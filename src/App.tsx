@@ -61,6 +61,7 @@ const ExactImageSize = lazy(() => import('./pages/ExactImageSize'));
 const PixelResizer = lazy(() => import('./pages/PixelResizer'));
 const ImageResizer = lazy(() => import('./pages/ImageResizer'));
 const ImageTextEditor = lazy(() => import('./pages/ImageTextEditor'));
+const PassportPhotoSheet = lazy(() => import('./pages/PassportPhotoSheet'));
 
 export default function App() {
   return (
@@ -112,6 +113,7 @@ export default function App() {
           <Route path="pdf-to-gif" element={<PdfToGif />} />
           <Route path="video-to-pdf" element={<VideoToPdf />} />
           <Route path="remove-background" element={<RemoveBackground />} />
+          <Route path="passport-photo-sheet" element={<PassportPhotoSheet />} />
           <Route path="convert-tiff" element={<ConvertToTiff />} />
           <Route path="extract-media" element={<ExtractMedia />} />
 

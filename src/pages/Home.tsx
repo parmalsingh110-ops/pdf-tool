@@ -13,6 +13,7 @@ import {
   ScanText,
   Target,
   Image as ImageIcon,
+  ContactRound,
 } from 'lucide-react';
 
 const spotlightTools = [
@@ -109,6 +110,7 @@ export default function Home() {
             { title: 'Image text (OCR)', path: '/image-text-editor', desc: 'Edit text in screenshots & PDF page 1.', icon: ScanText, tone: 'bg-cyan-50 text-cyan-700 dark:bg-cyan-950/40 dark:text-cyan-300' },
             { title: 'Pixel resizer', path: '/pixel-resizer', desc: 'Exact width × height in pixels.', icon: ImageIcon, tone: 'bg-indigo-50 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300' },
             { title: 'Remove background', path: '/remove-background', desc: 'Portrait & product cutouts in-browser.', icon: Sparkles, tone: 'bg-pink-50 text-pink-700 dark:bg-pink-950/40 dark:text-pink-300' },
+            { title: 'Passport photo sheet', path: '/passport-photo-sheet', desc: 'Auto crop, background, and print-ready PDF grid.', icon: ContactRound, tone: 'bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300' },
           ].map((t) => (
             <Link key={t.path} to={t.path} className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-5 hover:border-sky-300 dark:hover:border-sky-700 transition-colors">
               <div className={`w-10 h-10 rounded-xl ${t.tone} flex items-center justify-center mb-3`}>

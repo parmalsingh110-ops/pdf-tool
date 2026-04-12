@@ -4,7 +4,8 @@ import {
   Combine, Scissors, Minimize2, Image as ImageIcon, FileImage, Layers, 
   Lock, Unlock, Droplet, Hash, Edit3, Target, ImageMinus, Maximize, 
   FileType, Tag, ArrowUpDown, FilePlus, Search, ShieldCheck, FileCode, CheckCircle,
-  FileText, Trash2, Contrast, Sparkles, Ruler, ScanText
+  FileText, Trash2, Contrast, Sparkles, Ruler,   ScanText,
+  ContactRound,
 } from 'lucide-react';
 
 function categoryAnchor(title: string): string {
@@ -65,6 +66,7 @@ const categories = [
       { title: 'PDF to GIF', path: '/pdf-to-gif', icon: ImageIcon, color: 'text-purple-500', bg: 'bg-purple-50' },
       { title: 'Video to PDF', path: '/video-to-pdf', icon: ImageIcon, color: 'text-blue-500', bg: 'bg-blue-50' },
       { title: 'Remove Image Backgrounds', path: '/remove-background', icon: ImageIcon, color: 'text-pink-500', bg: 'bg-pink-50' },
+      { title: 'Passport Photo Sheet', path: '/passport-photo-sheet', icon: ContactRound, color: 'text-rose-600', bg: 'bg-rose-50' },
       { title: 'Convert to WebP', path: '/convert-webp', icon: FileImage, color: 'text-emerald-500', bg: 'bg-emerald-50' },
       { title: 'Convert to TIFF', path: '/convert-tiff', icon: FileImage, color: 'text-indigo-500', bg: 'bg-indigo-50' },
       { title: 'Image Text Editor (OCR)', path: '/image-text-editor', icon: ScanText, color: 'text-cyan-600', bg: 'bg-cyan-50' },
