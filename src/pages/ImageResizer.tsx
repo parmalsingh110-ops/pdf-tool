@@ -1,5 +1,6 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
-import { Download, Image as ImageIcon, Ruler, Package } from 'lucide-react';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { Download, Image as ImageIcon, Ruler, Package, Eraser, RotateCcw } from 'lucide-react';
+import { preload, removeBackground } from '@imgly/background-removal';
 import JSZip from 'jszip';
 import FileDropzone from '../components/FileDropzone';
 import { encodeCanvasUnderByteBudget, type RasterMime } from '../lib/imageByteBudget';
@@ -75,16 +76,88 @@ export default function ImageResizer() {
   const [batchQueue, setBatchQueue] = useState<File[]>([]);
   const [batchBusy, setBatchBusy] = useState(false);
 
+  /** After background remove / composite — preview + resize source; null = use original `objectUrl`. */
+  const [editPreviewUrl, setEditPreviewUrl] = useState<string | null>(null);
+  const [changeBgPanel, setChangeBgPanel] = useState(false);
+  const [bgModelReady, setBgModelReady] = useState(false);
+  const [bgPreloadText, setBgPreloadText] = useState('');
+  const [bgBusy, setBgBusy] = useState(false);
+  const [bgError, setBgError] = useState<string | null>(null);
+  const [bgFillColor, setBgFillColor] = useState('#ffffff');
+  const [bgTransparent, setBgTransparent] = useState(false);
+  const [bgImageFile, setBgImageFile] = useState<File | null>(null);
+  const [bgImageUrl, setBgImageUrl] = useState<string | null>(null);
+
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const batchInputRef = useRef<HTMLInputElement>(null);
+  const bgImageInputRef = useRef<HTMLInputElement>(null);
+
+  const activePreviewUrl = editPreviewUrl ?? objectUrl;
+
+  const removerConfig = useMemo(
+    () => ({
+      model: 'isnet_quint8' as const,
+      device: 'cpu' as const,
+      proxyToWorker: true,
+      rescale: true,
+      fetchArgs: { cache: 'force-cache' as RequestCache },
+      output: { format: 'image/png' as const, quality: 1 },
+    }),
+    [],
+  );
+
+  useEffect(() => {
+    if (!changeBgPanel || bgModelReady) return;
+    let mounted = true;
+    (async () => {
+      try {
+        setBgPreloadText('Loading background model…');
+        await preload({
+          ...removerConfig,
+          progress: (key: string, current: number, total: number) => {
+            if (!mounted) return;
+            const pct = total > 0 ? Math.round((current / total) * 100) : 0;
+            setBgPreloadText(`${key} ${pct}%`);
+          },
+        });
+        if (mounted) {
+          setBgModelReady(true);
+          setBgPreloadText('Model ready');
+        }
+      } catch (e) {
+        console.error(e);
+        if (mounted) {
+          setBgError(e instanceof Error ? e.message : 'Model load failed');
+          setBgPreloadText('');
+        }
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [changeBgPanel, bgModelReady, removerConfig]);
 
   useEffect(() => {
     return () => {
       if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [objectUrl]);
+  useEffect(() => {
+    return () => {
       if (resultUrl) URL.revokeObjectURL(resultUrl);
     };
-  }, [objectUrl, resultUrl]);
+  }, [resultUrl]);
+  useEffect(() => {
+    return () => {
+      if (editPreviewUrl) URL.revokeObjectURL(editPreviewUrl);
+    };
+  }, [editPreviewUrl]);
+  useEffect(() => {
+    return () => {
+      if (bgImageUrl) URL.revokeObjectURL(bgImageUrl);
+    };
+  }, [bgImageUrl]);
 
   const syncInputsFromNatural = (w: number, h: number) => {
     setWidthIn(pxToDisplay(w, unit, dpi).toFixed(unit === 'px' ? 0 : 2));
@@ -94,6 +167,13 @@ export default function ImageResizer() {
   const handleImageFile = (f: File) => {
     if (objectUrl) URL.revokeObjectURL(objectUrl);
     if (resultUrl) URL.revokeObjectURL(resultUrl);
+    if (editPreviewUrl) URL.revokeObjectURL(editPreviewUrl);
+    if (bgImageUrl) URL.revokeObjectURL(bgImageUrl);
+    setEditPreviewUrl(null);
+    setBgImageFile(null);
+    setBgImageUrl(null);
+    setBgError(null);
+    setChangeBgPanel(false);
     setResultUrl(null);
     setResultMeta(null);
     setNote(null);
@@ -114,6 +194,107 @@ export default function ImageResizer() {
       alert('Could not read this file. Use JPG, PNG, WebP, or GIF.');
     };
     img.src = url;
+  };
+
+  const revertToOriginalImage = () => {
+    if (editPreviewUrl) URL.revokeObjectURL(editPreviewUrl);
+    setEditPreviewUrl(null);
+    setBgError(null);
+    setResultUrl(null);
+    setResultMeta(null);
+    if (objectUrl && natural) {
+      const img = new Image();
+      img.onload = () => {
+        setNatural({ w: img.naturalWidth, h: img.naturalHeight });
+        syncInputsFromNatural(img.naturalWidth, img.naturalHeight);
+      };
+      img.src = objectUrl;
+    }
+  };
+
+  const urlToFile = async (url: string, filename: string, mime: string): Promise<File> => {
+    const r = await fetch(url);
+    const b = await r.blob();
+    return new File([b], filename, { type: mime });
+  };
+
+  const applyRemoveBackground = async () => {
+    if (!file || !objectUrl) return;
+    const srcFile = editPreviewUrl ? await urlToFile(editPreviewUrl, 'working.png', 'image/png') : file;
+    setBgBusy(true);
+    setBgError(null);
+    setNote(null);
+    try {
+      const cutoutBlob = await removeBackground(srcFile, {
+        ...removerConfig,
+        progress: (key: string, current: number, total: number) => {
+          const pct = total > 0 ? Math.round((current / total) * 100) : 0;
+          setBgPreloadText(`${key} ${pct}%`);
+        },
+      });
+
+      const cutoutUrl = URL.createObjectURL(cutoutBlob);
+      const cutoutImg = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const i = new Image();
+        i.onload = () => resolve(i);
+        i.onerror = reject;
+        i.src = cutoutUrl;
+      });
+
+      if (bgTransparent && !bgImageFile) {
+        if (editPreviewUrl) URL.revokeObjectURL(editPreviewUrl);
+        URL.revokeObjectURL(cutoutUrl);
+        const transparentUrl = URL.createObjectURL(cutoutBlob);
+        setEditPreviewUrl(transparentUrl);
+        setNatural({ w: cutoutImg.naturalWidth, h: cutoutImg.naturalHeight });
+        syncInputsFromNatural(cutoutImg.naturalWidth, cutoutImg.naturalHeight);
+        setNote('Transparent cutout — use PNG or WebP export to keep transparency.');
+        return;
+      }
+
+      const canvas = document.createElement('canvas');
+      canvas.width = cutoutImg.naturalWidth;
+      canvas.height = cutoutImg.naturalHeight;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error('Canvas unavailable');
+
+      if (bgImageFile && bgImageUrl) {
+        const bgImg = await new Promise<HTMLImageElement>((resolve, reject) => {
+          const i = new Image();
+          i.onload = () => resolve(i);
+          i.onerror = reject;
+          i.src = bgImageUrl;
+        });
+        const cw = canvas.width;
+        const ch = canvas.height;
+        const bw = bgImg.naturalWidth;
+        const bh = bgImg.naturalHeight;
+        const scale = Math.max(cw / bw, ch / bh);
+        const dw = bw * scale;
+        const dh = bh * scale;
+        ctx.drawImage(bgImg, (cw - dw) / 2, (ch - dh) / 2, dw, dh);
+      } else {
+        ctx.fillStyle = bgFillColor;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+      }
+      ctx.drawImage(cutoutImg, 0, 0);
+      URL.revokeObjectURL(cutoutUrl);
+
+      const outBlob = await new Promise<Blob | null>((resolve) =>
+        canvas.toBlob((b) => resolve(b), 'image/png', 1),
+      );
+      if (!outBlob) throw new Error('Export failed');
+      const outUrl = URL.createObjectURL(outBlob);
+      if (editPreviewUrl) URL.revokeObjectURL(editPreviewUrl);
+      setEditPreviewUrl(outUrl);
+      setNatural({ w: canvas.width, h: canvas.height });
+      syncInputsFromNatural(canvas.width, canvas.height);
+    } catch (e) {
+      console.error(e);
+      setBgError(e instanceof Error ? e.message : 'Background step failed.');
+    } finally {
+      setBgBusy(false);
+    }
   };
 
   const handleDrop = (accepted: File[]) => {
@@ -279,7 +460,7 @@ export default function ImageResizer() {
   };
 
   const exportImage = async () => {
-    if (!file || !objectUrl || !natural || !canvasRef.current) return;
+    if (!file || !activePreviewUrl || !natural || !canvasRef.current) return;
     const dims = computeOutputPx();
     if (!dims) {
       alert('Please enter valid width and height (or choose a preset / percentage).');
@@ -290,7 +471,7 @@ export default function ImageResizer() {
     setBusy(true);
     setNote(null);
     try {
-      const { blob, note: n } = await renderUrlToBlob(objectUrl, wPx, hPx, file);
+      const { blob, note: n } = await renderUrlToBlob(activePreviewUrl, wPx, hPx, file);
       setNote(n);
 
       if (resultUrl) URL.revokeObjectURL(resultUrl);
@@ -470,6 +651,13 @@ export default function ImageResizer() {
                         onClick={() => {
                           if (objectUrl) URL.revokeObjectURL(objectUrl);
                           if (resultUrl) URL.revokeObjectURL(resultUrl);
+                          if (editPreviewUrl) URL.revokeObjectURL(editPreviewUrl);
+                          if (bgImageUrl) URL.revokeObjectURL(bgImageUrl);
+                          setEditPreviewUrl(null);
+                          setBgImageFile(null);
+                          setBgImageUrl(null);
+                          setChangeBgPanel(false);
+                          setBgError(null);
                           setFile(null);
                           setObjectUrl(null);
                           setNatural(null);
@@ -483,51 +671,49 @@ export default function ImageResizer() {
                   </div>
                   {resizeMode === 'size' && (
                     <>
-                      <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-3">
                         <div>
                           <label className="text-xs font-medium text-slate-600">Width</label>
                           <input
                             placeholder="Enter width"
-                            className="mt-1 w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"
+                            className="mt-1 w-full min-h-[2.75rem] border border-slate-200 rounded-lg px-3 py-2.5 text-base tabular-nums"
                             value={widthIn}
                             onChange={(e) => onWidthChange(e.target.value)}
                             disabled={!natural}
                           />
                         </div>
-                        <div className="flex gap-2">
-                          <div className="flex-1 min-w-0">
-                            <label className="text-xs font-medium text-slate-600">Height</label>
-                            <input
-                              placeholder="Enter height"
-                              className="mt-1 w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"
-                              value={heightIn}
-                              onChange={(e) => onHeightChange(e.target.value)}
-                              disabled={!natural}
-                            />
-                          </div>
-                          <div className="min-w-0 shrink-0 w-[6.5rem]">
-                            <label className="text-xs font-medium text-slate-600">Unit</label>
-                            <div className="mt-1 flex flex-wrap gap-0.5 rounded-lg border border-slate-200 bg-slate-50 p-0.5">
-                              {(
-                                [
-                                  ['px', 'px'],
-                                  ['in', 'in'],
-                                  ['cm', 'cm'],
-                                  ['mm', 'mm'],
-                                ] as const
-                              ).map(([u, lab]) => (
-                                <button
-                                  key={u}
-                                  type="button"
-                                  onClick={() => setUnit(u)}
-                                  className={`flex-1 min-w-[1.75rem] rounded px-1 py-1.5 text-[10px] font-bold leading-none ${
-                                    unit === u ? 'bg-white text-sky-700 shadow' : 'text-slate-600 hover:bg-white/80'
-                                  }`}
-                                >
-                                  {lab}
-                                </button>
-                              ))}
-                            </div>
+                        <div>
+                          <label className="text-xs font-medium text-slate-600">Height</label>
+                          <input
+                            placeholder="Enter height"
+                            className="mt-1 w-full min-h-[2.75rem] border border-slate-200 rounded-lg px-3 py-2.5 text-base tabular-nums"
+                            value={heightIn}
+                            onChange={(e) => onHeightChange(e.target.value)}
+                            disabled={!natural}
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs font-medium text-slate-600">Unit</label>
+                          <div className="mt-1 flex flex-wrap gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1">
+                            {(
+                              [
+                                ['px', 'px'],
+                                ['in', 'in'],
+                                ['cm', 'cm'],
+                                ['mm', 'mm'],
+                              ] as const
+                            ).map(([u, lab]) => (
+                              <button
+                                key={u}
+                                type="button"
+                                onClick={() => setUnit(u)}
+                                className={`flex-1 min-w-[2.5rem] rounded-md px-2 py-2 text-xs font-bold ${
+                                  unit === u ? 'bg-white text-sky-700 shadow' : 'text-slate-600 hover:bg-white/80'
+                                }`}
+                              >
+                                {lab}
+                              </button>
+                            ))}
                           </div>
                         </div>
                       </div>
@@ -615,6 +801,143 @@ export default function ImageResizer() {
                       </div>
                     </div>
                   )}
+
+                  <div className="border-t border-slate-200 pt-4 mt-1 space-y-3">
+                    <label className="flex items-start gap-2 text-sm text-slate-700 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        className="mt-1 rounded border-slate-300"
+                        checked={changeBgPanel}
+                        onChange={(e) => {
+                          setChangeBgPanel(e.target.checked);
+                          if (!e.target.checked) setBgError(null);
+                        }}
+                      />
+                      <span>
+                        <span className="font-semibold">Change background</span>
+                        <span className="block text-xs text-slate-500 font-normal mt-0.5">
+                          Remove or replace the background, then set size and export here — no re-upload.
+                        </span>
+                      </span>
+                    </label>
+
+                    {changeBgPanel && (
+                      <div className="rounded-xl border border-slate-200 bg-slate-50/90 p-4 space-y-3 text-sm">
+                        {!bgModelReady && (
+                          <p className="text-xs text-slate-600">{bgPreloadText || 'Preparing model…'}</p>
+                        )}
+                        {bgError && (
+                          <p className="text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-lg p-2">
+                            {bgError}
+                          </p>
+                        )}
+
+                        <label className="flex items-center gap-2 text-slate-700 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={bgTransparent}
+                            onChange={(e) => {
+                              setBgTransparent(e.target.checked);
+                              if (e.target.checked && bgImageFile) {
+                                if (bgImageUrl) URL.revokeObjectURL(bgImageUrl);
+                                setBgImageFile(null);
+                                setBgImageUrl(null);
+                              }
+                            }}
+                          />
+                          Transparent (no fill)
+                        </label>
+
+                        {!bgTransparent && (
+                          <div>
+                            <label className="text-xs font-medium text-slate-600">Background color</label>
+                            <div className="mt-1 flex gap-2 items-center">
+                              <input
+                                type="color"
+                                value={bgFillColor}
+                                onChange={(e) => setBgFillColor(e.target.value)}
+                                className="h-10 w-14 rounded border border-slate-200 cursor-pointer shrink-0"
+                              />
+                              <input
+                                className="flex-1 min-w-0 border border-slate-200 rounded-lg px-2 py-2 text-sm font-mono"
+                                value={bgFillColor}
+                                onChange={(e) => setBgFillColor(e.target.value)}
+                              />
+                            </div>
+                          </div>
+                        )}
+
+                        <div>
+                          <label className="text-xs font-medium text-slate-600">Background image (optional)</label>
+                          <p className="text-[11px] text-slate-500 mt-0.5">
+                            Fills behind the cutout (cover). Turn off Transparent to use it.
+                          </p>
+                          <input
+                            ref={bgImageInputRef}
+                            type="file"
+                            className="hidden"
+                            accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp"
+                            onChange={(e) => {
+                              const f = e.target.files?.[0];
+                              if (bgImageUrl) URL.revokeObjectURL(bgImageUrl);
+                              if (!f) {
+                                setBgImageFile(null);
+                                setBgImageUrl(null);
+                              } else {
+                                setBgTransparent(false);
+                                setBgImageFile(f);
+                                setBgImageUrl(URL.createObjectURL(f));
+                              }
+                              e.target.value = '';
+                            }}
+                          />
+                          <div className="mt-2 flex flex-wrap gap-2 items-center">
+                            <button
+                              type="button"
+                              onClick={() => bgImageInputRef.current?.click()}
+                              className="px-3 py-2 rounded-lg border border-slate-200 bg-white text-xs font-semibold hover:bg-slate-50"
+                            >
+                              Choose image…
+                            </button>
+                            {bgImageFile && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (bgImageUrl) URL.revokeObjectURL(bgImageUrl);
+                                  setBgImageFile(null);
+                                  setBgImageUrl(null);
+                                }}
+                                className="text-xs font-semibold text-rose-600"
+                              >
+                                Clear
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          disabled={bgBusy || !bgModelReady || !natural}
+                          onClick={() => void applyRemoveBackground()}
+                          className="w-full inline-flex items-center justify-center gap-2 py-2.5 rounded-xl bg-slate-800 text-white text-sm font-bold hover:bg-slate-900 disabled:opacity-50"
+                        >
+                          <Eraser className="w-4 h-4 shrink-0" />
+                          {bgBusy ? 'Processing…' : 'Remove / apply background'}
+                        </button>
+
+                        {editPreviewUrl && (
+                          <button
+                            type="button"
+                            onClick={revertToOriginalImage}
+                            className="w-full inline-flex items-center justify-center gap-2 py-2 text-xs font-semibold text-slate-600 hover:text-slate-900"
+                          >
+                            <RotateCcw className="w-3.5 h-3.5 shrink-0" />
+                            Revert to original upload
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
@@ -659,7 +982,7 @@ export default function ImageResizer() {
                 </div>
                 <button
                   type="button"
-                  disabled={!file || !natural || busy}
+                  disabled={!file || !natural || !activePreviewUrl || busy || bgBusy}
                   onClick={exportImage}
                   className="w-full py-3 rounded-xl bg-sky-600 text-white font-bold hover:bg-sky-700 disabled:opacity-50"
                 >
@@ -736,13 +1059,17 @@ export default function ImageResizer() {
                           : ''}
                     </span>
                   </div>
-                  <p className="text-xs text-slate-500">Showing your file as uploaded (not the sidebar).</p>
+                  <p className="text-xs text-slate-500">
+                    {editPreviewUrl
+                      ? 'Preview uses your edited image (background changes apply here before resize).'
+                      : 'Showing your file as uploaded.'}
+                  </p>
                   <div className="rounded-xl border border-slate-200 bg-slate-100 flex justify-center items-center max-h-[min(520px,65vh)] overflow-hidden">
                     {resultUrl ? (
                       <div className="w-full space-y-3 p-3">
                         <div className="relative inline-block max-w-full mx-auto select-none">
                           <img
-                            src={objectUrl}
+                            src={activePreviewUrl}
                             alt="Before"
                             className="max-h-[min(480px,60vh)] w-auto h-auto object-contain block mx-auto"
                             decoding="async"
@@ -773,7 +1100,7 @@ export default function ImageResizer() {
                       </div>
                     ) : (
                       <img
-                        src={objectUrl}
+                        src={activePreviewUrl}
                         alt="Resize preview"
                         className="max-w-full max-h-[min(520px,65vh)] w-auto h-auto object-contain block"
                         decoding="async"
