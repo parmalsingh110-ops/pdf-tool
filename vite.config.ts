@@ -21,5 +21,10 @@ export default defineConfig(() => {
     server: {
       hmr: process.env.DISABLE_HMR !== 'true',
     },
+    // Render sends a real Host header; Vite 6 preview blocks unknown hosts unless listed here.
+    preview: {
+      host: '0.0.0.0',
+      allowedHosts: ['mediasuite.onrender.com', 'localhost', '127.0.0.1'],
+    },
   };
 });
