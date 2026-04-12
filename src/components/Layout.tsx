@@ -26,6 +26,7 @@ const ROUTE_TITLES: Record<string, string> = {
   '/exact-image-size': 'Exact image size',
   '/image-text-editor': 'Image text (OCR)',
   '/remove-background': 'Remove background',
+  '/passport-photo-sheet': 'Passport photo sheet',
   '/convert-webp': 'Convert to WebP',
   '/convert-tiff': 'Convert to TIFF',
   '/all-tools': 'All tools',
@@ -38,6 +39,7 @@ const MEDIA_LINKS = [
   { to: '/exact-image-size', label: 'Exact image size' },
   { to: '/image-text-editor', label: 'Image & text (OCR)' },
   { to: '/remove-background', label: 'Remove background' },
+  { to: '/passport-photo-sheet', label: 'Passport photo sheet' },
   { to: '/convert-webp', label: 'Convert to WebP' },
   { to: '/convert-tiff', label: 'Convert to TIFF' },
 ];
