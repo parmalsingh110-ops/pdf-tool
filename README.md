@@ -34,4 +34,4 @@ Build static assets with `npm run build` and host the `dist/` folder on any stat
 
 ## Repository
 
-https://github.com/pscyberx/pdf-tool
+https://github.com/pscyberx/pdftoolnew
