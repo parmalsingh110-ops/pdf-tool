@@ -13,14 +13,22 @@ export default function CompressPDF() {
   const [compressionLevel, setCompressionLevel] = useState<CompressionLevel>('recommended');
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingStep, setProcessingStep] = useState('');
+  const [progressPct, setProgressPct] = useState(0);
   const [compressedUrl, setCompressedUrl] = useState<string | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [stats, setStats] = useState<{original: number, compressed: number} | null>(null);
 
   const handleDrop = (acceptedFiles: File[]) => {
     if (acceptedFiles.length > 0) {
+      // Revoke old URLs to prevent memory leaks
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+      if (compressedUrl) URL.revokeObjectURL(compressedUrl);
       setFile(acceptedFiles[0]);
       setCompressedUrl(null);
       setStats(null);
+      setProgressPct(0);
+      const url = URL.createObjectURL(acceptedFiles[0]);
+      setPreviewUrl(url);
     }
   };
 
@@ -58,6 +66,7 @@ export default function CompressPDF() {
         
         for (let i = 1; i <= numPages; i++) {
           setProcessingStep(`Processing page ${i} of ${numPages}...`);
+          setProgressPct(Math.round((i / numPages) * 100));
           const page = await pdf.getPage(i);
           const viewport = page.getViewport({ scale });
           
@@ -101,6 +110,7 @@ export default function CompressPDF() {
     } finally {
       setIsProcessing(false);
       setProcessingStep('');
+      setProgressPct(0);
     }
   };
 
@@ -253,7 +263,11 @@ export default function CompressPDF() {
                   </a>
                 </div>
                 <button
-                  onClick={() => { setFile(null); setCompressedUrl(null); setStats(null); }}
+                  onClick={() => { 
+                    if (previewUrl) URL.revokeObjectURL(previewUrl);
+                    if (compressedUrl) URL.revokeObjectURL(compressedUrl);
+                    setFile(null); setCompressedUrl(null); setStats(null); setPreviewUrl(null); 
+                  }}
                   className="text-gray-600 hover:text-gray-900 font-medium"
                 >
                   Compress another PDF
@@ -268,18 +282,23 @@ export default function CompressPDF() {
               PDF Preview
             </div>
             <div className="flex-1 relative bg-gray-200">
-               {file && (
+               {previewUrl && (
                  <iframe 
-                   src={`${URL.createObjectURL(file)}#toolbar=0`} 
-                   className="absolute inset-0 w-full h-full"
-                   title="PDF Preview"
-                 />
-               )}
+                    src={`${previewUrl}#toolbar=0`} 
+                    className="absolute inset-0 w-full h-full"
+                    title="PDF Preview"
+                  />
+                )}
                {isProcessing && (
                  <div className="absolute inset-0 bg-black/20 backdrop-blur-sm flex flex-col items-center justify-center text-white p-8">
-                    <div className="w-12 h-12 border-4 border-white border-t-transparent rounded-full animate-spin mb-4"></div>
-                    <p className="text-xl font-bold">{processingStep}</p>
-                 </div>
+                     <div className="w-12 h-12 border-4 border-white border-t-transparent rounded-full animate-spin mb-4"></div>
+                     <p className="text-xl font-bold">{processingStep}</p>
+                     {progressPct > 0 && (
+                       <div className="w-48 h-2 bg-white/30 rounded-full mt-3 overflow-hidden">
+                         <div className="h-full bg-white rounded-full transition-all" style={{width: `${progressPct}%`}} />
+                       </div>
+                     )}
+                  </div>
                )}
             </div>
           </div>

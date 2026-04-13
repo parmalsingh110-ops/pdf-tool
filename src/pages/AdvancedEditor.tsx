@@ -1,7 +1,8 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+import { createWorker } from 'tesseract.js';
 import { 
   Type, 
   Square, 
@@ -16,6 +17,15 @@ import {
   Table,
   Bold,
   Italic,
+  ZoomIn,
+  ZoomOut,
+  Undo2,
+  Redo,
+  Pencil,
+  Loader2,
+  Move,
+  ScanText,
+  ImagePlus,
 } from 'lucide-react';
 import SignatureCanvas from 'react-signature-canvas';
 import FileDropzone from '../components/FileDropzone';
@@ -23,7 +33,7 @@ import FileDropzone from '../components/FileDropzone';
 // Initialize pdf.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
-type Tool = 'select' | 'text' | 'whiteout' | 'highlight' | 'signature' | 'link' | 'table' | null;
+type Tool = 'select' | 'text' | 'whiteout' | 'highlight' | 'signature' | 'link' | 'table' | 'freehand' | 'image' | null;
 
 interface Annotation {
   id: string;
@@ -44,6 +54,11 @@ interface Annotation {
   tableData?: string[][];
   signatureDataUrl?: string;
   url?: string;
+  /** Freehand drawing SVG path data */
+  pathData?: string;
+  strokeWidth?: number;
+  /** Inserted image data URL */
+  imageDataUrl?: string;
 }
 
 export default function AdvancedEditor() {
@@ -76,6 +91,31 @@ export default function AdvancedEditor() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [editedUrl, setEditedUrl] = useState<string | null>(null);
 
+  // === NEW: Zoom ===
+  const [zoomLevel, setZoomLevel] = useState(1.5);
+
+  // === NEW: Undo/Redo ===
+  const [undoStack, setUndoStack] = useState<Annotation[][]>([]);
+  const [redoStack, setRedoStack] = useState<Annotation[][]>([]);
+
+  // === NEW: Drag move ===
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragTarget, setDragTarget] = useState<string | null>(null);
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+
+  // === NEW: Freehand ===
+  const [freehandPoints, setFreehandPoints] = useState<{x: number, y:number}[]>([]);
+  const [freehandColor, setFreehandColor] = useState('#000000');
+  const [freehandWidth, setFreehandWidth] = useState(2);
+
+  // === NEW: Resize for image/signature annotations ===
+  const resizeAnnRef = useRef<{ id: string; handle: string; startX: number; startY: number; startAnnX: number; startAnnY: number; startW: number; startH: number } | null>(null);
+
+  // === NEW: OCR for scanned PDFs ===
+  const [ocrBusy, setOcrBusy] = useState(false);
+  const [ocrDone, setOcrDone] = useState(false);
+  const [isScannedPdf, setIsScannedPdf] = useState(false);
+
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
   const sigCanvasRef = useRef<SignatureCanvas>(null);
@@ -87,6 +127,10 @@ export default function AdvancedEditor() {
       setEditedUrl(null);
       setAnnotations([]);
       setDetectedText([]);
+      setUndoStack([]);
+      setRedoStack([]);
+      setOcrDone(false);
+      setIsScannedPdf(false);
       
       try {
         const arrayBuffer = await selectedFile.arrayBuffer();
@@ -100,18 +144,55 @@ export default function AdvancedEditor() {
     }
   };
 
+  // === Undo/Redo helpers ===
+  const pushUndo = useCallback(() => {
+    setUndoStack(prev => [...prev.slice(-30), annotations.map(a => ({...a}))]);
+    setRedoStack([]);
+  }, [annotations]);
+
+  const doUndo = useCallback(() => {
+    if (undoStack.length === 0) return;
+    const prev = undoStack[undoStack.length - 1];
+    setRedoStack(r => [...r, annotations.map(a => ({...a}))]);
+    setUndoStack(s => s.slice(0, -1));
+    setAnnotations(prev);
+    setSelectedId(null);
+  }, [undoStack, annotations]);
+
+  const doRedo = useCallback(() => {
+    if (redoStack.length === 0) return;
+    const next = redoStack[redoStack.length - 1];
+    setUndoStack(s => [...s, annotations.map(a => ({...a}))]);
+    setRedoStack(r => r.slice(0, -1));
+    setAnnotations(next);
+    setSelectedId(null);
+  }, [redoStack, annotations]);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) { e.preventDefault(); doUndo(); }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z' && e.shiftKey) { e.preventDefault(); doRedo(); }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'y') { e.preventDefault(); doRedo(); }
+      if (e.key === 'Delete' && selectedId) { pushUndo(); deleteAnnotation(selectedId); }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [doUndo, doRedo, selectedId, pushUndo]);
+
   useEffect(() => {
     if (pdfDoc) {
       renderPage(currentPage);
     }
-  }, [pdfDoc, currentPage]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pdfDoc, currentPage, zoomLevel]);
 
   const renderPage = async (pageNum: number) => {
     if (!pdfDoc || !canvasRef.current) return;
     
     try {
       const page = await pdfDoc.getPage(pageNum);
-      const viewport = page.getViewport({ scale: 1.5 });
+      const viewport = page.getViewport({ scale: zoomLevel });
       setPageViewport(viewport);
       
       const canvas = canvasRef.current;
@@ -127,30 +208,98 @@ export default function AdvancedEditor() {
         }).promise;
       }
 
-      // Detection logic for 'True' editing
+      // Text detection for editing
       const textContent = await page.getTextContent();
       const items = textContent.items.map((item: any) => {
         const tx = pdfjsLib.Util.transform(viewport.transform, item.transform);
         return {
           text: item.str,
           x: tx[4],
-          y: tx[5] - item.height * viewport.scale, // pdfjs returns baseline
+          y: tx[5] - item.height * viewport.scale,
           w: item.width * viewport.scale,
           h: item.height * viewport.scale
         };
-      });
+      }).filter(i => i.text.trim().length > 0);
+
       setDetectedText(items);
+
+      // If very few text items found, it's likely a scanned PDF
+      const hasText = items.filter(i => i.w > 2 && i.h > 2).length > 3;
+      setIsScannedPdf(!hasText);
     } catch (error) {
       console.error("Error rendering page:", error);
     }
   };
 
+  // === NEW: OCR fallback for scanned PDFs ===
+  const runOcrOnPage = async () => {
+    if (!canvasRef.current) return;
+    setOcrBusy(true);
+    try {
+      const canvas = canvasRef.current;
+      const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(b => resolve(b), 'image/png'));
+      if (!blob) throw new Error('Canvas export failed');
+      
+      const worker = await createWorker('eng');
+      const { data } = await worker.recognize(blob, {}, { blocks: true });
+      await worker.terminate();
+
+      const ocrItems: {text: string, x: number, y: number, w: number, h: number}[] = [];
+      if (data.blocks) {
+        for (const block of data.blocks) {
+          for (const para of block.paragraphs || []) {
+            for (const line of para.lines || []) {
+              const t = (line.text || '').trim();
+              if (!t) continue;
+              const b = line.bbox;
+              if (!b || b.x1 <= b.x0 || b.y1 <= b.y0) continue;
+              ocrItems.push({
+                text: t,
+                x: b.x0,
+                y: b.y0,
+                w: b.x1 - b.x0,
+                h: b.y1 - b.y0,
+              });
+            }
+          }
+        }
+      }
+      setDetectedText(ocrItems);
+      setOcrDone(true);
+      setIsScannedPdf(ocrItems.length > 0);
+    } catch (e) {
+      console.error('OCR failed:', e);
+      alert('OCR failed. Please try again.');
+    } finally {
+      setOcrBusy(false);
+    }
+  };
+
   const handleOverlayMouseDown = (e: React.MouseEvent) => {
-    if (!activeTool || !overlayRef.current) return;
+    if (!overlayRef.current) return;
     
     const rect = overlayRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
+
+    // If no tool is active, check if we're clicking on an annotation to drag
+    if (!activeTool) {
+      const clickedAnn = [...annotations].reverse().find(a =>
+        a.pageIndex === currentPage - 1 &&
+        x >= a.x && x <= a.x + (a.width || 100) &&
+        y >= a.y && y <= a.y + (a.height || 24)
+      );
+      if (clickedAnn) {
+        setSelectedId(clickedAnn.id);
+        setIsDragging(true);
+        setDragTarget(clickedAnn.id);
+        setDragOffset({ x: x - clickedAnn.x, y: y - clickedAnn.y });
+        pushUndo();
+        e.preventDefault();
+        return;
+      }
+      return;
+    }
 
     if (activeTool === 'select') {
       // Check if we clicked on a detected text block
@@ -160,7 +309,7 @@ export default function AdvancedEditor() {
       );
 
       if (clickedText) {
-        // AUTOMATIC REPLACE: Create whiteout AND text annotation
+        pushUndo();
         const id = Date.now().toString();
         const whiteout: Annotation = {
           id: id + '_w',
@@ -171,39 +320,47 @@ export default function AdvancedEditor() {
           width: clickedText.w,
           height: clickedText.h
         };
-        const text: Annotation = {
+        const textAnn: Annotation = {
           id: id + '_t',
           type: 'text',
           pageIndex: currentPage - 1,
           x: clickedText.x,
           y: clickedText.y,
-          text: clickedText.text, // Pre-fill with original text
-          fontSize: 14,
+          width: clickedText.w,
+          height: clickedText.h,
+          text: clickedText.text,
+          fontSize: Math.max(10, Math.round(clickedText.h * 0.7)),
           color: '#000000',
           bold: defaultBold,
           italic: defaultItalic,
         };
-        setAnnotations([...annotations, whiteout, text]);
-        setSelectedId(text.id);
+        setAnnotations(prev => [...prev, whiteout, textAnn]);
+        setSelectedId(textAnn.id);
         setActiveTool(null);
       }
     } else if (activeTool === 'text') {
+      pushUndo();
       const newAnnotation: Annotation = {
         id: Date.now().toString(),
         type: 'text',
         pageIndex: currentPage - 1,
         x,
         y,
+        width: 200,
+        height: Math.max(24, fontSize + 8),
         text: 'New Text',
         fontSize,
         color: textColor,
         bold: defaultBold,
         italic: defaultItalic,
       };
-      setAnnotations([...annotations, newAnnotation]);
+      setAnnotations(prev => [...prev, newAnnotation]);
       setSelectedId(newAnnotation.id);
       setActiveTool(null);
-    } else if (['whiteout', 'highlight', 'link', 'table'].includes(activeTool)) {
+    } else if (activeTool === 'freehand') {
+      setIsDrawing(true);
+      setFreehandPoints([{ x, y }]);
+    } else if (['whiteout', 'highlight', 'link', 'table'].includes(activeTool!)) {
       setIsDrawing(true);
       setStartPos({ x, y });
       setCurrentRect({ x, y, w: 0, h: 0 });
@@ -214,11 +371,29 @@ export default function AdvancedEditor() {
   };
 
   const handleOverlayMouseMove = (e: React.MouseEvent) => {
-    if (!isDrawing || !overlayRef.current || !currentRect) return;
-    
+    if (!overlayRef.current) return;
+
     const rect = overlayRef.current.getBoundingClientRect();
     const currentX = e.clientX - rect.left;
     const currentY = e.clientY - rect.top;
+
+    // Handle drag move
+    if (isDragging && dragTarget) {
+      setAnnotations(prev => prev.map(a =>
+        a.id === dragTarget
+          ? { ...a, x: currentX - dragOffset.x, y: currentY - dragOffset.y }
+          : a
+      ));
+      return;
+    }
+
+    // Freehand drawing
+    if (isDrawing && activeTool === 'freehand') {
+      setFreehandPoints(prev => [...prev, { x: currentX, y: currentY }]);
+      return;
+    }
+    
+    if (!isDrawing || !currentRect) return;
     
     setCurrentRect({
       x: Math.min(startPos.x, currentX),
@@ -229,11 +404,47 @@ export default function AdvancedEditor() {
   };
 
   const handleOverlayMouseUp = () => {
-    if (!isDrawing || !currentRect) return;
+    // End drag
+    if (isDragging && dragTarget) {
+      setIsDragging(false);
+      setDragTarget(null);
+      return;
+    }
+
+    // End freehand
+    if (isDrawing && activeTool === 'freehand' && freehandPoints.length > 2) {
+      pushUndo();
+      const path = freehandPoints.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+      const xs = freehandPoints.map(p => p.x);
+      const ys = freehandPoints.map(p => p.y);
+      const newAnnotation: Annotation = {
+        id: Date.now().toString(),
+        type: 'freehand',
+        pageIndex: currentPage - 1,
+        x: Math.min(...xs),
+        y: Math.min(...ys),
+        width: Math.max(...xs) - Math.min(...xs),
+        height: Math.max(...ys) - Math.min(...ys),
+        pathData: path,
+        color: freehandColor,
+        strokeWidth: freehandWidth,
+      };
+      setAnnotations(prev => [...prev, newAnnotation]);
+      setFreehandPoints([]);
+      setIsDrawing(false);
+      return;
+    }
+
+    if (!isDrawing || !currentRect) {
+      setIsDrawing(false);
+      setFreehandPoints([]);
+      return;
+    }
     
     setIsDrawing(false);
     
     if (currentRect.w > 5 && currentRect.h > 5) {
+      pushUndo();
       if (activeTool === 'link') {
         setPendingLinkRect(currentRect);
         setShowLinkModal(true);
@@ -250,7 +461,7 @@ export default function AdvancedEditor() {
           cols: 3,
           tableData: [['', '', ''], ['', '', ''], ['', '', '']]
         };
-        setAnnotations([...annotations, newAnnotation]);
+        setAnnotations(prev => [...prev, newAnnotation]);
         setSelectedId(newAnnotation.id);
       } else {
         const newAnnotation: Annotation = {
@@ -262,7 +473,7 @@ export default function AdvancedEditor() {
           width: currentRect.w,
           height: currentRect.h
         };
-        setAnnotations([...annotations, newAnnotation]);
+        setAnnotations(prev => [...prev, newAnnotation]);
         setSelectedId(newAnnotation.id);
       }
     }
@@ -272,6 +483,7 @@ export default function AdvancedEditor() {
 
   const saveSignature = () => {
     if (sigCanvasRef.current && !sigCanvasRef.current.isEmpty()) {
+      pushUndo();
       const dataUrl = sigCanvasRef.current.getTrimmedCanvas().toDataURL('image/png');
       const newAnnotation: Annotation = {
         id: Date.now().toString(),
@@ -279,11 +491,11 @@ export default function AdvancedEditor() {
         pageIndex: currentPage - 1,
         x: startPos.x,
         y: startPos.y,
-        width: 150, // default width
-        height: 50, // default height
+        width: 150,
+        height: 50,
         signatureDataUrl: dataUrl
       };
-      setAnnotations([...annotations, newAnnotation]);
+      setAnnotations(prev => [...prev, newAnnotation]);
       setShowSignatureModal(false);
       setActiveTool(null);
     }
@@ -291,6 +503,7 @@ export default function AdvancedEditor() {
 
   const saveLink = () => {
     if (pendingLinkRect && linkUrl) {
+      pushUndo();
       const newAnnotation: Annotation = {
         id: Date.now().toString(),
         type: 'link',
@@ -301,7 +514,7 @@ export default function AdvancedEditor() {
         height: pendingLinkRect.h,
         url: linkUrl
       };
-      setAnnotations([...annotations, newAnnotation]);
+      setAnnotations(prev => [...prev, newAnnotation]);
     }
     setShowLinkModal(false);
     setPendingLinkRect(null);
@@ -382,6 +595,7 @@ export default function AdvancedEditor() {
       
       for (const ann of annotations) {
         const page = pages[ann.pageIndex];
+        if (!page) continue;
         const { height: pageHeight } = page.getSize();
         
         const scale = pageViewport.scale;
@@ -404,12 +618,11 @@ export default function AdvancedEditor() {
           const cellW = pdfW / ann.cols;
           const cellH = pdfH / ann.rows;
 
-          ann.tableData.forEach((row, r) => {
-            row.forEach((cell, c) => {
-              const cx = pdfX + (c * cellW);
-              const cy = pdfY - ((r + 1) * cellH);
+          ann.tableData.forEach((row, ri) => {
+            row.forEach((cell, ci) => {
+              const cx = pdfX + (ci * cellW);
+              const cy = pdfY - ((ri + 1) * cellH);
               
-              // Draw cell border
               page.drawRectangle({
                 x: cx,
                 y: cy,
@@ -420,7 +633,6 @@ export default function AdvancedEditor() {
                 color: rgb(1, 1, 1),
               });
 
-              // Draw cell text
               if (cell) {
                 page.drawText(cell, {
                   x: cx + (2 / scale),
@@ -458,6 +670,41 @@ export default function AdvancedEditor() {
             width: pdfW,
             height: pdfH,
           });
+        } else if (ann.type === 'image' && ann.imageDataUrl) {
+          const imgBytes = await fetch(ann.imageDataUrl).then(res => res.arrayBuffer());
+          let pdfImage;
+          if (ann.imageDataUrl.includes('image/png')) {
+            pdfImage = await pdf.embedPng(imgBytes);
+          } else {
+            pdfImage = await pdf.embedJpg(imgBytes);
+          }
+          page.drawImage(pdfImage, {
+            x: pdfX,
+            y: pdfY - pdfH,
+            width: pdfW,
+            height: pdfH,
+          });
+        } else if (ann.type === 'freehand' && ann.pathData) {
+          // Freehand: draw as a series of thin lines
+          const { r, g, b } = hexToRgb(ann.color || '#000000');
+          const parts = ann.pathData.split(/\s+/);
+          let prevX = 0, prevY = 0;
+          for (const part of parts) {
+            const cmd = part[0];
+            const coords = part.slice(1).split(',').map(Number);
+            const px = coords[0] / scale;
+            const py = pageHeight - (coords[1] / scale);
+            if (cmd === 'L' && prevX !== 0) {
+              page.drawLine({
+                start: { x: prevX, y: prevY },
+                end: { x: px, y: py },
+                thickness: (ann.strokeWidth || 2) / scale,
+                color: rgb(r, g, b),
+              });
+            }
+            prevX = px;
+            prevY = py;
+          }
         } else if (ann.type === 'link' && ann.url) {
           const linkAnnotation = pdf.context.obj({
             Type: 'Annot',
@@ -493,6 +740,17 @@ export default function AdvancedEditor() {
     }
   };
 
+  const toolButton = (tool: Tool, icon: React.ReactNode, label: string, title?: string) => (
+    <button
+      onClick={() => setActiveTool(activeTool === tool ? null : tool)}
+      className={`p-2 rounded-lg flex items-center gap-2 transition-colors ${activeTool === tool ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 hover:bg-gray-100'}`}
+      title={title || label}
+    >
+      {icon}
+      <span className="hidden sm:inline text-sm font-medium">{label}</span>
+    </button>
+  );
+
   return (
     <div className="flex-1 flex flex-col bg-gray-100">
       {!file ? (
@@ -500,7 +758,7 @@ export default function AdvancedEditor() {
           <div className="w-full max-w-3xl">
             <div className="text-center mb-8">
               <h1 className="text-4xl font-bold text-gray-900 mb-4">Advanced PDF Editor</h1>
-              <p className="text-xl text-gray-600">Add text, whiteout, highlights, signatures, and links.</p>
+              <p className="text-xl text-gray-600">Add text, whiteout, highlights, signatures, freehand draw, links, and more.</p>
             </div>
             <FileDropzone onDrop={handleDrop} multiple={false} title="Select PDF file" />
           </div>
@@ -508,25 +766,11 @@ export default function AdvancedEditor() {
       ) : !editedUrl ? (
         <div className="flex-1 flex flex-col h-full">
           {/* Toolbar */}
-          <div className="bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between shadow-sm z-10">
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setActiveTool(activeTool === 'select' ? null : 'select')}
-                className={`p-2 rounded-lg flex items-center gap-2 transition-colors ${activeTool === 'select' ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 hover:bg-gray-100'}`}
-                title="Select & Edit Existing Text"
-              >
-                <MousePointer2 className="w-5 h-5" />
-                <span className="hidden sm:inline text-sm font-medium">Select</span>
-              </button>
+          <div className="bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between shadow-sm z-10 flex-wrap gap-2">
+            <div className="flex items-center gap-1 flex-wrap">
+              {toolButton('select', <MousePointer2 className="w-5 h-5" />, 'Select', 'Select & Edit Existing Text (click on text in the PDF)')}
               <div className="w-px h-6 bg-gray-200 mx-1"></div>
-              <button
-                onClick={() => setActiveTool(activeTool === 'text' ? null : 'text')}
-                className={`p-2 rounded-lg flex items-center gap-2 transition-colors ${activeTool === 'text' ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 hover:bg-gray-100'}`}
-                title="Add New Text"
-              >
-                <Type className="w-5 h-5" />
-                <span className="hidden sm:inline text-sm font-medium">Text</span>
-              </button>
+              {toolButton('text', <Type className="w-5 h-5" />, 'Text', 'Add New Text')}
               <button
                 type="button"
                 onClick={toggleBoldForText}
@@ -535,7 +779,7 @@ export default function AdvancedEditor() {
                     ? 'bg-indigo-100 text-indigo-700'
                     : 'text-gray-600 hover:bg-gray-100'
                 }`}
-                title="Bold (selected text or default for new text)"
+                title="Bold"
               >
                 <Bold className="w-5 h-5" />
               </button>
@@ -547,53 +791,75 @@ export default function AdvancedEditor() {
                     ? 'bg-indigo-100 text-indigo-700'
                     : 'text-gray-600 hover:bg-gray-100'
                 }`}
-                title="Italic (selected text or default for new text)"
+                title="Italic"
               >
                 <Italic className="w-5 h-5" />
               </button>
-              <button
-                onClick={() => setActiveTool(activeTool === 'table' ? null : 'table')}
-                className={`p-2 rounded-lg flex items-center gap-2 transition-colors ${activeTool === 'table' ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 hover:bg-gray-100'}`}
-                title="Add Table"
+              {toolButton('table', <Table className="w-5 h-5" />, 'Table', 'Add Table')}
+              {toolButton('whiteout', <Square className="w-5 h-5" />, 'Whiteout')}
+              {toolButton('highlight', <Highlighter className="w-5 h-5" />, 'Highlight')}
+              {toolButton('freehand', <Pencil className="w-5 h-5" />, 'Draw', 'Freehand Draw')}
+              {toolButton('signature', <PenTool className="w-5 h-5" />, 'Sign')}
+              {toolButton('link', <LinkIcon className="w-5 h-5" />, 'Link')}
+              {/* Insert Image */}
+              <label
+                className={`p-2 rounded-lg flex items-center gap-1 cursor-pointer transition-colors text-gray-600 hover:bg-gray-100`}
+                title="Insert Image"
               >
-                <Table className="w-5 h-5" />
-                <span className="hidden sm:inline text-sm font-medium">Table</span>
+                <ImagePlus className="w-5 h-5" />
+                <span className="text-xs font-medium hidden md:inline">Image</span>
+                <input type="file" accept="image/*" className="hidden" onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  e.target.value = '';
+                  if (!f) return;
+                  const reader = new FileReader();
+                  reader.onload = () => {
+                    const dataUrl = reader.result as string;
+                    const tempImg = new Image();
+                    tempImg.onload = () => {
+                      pushUndo();
+                      const maxW = 200;
+                      const scale = Math.min(maxW / tempImg.naturalWidth, 1);
+                      const newAnnotation: Annotation = {
+                        id: Date.now().toString(),
+                        type: 'image',
+                        pageIndex: currentPage - 1,
+                        x: 50,
+                        y: 50,
+                        width: tempImg.naturalWidth * scale,
+                        height: tempImg.naturalHeight * scale,
+                        imageDataUrl: dataUrl,
+                      };
+                      setAnnotations(prev => [...prev, newAnnotation]);
+                      setSelectedId(newAnnotation.id);
+                    };
+                    tempImg.src = dataUrl;
+                  };
+                  reader.readAsDataURL(f);
+                }} />
+              </label>
+              <div className="w-px h-6 bg-gray-200 mx-1"></div>
+              {/* Undo / Redo */}
+              <button onClick={doUndo} disabled={undoStack.length === 0} className="p-2 rounded-lg text-gray-600 hover:bg-gray-100 disabled:opacity-30" title="Undo (Ctrl+Z)">
+                <Undo2 className="w-5 h-5" />
               </button>
-              <button
-                onClick={() => setActiveTool(activeTool === 'whiteout' ? null : 'whiteout')}
-                className={`p-2 rounded-lg flex items-center gap-2 transition-colors ${activeTool === 'whiteout' ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 hover:bg-gray-100'}`}
-                title="Whiteout"
-              >
-                <Square className="w-5 h-5" />
-                <span className="hidden sm:inline text-sm font-medium">Whiteout</span>
-              </button>
-              <button
-                onClick={() => setActiveTool(activeTool === 'highlight' ? null : 'highlight')}
-                className={`p-2 rounded-lg flex items-center gap-2 transition-colors ${activeTool === 'highlight' ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 hover:bg-gray-100'}`}
-                title="Highlight"
-              >
-                <Highlighter className="w-5 h-5" />
-                <span className="hidden sm:inline text-sm font-medium">Highlight</span>
-              </button>
-              <button
-                onClick={() => setActiveTool(activeTool === 'signature' ? null : 'signature')}
-                className={`p-2 rounded-lg flex items-center gap-2 transition-colors ${activeTool === 'signature' ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 hover:bg-gray-100'}`}
-                title="Sign"
-              >
-                <PenTool className="w-5 h-5" />
-                <span className="hidden sm:inline text-sm font-medium">Sign</span>
-              </button>
-              <button
-                onClick={() => setActiveTool(activeTool === 'link' ? null : 'link')}
-                className={`p-2 rounded-lg flex items-center gap-2 transition-colors ${activeTool === 'link' ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 hover:bg-gray-100'}`}
-                title="Add Link"
-              >
-                <LinkIcon className="w-5 h-5" />
-                <span className="hidden sm:inline text-sm font-medium">Link</span>
+              <button onClick={doRedo} disabled={redoStack.length === 0} className="p-2 rounded-lg text-gray-600 hover:bg-gray-100 disabled:opacity-30" title="Redo (Ctrl+Shift+Z)">
+                <Redo className="w-5 h-5" />
               </button>
             </div>
             
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-3 flex-wrap">
+              {/* Zoom */}
+              <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
+                <button onClick={() => setZoomLevel(z => Math.max(0.5, z - 0.25))} className="p-1 rounded hover:bg-white" title="Zoom out">
+                  <ZoomOut className="w-4 h-4" />
+                </button>
+                <span className="text-xs font-medium px-2 min-w-[3rem] text-center">{Math.round(zoomLevel * 100)}%</span>
+                <button onClick={() => setZoomLevel(z => Math.min(3, z + 0.25))} className="p-1 rounded hover:bg-white" title="Zoom in">
+                  <ZoomIn className="w-4 h-4" />
+                </button>
+              </div>
+              {/* Page nav */}
               <div className="flex items-center gap-2 bg-gray-100 rounded-lg p-1">
                 <button 
                   onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
@@ -611,15 +877,36 @@ export default function AdvancedEditor() {
                   <ChevronRight className="w-5 h-5" />
                 </button>
               </div>
+              {/* OCR button for scanned PDFs */}
+              {isScannedPdf && !ocrDone && (
+                <button
+                  onClick={runOcrOnPage}
+                  disabled={ocrBusy}
+                  className="px-3 py-2 bg-amber-100 text-amber-800 rounded-lg text-sm font-bold hover:bg-amber-200 disabled:opacity-50 flex items-center gap-2"
+                  title="Scanned PDF detected. Run OCR to detect text."
+                >
+                  {ocrBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <ScanText className="w-4 h-4" />}
+                  {ocrBusy ? 'OCR running…' : 'Scan Text (OCR)'}
+                </button>
+              )}
               <button
                 onClick={applyChangesAndSave}
                 disabled={isProcessing}
-                className="px-6 py-2 bg-indigo-600 text-white font-bold rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50"
+                className="px-6 py-2 bg-indigo-600 text-white font-bold rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50 flex items-center gap-2"
               >
+                {isProcessing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
                 {isProcessing ? 'Saving...' : 'Apply Changes'}
               </button>
             </div>
           </div>
+
+          {/* Scanned PDF notice */}
+          {isScannedPdf && !ocrDone && (
+            <div className="bg-amber-50 border-b border-amber-200 px-4 py-2 text-sm text-amber-800 flex items-center gap-2">
+              <ScanText className="w-4 h-4 shrink-0" />
+              <span>This looks like a <strong>scanned/image-based PDF</strong>. Click "Scan Text (OCR)" to detect text for editing.</span>
+            </div>
+          )}
 
           {/* Editor Layout: Canvas + Sidebar */}
           <div className="flex-1 flex overflow-hidden">
@@ -634,23 +921,56 @@ export default function AdvancedEditor() {
                 {/* Interactive Overlay */}
                 <div 
                   ref={overlayRef}
-                  className={`absolute top-0 left-0 w-full h-full z-10 ${activeTool ? 'cursor-crosshair' : ''}`}
+                  className={`absolute top-0 left-0 w-full h-full z-10 ${
+                    activeTool === 'freehand' ? 'cursor-crosshair' : 
+                    activeTool ? 'cursor-crosshair' :
+                    isDragging ? 'cursor-grabbing' : ''
+                  }`}
                   onMouseDown={handleOverlayMouseDown}
-                  onMouseMove={handleOverlayMouseMove}
-                  onMouseUp={handleOverlayMouseUp}
-                  onMouseLeave={handleOverlayMouseUp}
+                  onMouseMove={(e) => {
+                    handleOverlayMouseMove(e);
+                    if (resizeAnnRef.current) {
+                      const r = resizeAnnRef.current;
+                      const dx = e.clientX - r.startX;
+                      const dy = e.clientY - r.startY;
+                      let newW = r.startW, newH = r.startH;
+                      let newX = r.startAnnX, newY = r.startAnnY;
+                      const h = r.handle;
+                      if (h === 'br') { newW = r.startW + dx; newH = r.startH + dy; }
+                      else if (h === 'bl') { newW = r.startW - dx; newH = r.startH + dy; newX = r.startAnnX + dx; }
+                      else if (h === 'tr') { newW = r.startW + dx; newH = r.startH - dy; newY = r.startAnnY + dy; }
+                      else if (h === 'tl') { newW = r.startW - dx; newH = r.startH - dy; newX = r.startAnnX + dx; newY = r.startAnnY + dy; }
+                      else if (h === 'r') { newW = r.startW + dx; }
+                      else if (h === 'l') { newW = r.startW - dx; newX = r.startAnnX + dx; }
+                      else if (h === 'b') { newH = r.startH + dy; }
+                      else if (h === 't') { newH = r.startH - dy; newY = r.startAnnY + dy; }
+                      newW = Math.max(20, newW);
+                      newH = Math.max(20, newH);
+                      updateAnnotation(r.id, { width: newW, height: newH, x: newX, y: newY });
+                    }
+                  }}
+                  onMouseUp={() => {
+                    handleOverlayMouseUp();
+                    setFreehandPoints([]);
+                    if (resizeAnnRef.current) resizeAnnRef.current = null;
+                  }}
+                  onMouseLeave={() => {
+                    handleOverlayMouseUp();
+                    setFreehandPoints([]);
+                    if (resizeAnnRef.current) resizeAnnRef.current = null;
+                  }}
                 >
                   {/* Render Annotations for current page */}
                   {annotations.filter(a => a.pageIndex === currentPage - 1).map(ann => (
                     <div 
                       key={ann.id}
                       onClick={(e) => { e.stopPropagation(); setSelectedId(ann.id); }}
-                      className={`absolute group cursor-pointer ${selectedId === ann.id ? 'ring-2 ring-indigo-500' : ''}`}
+                      className={`absolute group ${selectedId === ann.id ? 'ring-2 ring-indigo-500' : ''} ${!activeTool && ann.type !== 'freehand' ? 'cursor-move' : 'cursor-pointer'}`}
                       style={{ 
                         left: ann.x, 
                         top: ann.y, 
-                        width: ann.width, 
-                        height: ann.height,
+                        width: ann.width || (ann.type === 'text' ? 200 : undefined), 
+                        height: ann.height || (ann.type === 'text' ? 24 : undefined),
                         backgroundColor: ann.type === 'whiteout' ? 'white' : ann.type === 'highlight' ? 'rgba(255, 255, 0, 0.4)' : ann.type === 'link' ? 'rgba(0, 0, 255, 0.2)' : 'transparent',
                         border: ann.type === 'link' ? '1px dashed blue' : ann.type === 'table' ? '1px solid #ccc' : 'none'
                       }}
@@ -668,6 +988,7 @@ export default function AdvancedEditor() {
                             fontStyle: ann.italic ? 'italic' : 'normal',
                           }}
                           autoFocus
+                          onClick={(e) => e.stopPropagation()}
                         />
                       )}
                       {ann.type === 'table' && ann.tableData && (
@@ -678,13 +999,14 @@ export default function AdvancedEditor() {
                             gridTemplateColumns: `repeat(${ann.cols}, 1fr)`
                           }}
                         >
-                          {ann.tableData.map((row, r) => (
-                            row.map((cell, c) => (
+                          {ann.tableData.map((row, ri) => (
+                            row.map((cell, ci) => (
                               <input
-                                key={`${r}-${c}`}
+                                key={`${ri}-${ci}`}
                                 value={cell}
-                                onChange={(e) => updateTableData(ann.id, r, c, e.target.value)}
+                                onChange={(e) => updateTableData(ann.id, ri, ci, e.target.value)}
                                 className="border border-gray-300 text-[10px] p-0.5 outline-none focus:bg-indigo-50"
+                                onClick={(e) => e.stopPropagation()}
                               />
                             ))
                           ))}
@@ -693,20 +1015,75 @@ export default function AdvancedEditor() {
                       {ann.type === 'signature' && ann.signatureDataUrl && (
                         <img src={ann.signatureDataUrl} alt="Signature" className="w-full h-full object-contain pointer-events-none" />
                       )}
+                      {ann.type === 'image' && ann.imageDataUrl && (
+                        <img src={ann.imageDataUrl} alt="Inserted" className="w-full h-full object-fill pointer-events-none" />
+                      )}
+                      {/* 8-handle resize for image & signature */}
+                      {(ann.type === 'image' || ann.type === 'signature') && selectedId === ann.id && (
+                        <>
+                          {/* Corner handles */}
+                          <div className="absolute -top-1.5 -left-1.5 w-3 h-3 bg-indigo-500 border border-white rounded-sm cursor-nwse-resize z-20"
+                            onMouseDown={e => { e.stopPropagation(); resizeAnnRef.current = { id: ann.id, handle: 'tl', startX: e.clientX, startY: e.clientY, startAnnX: ann.x, startAnnY: ann.y, startW: ann.width || 150, startH: ann.height || 50 }; }} />
+                          <div className="absolute -top-1.5 -right-1.5 w-3 h-3 bg-indigo-500 border border-white rounded-sm cursor-nesw-resize z-20"
+                            onMouseDown={e => { e.stopPropagation(); resizeAnnRef.current = { id: ann.id, handle: 'tr', startX: e.clientX, startY: e.clientY, startAnnX: ann.x, startAnnY: ann.y, startW: ann.width || 150, startH: ann.height || 50 }; }} />
+                          <div className="absolute -bottom-1.5 -left-1.5 w-3 h-3 bg-indigo-500 border border-white rounded-sm cursor-nesw-resize z-20"
+                            onMouseDown={e => { e.stopPropagation(); resizeAnnRef.current = { id: ann.id, handle: 'bl', startX: e.clientX, startY: e.clientY, startAnnX: ann.x, startAnnY: ann.y, startW: ann.width || 150, startH: ann.height || 50 }; }} />
+                          <div className="absolute -bottom-1.5 -right-1.5 w-3 h-3 bg-indigo-500 border border-white rounded-sm cursor-nwse-resize z-20"
+                            onMouseDown={e => { e.stopPropagation(); resizeAnnRef.current = { id: ann.id, handle: 'br', startX: e.clientX, startY: e.clientY, startAnnX: ann.x, startAnnY: ann.y, startW: ann.width || 150, startH: ann.height || 50 }; }} />
+                          {/* Edge handles */}
+                          <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-6 h-2 bg-indigo-400 border border-white rounded-sm cursor-ns-resize z-20"
+                            onMouseDown={e => { e.stopPropagation(); resizeAnnRef.current = { id: ann.id, handle: 't', startX: e.clientX, startY: e.clientY, startAnnX: ann.x, startAnnY: ann.y, startW: ann.width || 150, startH: ann.height || 50 }; }} />
+                          <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-6 h-2 bg-indigo-400 border border-white rounded-sm cursor-ns-resize z-20"
+                            onMouseDown={e => { e.stopPropagation(); resizeAnnRef.current = { id: ann.id, handle: 'b', startX: e.clientX, startY: e.clientY, startAnnX: ann.x, startAnnY: ann.y, startW: ann.width || 150, startH: ann.height || 50 }; }} />
+                          <div className="absolute top-1/2 -left-1 -translate-y-1/2 w-2 h-6 bg-indigo-400 border border-white rounded-sm cursor-ew-resize z-20"
+                            onMouseDown={e => { e.stopPropagation(); resizeAnnRef.current = { id: ann.id, handle: 'l', startX: e.clientX, startY: e.clientY, startAnnX: ann.x, startAnnY: ann.y, startW: ann.width || 150, startH: ann.height || 50 }; }} />
+                          <div className="absolute top-1/2 -right-1 -translate-y-1/2 w-2 h-6 bg-indigo-400 border border-white rounded-sm cursor-ew-resize z-20"
+                            onMouseDown={e => { e.stopPropagation(); resizeAnnRef.current = { id: ann.id, handle: 'r', startX: e.clientX, startY: e.clientY, startAnnX: ann.x, startAnnY: ann.y, startW: ann.width || 150, startH: ann.height || 50 }; }} />
+                          {/* Size label */}
+                          <div className="absolute -top-5 left-0 text-[9px] font-bold text-indigo-600 bg-white/90 px-1 rounded whitespace-nowrap z-20">
+                            {Math.round(ann.width || 0)}×{Math.round(ann.height || 0)}
+                          </div>
+                        </>
+                      )}
+                      {ann.type === 'freehand' && ann.pathData && (
+                        <svg className="absolute inset-0 w-full h-full pointer-events-none overflow-visible" style={{ left: -ann.x, top: -ann.y, width: pageViewport?.width, height: pageViewport?.height }}>
+                          <path d={ann.pathData} fill="none" stroke={ann.color || '#000'} strokeWidth={ann.strokeWidth || 2} strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      )}
                       {ann.type === 'link' && (
                         <div className="w-full h-full flex items-center justify-center text-blue-800 text-xs font-bold opacity-0 group-hover:opacity-100 transition-opacity">
                           LINK
                         </div>
                       )}
                       
+                      {/* Delete & Move indicators */}
                       <button 
-                        onClick={(e) => { e.stopPropagation(); deleteAnnotation(ann.id); }}
+                        onClick={(e) => { e.stopPropagation(); pushUndo(); deleteAnnotation(ann.id); }}
                         className="absolute -top-3 -right-3 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity z-20 shadow-sm"
                       >
                         <X className="w-3 h-3" />
                       </button>
+                      {!activeTool && ann.type !== 'freehand' && (
+                        <div className="absolute -top-3 -left-3 bg-indigo-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity z-20 shadow-sm">
+                          <Move className="w-3 h-3" />
+                        </div>
+                      )}
                     </div>
                   ))}
+
+                  {/* Live freehand path */}
+                  {isDrawing && activeTool === 'freehand' && freehandPoints.length > 1 && (
+                    <svg className="absolute inset-0 w-full h-full pointer-events-none" style={{ width: pageViewport?.width, height: pageViewport?.height }}>
+                      <path 
+                        d={freehandPoints.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ')} 
+                        fill="none" 
+                        stroke={freehandColor} 
+                        strokeWidth={freehandWidth} 
+                        strokeLinecap="round" 
+                        strokeLinejoin="round" 
+                      />
+                    </svg>
+                  )}
 
                   {/* Current Drawing Rect */}
                   {isDrawing && currentRect && (
@@ -842,9 +1219,34 @@ export default function AdvancedEditor() {
                     </div>
                   )}
 
+                  {annotations.find(a => a.id === selectedId)?.type === 'freehand' && (
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Stroke Color</label>
+                        <input
+                          type="color"
+                          value={annotations.find(a => a.id === selectedId)?.color || '#000000'}
+                          onChange={(e) => updateAnnotation(selectedId, { color: e.target.value })}
+                          className="w-full h-10 p-1 border border-gray-300 rounded-lg cursor-pointer"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Stroke Width: {annotations.find(a => a.id === selectedId)?.strokeWidth || 2}px</label>
+                        <input
+                          type="range"
+                          min={1}
+                          max={10}
+                          value={annotations.find(a => a.id === selectedId)?.strokeWidth || 2}
+                          onChange={(e) => updateAnnotation(selectedId, { strokeWidth: parseInt(e.target.value) })}
+                          className="w-full"
+                        />
+                      </div>
+                    </div>
+                  )}
+
                   <div>
                     <button
-                      onClick={() => deleteAnnotation(selectedId)}
+                      onClick={() => { pushUndo(); deleteAnnotation(selectedId); }}
                       className="w-full py-2 text-red-600 border border-red-200 rounded-lg hover:bg-red-50 text-sm font-medium transition-colors"
                     >
                       Delete Element
@@ -852,9 +1254,26 @@ export default function AdvancedEditor() {
                   </div>
                 </div>
               ) : (
-                <div className="h-full flex flex-col items-center justify-center text-center text-gray-400">
-                  <MousePointer2 className="w-8 h-8 mb-4 opacity-20" />
-                  <p className="text-sm">Select an element to edit its properties</p>
+                <div className="space-y-6">
+                  <div className="h-full flex flex-col items-center justify-center text-center text-gray-400">
+                    <MousePointer2 className="w-8 h-8 mb-4 opacity-20" />
+                    <p className="text-sm">Select an element to edit its properties</p>
+                    <p className="text-xs mt-2 text-gray-300">Drag elements to reposition them</p>
+                  </div>
+                  {/* Freehand settings when freehand tool active */}
+                  {activeTool === 'freehand' && (
+                    <div className="space-y-4 border-t border-gray-200 pt-4">
+                      <h3 className="text-sm font-bold text-gray-800">Draw Settings</h3>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Color</label>
+                        <input type="color" value={freehandColor} onChange={e => setFreehandColor(e.target.value)} className="w-full h-10 p-1 border border-gray-300 rounded-lg cursor-pointer" />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Width: {freehandWidth}px</label>
+                        <input type="range" min={1} max={10} value={freehandWidth} onChange={e => setFreehandWidth(Number(e.target.value))} className="w-full" />
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -875,7 +1294,7 @@ export default function AdvancedEditor() {
               </a>
             </div>
             <button
-              onClick={() => { setFile(null); setEditedUrl(null); setAnnotations([]); }}
+              onClick={() => { setFile(null); setEditedUrl(null); setAnnotations([]); setUndoStack([]); setRedoStack([]); }}
               className="text-gray-600 hover:text-gray-900 font-medium"
             >
               Edit another PDF

@@ -117,11 +117,12 @@ export function clampCropRect(
   return { x, y, w, h };
 }
 
-export type SheetPageSize = 'a4' | 'letter';
+export type SheetPageSize = 'a4' | 'letter' | '4x6';
 
 const PAGE_PT: Record<SheetPageSize, [number, number]> = {
   a4: [595.28, 841.89],
   letter: [612, 792],
+  '4x6': [288, 432], // 4×6 inch photo paper
 };
 
 export async function buildPassportGridPdf(options: {

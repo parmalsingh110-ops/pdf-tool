@@ -55,6 +55,19 @@ import BatchProtect from './pages/BatchProtect';
 import InkSaverPDF from './pages/InkSaverPDF';
 import UniversalConverter from './pages/UniversalConverter';
 
+// New Advanced Tools
+import ImageCollage from './pages/ImageCollage';
+import QrCodeGenerator from './pages/QrCodeGenerator';
+import SignaturePad from './pages/SignaturePad';
+import DocumentScanner from './pages/DocumentScanner';
+import PdfComparison from './pages/PdfComparison';
+import SmartImageToPdf from './pages/SmartImageToPdf';
+import PdfFormFiller from './pages/PdfFormFiller';
+import ImageColorCorrection from './pages/ImageColorCorrection';
+import PdfPageCropper from './pages/PdfPageCropper';
+import ImageNoiseReduction from './pages/ImageNoiseReduction';
+import ImageInsertTool from './pages/ImageInsertTool';
+
 const AdvancedEditor = lazy(() => import('./pages/AdvancedEditor'));
 const TargetPDFCompress = lazy(() => import('./pages/TargetPDFCompress'));
 const ExactImageSize = lazy(() => import('./pages/ExactImageSize'));
@@ -127,6 +140,19 @@ export default function App() {
           <Route path="batch-protect" element={<BatchProtect />} />
           <Route path="ink-saver" element={<InkSaverPDF />} />
           <Route path="universal-converter" element={<UniversalConverter />} />
+
+          {/* 10 New Advanced Tools */}
+          <Route path="image-collage" element={<ImageCollage />} />
+          <Route path="qr-code" element={<QrCodeGenerator />} />
+          <Route path="signature-pad" element={<SignaturePad />} />
+          <Route path="document-scanner" element={<DocumentScanner />} />
+          <Route path="pdf-comparison" element={<PdfComparison />} />
+          <Route path="smart-image-to-pdf" element={<SmartImageToPdf />} />
+          <Route path="pdf-form-filler" element={<PdfFormFiller />} />
+          <Route path="image-color-correction" element={<ImageColorCorrection />} />
+          <Route path="pdf-page-cropper" element={<PdfPageCropper />} />
+          <Route path="image-noise-reduction" element={<ImageNoiseReduction />} />
+          <Route path="image-insert" element={<ImageInsertTool />} />
         </Route>
     </Routes>
   );
