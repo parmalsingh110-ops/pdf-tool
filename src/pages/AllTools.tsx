@@ -4,14 +4,16 @@ import {
   Combine, Scissors, Minimize2, Image as ImageIcon, FileImage, Layers, 
   Lock, Unlock, Droplet, Hash, Edit3, Target, ImageMinus, Maximize, 
   FileType, Tag, ArrowUpDown, FilePlus, Search, ShieldCheck, FileCode, CheckCircle,
-  FileText, Trash2, Contrast, Sparkles, Ruler,   ScanText,
-  ContactRound,
+  FileText, Trash2, Contrast, Sparkles, Ruler, ScanText,
+  ContactRound, LayoutGrid, QrCode, Pen, ScanLine, GitCompare, Palette, Crop,
+  FormInput,
 } from 'lucide-react';
 
 function categoryAnchor(title: string): string {
   if (title.includes('Currently Available')) return 'cat-available';
   if (title.includes('Advanced Text')) return 'cat-advanced-ocr';
   if (title.includes('Image & Media')) return 'cat-media';
+  if (title.includes('Creative & Productivity')) return 'cat-creative';
   if (title.includes('Security & Compliance')) return 'cat-security';
   if (title.includes('Coming Soon')) return 'cat-coming-soon';
   return 'cat-other';
@@ -75,6 +77,22 @@ const categories = [
       { title: 'Grayscale PDF', path: '/grayscale-pdf', icon: Droplet, color: 'text-gray-500', bg: 'bg-gray-100' },
       { title: 'Invert Colors', path: '/invert-colors', icon: Droplet, color: 'text-zinc-800', bg: 'bg-zinc-100' },
       { title: 'Ink Saver PDF', path: '/ink-saver', icon: Contrast, color: 'text-emerald-600', bg: 'bg-emerald-50' },
+      { title: 'Image Color Correction', path: '/image-color-correction', icon: Palette, color: 'text-pink-600', bg: 'bg-pink-50' },
+      { title: 'Image Noise Reduction', path: '/image-noise-reduction', icon: Sparkles, color: 'text-violet-500', bg: 'bg-violet-50' },
+    ]
+  },
+  {
+    title: "Creative & Productivity Tools",
+    tools: [
+      { title: 'Image Collage Maker', path: '/image-collage', icon: LayoutGrid, color: 'text-pink-500', bg: 'bg-pink-50' },
+      { title: 'QR Code & Barcode', path: '/qr-code', icon: QrCode, color: 'text-indigo-600', bg: 'bg-indigo-50' },
+      { title: 'Digital Signature Pad', path: '/signature-pad', icon: Pen, color: 'text-violet-600', bg: 'bg-violet-50' },
+      { title: 'Document Scanner', path: '/document-scanner', icon: ScanLine, color: 'text-blue-600', bg: 'bg-blue-50' },
+      { title: 'PDF Comparison (Diff)', path: '/pdf-comparison', icon: GitCompare, color: 'text-orange-600', bg: 'bg-orange-50' },
+      { title: 'Smart Image to PDF', path: '/smart-image-to-pdf', icon: FileImage, color: 'text-emerald-600', bg: 'bg-emerald-50' },
+      { title: 'PDF Form Filler', path: '/pdf-form-filler', icon: FormInput, color: 'text-blue-700', bg: 'bg-blue-50' },
+      { title: 'PDF Page Cropper', path: '/pdf-page-cropper', icon: Crop, color: 'text-orange-500', bg: 'bg-orange-50' },
+      { title: 'Image Insert & Overlay', path: '/image-insert', icon: ImageIcon, color: 'text-cyan-600', bg: 'bg-cyan-50' },
     ]
   },
   {
@@ -118,6 +136,7 @@ export default function AllTools() {
     { id: 'cat-available', label: 'Essentials', icon: Combine },
     { id: 'cat-advanced-ocr', label: 'OCR & text', icon: ScanText },
     { id: 'cat-media', label: 'Media', icon: ImageIcon },
+    { id: 'cat-creative', label: 'Creative', icon: LayoutGrid },
     { id: 'cat-security', label: 'Security', icon: ShieldCheck },
     { id: 'cat-coming-soon', label: 'Coming soon', icon: Sparkles },
   ];

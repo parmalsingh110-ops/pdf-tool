@@ -308,6 +308,48 @@ export default function ImageTextEditor() {
     if (undoStackRef.current.length > 40) undoStackRef.current.shift();
   }, []);
 
+  const deleteWord = useCallback((id: string) => {
+    pushUndo();
+    setWords((prev) => prev.filter((w) => w.id !== id));
+    setSelectedId((prev) => (prev === id ? null : prev));
+  }, [pushUndo]);
+
+  /**
+   * Sample surrounding pixels around a bbox to detect the background color.
+   * Falls back to white if sampling fails.
+   */
+  const sampleBgColor = useCallback((ctx: CanvasRenderingContext2D, bbox: Bbox, imgW: number, imgH: number): string => {
+    const samples: number[][] = [];
+    const pad = 4;
+    // Gather pixels from edges around the bbox
+    const positions = [
+      [bbox.x0 - pad, bbox.y0 - pad],
+      [bbox.x1 + pad, bbox.y0 - pad],
+      [bbox.x0 - pad, bbox.y1 + pad],
+      [bbox.x1 + pad, bbox.y1 + pad],
+      [(bbox.x0 + bbox.x1) / 2, bbox.y0 - pad],
+      [(bbox.x0 + bbox.x1) / 2, bbox.y1 + pad],
+      [bbox.x0 - pad, (bbox.y0 + bbox.y1) / 2],
+      [bbox.x1 + pad, (bbox.y0 + bbox.y1) / 2],
+    ];
+    for (const [px, py] of positions) {
+      const sx = Math.round(Math.min(Math.max(0, px), imgW - 1));
+      const sy = Math.round(Math.min(Math.max(0, py), imgH - 1));
+      try {
+        const id = ctx.getImageData(sx, sy, 1, 1);
+        samples.push([id.data[0], id.data[1], id.data[2]]);
+      } catch { /* cross-origin or empty */ }
+    }
+    if (samples.length === 0) return '#ffffff';
+    // Average
+    const avg = [0, 0, 0];
+    for (const s of samples) { avg[0] += s[0]; avg[1] += s[1]; avg[2] += s[2]; }
+    avg[0] = Math.round(avg[0] / samples.length);
+    avg[1] = Math.round(avg[1] / samples.length);
+    avg[2] = Math.round(avg[2] / samples.length);
+    return `rgb(${avg[0]},${avg[1]},${avg[2]})`;
+  }, []);
+
   const undoLast = useCallback(() => {
     const st = undoStackRef.current;
     if (!st.length) return;
@@ -436,11 +478,15 @@ export default function ImageTextEditor() {
 
   const selected = words.find((w) => w.id === selectedId) || null;
 
-  const paintDirtyWords = (ctx: CanvasRenderingContext2D, dirty: EditableWord[]) => {
+  const paintDirtyWords = (ctx: CanvasRenderingContext2D, dirty: EditableWord[], srcCtx?: CanvasRenderingContext2D) => {
     const pad = 2;
+    const cw = ctx.canvas.width;
+    const ch = ctx.canvas.height;
     for (const w of dirty) {
       const { bbox: b } = w;
-      ctx.fillStyle = '#ffffff';
+      // Use auto-detected background color from surrounding pixels
+      const bg = srcCtx ? sampleBgColor(srcCtx, b, cw, ch) : '#ffffff';
+      ctx.fillStyle = bg;
       ctx.fillRect(b.x0 - pad, b.y0 - pad, b.x1 - b.x0 + pad * 2, b.y1 - b.y0 + pad * 2);
 
       const styleParts: string[] = [];
@@ -501,7 +547,13 @@ export default function ImageTextEditor() {
       const ctx = canvas.getContext('2d');
       if (!ctx) throw new Error('ctx');
       ctx.drawImage(img, 0, 0);
-      paintDirtyWords(ctx, dirty);
+      // Create a clean copy for background sampling (before any overpainting)
+      const srcCanvas = document.createElement('canvas');
+      srcCanvas.width = natural.w;
+      srcCanvas.height = natural.h;
+      const srcCtx = srcCanvas.getContext('2d');
+      if (srcCtx) srcCtx.drawImage(img, 0, 0);
+      paintDirtyWords(ctx, dirty, srcCtx || undefined);
 
       const q = mime === 'image/jpeg' ? 0.92 : undefined;
       const blob = await new Promise<Blob | null>((resolve) =>
@@ -761,14 +813,26 @@ export default function ImageTextEditor() {
                     key={w.id}
                     type="button"
                     onClick={() => setSelectedId(w.id)}
-                    className={`w-full text-left px-2 py-1.5 rounded-lg text-xs truncate border ${
+                    className={`w-full text-left px-2 py-1.5 rounded-lg text-xs truncate border flex items-center gap-1.5 ${
                       selectedId === w.id
                         ? 'border-sky-500 bg-sky-950/50 text-sky-100'
                         : 'border-transparent hover:bg-slate-700/80 text-slate-300'
                     }`}
                   >
+                    {/* Confidence dot */}
+                    <span className={`inline-block w-1.5 h-1.5 rounded-full shrink-0 ${
+                      w.confidence >= 85 ? 'bg-emerald-400' : w.confidence >= 60 ? 'bg-amber-400' : 'bg-rose-400'
+                    }`} title={`Confidence: ${Math.round(w.confidence)}%`} />
                     {w.dirty ? '✎ ' : ''}
-                    {w.text}
+                    <span className="truncate">{w.text}</span>
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); deleteWord(w.id); }}
+                      className="ml-auto shrink-0 w-4 h-4 rounded bg-rose-600/70 hover:bg-rose-500 text-white flex items-center justify-center text-[8px] font-bold opacity-0 group-hover:opacity-100 transition-opacity"
+                      title="Delete this word"
+                    >
+                      ×
+                    </button>
                   </button>
                 ))}
               </div>
