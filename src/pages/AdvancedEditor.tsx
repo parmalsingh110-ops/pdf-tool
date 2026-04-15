@@ -59,6 +59,25 @@ interface Annotation {
   strokeWidth?: number;
   /** Inserted image data URL */
   imageDataUrl?: string;
+  /** Text background to blend with scanned page when replacing OCR text */
+  backgroundColor?: string;
+  /** Prevent accidental drag for OCR-aligned text replacement */
+  lockPosition?: boolean;
+  /** Link text <-> whiteout pair for seamless replace */
+  linkedId?: string;
+  /** Keep original OCR line metrics for smart resizing */
+  sourceWidth?: number;
+  sourceHeight?: number;
+}
+
+interface DetectedTextBlock {
+  text: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  fgColor?: string;
+  bgColor?: string;
 }
 
 export default function AdvancedEditor() {
@@ -71,7 +90,7 @@ export default function AdvancedEditor() {
   const [activeTool, setActiveTool] = useState<Tool>(null);
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [detectedText, setDetectedText] = useState<{text: string, x: number, y: number, w: number, h: number}[]>([]);
+  const [detectedText, setDetectedText] = useState<DetectedTextBlock[]>([]);
   
   // Property states (defaults for newly placed text)
   const [fontSize, setFontSize] = useState(14);
@@ -119,6 +138,54 @@ export default function AdvancedEditor() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
   const sigCanvasRef = useRef<SignatureCanvas>(null);
+
+  const WHITEOUT_BASE_PAD = 2;
+  const WHITEOUT_MAX_PAD = 8;
+  const getWhiteoutPad = (h: number) => Math.max(WHITEOUT_BASE_PAD, Math.min(WHITEOUT_MAX_PAD, Math.round(h * 0.18)));
+
+  const estimateTextWidth = (text: string, pxSize: number, bold?: boolean, italic?: boolean) => {
+    const measureCanvas = document.createElement('canvas');
+    const ctx = measureCanvas.getContext('2d');
+    if (!ctx) return Math.max(8, text.length * pxSize * 0.56);
+    const styleParts = [];
+    if (italic) styleParts.push('italic');
+    if (bold) styleParts.push('700');
+    styleParts.push(`${Math.max(8, pxSize)}px`);
+    styleParts.push('Helvetica, Arial, sans-serif');
+    ctx.font = styleParts.join(' ');
+    return Math.max(8, ctx.measureText(text || ' ').width);
+  };
+
+  const fitFontSizeToBox = (text: string, targetW: number, currentSize: number, bold?: boolean, italic?: boolean) => {
+    if (!text.trim() || targetW <= 0) return currentSize;
+    let size = Math.max(8, currentSize);
+    const minSize = 8;
+    const maxSize = 96;
+    let width = estimateTextWidth(text, size, bold, italic);
+    if (width <= targetW) {
+      while (size < maxSize) {
+        const next = size + 1;
+        const nextW = estimateTextWidth(text, next, bold, italic);
+        if (nextW > targetW) break;
+        size = next;
+        width = nextW;
+      }
+      return size;
+    }
+    while (width > targetW && size > minSize) {
+      size -= 1;
+      width = estimateTextWidth(text, size, bold, italic);
+    }
+    return size;
+  };
+
+  const fitFontSizeToBounds = (text: string, targetW: number, targetH: number, currentSize: number, bold?: boolean, italic?: boolean) => {
+    let size = fitFontSizeToBox(text, targetW, currentSize, bold, italic);
+    const minSize = 7;
+    const maxInkH = Math.max(6, targetH * 0.86);
+    while (size > minSize && size * 1.05 > maxInkH) size -= 1;
+    return size;
+  };
 
   const handleDrop = async (acceptedFiles: File[]) => {
     if (acceptedFiles.length > 0) {
@@ -247,7 +314,7 @@ export default function AdvancedEditor() {
       const ctx = canvas.getContext('2d', { willReadFrequently: true });
       const imgData = ctx ? ctx.getImageData(0, 0, canvas.width, canvas.height).data : null;
 
-      const ocrItems: {text: string, x: number, y: number, w: number, h: number, fgColor: string, bgColor: string}[] = [];
+      const ocrItems: DetectedTextBlock[] = [];
       if (data.blocks) {
         for (const block of data.blocks) {
           for (const para of block.paragraphs || []) {
@@ -269,6 +336,8 @@ export default function AdvancedEditor() {
                 let fgR=0, fgG=0, fgB=0;
                 let bgR=255, bgG=255, bgB=255;
                 let bgSumR=0, bgSumG=0, bgSumB=0, bgCount=0;
+                let ringSumR=0, ringSumG=0, ringSumB=0, ringCount=0;
+                const ringPad = Math.max(2, Math.round(h * 0.2));
 
                 for (let py = y; py < y + h; py++) {
                   for (let px = x; px < x + w; px++) {
@@ -282,8 +351,25 @@ export default function AdvancedEditor() {
                     }
                   }
                 }
+                // Sample around text edges to match page background and avoid visible patch edges.
+                for (let py = y - ringPad; py < y + h + ringPad; py++) {
+                  for (let px = x - ringPad; px < x + w + ringPad; px++) {
+                    const inside = px >= x && px < x + w && py >= y && py < y + h;
+                    if (inside) continue;
+                    if (px < 0 || py < 0 || px >= canvas.width || py >= canvas.height) continue;
+                    const i = (py * canvas.width + px) * 4;
+                    if (i >= 0 && i < imgData.length) {
+                      ringSumR += imgData[i];
+                      ringSumG += imgData[i + 1];
+                      ringSumB += imgData[i + 2];
+                      ringCount++;
+                    }
+                  }
+                }
                 fgColor = `#${((1<<24)+(fgR<<16)+(fgG<<8)+fgB).toString(16).slice(1)}`;
-                if (bgCount > 0) {
+                if (ringCount > 0) {
+                  bgColor = `#${((1<<24)+(Math.round(ringSumR/ringCount)<<16)+(Math.round(ringSumG/ringCount)<<8)+Math.round(ringSumB/ringCount)).toString(16).slice(1)}`;
+                } else if (bgCount > 0) {
                    bgColor = `#${((1<<24)+(Math.round(bgSumR/bgCount)<<16)+(Math.round(bgSumG/bgCount)<<8)+Math.round(bgSumB/bgCount)).toString(16).slice(1)}`;
                 } else {
                    bgColor = `#${((1<<24)+(bgR<<16)+(bgG<<8)+bgB).toString(16).slice(1)}`;
@@ -330,10 +416,12 @@ export default function AdvancedEditor() {
       );
       if (clickedAnn) {
         setSelectedId(clickedAnn.id);
-        setIsDragging(true);
-        setDragTarget(clickedAnn.id);
-        setDragOffset({ x: x - clickedAnn.x, y: y - clickedAnn.y });
-        pushUndo();
+        if (!clickedAnn.lockPosition) {
+          setIsDragging(true);
+          setDragTarget(clickedAnn.id);
+          setDragOffset({ x: x - clickedAnn.x, y: y - clickedAnn.y });
+          pushUndo();
+        }
         e.preventDefault();
         return;
       }
@@ -349,33 +437,30 @@ export default function AdvancedEditor() {
 
       if (clickedText) {
         pushUndo();
-        const id = Date.now().toString();
-        const pad = 4;
-        const whiteout: Annotation = {
-          id: id + '_w',
-          type: 'whiteout',
-          pageIndex: currentPage - 1,
-          x: clickedText.x - pad,
-          y: clickedText.y - pad,
-          width: clickedText.w + pad * 2,
-          height: clickedText.h + pad * 2,
-          color: clickedText.bgColor || '#ffffff'
-        };
+        const id = Date.now().toString() + '_t';
+        const fittedFont = fitFontSizeToBounds(clickedText.text, clickedText.w, clickedText.h, Math.max(10, Math.round(clickedText.h * 0.74)), defaultBold, defaultItalic);
+        const initialTextW = estimateTextWidth(clickedText.text, fittedFont, defaultBold, defaultItalic);
+        const initialBoxW = Math.max(36, Math.min(clickedText.w, initialTextW + 8));
+        const initialBoxH = Math.max(clickedText.h, Math.round(fittedFont * 1.28));
         const textAnn: Annotation = {
-          id: id + '_t',
+          id,
           type: 'text',
           pageIndex: currentPage - 1,
           x: clickedText.x,
-          y: clickedText.y,
-          width: clickedText.w,
-          height: clickedText.h,
+          y: clickedText.y - Math.max(0, (initialBoxH - clickedText.h) / 2),
+          width: initialBoxW,
+          height: initialBoxH,
           text: clickedText.text,
-          fontSize: Math.max(10, Math.round(clickedText.h * 0.7)),
+          fontSize: fittedFont,
           color: clickedText.fgColor || '#000000',
+          backgroundColor: clickedText.bgColor || '#ffffff',
           bold: defaultBold,
           italic: defaultItalic,
+          lockPosition: false,
+          sourceWidth: clickedText.w,
+          sourceHeight: clickedText.h
         };
-        setAnnotations(prev => [...prev, whiteout, textAnn]);
+        setAnnotations(prev => [...prev, textAnn]);
         setSelectedId(textAnn.id);
         setActiveTool(null);
       }
@@ -401,7 +486,7 @@ export default function AdvancedEditor() {
     } else if (activeTool === 'freehand') {
       setIsDrawing(true);
       setFreehandPoints([{ x, y }]);
-    } else if (['whiteout', 'highlight', 'link', 'table'].includes(activeTool!)) {
+    } else if (['highlight', 'link', 'table'].includes(activeTool!)) {
       setIsDrawing(true);
       setStartPos({ x, y });
       setCurrentRect({ x, y, w: 0, h: 0 });
@@ -420,11 +505,21 @@ export default function AdvancedEditor() {
 
     // Handle drag move
     if (isDragging && dragTarget) {
-      setAnnotations(prev => prev.map(a =>
-        a.id === dragTarget
-          ? { ...a, x: currentX - dragOffset.x, y: currentY - dragOffset.y }
-          : a
-      ));
+      setAnnotations(prev => {
+        const dragAnn = prev.find(a => a.id === dragTarget);
+        if (!dragAnn) return prev;
+        const nextX = currentX - dragOffset.x;
+        const nextY = currentY - dragOffset.y;
+        const deltaX = nextX - dragAnn.x;
+        const deltaY = nextY - dragAnn.y;
+        return prev.map(a => {
+          if (a.id === dragTarget) return { ...a, x: nextX, y: nextY };
+          if (dragAnn.linkedId && a.id === dragAnn.linkedId) {
+            return { ...a, x: a.x + deltaX, y: a.y + deltaY };
+          }
+          return a;
+        });
+      });
       return;
     }
 
@@ -564,11 +659,67 @@ export default function AdvancedEditor() {
   };
 
   const updateAnnotation = (id: string, updates: Partial<Annotation>) => {
-    setAnnotations(annotations.map(a => a.id === id ? { ...a, ...updates } : a));
+    setAnnotations(prev => {
+      const target = prev.find(a => a.id === id);
+      if (!target) return prev;
+      const updatedTarget = { ...target, ...updates };
+
+      return prev.map(a => {
+        if (a.id === id) return updatedTarget;
+        if (target.type === 'text' && target.linkedId && a.id === target.linkedId && a.type === 'whiteout') {
+          const linkedW = updatedTarget.width || target.width || a.width || 0;
+          const linkedH = updatedTarget.height || target.height || a.height || 0;
+          const pad = getWhiteoutPad(linkedH);
+          return {
+            ...a,
+            x: updatedTarget.x - pad,
+            y: updatedTarget.y - pad,
+            width: linkedW + pad * 2,
+            height: linkedH + pad * 2,
+          };
+        }
+        return a;
+      });
+    });
   };
 
   const updateAnnotationText = (id: string, text: string) => {
-    updateAnnotation(id, { text });
+    setAnnotations(prev => {
+      const target = prev.find(a => a.id === id);
+      if (!target || target.type !== 'text') return prev;
+
+      const sourceW = target.sourceWidth || target.width || 120;
+      const sourceH = target.sourceHeight || target.height || 24;
+      const currentW = target.width || sourceW;
+      const currentH = target.height || sourceH;
+      const desiredFont = fitFontSizeToBounds(text, currentW, currentH, target.fontSize || 14, target.bold, target.italic);
+      const measuredTextW = estimateTextWidth(text, desiredFont, target.bold, target.italic);
+      const contentW = Math.max(36, currentW, measuredTextW + 8);
+      const contentH = Math.max(currentH, sourceH, Math.round(desiredFont * 1.28));
+      const pad = getWhiteoutPad(contentH);
+
+      return prev.map(a => {
+        if (a.id === id) {
+          return {
+            ...a,
+            text,
+            fontSize: desiredFont,
+            width: contentW,
+            height: contentH,
+          };
+        }
+        if (target.linkedId && a.id === target.linkedId && a.type === 'whiteout') {
+          return {
+            ...a,
+            x: target.x - pad,
+            y: target.y - pad,
+            width: contentW + pad * 2,
+            height: contentH + pad * 2,
+          };
+        }
+        return a;
+      });
+    });
   };
 
   const selectedTextAnn = annotations.find((a) => a.id === selectedId && a.type === 'text');
@@ -584,7 +735,9 @@ export default function AdvancedEditor() {
     }));
   };
   const deleteAnnotation = (id: string) => {
-    setAnnotations(annotations.filter(a => a.id !== id));
+    const target = annotations.find(a => a.id === id);
+    const linkedId = target?.linkedId;
+    setAnnotations(annotations.filter(a => a.id !== id && a.id !== linkedId));
     if (selectedId === id) setSelectedId(null);
   };
 
@@ -646,12 +799,31 @@ export default function AdvancedEditor() {
         const pdfH = (ann.height || 0) / scale;
 
         if (ann.type === 'text' && ann.text) {
+          const textPx = ann.fontSize || 14;
+          const boxPxH = ann.height || Math.max(24, textPx * 1.25);
+          const clearPxW = Math.max(ann.width || 0, ann.sourceWidth || 0);
+          const clearPxH = Math.max(boxPxH, ann.sourceHeight || 0);
+          const clearPdfW = clearPxW / scale;
+          const clearPdfH = clearPxH / scale;
+
+          if (ann.backgroundColor) {
+            const { r: bgR, g: bgG, b: bgB } = hexToRgb(ann.backgroundColor);
+            const bgPad = Math.max(1.2 / scale, (textPx * 0.12) / scale);
+            page.drawRectangle({
+              x: pdfX - bgPad,
+              y: pdfY - clearPdfH - bgPad,
+              width: clearPdfW + (bgPad * 2),
+              height: clearPdfH + (bgPad * 2),
+              color: rgb(bgR, bgG, bgB),
+            });
+          }
           const { r, g, b } = hexToRgb(ann.color || '#000000');
           const font = resolveTextFont(ann.bold, ann.italic);
+          const baselineFromTopPx = Math.max(textPx, boxPxH * 0.74);
           page.drawText(ann.text, {
             x: pdfX,
-            y: pdfY - ((ann.fontSize || 14) / scale),
-            size: (ann.fontSize || 14) / scale,
+            y: pdfY - (baselineFromTopPx / scale),
+            size: textPx / scale,
             font,
             color: rgb(r, g, b),
           });
@@ -839,7 +1011,6 @@ export default function AdvancedEditor() {
                 <Italic className="w-5 h-5" />
               </button>
               {toolButton('table', <Table className="w-5 h-5" />, 'Table', 'Add Table')}
-              {toolButton('whiteout', <Square className="w-5 h-5" />, 'Whiteout')}
               {toolButton('highlight', <Highlighter className="w-5 h-5" />, 'Highlight')}
               {toolButton('freehand', <Pencil className="w-5 h-5" />, 'Draw', 'Freehand Draw')}
               <button
@@ -1022,7 +1193,7 @@ export default function AdvancedEditor() {
                         top: ann.y, 
                         width: ann.width || (ann.type === 'text' ? Math.max(200, (ann.text?.length || 10) * (ann.fontSize || 14) * 0.6) : undefined), 
                         height: Math.max(ann.height || 24, ann.type === 'text' ? (ann.fontSize || 14) * 1.5 : 0),
-                        backgroundColor: ann.type === 'whiteout' ? (ann.color || '#ffffff') : ann.type === 'highlight' ? 'rgba(255, 255, 0, 0.4)' : ann.type === 'link' ? 'rgba(0, 0, 255, 0.2)' : 'transparent',
+                        backgroundColor: ann.type === 'text' ? (ann.backgroundColor || 'transparent') : ann.type === 'whiteout' ? (ann.color || '#ffffff') : ann.type === 'highlight' ? 'rgba(255, 255, 0, 0.4)' : ann.type === 'link' ? 'rgba(0, 0, 255, 0.2)' : 'transparent',
                         border: ann.type === 'link' ? '1px dashed blue' : ann.type === 'table' ? '1px solid #ccc' : 'none'
                       }}
                     >
@@ -1031,12 +1202,14 @@ export default function AdvancedEditor() {
                           type="text" 
                           value={ann.text}
                           onChange={(e) => updateAnnotationText(ann.id, e.target.value)}
-                          className="bg-transparent border border-transparent outline-none text-black px-1 w-full h-full"
+                          className="bg-transparent border border-transparent outline-none text-black w-full h-full px-[1px] py-0 m-0 leading-none"
                           style={{
                             fontSize: `${ann.fontSize || 14}px`,
                             color: ann.color || '#000000',
                             fontWeight: ann.bold ? 700 : 400,
                             fontStyle: ann.italic ? 'italic' : 'normal',
+                            lineHeight: '1',
+                            textAlign: 'left',
                           }}
                           autoFocus
                           onClick={(e) => e.stopPropagation()}
