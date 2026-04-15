@@ -3,11 +3,13 @@ import { Download, FileText, Image as ImageIcon } from 'lucide-react';
 import FileDropzone from '../components/FileDropzone';
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+import { usePageSEO } from '../lib/usePageSEO';
 
 // Initialize pdf.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
 export default function PDFToJPG() {
+  usePageSEO('PDF to JPG Converter', 'Convert PDF pages to high-quality JPG images. Free online PDF to JPEG converter — fast, private, no uploads required.');
   const [file, setFile] = useState<File | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [imageUrls, setImageUrls] = useState<{url: string, name: string}[]>([]);

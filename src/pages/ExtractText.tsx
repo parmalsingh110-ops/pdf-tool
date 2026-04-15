@@ -3,11 +3,13 @@ import { Download, FileText, FileType } from 'lucide-react';
 import FileDropzone from '../components/FileDropzone';
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+import { usePageSEO } from '../lib/usePageSEO';
 
 // Initialize pdf.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
 export default function ExtractText() {
+  usePageSEO('Extract Text from PDF', 'Extract all text content from PDF documents. Free online PDF text extractor — instant copy/paste.');
   const [file, setFile] = useState<File | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [extractedText, setExtractedText] = useState<string>('');

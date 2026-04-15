@@ -68,6 +68,28 @@ import PdfPageCropper from './pages/PdfPageCropper';
 import ImageNoiseReduction from './pages/ImageNoiseReduction';
 import ImageInsertTool from './pages/ImageInsertTool';
 
+// 20 New Advanced Features
+const PdfStats = lazy(() => import('./pages/PdfStats'));
+const ExtractPages = lazy(() => import('./pages/ExtractPages'));
+const Booklet = lazy(() => import('./pages/Booklet'));
+const DuplicatePages = lazy(() => import('./pages/DuplicatePages'));
+const RotatePages = lazy(() => import('./pages/RotatePages'));
+const RedactPdf = lazy(() => import('./pages/RedactPdf'));
+const ImageConverter = lazy(() => import('./pages/ImageConverter'));
+const ImageWatermark = lazy(() => import('./pages/ImageWatermark'));
+const ImageCrop = lazy(() => import('./pages/ImageCrop'));
+const ImageMetadata = lazy(() => import('./pages/ImageMetadata'));
+const ScreenshotToPdf = lazy(() => import('./pages/ScreenshotToPdf'));
+const PageCounter = lazy(() => import('./pages/PageCounter'));
+const PdfStamp = lazy(() => import('./pages/PdfStamp'));
+const RemoveBlankPages = lazy(() => import('./pages/RemoveBlankPages'));
+const PdfToImages = lazy(() => import('./pages/PdfToImages'));
+const ImageToBase64 = lazy(() => import('./pages/ImageToBase64'));
+const PdfOverlay = lazy(() => import('./pages/PdfOverlay'));
+const ColorExtractor = lazy(() => import('./pages/ColorExtractor'));
+const PdfPresenter = lazy(() => import('./pages/PdfPresenter'));
+const FileHash = lazy(() => import('./pages/FileHash'));
+
 const AdvancedEditor = lazy(() => import('./pages/AdvancedEditor'));
 const TargetPDFCompress = lazy(() => import('./pages/TargetPDFCompress'));
 const ExactImageSize = lazy(() => import('./pages/ExactImageSize'));
@@ -153,6 +175,28 @@ export default function App() {
           <Route path="pdf-page-cropper" element={<PdfPageCropper />} />
           <Route path="image-noise-reduction" element={<ImageNoiseReduction />} />
           <Route path="image-insert" element={<ImageInsertTool />} />
+
+          {/* 20 New Advanced Features */}
+          <Route path="pdf-stats" element={<PdfStats />} />
+          <Route path="extract-pages" element={<ExtractPages />} />
+          <Route path="booklet" element={<Booklet />} />
+          <Route path="duplicate-pages" element={<DuplicatePages />} />
+          <Route path="rotate-pages" element={<RotatePages />} />
+          <Route path="redact" element={<RedactPdf />} />
+          <Route path="image-converter" element={<ImageConverter />} />
+          <Route path="image-watermark" element={<ImageWatermark />} />
+          <Route path="image-crop" element={<ImageCrop />} />
+          <Route path="image-metadata" element={<ImageMetadata />} />
+          <Route path="screenshot-to-pdf" element={<ScreenshotToPdf />} />
+          <Route path="page-counter" element={<PageCounter />} />
+          <Route path="stamp" element={<PdfStamp />} />
+          <Route path="remove-blank-pages" element={<RemoveBlankPages />} />
+          <Route path="pdf-to-images" element={<PdfToImages />} />
+          <Route path="image-to-base64" element={<ImageToBase64 />} />
+          <Route path="pdf-overlay" element={<PdfOverlay />} />
+          <Route path="color-extractor" element={<ColorExtractor />} />
+          <Route path="present" element={<PdfPresenter />} />
+          <Route path="file-hash" element={<FileHash />} />
         </Route>
     </Routes>
   );

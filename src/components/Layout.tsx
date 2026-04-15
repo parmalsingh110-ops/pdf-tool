@@ -9,6 +9,26 @@ import {
   ChevronDown,
   Image as ImageIcon,
   Keyboard,
+  Combine,
+  Scissors,
+  Minimize2,
+  Lock,
+  Edit3,
+  Layers,
+  Hash,
+  RotateCw,
+  ShieldOff,
+  Stamp,
+  BarChart3,
+  RefreshCw,
+  Crop,
+  Droplet,
+  Palette,
+  Code,
+  ShieldCheck,
+  Presentation,
+  BookOpen,
+  Images,
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 import { readRecentTools, recordToolVisit, type RecentEntry } from '../lib/recentFiles';
@@ -33,26 +53,108 @@ const ROUTE_TITLES: Record<string, string> = {
   '/privacy': 'Privacy',
 };
 
-const MEDIA_LINKS = [
-  { to: '/image-resizer', label: 'Image resizer (px / cm / mm)' },
-  { to: '/pixel-resizer', label: 'Pixel resizer' },
-  { to: '/exact-image-size', label: 'Exact image size' },
-  { to: '/image-text-editor', label: 'Image & text (OCR)' },
-  { to: '/remove-background', label: 'Remove background' },
-  { to: '/passport-photo-sheet', label: 'Passport photo sheet' },
-  { to: '/convert-webp', label: 'Convert to WebP' },
-  { to: '/convert-tiff', label: 'Convert to TIFF' },
+// Navigation mega-menu data  — hover to open
+interface NavGroup { label: string; items: { to: string; label: string; icon: any }[]; }
+
+const NAV_GROUPS: NavGroup[] = [
+  {
+    label: 'PDF Tools',
+    items: [
+      { to: '/edit', label: 'Edit PDF', icon: Edit3 },
+      { to: '/merge', label: 'Merge PDF', icon: Combine },
+      { to: '/split', label: 'Split PDF', icon: Scissors },
+      { to: '/compress', label: 'Compress PDF', icon: Minimize2 },
+      { to: '/organize', label: 'Organize PDF', icon: Layers },
+      { to: '/watermark', label: 'Watermark', icon: Droplet },
+      { to: '/protect', label: 'Protect PDF', icon: Lock },
+      { to: '/page-numbers', label: 'Page Numbers', icon: Hash },
+      { to: '/rotate-pages', label: 'Rotate Pages', icon: RotateCw },
+      { to: '/reverse', label: 'Reverse PDF', icon: Layers },
+    ],
+  },
+  {
+    label: 'Convert',
+    items: [
+      { to: '/pdf-to-word', label: 'PDF to Word', icon: FileText },
+      { to: '/pdf-to-excel', label: 'PDF to Excel', icon: FileText },
+      { to: '/pdf-to-ppt', label: 'PDF to PPT', icon: FileText },
+      { to: '/pdf-to-jpg', label: 'PDF to JPG', icon: ImageIcon },
+      { to: '/jpg-to-pdf', label: 'JPG to PDF', icon: ImageIcon },
+      { to: '/pdf-to-images', label: 'PDF to Images (ZIP)', icon: Images },
+      { to: '/universal-converter', label: 'Universal Converter', icon: RefreshCw },
+      { to: '/screenshot-to-pdf', label: 'Screenshot to PDF', icon: FileText },
+    ],
+  },
+  {
+    label: 'Image Tools',
+    items: [
+      { to: '/image-resizer', label: 'Image Resizer', icon: ImageIcon },
+      { to: '/pixel-resizer', label: 'Pixel Resizer', icon: ImageIcon },
+      { to: '/image-crop', label: 'Image Cropper', icon: Crop },
+      { to: '/image-converter', label: 'Format Converter', icon: RefreshCw },
+      { to: '/image-watermark', label: 'Image Watermark', icon: Droplet },
+      { to: '/remove-background', label: 'Remove Background', icon: ImageIcon },
+      { to: '/color-extractor', label: 'Color Extractor', icon: Palette },
+      { to: '/image-to-base64', label: 'Image to Base64', icon: Code },
+      { to: '/image-text-editor', label: 'Image Text (OCR)', icon: Edit3 },
+    ],
+  },
+  {
+    label: 'Pro Tools',
+    items: [
+      { to: '/redact', label: 'PDF Redaction', icon: ShieldOff },
+      { to: '/stamp', label: 'PDF Stamp', icon: Stamp },
+      { to: '/pdf-stats', label: 'PDF Stats', icon: BarChart3 },
+      { to: '/booklet', label: 'PDF Booklet', icon: BookOpen },
+      { to: '/present', label: 'Slide Presenter', icon: Presentation },
+      { to: '/remove-blank-pages', label: 'Blank Page Remover', icon: FileText },
+      { to: '/duplicate-pages', label: 'Duplicate Finder', icon: FileText },
+      { to: '/extract-pages', label: 'Extract Pages', icon: FileText },
+      { to: '/file-hash', label: 'File Hash', icon: ShieldCheck },
+    ],
+  },
 ];
+
+function NavDropdown({ group }: { group: NavGroup }) {
+  const [open, setOpen] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const onEnter = () => { if (timerRef.current) clearTimeout(timerRef.current); setOpen(true); };
+  const onLeave = () => { timerRef.current = setTimeout(() => setOpen(false), 150); };
+
+  return (
+    <div className="relative" onMouseEnter={onEnter} onMouseLeave={onLeave}>
+      <button type="button" className="inline-flex items-center gap-1 hover:text-rose-600 dark:hover:text-rose-400 transition-colors">
+        {group.label}
+        <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        <div className="absolute left-1/2 -translate-x-1/2 top-full pt-2 z-[60]">
+          <div className="w-64 rounded-xl border border-slate-200/80 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-2xl py-2 animate-in fade-in slide-in-from-top-1 duration-200">
+            {group.items.map((item) => (
+              <Link
+                key={item.to}
+                to={item.to}
+                onClick={() => setOpen(false)}
+                className="flex items-center gap-3 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-rose-50 dark:hover:bg-slate-800 transition-colors"
+              >
+                <item.icon className="w-4 h-4 text-rose-500 dark:text-rose-400 shrink-0" />
+                {item.label}
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function Layout() {
   const navigate = useNavigate();
   const location = useLocation();
   const { theme, toggleTheme } = useTheme();
-  const [mediaOpen, setMediaOpen] = useState(false);
   const [recentOpen, setRecentOpen] = useState(false);
   const [recent, setRecent] = useState<RecentEntry[]>([]);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
-  const mediaRef = useRef<HTMLDivElement>(null);
   const recentRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -65,7 +167,6 @@ export default function Layout() {
   useEffect(() => {
     const onDoc = (e: MouseEvent) => {
       const t = e.target as Node;
-      if (mediaRef.current && !mediaRef.current.contains(t)) setMediaOpen(false);
       if (recentRef.current && !recentRef.current.contains(t)) setRecentOpen(false);
     };
     document.addEventListener('click', onDoc);
@@ -96,49 +197,9 @@ export default function Layout() {
             <span className="text-xl font-extrabold tracking-tight">MediaSuite</span>
           </Link>
           <nav className="hidden md:flex items-center gap-5 lg:gap-6 text-sm font-semibold text-slate-600 dark:text-slate-300">
-            <Link to="/edit" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">
-              Edit
-            </Link>
-            <Link to="/merge" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">
-              Merge
-            </Link>
-            <Link to="/split" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">
-              Split
-            </Link>
-            <Link to="/compress" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">
-              Compress
-            </Link>
-            <div className="relative" ref={mediaRef}>
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setMediaOpen((o) => !o);
-                }}
-                className="inline-flex items-center gap-1 hover:text-rose-600 dark:hover:text-rose-400 transition-colors"
-              >
-                Media hub
-                <ChevronDown className={`w-4 h-4 transition-transform ${mediaOpen ? 'rotate-180' : ''}`} />
-              </button>
-              {mediaOpen && (
-                <div className="absolute left-0 top-full mt-2 w-56 rounded-xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 shadow-xl py-2 z-[60]">
-                  {MEDIA_LINKS.map((l) => (
-                    <Link
-                      key={l.to}
-                      to={l.to}
-                      onClick={() => setMediaOpen(false)}
-                      className="flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-rose-50 dark:hover:bg-slate-800"
-                    >
-                      <ImageIcon className="w-4 h-4 text-rose-500 shrink-0" />
-                      {l.label}
-                    </Link>
-                  ))}
-                </div>
-              )}
-            </div>
-            <Link to="/target-compress" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">
-              Target KB
-            </Link>
+            {NAV_GROUPS.map((g) => (
+              <NavDropdown key={g.label} group={g} />
+            ))}
             <Link to="/all-tools" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">
               All Tools
             </Link>
@@ -223,73 +284,51 @@ export default function Layout() {
         </Suspense>
       </main>
       <footer className="bg-slate-50 dark:bg-slate-900 py-12 border-t border-slate-200/70 dark:border-slate-800">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 grid grid-cols-2 md:grid-cols-4 gap-8">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 grid grid-cols-2 md:grid-cols-5 gap-8">
           <div className="col-span-2 md:col-span-1">
             <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-3">MediaSuite</h3>
             <p className="text-sm text-slate-500 dark:text-slate-400">
-              Premium kinetic gallery for PDF and media processing workflows.
+              Free online PDF & image tools. Fast, private, browser-based.
             </p>
           </div>
           <div>
             <h4 className="font-bold mb-3 text-slate-900 dark:text-white">PDF Tools</h4>
             <ul className="space-y-2 text-sm text-slate-500 dark:text-slate-400">
-              <li>
-                <Link to="/edit" className="hover:text-rose-600 dark:hover:text-rose-400">
-                  Edit PDF
-                </Link>
-              </li>
-              <li>
-                <Link to="/merge" className="hover:text-rose-600 dark:hover:text-rose-400">
-                  Merge PDF
-                </Link>
-              </li>
-              <li>
-                <Link to="/compress" className="hover:text-rose-600 dark:hover:text-rose-400">
-                  Compress PDF
-                </Link>
-              </li>
-              <li>
-                <Link to="/target-compress" className="hover:text-rose-600 dark:hover:text-rose-400">
-                  Target size PDF
-                </Link>
-              </li>
+              <li><Link to="/merge" className="hover:text-rose-600 dark:hover:text-rose-400">Merge PDF</Link></li>
+              <li><Link to="/split" className="hover:text-rose-600 dark:hover:text-rose-400">Split PDF</Link></li>
+              <li><Link to="/compress" className="hover:text-rose-600 dark:hover:text-rose-400">Compress PDF</Link></li>
+              <li><Link to="/edit" className="hover:text-rose-600 dark:hover:text-rose-400">Edit PDF</Link></li>
+              <li><Link to="/protect" className="hover:text-rose-600 dark:hover:text-rose-400">Protect PDF</Link></li>
+              <li><Link to="/rotate-pages" className="hover:text-rose-600 dark:hover:text-rose-400">Rotate PDF</Link></li>
             </ul>
           </div>
           <div>
-            <h4 className="font-bold mb-3 text-slate-900 dark:text-white">Explore</h4>
+            <h4 className="font-bold mb-3 text-slate-900 dark:text-white">Convert</h4>
             <ul className="space-y-2 text-sm text-slate-500 dark:text-slate-400">
-              <li>
-                <Link to="/all-tools" className="hover:text-rose-600 dark:hover:text-rose-400">
-                  All Tools
-                </Link>
-              </li>
-              <li>
-                <Link to="/image-text-editor" className="hover:text-rose-600 dark:hover:text-rose-400">
-                  Image text (OCR)
-                </Link>
-              </li>
-              <li>
-                <Link to="/universal-converter" className="hover:text-rose-600 dark:hover:text-rose-400">
-                  Universal Converter
-                </Link>
-              </li>
-              <li>
-                <Link to="/ink-saver" className="hover:text-rose-600 dark:hover:text-rose-400">
-                  Ink Saver
-                </Link>
-              </li>
+              <li><Link to="/pdf-to-word" className="hover:text-rose-600 dark:hover:text-rose-400">PDF to Word</Link></li>
+              <li><Link to="/pdf-to-excel" className="hover:text-rose-600 dark:hover:text-rose-400">PDF to Excel</Link></li>
+              <li><Link to="/pdf-to-jpg" className="hover:text-rose-600 dark:hover:text-rose-400">PDF to JPG</Link></li>
+              <li><Link to="/jpg-to-pdf" className="hover:text-rose-600 dark:hover:text-rose-400">JPG to PDF</Link></li>
+              <li><Link to="/pdf-to-images" className="hover:text-rose-600 dark:hover:text-rose-400">PDF to Images</Link></li>
             </ul>
           </div>
           <div>
-            <h4 className="font-bold mb-3 text-slate-900 dark:text-white">Legal</h4>
+            <h4 className="font-bold mb-3 text-slate-900 dark:text-white">Image Tools</h4>
             <ul className="space-y-2 text-sm text-slate-500 dark:text-slate-400">
-              <li>
-                <Link to="/privacy" className="hover:text-rose-600 dark:hover:text-rose-400">
-                  Privacy
-                </Link>
-              </li>
-              <li>Terms</li>
-              <li>Support</li>
+              <li><Link to="/image-resizer" className="hover:text-rose-600 dark:hover:text-rose-400">Image Resizer</Link></li>
+              <li><Link to="/image-crop" className="hover:text-rose-600 dark:hover:text-rose-400">Image Cropper</Link></li>
+              <li><Link to="/image-converter" className="hover:text-rose-600 dark:hover:text-rose-400">Format Converter</Link></li>
+              <li><Link to="/remove-background" className="hover:text-rose-600 dark:hover:text-rose-400">Remove Background</Link></li>
+              <li><Link to="/color-extractor" className="hover:text-rose-600 dark:hover:text-rose-400">Color Extractor</Link></li>
+            </ul>
+          </div>
+          <div>
+            <h4 className="font-bold mb-3 text-slate-900 dark:text-white">More</h4>
+            <ul className="space-y-2 text-sm text-slate-500 dark:text-slate-400">
+              <li><Link to="/all-tools" className="hover:text-rose-600 dark:hover:text-rose-400">All Tools</Link></li>
+              <li><Link to="/redact" className="hover:text-rose-600 dark:hover:text-rose-400">PDF Redaction</Link></li>
+              <li><Link to="/stamp" className="hover:text-rose-600 dark:hover:text-rose-400">PDF Stamp</Link></li>
+              <li><Link to="/privacy" className="hover:text-rose-600 dark:hover:text-rose-400">Privacy</Link></li>
             </ul>
           </div>
         </div>

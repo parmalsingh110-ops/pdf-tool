@@ -3,8 +3,10 @@ import { FileText } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
 import * as XLSX from 'xlsx';
 import GenericToolUI from '../components/GenericToolUI';
+import { usePageSEO } from '../lib/usePageSEO';
 
 export default function PdfToExcel() {
+  usePageSEO('PDF to Excel Converter', 'Convert PDF tables to Excel XLSX spreadsheets. Free online PDF to Excel converter.');
   const [processingState, setProcessingState] = useState('');
 
   const handleProcess = async (file: File): Promise<string> => {

@@ -3,8 +3,10 @@ import { FileText } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
 import { Document, Packer, Paragraph, TextRun } from 'docx';
 import GenericToolUI from '../components/GenericToolUI';
+import { usePageSEO } from '../lib/usePageSEO';
 
 export default function PdfToWord() {
+  usePageSEO('PDF to Word Converter', 'Convert PDF to editable Word DOCX files. Free online PDF to Word converter — preserves formatting.');
   const [processingState, setProcessingState] = useState('');
 
   const handleProcess = async (file: File): Promise<string> => {

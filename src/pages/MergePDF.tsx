@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { PDFDocument } from 'pdf-lib';
 import { Download, Trash2, GripVertical, FileText, ListRestart } from 'lucide-react';
 import FileDropzone from '../components/FileDropzone';
+import { usePageSEO } from '../lib/usePageSEO';
 
 const ORDER_KEY = 'mergePdfOrderV1';
 
@@ -42,6 +43,7 @@ function sortFilesBySavedOrder(files: File[], order: OrderEntry[]): File[] {
 }
 
 export default function MergePDF() {
+  usePageSEO('Merge PDF Online Free', 'Combine multiple PDF files into one document. Free online PDF merger — fast, private, no uploads. Drag & drop to merge PDFs instantly.');
   const [files, setFiles] = useState<File[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [mergedPdfUrl, setMergedPdfUrl] = useState<string | null>(null);

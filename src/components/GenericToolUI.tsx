@@ -89,28 +89,28 @@ export default function GenericToolUI({
   return (
     <div className="flex-1 flex flex-col items-center justify-center p-8">
       <div className="text-center mb-8">
-        <h1 className="text-4xl font-bold text-gray-900 mb-4">{title}</h1>
-        <p className="text-xl text-gray-600">{description}</p>
+        <h1 className="text-4xl font-bold text-gray-900 dark:text-white mb-4">{title}</h1>
+        <p className="text-xl text-gray-600 dark:text-slate-400">{description}</p>
       </div>
 
       {!file ? (
         <FileDropzone onDrop={handleDrop} multiple={multiple} accept={accept} />
       ) : (
-        <div className="w-full max-w-2xl bg-white rounded-2xl shadow-sm border border-gray-200 p-8">
-          <div className="flex items-center gap-4 p-6 bg-gray-50 rounded-xl border border-gray-200 mb-8">
+        <div className="w-full max-w-2xl bg-white dark:bg-slate-900 rounded-2xl shadow-sm border border-gray-200 dark:border-slate-700 p-8">
+          <div className="flex items-center gap-4 p-6 bg-gray-50 dark:bg-slate-800 rounded-xl border border-gray-200 dark:border-slate-700 mb-8">
             <div className={`w-16 h-16 ${bgClass} ${colorClass} rounded-xl flex items-center justify-center shrink-0`}>
               <Icon className="w-8 h-8" />
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-lg font-semibold text-gray-900 truncate">{file.name}</p>
-              <p className="text-sm text-gray-500">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
+              <p className="text-lg font-semibold text-gray-900 dark:text-white truncate">{file.name}</p>
+              <p className="text-sm text-gray-500 dark:text-slate-400">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
             </div>
           </div>
 
           {!resultUrl ? (
             <div className="space-y-6">
               {errorMsg && (
-                <div className="p-4 bg-red-50 border border-red-200 rounded-xl flex items-start gap-3 text-red-700 text-left">
+                <div className="p-4 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-xl flex items-start gap-3 text-red-700 dark:text-red-300 text-left">
                   <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" />
                   <div>
                     <h4 className="font-bold">Processing Failed</h4>
@@ -119,7 +119,7 @@ export default function GenericToolUI({
                 </div>
               )}
               {requiresBackendAlert && (
-                 <div className="p-4 bg-amber-50 text-amber-800 border border-amber-200 rounded-lg text-sm text-center">
+                 <div className="p-4 bg-amber-50 dark:bg-amber-950/30 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800 rounded-lg text-sm text-center">
                    This complex operation is partially simulated in the browser. In a production environment, this would require a backend service.
                  </div>
               )}
@@ -127,7 +127,7 @@ export default function GenericToolUI({
                 <button
                   onClick={handleProcess}
                   disabled={isProcessing}
-                  className={`flex-1 flex items-center justify-center gap-2 py-4 ${bgClass.replace('bg-', 'bg-').replace('50', '600')} text-white border-none shadow-md text-lg font-bold rounded-xl hover:opacity-90 transition-colors disabled:opacity-50 !bg-slate-800`}
+                  className="flex-1 flex items-center justify-center gap-2 py-4 bg-slate-800 dark:bg-slate-100 text-white dark:text-slate-900 border-none shadow-md text-lg font-bold rounded-xl hover:bg-slate-900 dark:hover:bg-white transition-colors disabled:opacity-50"
                 >
                   {isProcessing ? (
                      <div className="w-6 h-6 border-4 border-white border-t-transparent rounded-full animate-spin"></div>
@@ -136,7 +136,7 @@ export default function GenericToolUI({
                 </button>
                 <button
                   onClick={() => { setFile(null); setErrorMsg(null); }}
-                  className="px-6 py-4 bg-gray-100 text-gray-700 text-lg font-semibold rounded-xl hover:bg-gray-200 transition-colors"
+                  className="px-6 py-4 bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-slate-300 text-lg font-semibold rounded-xl hover:bg-gray-200 dark:hover:bg-slate-700 transition-colors"
                 >
                   Cancel
                 </button>
@@ -144,8 +144,8 @@ export default function GenericToolUI({
             </div>
           ) : (
             <div className="space-y-6 text-center">
-              <div className="p-8 bg-green-50 rounded-xl border border-green-200">
-                <h3 className="text-2xl font-bold text-green-800 mb-4">Task Completed!</h3>
+              <div className="p-8 bg-green-50 dark:bg-green-950/30 rounded-xl border border-green-200 dark:border-green-800">
+                <h3 className="text-2xl font-bold text-green-800 dark:text-green-300 mb-4">Task Completed!</h3>
                 {resultUrl !== '#done' && (
                   <a
                     href={resultUrl}
@@ -159,7 +159,7 @@ export default function GenericToolUI({
               </div>
               <button
                 onClick={() => { setFile(null); setResultUrl(null); }}
-                className="text-gray-600 hover:text-gray-900 font-medium"
+                className="text-gray-600 dark:text-slate-400 hover:text-gray-900 dark:hover:text-white font-medium"
               >
                 Process another file
               </button>

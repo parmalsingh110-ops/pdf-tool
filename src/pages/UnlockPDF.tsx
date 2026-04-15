@@ -2,8 +2,10 @@ import { useState } from 'react';
 import { PDFDocument } from 'pdf-lib';
 import { Download, FileText, Unlock } from 'lucide-react';
 import FileDropzone from '../components/FileDropzone';
+import { usePageSEO } from '../lib/usePageSEO';
 
 export default function UnlockPDF() {
+  usePageSEO('Unlock PDF — Remove Password', 'Remove password protection from PDF files. Free online PDF unlocker — instant, private, no uploads.');
   const [file, setFile] = useState<File | null>(null);
   const [password, setPassword] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
