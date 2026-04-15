@@ -98,6 +98,10 @@ export default function CompressPDF() {
           // Clean up canvas to save memory
           canvas.width = 0;
           canvas.height = 0;
+          page.cleanup();
+
+          // Yield to main thread so UI updates smoothly and doesn't freeze
+          await new Promise((resolve) => setTimeout(resolve, 15));
         }
         
         setProcessingStep('Generating final PDF...');
