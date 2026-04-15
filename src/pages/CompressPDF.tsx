@@ -5,10 +5,12 @@ import { Download, FileText, Minimize2, Check, Zap, Gauge, Shield } from 'lucide
 import FileDropzone from '../components/FileDropzone';
 import * as pdfjsLib from 'pdfjs-dist';
 import '../lib/pdfWorker';
+import { usePageSEO } from '../lib/usePageSEO';
 
 type CompressionLevel = 'extreme' | 'recommended' | 'low';
 
 export default function CompressPDF() {
+  usePageSEO('Compress PDF Online Free', 'Reduce PDF file size while maintaining quality. Free online PDF compressor with multiple compression levels — fast and private.');
   const [file, setFile] = useState<File | null>(null);
   const [compressionLevel, setCompressionLevel] = useState<CompressionLevel>('recommended');
   const [isProcessing, setIsProcessing] = useState(false);

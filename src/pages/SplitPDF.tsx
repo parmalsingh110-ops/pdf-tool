@@ -2,8 +2,10 @@ import { useState } from 'react';
 import { PDFDocument } from 'pdf-lib';
 import { Download, FileText } from 'lucide-react';
 import FileDropzone from '../components/FileDropzone';
+import { usePageSEO } from '../lib/usePageSEO';
 
 export default function SplitPDF() {
+  usePageSEO('Split PDF Online Free', 'Split PDF into individual pages or extract specific page ranges. Free online PDF splitter — fast, private, browser-based.');
   const [file, setFile] = useState<File | null>(null);
   const [pageCount, setPageCount] = useState<number>(0);
   const [ranges, setRanges] = useState<string>('');

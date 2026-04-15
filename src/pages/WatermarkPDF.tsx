@@ -2,8 +2,10 @@ import { useState } from 'react';
 import { PDFDocument, rgb, degrees, StandardFonts } from 'pdf-lib';
 import { Download, FileText, Type } from 'lucide-react';
 import FileDropzone from '../components/FileDropzone';
+import { usePageSEO } from '../lib/usePageSEO';
 
 export default function WatermarkPDF() {
+  usePageSEO('Add Watermark to PDF', 'Add text watermarks to PDF pages. Free online PDF watermark tool — customize font, size, and position.');
   const [file, setFile] = useState<File | null>(null);
   const [watermarkText, setWatermarkText] = useState('CONFIDENTIAL');
   const [isProcessing, setIsProcessing] = useState(false);

@@ -2,8 +2,10 @@ import { useState } from 'react';
 import { PDFDocument } from 'pdf-lib-plus-encrypt';
 import { Download, FileText, Lock } from 'lucide-react';
 import FileDropzone from '../components/FileDropzone';
+import { usePageSEO } from '../lib/usePageSEO';
 
 export default function ProtectPDF() {
+  usePageSEO('Protect PDF with Password', 'Add password protection and encryption to PDF files. Free online PDF locker — 256-bit AES encryption.');
   const [file, setFile] = useState<File | null>(null);
   const [password, setPassword] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);

@@ -6,11 +6,14 @@ import {
   FileType, Tag, ArrowUpDown, FilePlus, Search, ShieldCheck, FileCode, CheckCircle,
   FileText, Trash2, Contrast, Sparkles, Ruler, ScanText,
   ContactRound, LayoutGrid, QrCode, Pen, ScanLine, GitCompare, Palette, Crop,
-  FormInput,
+  FormInput, BarChart3, BookOpen, Copy, RotateCw, ShieldOff, RefreshCw,
+  MonitorSmartphone, Stamp, FileX, Images, Code, Presentation, Layers2,
+  Info, Zap,
 } from 'lucide-react';
 
 function categoryAnchor(title: string): string {
   if (title.includes('Currently Available')) return 'cat-available';
+  if (title.includes('Pro & Advanced')) return 'cat-pro-tools';
   if (title.includes('Advanced Text')) return 'cat-advanced-ocr';
   if (title.includes('Image & Media')) return 'cat-media';
   if (title.includes('Creative & Productivity')) return 'cat-creative';
@@ -111,6 +114,31 @@ const categories = [
     ]
   },
   {
+    title: "Pro & Advanced Tools ✨",
+    tools: [
+      { title: 'PDF Word Counter & Stats', path: '/pdf-stats', icon: BarChart3, color: 'text-indigo-500', bg: 'bg-indigo-50' },
+      { title: 'Extract Pages (Visual)', path: '/extract-pages', icon: FileImage, color: 'text-indigo-600', bg: 'bg-indigo-50' },
+      { title: 'PDF to Booklet', path: '/booklet', icon: BookOpen, color: 'text-violet-600', bg: 'bg-violet-50' },
+      { title: 'Duplicate Page Finder', path: '/duplicate-pages', icon: Copy, color: 'text-red-500', bg: 'bg-red-50' },
+      { title: 'Rotate PDF Pages', path: '/rotate-pages', icon: RotateCw, color: 'text-sky-500', bg: 'bg-sky-50' },
+      { title: 'PDF Redaction Tool', path: '/redact', icon: ShieldOff, color: 'text-red-600', bg: 'bg-red-50' },
+      { title: 'Image Format Converter', path: '/image-converter', icon: RefreshCw, color: 'text-rose-500', bg: 'bg-rose-50' },
+      { title: 'Image Watermark', path: '/image-watermark', icon: Droplet, color: 'text-cyan-500', bg: 'bg-cyan-50' },
+      { title: 'Image Cropper', path: '/image-crop', icon: Crop, color: 'text-emerald-500', bg: 'bg-emerald-50' },
+      { title: 'Image Metadata (EXIF)', path: '/image-metadata', icon: Info, color: 'text-amber-500', bg: 'bg-amber-50' },
+      { title: 'Screenshot to PDF', path: '/screenshot-to-pdf', icon: MonitorSmartphone, color: 'text-teal-500', bg: 'bg-teal-50' },
+      { title: 'Multi-PDF Page Counter', path: '/page-counter', icon: Hash, color: 'text-purple-500', bg: 'bg-purple-50' },
+      { title: 'PDF Stamp Tool', path: '/stamp', icon: Stamp, color: 'text-red-600', bg: 'bg-red-50' },
+      { title: 'Blank Page Remover', path: '/remove-blank-pages', icon: FileX, color: 'text-orange-500', bg: 'bg-orange-50' },
+      { title: 'PDF to Images (ZIP)', path: '/pdf-to-images', icon: Images, color: 'text-blue-500', bg: 'bg-blue-50' },
+      { title: 'Image to Base64', path: '/image-to-base64', icon: Code, color: 'text-violet-500', bg: 'bg-violet-50' },
+      { title: 'PDF A/B Overlay', path: '/pdf-overlay', icon: Layers2, color: 'text-indigo-500', bg: 'bg-indigo-50' },
+      { title: 'Color Palette Extractor', path: '/color-extractor', icon: Palette, color: 'text-pink-500', bg: 'bg-pink-50' },
+      { title: 'PDF Slide Presenter', path: '/present', icon: Presentation, color: 'text-indigo-600', bg: 'bg-indigo-50' },
+      { title: 'File Hash Calculator', path: '/file-hash', icon: ShieldCheck, color: 'text-green-600', bg: 'bg-green-50' },
+    ]
+  },
+  {
     title: "AI & NLP Integration (Coming Soon)",
     tools: [
       { title: 'AI PDF Summarizer', icon: FileText },
@@ -134,6 +162,7 @@ export default function AllTools() {
   const quickSections = [
     { id: 'popular', label: 'Popular', icon: Sparkles },
     { id: 'cat-available', label: 'Essentials', icon: Combine },
+    { id: 'cat-pro-tools', label: 'Pro Tools', icon: Zap },
     { id: 'cat-advanced-ocr', label: 'OCR & text', icon: ScanText },
     { id: 'cat-media', label: 'Media', icon: ImageIcon },
     { id: 'cat-creative', label: 'Creative', icon: LayoutGrid },

@@ -3,8 +3,10 @@ import { FileText } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
 import pptxgen from 'pptxgenjs';
 import GenericToolUI from '../components/GenericToolUI';
+import { usePageSEO } from '../lib/usePageSEO';
 
 export default function PdfToPpt() {
+  usePageSEO('PDF to PowerPoint Converter', 'Convert PDF slides to PowerPoint PPTX presentations. Free online PDF to PPT converter.');
   const [processingState, setProcessingState] = useState('');
 
   const handleProcess = async (file: File): Promise<string> => {

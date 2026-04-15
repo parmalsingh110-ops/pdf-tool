@@ -2,8 +2,10 @@ import { useState } from 'react';
 import { PDFDocument } from 'pdf-lib';
 import { Download, Image as ImageIcon, Trash2, GripVertical } from 'lucide-react';
 import FileDropzone from '../components/FileDropzone';
+import { usePageSEO } from '../lib/usePageSEO';
 
 export default function JPGToPDF() {
+  usePageSEO('JPG to PDF Converter', 'Convert JPEG, PNG images to PDF documents. Free online image to PDF converter — drag, drop, download.');
   const [files, setFiles] = useState<File[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);

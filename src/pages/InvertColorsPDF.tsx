@@ -3,8 +3,10 @@ import { Droplet } from 'lucide-react';
 import { PDFDocument } from 'pdf-lib';
 import * as pdfjsLib from 'pdfjs-dist';
 import GenericToolUI from '../components/GenericToolUI';
+import { usePageSEO } from '../lib/usePageSEO';
 
 export default function InvertColorsPDF() {
+  usePageSEO('Invert PDF Colors', 'Invert all colors in PDF pages. Free online PDF color inverter — create dark mode PDFs.');
   const handleProcess = async (file: File): Promise<string> => {
     const arrayBuffer = await file.arrayBuffer();
     const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
@@ -42,12 +44,13 @@ export default function InvertColorsPDF() {
       const imgBytes = await fetch(imgDataUrl).then(res => res.arrayBuffer());
       
       const pdfImage = await newPdfDoc.embedJpg(imgBytes);
-      const newPage = newPdfDoc.addPage([viewport.width, viewport.height]);
+      const origVp = page.getViewport({ scale: 1 });
+      const newPage = newPdfDoc.addPage([origVp.width, origVp.height]);
       newPage.drawImage(pdfImage, {
         x: 0,
         y: 0,
-        width: viewport.width,
-        height: viewport.height,
+        width: origVp.width,
+        height: origVp.height,
       });
       
       canvas.width = 0;

@@ -4,6 +4,7 @@ import { Download, FileText, RotateCw, Trash2, GripVertical } from 'lucide-react
 import FileDropzone from '../components/FileDropzone';
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+import { usePageSEO } from '../lib/usePageSEO';
 
 // Initialize pdf.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
@@ -16,6 +17,7 @@ interface PageData {
 }
 
 export default function OrganizePDF() {
+  usePageSEO('Organize PDF Pages', 'Reorder, delete, and rearrange PDF pages with drag & drop. Free online PDF organizer.');
   const [file, setFile] = useState<File | null>(null);
   const [pages, setPages] = useState<PageData[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
