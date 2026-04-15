@@ -28,6 +28,35 @@ export const DEFAULT_ADJUSTMENTS: PhotoAdjustments = {
   temperature: 0, tint: 0, dehaze: 0, texture: 0, vignette: 0, grain: 0,
 };
 
+export const PRESETS: Record<string, PhotoAdjustments> = {
+  'None': DEFAULT_ADJUSTMENTS,
+  'Pro Studio': {
+    ...DEFAULT_ADJUSTMENTS,
+    exposure: 5, contrast: 15, highlights: 10, shadows: -5,
+    clarity: 10, vibrance: 15, temperature: -2
+  },
+  'Vibrant Clean': {
+    ...DEFAULT_ADJUSTMENTS,
+    exposure: 8, contrast: 20, saturation: 10, vibrance: 25,
+    highlights: 15, shadows: 5, clarity: 15, whites: 10
+  },
+  'Passport Clear': {
+    ...DEFAULT_ADJUSTMENTS,
+    exposure: 10, contrast: 25, highlights: 15, shadows: 10,
+    clarity: 20, vibrance: 5, whites: 20, blacks: -10
+  },
+  'Document B&W': {
+    ...DEFAULT_ADJUSTMENTS,
+    exposure: 15, contrast: 40, highlights: 30, shadows: -15,
+    whites: 40, blacks: -30, saturation: -100, clarity: 50
+  },
+  'Natural Warm': {
+    ...DEFAULT_ADJUSTMENTS,
+    exposure: 2, contrast: 5, temperature: 10, vibrance: 10,
+    shadows: 10, clarity: 5
+  }
+};
+
 export function isDefault(adj: PhotoAdjustments): boolean {
   return Object.keys(DEFAULT_ADJUSTMENTS).every(
     (k) => adj[k as keyof PhotoAdjustments] === DEFAULT_ADJUSTMENTS[k as keyof PhotoAdjustments],

@@ -384,6 +384,7 @@ export default function ImageResizer() {
 
   const resolveMimeForFile = (f: File | null): ExportFormat => {
     if (exportFormat !== 'original') return exportFormat;
+    if (editPreviewUrl && bgTransparent) return 'image/png';
     if (!f) return 'image/jpeg';
     const t = f.type;
     if (t === 'image/png') return 'image/png';

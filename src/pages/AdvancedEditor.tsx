@@ -244,7 +244,10 @@ export default function AdvancedEditor() {
       const { data } = await worker.recognize(blob, {}, { blocks: true });
       await worker.terminate();
 
-      const ocrItems: {text: string, x: number, y: number, w: number, h: number}[] = [];
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      const imgData = ctx ? ctx.getImageData(0, 0, canvas.width, canvas.height).data : null;
+
+      const ocrItems: {text: string, x: number, y: number, w: number, h: number, fgColor: string, bgColor: string}[] = [];
       if (data.blocks) {
         for (const block of data.blocks) {
           for (const para of block.paragraphs || []) {
@@ -253,12 +256,48 @@ export default function AdvancedEditor() {
               if (!t) continue;
               const b = line.bbox;
               if (!b || b.x1 <= b.x0 || b.y1 <= b.y0) continue;
+              const x = Math.floor(b.x0);
+              const y = Math.floor(b.y0);
+              const w = Math.floor(b.x1 - b.x0);
+              const h = Math.floor(b.y1 - b.y0);
+
+              let fgColor = '#000000';
+              let bgColor = '#ffffff';
+
+              if (imgData && w > 0 && h > 0) {
+                let minL = 255, maxL = 0;
+                let fgR=0, fgG=0, fgB=0;
+                let bgR=255, bgG=255, bgB=255;
+                let bgSumR=0, bgSumG=0, bgSumB=0, bgCount=0;
+
+                for (let py = y; py < y + h; py++) {
+                  for (let px = x; px < x + w; px++) {
+                    const i = (py * canvas.width + px) * 4;
+                    if (i >= 0 && i < imgData.length) {
+                      const r = imgData[i], g = imgData[i+1], b = imgData[i+2];
+                      const l = 0.299*r + 0.587*g + 0.114*b;
+                      if (l < minL) { minL = l; fgR=r; fgG=g; fgB=b; }
+                      if (l > maxL) { maxL = l; bgR=r; bgG=g; bgB=b; }
+                      if (l > 150) { bgSumR+=r; bgSumG+=g; bgSumB+=b; bgCount++; }
+                    }
+                  }
+                }
+                fgColor = `#${((1<<24)+(fgR<<16)+(fgG<<8)+fgB).toString(16).slice(1)}`;
+                if (bgCount > 0) {
+                   bgColor = `#${((1<<24)+(Math.round(bgSumR/bgCount)<<16)+(Math.round(bgSumG/bgCount)<<8)+Math.round(bgSumB/bgCount)).toString(16).slice(1)}`;
+                } else {
+                   bgColor = `#${((1<<24)+(bgR<<16)+(bgG<<8)+bgB).toString(16).slice(1)}`;
+                }
+              }
+
               ocrItems.push({
                 text: t,
                 x: b.x0,
                 y: b.y0,
-                w: b.x1 - b.x0,
-                h: b.y1 - b.y0,
+                w,
+                h,
+                fgColor,
+                bgColor
               });
             }
           }
@@ -311,14 +350,16 @@ export default function AdvancedEditor() {
       if (clickedText) {
         pushUndo();
         const id = Date.now().toString();
+        const pad = 4;
         const whiteout: Annotation = {
           id: id + '_w',
           type: 'whiteout',
           pageIndex: currentPage - 1,
-          x: clickedText.x,
-          y: clickedText.y,
-          width: clickedText.w,
-          height: clickedText.h
+          x: clickedText.x - pad,
+          y: clickedText.y - pad,
+          width: clickedText.w + pad * 2,
+          height: clickedText.h + pad * 2,
+          color: clickedText.bgColor || '#ffffff'
         };
         const textAnn: Annotation = {
           id: id + '_t',
@@ -330,7 +371,7 @@ export default function AdvancedEditor() {
           height: clickedText.h,
           text: clickedText.text,
           fontSize: Math.max(10, Math.round(clickedText.h * 0.7)),
-          color: '#000000',
+          color: clickedText.fgColor || '#000000',
           bold: defaultBold,
           italic: defaultItalic,
         };
@@ -645,12 +686,14 @@ export default function AdvancedEditor() {
             });
           });
         } else if (ann.type === 'whiteout') {
+          const { r, g, b } = hexToRgb(ann.color || '#ffffff');
+          const padding = 2 / scale;
           page.drawRectangle({
-            x: pdfX,
-            y: pdfY - pdfH,
-            width: pdfW,
-            height: pdfH,
-            color: rgb(1, 1, 1),
+            x: pdfX - padding,
+            y: pdfY - pdfH - padding,
+            width: pdfW + (padding * 2),
+            height: pdfH + (padding * 2),
+            color: rgb(r, g, b),
           });
         } else if (ann.type === 'highlight') {
           page.drawRectangle({
@@ -799,7 +842,15 @@ export default function AdvancedEditor() {
               {toolButton('whiteout', <Square className="w-5 h-5" />, 'Whiteout')}
               {toolButton('highlight', <Highlighter className="w-5 h-5" />, 'Highlight')}
               {toolButton('freehand', <Pencil className="w-5 h-5" />, 'Draw', 'Freehand Draw')}
-              {toolButton('signature', <PenTool className="w-5 h-5" />, 'Sign')}
+              <button
+                type="button"
+                onClick={() => { setActiveTool('signature'); setStartPos({x: 200, y: 300}); setShowSignatureModal(true); }}
+                className={`p-2 rounded-lg flex items-center gap-1 cursor-pointer transition-colors ${activeTool === 'signature' ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 hover:bg-gray-100'}`}
+                title="Sign"
+              >
+                <PenTool className="w-5 h-5" />
+                <span className="text-xs font-medium hidden md:inline">Sign</span>
+              </button>
               {toolButton('link', <LinkIcon className="w-5 h-5" />, 'Link')}
               {/* Insert Image */}
               <label
@@ -969,9 +1020,9 @@ export default function AdvancedEditor() {
                       style={{ 
                         left: ann.x, 
                         top: ann.y, 
-                        width: ann.width || (ann.type === 'text' ? 200 : undefined), 
-                        height: ann.height || (ann.type === 'text' ? 24 : undefined),
-                        backgroundColor: ann.type === 'whiteout' ? 'white' : ann.type === 'highlight' ? 'rgba(255, 255, 0, 0.4)' : ann.type === 'link' ? 'rgba(0, 0, 255, 0.2)' : 'transparent',
+                        width: ann.width || (ann.type === 'text' ? Math.max(200, (ann.text?.length || 10) * (ann.fontSize || 14) * 0.6) : undefined), 
+                        height: Math.max(ann.height || 24, ann.type === 'text' ? (ann.fontSize || 14) * 1.5 : 0),
+                        backgroundColor: ann.type === 'whiteout' ? (ann.color || '#ffffff') : ann.type === 'highlight' ? 'rgba(255, 255, 0, 0.4)' : ann.type === 'link' ? 'rgba(0, 0, 255, 0.2)' : 'transparent',
                         border: ann.type === 'link' ? '1px dashed blue' : ann.type === 'table' ? '1px solid #ccc' : 'none'
                       }}
                     >
@@ -1019,7 +1070,7 @@ export default function AdvancedEditor() {
                         <img src={ann.imageDataUrl} alt="Inserted" className="w-full h-full object-fill pointer-events-none" />
                       )}
                       {/* 8-handle resize for image & signature */}
-                      {(ann.type === 'image' || ann.type === 'signature') && selectedId === ann.id && (
+                      {(ann.type === 'image' || ann.type === 'signature' || ann.type === 'text') && selectedId === ann.id && (
                         <>
                           {/* Corner handles */}
                           <div className="absolute -top-1.5 -left-1.5 w-3 h-3 bg-indigo-500 border border-white rounded-sm cursor-nwse-resize z-20"

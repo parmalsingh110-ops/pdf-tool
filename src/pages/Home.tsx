@@ -166,6 +166,41 @@ export default function Home() {
         </div>
       </section>
 
+      {/* NEW: ILovePDF Clone Categories */}
+      <section className="max-w-7xl mx-auto px-6 pb-20">
+        <div className="flex items-end justify-between mb-8">
+          <div>
+            <h2 className="text-2xl md:text-3xl font-extrabold text-slate-900 dark:text-white">Convert & Organize</h2>
+            <p className="mt-2 text-slate-600 dark:text-slate-400 text-sm max-w-2xl">
+              Switch formats instantly. Organize pages, or lock your documents.
+            </p>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
+          {[
+            { title: 'PDF to Word', path: '/pdf-to-word', tone: 'bg-blue-50 text-blue-600' },
+            { title: 'PDF to Excel', path: '/pdf-to-excel', tone: 'bg-green-50 text-green-600' },
+            { title: 'PDF to PPT', path: '/pdf-to-ppt', tone: 'bg-orange-50 text-orange-600' },
+            { title: 'Word to PDF', path: '/universal-converter', tone: 'bg-blue-50 text-blue-800' },
+            { title: 'Excel to PDF', path: '/universal-converter', tone: 'bg-green-50 text-green-800' },
+            { title: 'Organize PDF', path: '/organize', tone: 'bg-indigo-50 text-indigo-600' },
+            { title: 'Protect PDF', path: '/protect', tone: 'bg-slate-100 text-slate-800' },
+            { title: 'Unlock PDF', path: '/unlock', tone: 'bg-slate-100 text-slate-600' },
+            { title: 'Watermark', path: '/watermark', tone: 'bg-cyan-50 text-cyan-600' },
+            { title: 'Page Numbers', path: '/page-numbers', tone: 'bg-purple-50 text-purple-600' },
+            { title: 'PDF to PDF/A', path: '/pdf-a-conversion', tone: 'bg-rose-50 text-rose-600' },
+            { title: 'Repair PDF', path: '/universal-converter', tone: 'bg-yellow-50 text-yellow-700' },
+          ].map(t => (
+            <Link key={t.title} to={t.path} className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4 hover:-translate-y-1 hover:shadow-md transition-all flex flex-col items-center text-center gap-3">
+              <div className={`w-12 h-12 rounded-lg ${t.tone} flex items-center justify-center`}>
+                <FileText className="w-6 h-6" />
+              </div>
+              <h3 className="font-bold text-slate-800 dark:text-slate-100 text-sm leading-tight">{t.title}</h3>
+            </Link>
+          ))}
+        </div>
+      </section>
+
       <section className="max-w-7xl mx-auto px-6 pb-24">
         <div className="rounded-3xl overflow-hidden border border-slate-200 dark:border-slate-700 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-700 dark:from-slate-950 dark:via-slate-900 dark:to-slate-800 p-10 md:p-14 text-white">
           <h2 className="text-4xl font-extrabold max-w-2xl leading-tight">

@@ -7,18 +7,8 @@ import {
   applyAdjustments,
   ADJUSTMENT_GROUPS,
   ADJUSTMENT_RANGES,
+  PRESETS,
 } from '../lib/photoAdjustments';
-
-const PRESETS: { name: string; adj: Partial<PhotoAdjustments> }[] = [
-  { name: 'Vivid', adj: { saturation: 30, contrast: 15, vibrance: 20 } },
-  { name: 'Warm Portrait', adj: { temperature: 25, exposure: 5, highlights: -10, shadows: 15, saturation: 10 } },
-  { name: 'Cool Film', adj: { temperature: -20, tint: -5, contrast: 15, grain: 15, vignette: 20 } },
-  { name: 'High Contrast B&W', adj: { saturation: -100, contrast: 40, clarity: 30, blacks: -15 } },
-  { name: 'Cinematic', adj: { exposure: -5, contrast: 20, highlights: -25, shadows: 10, temperature: 5, tint: 5, vignette: 30, grain: 10 } },
-  { name: 'Bright & Airy', adj: { exposure: 15, highlights: 10, shadows: 30, whites: 20, dehaze: -10, saturation: -10 } },
-  { name: 'Moody', adj: { exposure: -10, contrast: 10, highlights: -30, shadows: -10, blacks: -20, temperature: -10, dehaze: 15, vignette: 40 } },
-  { name: 'Vintage', adj: { exposure: 5, contrast: -10, saturation: -20, temperature: 15, grain: 25, vignette: 20 } },
-];
 
 export default function ImageColorCorrection() {
   const [file, setFile] = useState<File | null>(null);
@@ -109,8 +99,8 @@ export default function ImageColorCorrection() {
     }
   };
 
-  const applyPreset = (preset: typeof PRESETS[0]) => {
-    setAdjustments({ ...DEFAULT_ADJUSTMENTS, ...preset.adj });
+  const applyPreset = (presetName: string) => {
+    setAdjustments({ ...DEFAULT_ADJUSTMENTS, ...PRESETS[presetName] });
   };
 
   return (
@@ -167,10 +157,10 @@ export default function ImageColorCorrection() {
               <div className="space-y-2">
                 <p className="text-xs font-bold text-gray-500 uppercase tracking-wider">Presets</p>
                 <div className="grid grid-cols-2 gap-1.5">
-                  {PRESETS.map(p => (
-                    <button key={p.name} onClick={() => applyPreset(p)}
+                  {Object.keys(PRESETS).filter(n => n !== 'None').map(name => (
+                    <button key={name} onClick={() => applyPreset(name)}
                       className="px-2 py-1.5 text-xs font-semibold rounded-lg bg-gray-50 hover:bg-gray-100 border border-gray-200 text-gray-700 truncate">
-                      {p.name}
+                      {name}
                     </button>
                   ))}
                 </div>

@@ -22,6 +22,7 @@ import {
   applyAdjustments,
   ADJUSTMENT_GROUPS,
   ADJUSTMENT_RANGES,
+  PRESETS,
 } from '../lib/photoAdjustments';
 
 const PHOTO_W_MM = 35;
@@ -617,6 +618,17 @@ export default function PassportPhotoSheet() {
                         <RotateCcw className="w-3 h-3" /> Reset all
                       </button>
                     )}
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {Object.keys(PRESETS).filter(n => n !== 'None').map(name => (
+                        <button key={name} onClick={() => setAdjustments({ ...DEFAULT_ADJUSTMENTS, ...PRESETS[name] })}
+                          className="px-2 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 truncate dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-750">
+                          {name}
+                        </button>
+                      ))}
+                    </div>
                   </div>
 
                   {ADJUSTMENT_GROUPS.map(group => (
