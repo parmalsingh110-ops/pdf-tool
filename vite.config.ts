@@ -24,7 +24,13 @@ export default defineConfig(() => {
     // Render sends a real Host header; Vite 6 preview blocks unknown hosts unless listed here.
     preview: {
       host: '0.0.0.0',
-      allowedHosts: ['mediasuite.onrender.com', 'localhost', '127.0.0.1'],
+      allowedHosts: [
+        'mediasuite.onrender.com',
+        'pdfmediasuite.in',
+        'www.pdfmediasuite.in',
+        'localhost',
+        '127.0.0.1',
+      ],
     },
   };
 });
