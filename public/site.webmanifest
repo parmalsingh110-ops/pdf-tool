@@ -1,0 +1,16 @@
+{
+  "name": "PDF Media Suite",
+  "short_name": "PDFSuite",
+  "description": "Professional online PDF and image toolkit for merge, split, compress, OCR, convert, secure, and optimize workflows.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#0f172a",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}
