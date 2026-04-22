@@ -148,7 +148,6 @@ export default function PassportPhotoSheet() {
   const [removeBg, setRemoveBg] = useState(true);
   const [borderPx, setBorderPx] = useState(2);
   const [qty, setQty] = useState(8);
-  const [columns] = useState(4);
   const [gapMm, setGapMm] = useState(3);
   const [marginMm, setMarginMm] = useState(10);
   const [exportDpi, setExportDpi] = useState<DpiChoice>(300);
@@ -303,6 +302,17 @@ export default function PassportPhotoSheet() {
     setCrop(clampCropRect({ x: cx - nwNew / 2, y: cy - nhNew / 2, w: nwNew, h: nhNew }, nw, nh, PASSPORT_ASPECT));
   }, [crop, nw, nh]);
 
+  // Dynamic columns: auto-fill row based on page width, photo width, margin, gap
+  const columns = useMemo(() => {
+    const [pageW] = PAGE_PT[pageSize] ?? [595.28, 841.89];
+    const mmToPt = 72 / 25.4;
+    const marginPt = marginMm * mmToPt;
+    const gapPt = gapMm * mmToPt;
+    const photoWPt = PHOTO_W_MM * mmToPt;
+    const usableW = pageW - 2 * marginPt + gapPt;
+    return Math.max(1, Math.floor(usableW / (photoWPt + gapPt)));
+  }, [pageSize, marginMm, gapMm]);
+
   const EXPORT_W = useMemo(() => Math.round((PHOTO_W_MM / 25.4) * exportDpi), [exportDpi]);
   const EXPORT_H = useMemo(() => Math.round((PHOTO_H_MM / 25.4) * exportDpi), [exportDpi]);
 
@@ -449,7 +459,14 @@ export default function PassportPhotoSheet() {
         for (let c = 0; c < cols; c++) {
           const idx = r * cols + c;
           if (idx >= qty) break;
-          const x = margin + c * (photoW + gap);
+          // Centering for last row
+          const rowStart = r * cols;
+          const rowEnd = Math.min(rowStart + cols, qty);
+          const photosInRow = rowEnd - rowStart;
+          const rowOffsetX = photosInRow < cols
+            ? (cw - (photosInRow * photoW + (photosInRow - 1) * gap)) / 2
+            : margin;
+          const x = rowOffsetX + c * (photoW + gap);
           const y = margin + r * (photoH + gap);
           ctx.drawImage(tileImg, x, y, photoW, photoH);
           ctx.strokeStyle = '#d4d4d8';
@@ -667,6 +684,12 @@ export default function PassportPhotoSheet() {
                     Page margin (mm): {marginMm}
                     <input type="range" min={4} max={20} value={marginMm} onChange={(e) => setMarginMm(Number(e.target.value))} className="mt-1 w-full" />
                   </label>
+                  {/* Auto-columns info */}
+                  <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-800 text-sm">
+                    <span className="text-rose-600 dark:text-rose-400 font-bold text-lg">{columns}</span>
+                    <span className="text-slate-700 dark:text-slate-300 font-medium">photos per row</span>
+                    <span className="text-slate-400 text-xs ml-auto">(auto-calculated)</span>
+                  </div>
                   <label className="block text-sm font-medium text-slate-700 dark:text-slate-200">
                     Paper
                     <select value={pageSize} onChange={(e) => setPageSize(e.target.value as SheetPageSize)} className="mt-1 w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-950 px-3 py-2">

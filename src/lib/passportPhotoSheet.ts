@@ -165,7 +165,15 @@ export async function buildPassportGridPdf(options: {
 
     for (let i = 0; i < nThisPage; i++) {
       const { col, row } = colRow(i);
-      const px = marginPt + col * cellW;
+      // Determine how many photos are in this row (for centering)
+      const rowStart = row * columns;
+      const rowEnd = Math.min(rowStart + columns, nThisPage);
+      const photosInRow = rowEnd - rowStart;
+      // Center the row horizontally if it has fewer photos than columns
+      const rowOffsetX = photosInRow < columns
+        ? (pageW - (photosInRow * photoW + (photosInRow - 1) * gapPt)) / 2
+        : marginPt;
+      const px = rowOffsetX + col * cellW;
       const py = pageH - marginPt - (row + 1) * photoH - row * gapPt;
       page.drawImage(embedded, { x: px, y: py, width: photoW, height: photoH });
     }
