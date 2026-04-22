@@ -40,10 +40,25 @@ export default function UnlockPDF() {
       setUnlockedUrl(url);
     } catch (error: any) {
       console.error("Error unlocking PDF:", error);
-      if (error.message && error.message.includes('password')) {
-        setErrorMsg("Incorrect password. Please try again.");
+      const msg = (error?.message || '').toLowerCase();
+      if (msg.includes('password') || msg.includes('incorrect') || msg.includes('invalid') ||
+          msg.includes('decrypt') || msg.includes('encrypted') || msg.includes('wrong')) {
+        setErrorMsg('Incorrect password. Please try again.');
+      } else if (msg.includes('not encrypted') || msg.includes('no password')) {
+        // PDF is not encrypted — just save as-is
+        try {
+          const arrayBuffer2 = await file.arrayBuffer();
+          const pdfDoc2 = await PDFDocument.load(arrayBuffer2);
+          const pdfBytes2 = await pdfDoc2.save();
+          const blob2 = new Blob([pdfBytes2], { type: 'application/pdf' });
+          setUnlockedUrl(URL.createObjectURL(blob2));
+          return;
+        } catch {
+          setErrorMsg('This PDF does not appear to be password-protected.');
+        }
       } else {
-        setErrorMsg("An error occurred while unlocking the PDF.");
+        // Generic: most likely wrong password
+        setErrorMsg('Incorrect password or the PDF cannot be unlocked in the browser. Try a different password.');
       }
     } finally {
       setIsProcessing(false);

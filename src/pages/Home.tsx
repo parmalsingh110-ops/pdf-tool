@@ -1,13 +1,14 @@
 import { Link } from 'react-router-dom';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Combine, Scissors, Minimize2, Edit3, ArrowRight, Sparkles, FileText,
   Shield, Wand2, Ruler, ScanText, Target, Image as ImageIcon,
   ContactRound, Zap, BarChart3, ShieldOff, RotateCw, Crop, Palette,
   Presentation, BookOpen, Stamp, Layers2, Lock, Unlock, Droplet, Hash,
   Layers, RefreshCw, Code, ShieldCheck, FileX, MonitorSmartphone,
-  Images, Copy, Info, Download,
+  Images, Copy, Info, Download, ScanSearch, Clock3,
 } from 'lucide-react';
+import { readRecentTools, type RecentEntry } from '../lib/recentFiles';
 
 /* =============================================
    TOOL CATEGORIES — ordered by user usefulness
@@ -43,6 +44,7 @@ const TOOL_GROUPS = [
       { title: 'JPG to PDF', desc: 'Images into a PDF.', path: '/jpg-to-pdf', icon: ImageIcon },
       { title: 'PDF to Images (ZIP)', desc: 'All pages in a ZIP file.', path: '/pdf-to-images', icon: Images },
       { title: 'Screenshot to PDF', desc: 'Screenshots into clean PDF.', path: '/screenshot-to-pdf', icon: MonitorSmartphone },
+      { title: 'Searchable PDF (OCR)', desc: 'Scanned PDF ko searchable banayein.', path: '/searchable-pdf', icon: ScanSearch },
       { title: 'Universal Converter', desc: 'Auto-detect & convert.', path: '/universal-converter', icon: Wand2 },
     ],
   },
@@ -118,6 +120,7 @@ const COLOR_MAP: Record<string, { card: string; iconBg: string; iconText: string
 };
 
 export default function Home() {
+  const [recent, setRecent] = useState<RecentEntry[]>([]);
   // Dynamic SEO
   useEffect(() => {
     document.title = 'MediaSuite — Free Online PDF & Image Tools | Merge, Split, Compress, Convert';
@@ -143,6 +146,10 @@ export default function Home() {
       document.head.appendChild(script);
     }
     return () => { const el = document.querySelector('#mediasuite-jsonld'); if (el) el.remove(); };
+  }, []);
+
+  useEffect(() => {
+    setRecent(readRecentTools().filter((r) => r.path !== '/').slice(0, 4));
   }, []);
 
   return (
@@ -174,6 +181,29 @@ export default function Home() {
           </div>
         </div>
       </section>
+
+      {recent.length > 0 && (
+        <section className="max-w-7xl mx-auto px-6 pb-12">
+          <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4 sm:p-5">
+            <div className="flex items-center gap-2 mb-3">
+              <Clock3 className="w-4 h-4 text-rose-500" />
+              <h2 className="text-sm font-bold text-slate-900 dark:text-white">Welcome back</h2>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+              {recent.map((tool) => (
+                <Link
+                  key={`${tool.path}-${tool.at}`}
+                  to={tool.path}
+                  className="rounded-lg border border-slate-200 dark:border-slate-700 px-3 py-2 text-sm text-slate-700 dark:text-slate-200 hover:border-rose-300 dark:hover:border-rose-800 hover:text-rose-600 dark:hover:text-rose-400 transition-colors truncate"
+                  title={tool.title}
+                >
+                  {tool.title}
+                </Link>
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* =============== TOOL GROUPS =============== */}
       {TOOL_GROUPS.map((group) => {

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { PDFDocument } from 'pdf-lib';
-import { Download, FileText, Minimize2, Check, Zap, Gauge, Shield } from 'lucide-react';
+import { Download, FileText, Minimize2, Check, Zap, Gauge, Shield, Target } from 'lucide-react';
 import FileDropzone from '../components/FileDropzone';
 import * as pdfjsLib from 'pdfjs-dist';
 import '../lib/pdfWorker';
@@ -18,7 +18,10 @@ export default function CompressPDF() {
   const [progressPct, setProgressPct] = useState(0);
   const [compressedUrl, setCompressedUrl] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [stats, setStats] = useState<{original: number, compressed: number} | null>(null);
+  const [targetSizeKB, setTargetSizeKB] = useState<number>(100);
+  const [useTargetSize, setUseTargetSize] = useState(false);
+  const [stats, setStats] = useState<{original: number, compressed: number, method?: string} | null>(null);
+  const [usedFallback, setUsedFallback] = useState(false);
 
   const handleDrop = (acceptedFiles: File[]) => {
     if (acceptedFiles.length > 0) {
@@ -29,6 +32,7 @@ export default function CompressPDF() {
       setCompressedUrl(null);
       setStats(null);
       setProgressPct(0);
+      setUsedFallback(false);
       const url = URL.createObjectURL(acceptedFiles[0]);
       setPreviewUrl(url);
     }
@@ -54,65 +58,194 @@ export default function CompressPDF() {
         pdfDoc.setCreator('');
         
         const pdfBytes = await pdfDoc.save({ useObjectStreams: false });
+        setUsedFallback(false);
         finishCompression(pdfBytes);
       } else {
-        // Advanced compression via rasterization
+        // Target-size guided compression (same tuning strategy as target-compress tool)
+        if (useTargetSize && targetSizeKB > 0) {
+          setProcessingStep('Applying target-based advanced compression...');
+          const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
+          const totalPages = pdf.numPages;
+          const targetBytes = targetSizeKB * 1024;
+          const perPageBudget = targetBytes / Math.max(1, totalPages);
+
+          const canvasToJpegBytes = (canvas: HTMLCanvasElement, q: number) =>
+            new Promise<ArrayBuffer>((resolve, reject) => {
+              canvas.toBlob(
+                async (blob) => {
+                  if (!blob) reject(new Error('jpeg'));
+                  else resolve(await blob.arrayBuffer());
+                },
+                'image/jpeg',
+                q,
+              );
+            });
+
+          const rasterize = async (scale: number, jpegQ: number) => {
+            const newPdfDoc = await PDFDocument.create();
+            for (let i = 1; i <= totalPages; i++) {
+              setProcessingStep(`Processing page ${i} of ${totalPages}...`);
+              setProgressPct(Math.round((i / totalPages) * 100));
+              const page = await pdf.getPage(i);
+              const viewport = page.getViewport({ scale });
+              const canvas = document.createElement('canvas');
+              const ctx = canvas.getContext('2d');
+              if (!ctx) {
+                page.cleanup();
+                continue;
+              }
+              canvas.width = Math.round(viewport.width);
+              canvas.height = Math.round(viewport.height);
+              await page.render({ canvasContext: ctx, viewport }).promise;
+              const imgBytes = await canvasToJpegBytes(canvas, jpegQ);
+              const pdfImage = await newPdfDoc.embedJpg(imgBytes);
+              const newPage = newPdfDoc.addPage([canvas.width, canvas.height]);
+              newPage.drawImage(pdfImage, { x: 0, y: 0, width: canvas.width, height: canvas.height });
+              canvas.width = 0;
+              canvas.height = 0;
+              page.cleanup();
+            }
+            return new Uint8Array(await newPdfDoc.save());
+          };
+
+          const bestQualityUnderTarget = async (scale: number) => {
+            let lo = 0.08;
+            let hi = 0.92;
+            let best = await rasterize(scale, 0.5);
+            let bestQ = 0.5;
+            for (let k = 0; k < 18 && hi - lo > 0.015; k++) {
+              const mid = (lo + hi) / 2;
+              const candidate = await rasterize(scale, mid);
+              if (candidate.length <= targetBytes) {
+                best = candidate;
+                bestQ = mid;
+                lo = mid;
+              } else {
+                hi = mid;
+              }
+            }
+            if (best.length < targetBytes * 0.82) {
+              let q = bestQ;
+              for (let k = 0; k < 12; k++) {
+                const tryQ = Math.min(0.95, q + 0.03);
+                if (tryQ <= q + 0.005) break;
+                const candidate = await rasterize(scale, tryQ);
+                if (candidate.length <= targetBytes) {
+                  best = candidate;
+                  bestQ = tryQ;
+                  q = tryQ;
+                } else {
+                  break;
+                }
+              }
+            }
+            return best;
+          };
+
+          let scale = compressionLevel === 'extreme' ? 1.15 : 1.65;
+          if (perPageBudget < 55_000) scale = 1.05;
+          if (perPageBudget < 25_000) scale = 0.78;
+          if (perPageBudget < 12_000) scale = 0.58;
+
+          setProcessingStep('Tuning quality to target size...');
+          let bestPdfBytes = await bestQualityUnderTarget(scale);
+
+          let guard = 0;
+          while (bestPdfBytes.length > targetBytes && scale > 0.38 && guard < 14) {
+            setProcessingStep(`Shrinking raster... (${guard + 1})`);
+            scale *= 0.88;
+            bestPdfBytes = await bestQualityUnderTarget(scale);
+            guard++;
+          }
+
+          if (bestPdfBytes.length < targetBytes * 0.78) {
+            let tryScale = Math.min(2.4, scale * 1.1);
+            for (let k = 0; k < 10 && tryScale <= 2.5; k++) {
+              setProcessingStep('Increasing detail toward target...');
+              const candidate = await bestQualityUnderTarget(tryScale);
+              if (candidate.length <= targetBytes && candidate.length > bestPdfBytes.length) {
+                bestPdfBytes = candidate;
+                scale = tryScale;
+                tryScale *= 1.06;
+              } else {
+                break;
+              }
+            }
+          }
+
+          setUsedFallback(false);
+          finishCompression(bestPdfBytes);
+          return;
+        }
+
+        // Default advanced compression via rasterization
         setProcessingStep('Analyzing PDF structure...');
         const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
         const numPages = pdf.numPages;
         const newPdfDoc = await PDFDocument.create();
         
         // Settings based on level
-        const scale = compressionLevel === 'extreme' ? 1.0 : 1.5;
-        const quality = compressionLevel === 'extreme' ? 0.4 : 0.7;
+        const scale = compressionLevel === 'extreme' ? 0.9 : 1.2;
+        const quality = compressionLevel === 'extreme' ? 0.35 : 0.65;
         
         for (let i = 1; i <= numPages; i++) {
           setProcessingStep(`Processing page ${i} of ${numPages}...`);
           setProgressPct(Math.round((i / numPages) * 100));
+
           const page = await pdf.getPage(i);
           const viewport = page.getViewport({ scale });
           
           const canvas = document.createElement('canvas');
+          canvas.width = Math.round(viewport.width);
+          canvas.height = Math.round(viewport.height);
           const ctx = canvas.getContext('2d');
-          if (!ctx) continue;
+          if (!ctx) { page.cleanup(); continue; }
           
-          canvas.width = viewport.width;
-          canvas.height = viewport.height;
+          // ✅ Correct: only pass canvasContext + viewport (no 'canvas' property)
+          await page.render({ canvasContext: ctx, viewport }).promise;
           
-          await page.render({ 
-            canvasContext: ctx, 
-            viewport,
-            canvas: canvas
-          }).promise;
-          
-          const imgDataUrl = canvas.toDataURL('image/jpeg', quality);
-          const imgBytes = await fetch(imgDataUrl).then(res => res.arrayBuffer());
+          // ✅ Reliable base64 decode — avoids fetch(dataUrl) which can fail in some browsers
+          const dataUrl = canvas.toDataURL('image/jpeg', quality);
+          const base64 = dataUrl.split(',')[1];
+          const binaryStr = atob(base64);
+          const imgBytes = new Uint8Array(binaryStr.length);
+          for (let b = 0; b < binaryStr.length; b++) {
+            imgBytes[b] = binaryStr.charCodeAt(b);
+          }
           
           const pdfImage = await newPdfDoc.embedJpg(imgBytes);
-          const newPage = newPdfDoc.addPage([viewport.width, viewport.height]);
-          newPage.drawImage(pdfImage, {
-            x: 0,
-            y: 0,
-            width: viewport.width,
-            height: viewport.height,
-          });
+          const newPage = newPdfDoc.addPage([canvas.width, canvas.height]);
+          newPage.drawImage(pdfImage, { x: 0, y: 0, width: canvas.width, height: canvas.height });
           
-          // Clean up canvas to save memory
+          // Release memory
           canvas.width = 0;
           canvas.height = 0;
           page.cleanup();
 
-          // Yield to main thread so UI updates smoothly and doesn't freeze
-          await new Promise((resolve) => setTimeout(resolve, 15));
+          // Yield to UI thread
+          await new Promise((resolve) => setTimeout(resolve, 10));
         }
         
         setProcessingStep('Generating final PDF...');
         const pdfBytes = await newPdfDoc.save();
-        finishCompression(pdfBytes);
+
+        // Safety check: if rasterized result is bigger, use lossless fallback
+        if (pdfBytes.byteLength >= arrayBuffer.byteLength) {
+          setProcessingStep('File already optimized — applying lossless cleanup...');
+          setUsedFallback(true);
+          const origDoc = await PDFDocument.load(arrayBuffer);
+          origDoc.setTitle(''); origDoc.setAuthor(''); origDoc.setSubject('');
+          origDoc.setKeywords([]); origDoc.setProducer(''); origDoc.setCreator('');
+          const losslessBytes = await origDoc.save({ useObjectStreams: false });
+          finishCompression(losslessBytes);
+        } else {
+          setUsedFallback(false);
+          finishCompression(pdfBytes);
+        }
       }
-    } catch (error) {
-      console.error("Error compressing PDF:", error);
-      alert("An error occurred while compressing the PDF.");
+    } catch (error: any) {
+      console.error('Compression error:', error?.message || error);
+      alert(`Compression failed: ${error?.message || 'Unknown error'}. Try "Less Compression" mode which works on all PDFs.`);
     } finally {
       setIsProcessing(false);
       setProcessingStep('');
@@ -219,6 +352,41 @@ export default function CompressPDF() {
                     </button>
                   ))}
                 </div>
+                {compressionLevel !== 'low' && (
+                  <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 space-y-3">
+                    <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+                      <input
+                        type="checkbox"
+                        checked={useTargetSize}
+                        onChange={(e) => setUseTargetSize(e.target.checked)}
+                        className="rounded border-gray-300"
+                      />
+                      Use target size based compression
+                    </label>
+                    {useTargetSize && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Target Size (KB)
+                        </label>
+                        <div className="relative">
+                          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                            <Target className="h-4 w-4 text-gray-400" />
+                          </div>
+                          <input
+                            type="number"
+                            min={1}
+                            value={targetSizeKB}
+                            onChange={(e) => setTargetSizeKB(Math.max(1, Number(e.target.value) || 1))}
+                            className="w-full pl-9 pr-3 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none"
+                          />
+                        </div>
+                        <p className="mt-2 text-xs text-gray-500">
+                          Advanced mode tries to keep output near this size by tuning raster quality.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 <div className="pt-4 flex gap-4">
                   <button
@@ -253,10 +421,17 @@ export default function CompressPDF() {
                       </div>
                       <div>
                         <p className="text-gray-500">Saved</p>
-                        <p className="font-semibold text-green-700">
-                          {Math.round((1 - stats.compressed / stats.original) * 100)}%
+                        <p className={`font-semibold ${stats.compressed < stats.original ? 'text-green-700' : 'text-amber-600'}`}>
+                          {stats.compressed < stats.original
+                            ? `${Math.round((1 - stats.compressed / stats.original) * 100)}%`
+                            : '—'}
                         </p>
                       </div>
+                    </div>
+                  )}
+                  {usedFallback && (
+                    <div className="mb-4 px-4 py-2 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
+                      ⚠️ PDF was already highly optimized — rasterization would have increased size, so lossless metadata cleanup was applied instead.
                     </div>
                   )}
                   <a
