@@ -8,7 +8,7 @@ import {
   ContactRound, LayoutGrid, QrCode, Pen, ScanLine, GitCompare, Palette, Crop,
   FormInput, BarChart3, BookOpen, Copy, RotateCw, ShieldOff, RefreshCw,
   MonitorSmartphone, Stamp, FileX, Images, Code, Presentation, Layers2,
-  Info, Zap,
+  Info, Zap, ScanSearch,
 } from 'lucide-react';
 
 function categoryAnchor(title: string): string {
@@ -42,6 +42,7 @@ const categories = [
       { title: 'Pixel Resizer', path: '/pixel-resizer', icon: Maximize, color: 'text-sky-500', bg: 'bg-sky-50' },
       { title: 'Image Resizer (px/cm/mm)', path: '/image-resizer', icon: Ruler, color: 'text-sky-600', bg: 'bg-sky-50' },
       { title: 'Image Text Editor (OCR)', path: '/image-text-editor', icon: ScanText, color: 'text-cyan-600', bg: 'bg-cyan-50' },
+      { title: 'Searchable PDF (OCR)', path: '/searchable-pdf', icon: ScanSearch, color: 'text-blue-600', bg: 'bg-blue-50' },
       { title: 'Extract Text', path: '/extract-text', icon: FileType, color: 'text-violet-500', bg: 'bg-violet-50' },
       { title: 'Edit Metadata', path: '/edit-metadata', icon: Tag, color: 'text-fuchsia-500', bg: 'bg-fuchsia-50' },
       { title: 'Flatten PDF', path: '/flatten-pdf', icon: Layers, color: 'text-rose-500', bg: 'bg-rose-50' },
@@ -53,6 +54,7 @@ const categories = [
     title: "Advanced Text & OCR",
     tools: [
       { title: 'Search & Replace', path: '/search-replace', icon: Search, color: 'text-blue-500', bg: 'bg-blue-50' },
+      { title: 'Searchable PDF (OCR)', path: '/searchable-pdf', icon: ScanSearch, color: 'text-blue-600', bg: 'bg-blue-50' },
       { title: 'PDF to Word (.docx)', path: '/pdf-to-word', icon: FileText, color: 'text-blue-700', bg: 'bg-blue-50' },
       { title: 'PDF to Excel (.xlsx)', path: '/pdf-to-excel', icon: FileText, color: 'text-emerald-700', bg: 'bg-emerald-50' },
       { title: 'PDF to PowerPoint', path: '/pdf-to-ppt', icon: FileText, color: 'text-orange-700', bg: 'bg-orange-50' },

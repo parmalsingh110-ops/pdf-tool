@@ -26,6 +26,7 @@ import {
   Move,
   ScanText,
   ImagePlus,
+  Eraser,
 } from 'lucide-react';
 import SignatureCanvas from 'react-signature-canvas';
 import FileDropzone from '../components/FileDropzone';
@@ -33,7 +34,7 @@ import FileDropzone from '../components/FileDropzone';
 // Initialize pdf.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
-type Tool = 'select' | 'text' | 'whiteout' | 'highlight' | 'signature' | 'link' | 'table' | 'freehand' | 'image' | null;
+type Tool = 'select' | 'text' | 'whiteout' | 'highlight' | 'signature' | 'link' | 'table' | 'freehand' | 'image' | 'eraser' | null;
 
 interface Annotation {
   id: string;
@@ -127,13 +128,28 @@ export default function AdvancedEditor() {
   const [freehandColor, setFreehandColor] = useState('#000000');
   const [freehandWidth, setFreehandWidth] = useState(2);
 
+  // === NEW: Signature color ===
+  const [signatureColor, setSignatureColor] = useState('#000000');
+
+  // === NEW: Eraser ===
+  const [eraserSize, setEraserSize] = useState(20);
+  const [eraserPos, setEraserPos] = useState<{x: number, y: number} | null>(null);
+
   // === NEW: Resize for image/signature annotations ===
   const resizeAnnRef = useRef<{ id: string; handle: string; startX: number; startY: number; startAnnX: number; startAnnY: number; startW: number; startH: number } | null>(null);
+
+  // === Eraser drag state ===
+  const isErasingRef = useRef(false);
+  const lastErasedRef = useRef<Set<string>>(new Set());
 
   // === NEW: OCR for scanned PDFs ===
   const [ocrBusy, setOcrBusy] = useState(false);
   const [ocrDone, setOcrDone] = useState(false);
   const [isScannedPdf, setIsScannedPdf] = useState(false);
+  const [ocrLanguage, setOcrLanguage] = useState<'eng' | 'hin' | 'eng+hin'>('eng');
+
+  // === Signature pen width ===
+  const [signaturePenWidth, setSignaturePenWidth] = useState(2);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
@@ -307,7 +323,7 @@ export default function AdvancedEditor() {
       const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(b => resolve(b), 'image/png'));
       if (!blob) throw new Error('Canvas export failed');
       
-      const worker = await createWorker('eng');
+      const worker = await createWorker(ocrLanguage);
       const { data } = await worker.recognize(blob, {}, { blocks: true });
       await worker.terminate();
 
@@ -400,6 +416,39 @@ export default function AdvancedEditor() {
     }
   };
 
+  // === Eraser helper ===
+  const eraseAtPoint = (cx: number, cy: number) => {
+    const radius = eraserSize / 2;
+    setAnnotations(prev => prev.filter(a => {
+      if (a.pageIndex !== currentPage - 1) return true;
+      // For freehand: check each recorded path point against eraser radius
+      if (a.type === 'freehand' && a.pathData) {
+        const parts = a.pathData.trim().split(' ');
+        for (const part of parts) {
+          if (!part) continue;
+          const coords = part.slice(1).split(',').map(Number);
+          if (coords.length === 2 && !isNaN(coords[0])) {
+            const dx = coords[0] - cx;
+            const dy = coords[1] - cy;
+            if (Math.sqrt(dx * dx + dy * dy) <= radius + (a.strokeWidth || 2)) return false;
+          }
+        }
+        // Fallback: bounding box check for freehand too
+        const ax = a.x, ay = a.y, aw = Math.max(a.width || 0, 4), ah = Math.max(a.height || 0, 4);
+        const cx2 = Math.max(ax, Math.min(cx, ax + aw));
+        const cy2 = Math.max(ay, Math.min(cy, ay + ah));
+        return Math.sqrt((cx2 - cx) ** 2 + (cy2 - cy) ** 2) > radius;
+      }
+      // For all other annotation types: bounding box proximity
+      const ax = a.x, ay = a.y;
+      const aw = Math.max(a.width || 0, 20);
+      const ah = Math.max(a.height || 0, 20);
+      const closestX = Math.max(ax, Math.min(cx, ax + aw));
+      const closestY = Math.max(ay, Math.min(cy, ay + ah));
+      return Math.sqrt((closestX - cx) ** 2 + (closestY - cy) ** 2) > radius;
+    }));
+  };
+
   const handleOverlayMouseDown = (e: React.MouseEvent) => {
     if (!overlayRef.current) return;
     
@@ -486,6 +535,12 @@ export default function AdvancedEditor() {
     } else if (activeTool === 'freehand') {
       setIsDrawing(true);
       setFreehandPoints([{ x, y }]);
+    } else if (activeTool === 'eraser') {
+      // Eraser drag begins
+      isErasingRef.current = true;
+      lastErasedRef.current = new Set();
+      pushUndo();
+      eraseAtPoint(x, y);
     } else if (['highlight', 'link', 'table'].includes(activeTool!)) {
       setIsDrawing(true);
       setStartPos({ x, y });
@@ -502,6 +557,16 @@ export default function AdvancedEditor() {
     const rect = overlayRef.current.getBoundingClientRect();
     const currentX = e.clientX - rect.left;
     const currentY = e.clientY - rect.top;
+
+    // Update eraser cursor position
+    if (activeTool === 'eraser') {
+      setEraserPos({ x: currentX, y: currentY });
+      // Continuous erasing while mouse button held (use ref for reliability)
+      if (isErasingRef.current) {
+        eraseAtPoint(currentX, currentY);
+      }
+      return;
+    }
 
     // Handle drag move
     if (isDragging && dragTarget) {
@@ -540,6 +605,13 @@ export default function AdvancedEditor() {
   };
 
   const handleOverlayMouseUp = () => {
+    // End eraser drag
+    if (isErasingRef.current) {
+      isErasingRef.current = false;
+      lastErasedRef.current = new Set();
+      return;
+    }
+
     // End drag
     if (isDragging && dragTarget) {
       setIsDragging(false);
@@ -627,8 +699,8 @@ export default function AdvancedEditor() {
         pageIndex: currentPage - 1,
         x: startPos.x,
         y: startPos.y,
-        width: 150,
-        height: 50,
+        width: 200,
+        height: 60,
         signatureDataUrl: dataUrl
       };
       setAnnotations(prev => [...prev, newAnnotation]);
@@ -1012,15 +1084,59 @@ export default function AdvancedEditor() {
               </button>
               {toolButton('table', <Table className="w-5 h-5" />, 'Table', 'Add Table')}
               {toolButton('highlight', <Highlighter className="w-5 h-5" />, 'Highlight')}
-              {toolButton('freehand', <Pencil className="w-5 h-5" />, 'Draw', 'Freehand Draw')}
+              {/* Draw tool with color picker */}
+              <div className="flex items-center gap-0.5">
+                <button
+                  type="button"
+                  onClick={() => setActiveTool(activeTool === 'freehand' ? null : 'freehand')}
+                  className={`p-2 rounded-lg flex items-center gap-1 transition-colors ${activeTool === 'freehand' ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 hover:bg-gray-100'}`}
+                  title="Freehand Draw"
+                >
+                  <Pencil className="w-5 h-5" />
+                  <span className="text-xs font-medium hidden md:inline">Draw</span>
+                </button>
+                <div className="relative" title="Draw Color">
+                  <input
+                    type="color"
+                    value={freehandColor}
+                    onChange={e => setFreehandColor(e.target.value)}
+                    className="w-6 h-6 rounded cursor-pointer border-0 p-0 bg-transparent"
+                    style={{ appearance: 'none', WebkitAppearance: 'none' }}
+                  />
+                  <div className="absolute inset-0 rounded pointer-events-none border border-gray-300" style={{ background: freehandColor, opacity: 0.9 }} />
+                </div>
+              </div>
+              {/* Sign tool with color picker */}
+              <div className="flex items-center gap-0.5">
+                <button
+                  type="button"
+                  onClick={() => { setActiveTool('signature'); setStartPos({x: 200, y: 300}); setShowSignatureModal(true); }}
+                  className={`p-2 rounded-lg flex items-center gap-1 cursor-pointer transition-colors ${activeTool === 'signature' ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 hover:bg-gray-100'}`}
+                  title="Sign"
+                >
+                  <PenTool className="w-5 h-5" />
+                  <span className="text-xs font-medium hidden md:inline">Sign</span>
+                </button>
+                <div className="relative" title="Signature Color">
+                  <input
+                    type="color"
+                    value={signatureColor}
+                    onChange={e => setSignatureColor(e.target.value)}
+                    className="w-6 h-6 rounded cursor-pointer border-0 p-0 bg-transparent"
+                    style={{ appearance: 'none', WebkitAppearance: 'none' }}
+                  />
+                  <div className="absolute inset-0 rounded pointer-events-none border border-gray-300" style={{ background: signatureColor, opacity: 0.9 }} />
+                </div>
+              </div>
+              {/* Eraser tool */}
               <button
                 type="button"
-                onClick={() => { setActiveTool('signature'); setStartPos({x: 200, y: 300}); setShowSignatureModal(true); }}
-                className={`p-2 rounded-lg flex items-center gap-1 cursor-pointer transition-colors ${activeTool === 'signature' ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 hover:bg-gray-100'}`}
-                title="Sign"
+                onClick={() => setActiveTool(activeTool === 'eraser' ? null : 'eraser')}
+                className={`p-2 rounded-lg flex items-center gap-1 transition-colors ${activeTool === 'eraser' ? 'bg-red-100 text-red-700' : 'text-gray-600 hover:bg-gray-100'}`}
+                title="Eraser — erase annotations"
               >
-                <PenTool className="w-5 h-5" />
-                <span className="text-xs font-medium hidden md:inline">Sign</span>
+                <Eraser className="w-5 h-5" />
+                <span className="text-xs font-medium hidden md:inline">Eraser</span>
               </button>
               {toolButton('link', <LinkIcon className="w-5 h-5" />, 'Link')}
               {/* Insert Image */}
@@ -1099,17 +1215,29 @@ export default function AdvancedEditor() {
                   <ChevronRight className="w-5 h-5" />
                 </button>
               </div>
-              {/* OCR button for scanned PDFs */}
+              {/* OCR button + language selector for scanned PDFs */}
               {isScannedPdf && !ocrDone && (
-                <button
-                  onClick={runOcrOnPage}
-                  disabled={ocrBusy}
-                  className="px-3 py-2 bg-amber-100 text-amber-800 rounded-lg text-sm font-bold hover:bg-amber-200 disabled:opacity-50 flex items-center gap-2"
-                  title="Scanned PDF detected. Run OCR to detect text."
-                >
-                  {ocrBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <ScanText className="w-4 h-4" />}
-                  {ocrBusy ? 'OCR running…' : 'Scan Text (OCR)'}
-                </button>
+                <div className="flex items-center gap-1">
+                  <select
+                    value={ocrLanguage}
+                    onChange={e => setOcrLanguage(e.target.value as 'eng' | 'hin' | 'eng+hin')}
+                    className="px-2 py-2 bg-amber-50 border border-amber-300 text-amber-900 rounded-lg text-xs font-semibold"
+                    title="OCR Language"
+                  >
+                    <option value="eng">English OCR</option>
+                    <option value="hin">Hindi OCR</option>
+                    <option value="eng+hin">Hindi + English</option>
+                  </select>
+                  <button
+                    onClick={runOcrOnPage}
+                    disabled={ocrBusy}
+                    className="px-3 py-2 bg-amber-100 text-amber-800 rounded-lg text-sm font-bold hover:bg-amber-200 disabled:opacity-50 flex items-center gap-2"
+                    title="Scanned PDF detected. Run OCR to detect text."
+                  >
+                    {ocrBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <ScanText className="w-4 h-4" />}
+                    {ocrBusy ? 'OCR running…' : 'Scan Text'}
+                  </button>
+                </div>
               )}
               <button
                 onClick={applyChangesAndSave}
@@ -1126,7 +1254,10 @@ export default function AdvancedEditor() {
           {isScannedPdf && !ocrDone && (
             <div className="bg-amber-50 border-b border-amber-200 px-4 py-2 text-sm text-amber-800 flex items-center gap-2">
               <ScanText className="w-4 h-4 shrink-0" />
-              <span>This looks like a <strong>scanned/image-based PDF</strong>. Click "Scan Text (OCR)" to detect text for editing.</span>
+              <span>
+                Scanned/image-based PDF detected. 
+                <strong> For Hindi PDF → select "Hindi OCR" or "Hindi + English"</strong> from the language dropdown, then click "Scan Text".
+              </span>
             </div>
           )}
 
@@ -1144,6 +1275,7 @@ export default function AdvancedEditor() {
                 <div 
                   ref={overlayRef}
                   className={`absolute top-0 left-0 w-full h-full z-10 ${
+                    activeTool === 'eraser' ? 'cursor-none' :
                     activeTool === 'freehand' ? 'cursor-crosshair' : 
                     activeTool ? 'cursor-crosshair' :
                     isDragging ? 'cursor-grabbing' : ''
@@ -1176,7 +1308,8 @@ export default function AdvancedEditor() {
                     setFreehandPoints([]);
                     if (resizeAnnRef.current) resizeAnnRef.current = null;
                   }}
-                  onMouseLeave={() => {
+                  onMouseLeave={(e) => {
+                    setEraserPos(null);
                     handleOverlayMouseUp();
                     setFreehandPoints([]);
                     if (resizeAnnRef.current) resizeAnnRef.current = null;
@@ -1186,8 +1319,17 @@ export default function AdvancedEditor() {
                   {annotations.filter(a => a.pageIndex === currentPage - 1).map(ann => (
                     <div 
                       key={ann.id}
-                      onClick={(e) => { e.stopPropagation(); setSelectedId(ann.id); }}
-                      className={`absolute group ${selectedId === ann.id ? 'ring-2 ring-indigo-500' : ''} ${!activeTool && ann.type !== 'freehand' ? 'cursor-move' : 'cursor-pointer'}`}
+                      onClick={(e) => { if (activeTool === 'eraser') return; e.stopPropagation(); setSelectedId(ann.id); }}
+                      onMouseDown={(e) => {
+                        if (activeTool === 'eraser') {
+                          e.stopPropagation();
+                          if (!isErasingRef.current) { isErasingRef.current = true; pushUndo(); }
+                          deleteAnnotation(ann.id);
+                        }
+                      }}
+                      className={`absolute group ${
+                        activeTool === 'eraser' ? 'cursor-none' : ''
+                      } ${selectedId === ann.id && activeTool !== 'eraser' ? 'ring-2 ring-indigo-500' : ''} ${!activeTool && ann.type !== 'freehand' ? 'cursor-move' : activeTool !== 'eraser' ? 'cursor-pointer' : ''}`}
                       style={{ 
                         left: ann.x, 
                         top: ann.y, 
@@ -1305,6 +1447,21 @@ export default function AdvancedEditor() {
                         strokeWidth={freehandWidth} 
                         strokeLinecap="round" 
                         strokeLinejoin="round" 
+                      />
+                    </svg>
+                  )}
+
+                  {/* Eraser cursor ring */}
+                  {activeTool === 'eraser' && eraserPos && (
+                    <svg className="absolute inset-0 w-full h-full pointer-events-none" style={{ width: pageViewport?.width, height: pageViewport?.height }}>
+                      <circle
+                        cx={eraserPos.x}
+                        cy={eraserPos.y}
+                        r={eraserSize / 2}
+                        fill="rgba(239,68,68,0.08)"
+                        stroke="rgba(239,68,68,0.7)"
+                        strokeWidth="1.5"
+                        strokeDasharray="4 2"
                       />
                     </svg>
                   )}
@@ -1489,13 +1646,36 @@ export default function AdvancedEditor() {
                     <div className="space-y-4 border-t border-gray-200 pt-4">
                       <h3 className="text-sm font-bold text-gray-800">Draw Settings</h3>
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Color</label>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Stroke Color</label>
                         <input type="color" value={freehandColor} onChange={e => setFreehandColor(e.target.value)} className="w-full h-10 p-1 border border-gray-300 rounded-lg cursor-pointer" />
+                        {/* Color presets */}
+                        <div className="flex gap-1.5 mt-2 flex-wrap">
+                          {['#000000','#ef4444','#3b82f6','#22c55e','#f59e0b','#8b5cf6','#ec4899','#06b6d4'].map(c => (
+                            <button key={c} type="button" onClick={() => setFreehandColor(c)}
+                              className={`w-6 h-6 rounded-full border-2 transition-transform hover:scale-110 ${freehandColor === c ? 'border-indigo-500 scale-110' : 'border-gray-300'}`}
+                              style={{ background: c }} title={c} />
+                          ))}
+                        </div>
                       </div>
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Width: {freehandWidth}px</label>
-                        <input type="range" min={1} max={10} value={freehandWidth} onChange={e => setFreehandWidth(Number(e.target.value))} className="w-full" />
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Stroke Width: {freehandWidth}px</label>
+                        <input type="range" min={1} max={20} value={freehandWidth} onChange={e => setFreehandWidth(Number(e.target.value))} className="w-full" />
                       </div>
+                    </div>
+                  )}
+                  {/* Eraser settings when eraser tool active */}
+                  {activeTool === 'eraser' && (
+                    <div className="space-y-4 border-t border-gray-200 pt-4">
+                      <h3 className="text-sm font-bold text-gray-800">🧹 Eraser Settings</h3>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Eraser Size: {eraserSize}px</label>
+                        <input type="range" min={8} max={120} step={4} value={eraserSize} onChange={e => setEraserSize(Number(e.target.value))} className="w-full" />
+                        <div className="flex justify-between text-xs text-gray-400 mt-1">
+                          <span>Small (8px)</span>
+                          <span>Large (120px)</span>
+                        </div>
+                      </div>
+                      <p className="text-xs text-gray-500">Click or drag over annotations to erase them.</p>
                     </div>
                   )}
                 </div>
@@ -1532,11 +1712,50 @@ export default function AdvancedEditor() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl p-6 w-full max-w-md shadow-2xl">
             <h3 className="text-xl font-bold text-gray-900 mb-4">Draw your signature</h3>
+            {/* Signature color picker */}
+            <div className="mb-3">
+              <label className="text-sm font-medium text-gray-700 block mb-2">Ink Color:</label>
+              <div className="flex items-center gap-2 flex-wrap">
+                <input
+                  type="color"
+                  value={signatureColor}
+                  onChange={e => {
+                    setSignatureColor(e.target.value);
+                    sigCanvasRef.current?.clear();
+                  }}
+                  className="w-8 h-8 p-0.5 border border-gray-300 rounded cursor-pointer flex-shrink-0"
+                />
+                {['#000000','#1d4ed8','#dc2626','#16a34a','#7c3aed','#db2777','#0891b2','#d97706','#1e3a8a','#7f1d1d'].map(c => (
+                  <button key={c} type="button"
+                    onClick={() => { setSignatureColor(c); sigCanvasRef.current?.clear(); }}
+                    className={`w-7 h-7 rounded-full border-2 transition-transform hover:scale-110 flex-shrink-0 ${signatureColor === c ? 'border-indigo-500 scale-110 ring-2 ring-indigo-300' : 'border-gray-300'}`}
+                    style={{ background: c }} title={c} />
+                ))}
+              </div>
+            </div>
+            {/* Signature pen width */}
+            <div className="mb-3">
+              <label className="text-sm font-medium text-gray-700 block mb-1">
+                Stroke Width: <span className="font-bold text-indigo-600">{signaturePenWidth}px</span>
+              </label>
+              <input
+                type="range" min={1} max={8} step={0.5}
+                value={signaturePenWidth}
+                onChange={e => { setSignaturePenWidth(Number(e.target.value)); sigCanvasRef.current?.clear(); }}
+                className="w-full"
+              />
+              <div className="flex justify-between text-xs text-gray-400">
+                <span>Thin (1px)</span><span>Thick (8px)</span>
+              </div>
+            </div>
             <div className="border-2 border-dashed border-gray-300 rounded-lg mb-4 bg-gray-50">
               <SignatureCanvas 
                 ref={sigCanvasRef}
                 canvasProps={{ className: 'w-full h-48 rounded-lg' }}
-                penColor="black"
+                penColor={signatureColor}
+                dotSize={signaturePenWidth}
+                minWidth={signaturePenWidth * 0.5}
+                maxWidth={signaturePenWidth * 1.5}
               />
             </div>
             <div className="flex justify-between gap-4">

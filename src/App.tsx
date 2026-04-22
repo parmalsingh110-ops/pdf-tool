@@ -67,6 +67,7 @@ import ImageColorCorrection from './pages/ImageColorCorrection';
 import PdfPageCropper from './pages/PdfPageCropper';
 import ImageNoiseReduction from './pages/ImageNoiseReduction';
 import ImageInsertTool from './pages/ImageInsertTool';
+import SearchablePdf from './pages/SearchablePdf';
 
 // 20 New Advanced Features
 const PdfStats = lazy(() => import('./pages/PdfStats'));
@@ -119,6 +120,7 @@ export default function App() {
           <Route path="pixel-resizer" element={<PixelResizer />} />
           <Route path="image-resizer" element={<ImageResizer />} />
           <Route path="image-text-editor" element={<ImageTextEditor />} />
+          <Route path="searchable-pdf" element={<SearchablePdf />} />
           <Route path="extract-text" element={<ExtractText />} />
           <Route path="edit-metadata" element={<EditMetadata />} />
           <Route path="flatten-pdf" element={<FlattenPDF />} />
