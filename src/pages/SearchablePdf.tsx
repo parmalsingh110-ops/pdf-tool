@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Download, FileText, Loader2, ScanSearch } from 'lucide-react';
-import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
+import { PDFDocument } from 'pdf-lib';
 import { createWorker } from 'tesseract.js';
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
@@ -46,7 +46,6 @@ export default function SearchablePdf() {
       const srcBytes = await file.arrayBuffer();
       const srcPdf = await pdfjsLib.getDocument({ data: srcBytes }).promise;
       const outPdf = await PDFDocument.create();
-      const invisibleFont = await outPdf.embedFont(StandardFonts.Helvetica);
       const totalPages = srcPdf.numPages;
 
       await workerRef.current?.terminate().catch(() => undefined);
@@ -74,42 +73,21 @@ export default function SearchablePdf() {
 
         await page.render({ canvasContext: ctx, viewport: renderViewport, canvas }).promise;
 
-        const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob((b) => resolve(b), 'image/png'));
-        if (!blob) throw new Error('Failed to render page image');
-        const imgBytes = await blob.arrayBuffer();
-
-        const embedded = await outPdf.embedPng(imgBytes);
-        const outPage = outPdf.addPage([viewport.width, viewport.height]);
-        outPage.drawImage(embedded, { x: 0, y: 0, width: viewport.width, height: viewport.height });
-
-        const { data } = await worker.recognize(canvas, {}, { blocks: true });
-        const recognized = data as any;
-        const words =
-          recognized.words ||
-          (recognized.lines || []).flatMap((line: any) => line.words || []);
-        const ratioX = viewport.width / canvas.width;
-        const ratioY = viewport.height / canvas.height;
-
-        for (const w of words) {
-          const text = (w.text || '').trim();
-          const box = w.bbox;
-          if (!text || !box) continue;
-          const wordWidth = Math.max(1, (box.x1 - box.x0) * ratioX);
-          const wordHeight = Math.max(6, (box.y1 - box.y0) * ratioY);
-          const x = box.x0 * ratioX;
-          const y = viewport.height - box.y1 * ratioY;
-
-          outPage.drawText(text, {
-            x,
-            y,
-            size: wordHeight,
-            font: invisibleFont,
-            color: rgb(0, 0, 0),
-            opacity: 0,
-            maxWidth: wordWidth,
-            lineHeight: wordHeight,
-          });
+        const { data } = await worker.recognize(canvas, { pdfTitle: file.name }, { pdf: true });
+        
+        if (!data.pdf) {
+          throw new Error('Failed to generate PDF from OCR engine');
         }
+
+        const tempPdf = await PDFDocument.load(new Uint8Array(data.pdf));
+        const [copiedPage] = await outPdf.copyPages(tempPdf, [0]);
+        
+        // Scale down the page contents to match the original size, as tesseract's output
+        // is based on the 2x scaled canvas we passed to it.
+        copiedPage.scaleContent(1 / renderScale, 1 / renderScale);
+        copiedPage.setSize(viewport.width, viewport.height);
+        
+        outPdf.addPage(copiedPage);
 
         setProgress(Math.round((i / totalPages) * 100));
       }
