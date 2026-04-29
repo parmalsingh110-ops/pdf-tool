@@ -10,7 +10,7 @@ export default defineConfig(() => {
       react(),
       tailwindcss(),
       nodePolyfills({
-        include: ['crypto', 'buffer', 'stream', 'vm'],
+        include: ['crypto', 'buffer', 'stream', 'vm', 'http', 'https', 'url', 'assert'],
       }),
     ],
     resolve: {
