@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@imgly/background-removal": "^1.7.0",
+    "@pdf-lib/fontkit": "^1.1.1",
     "@tailwindcss/vite": "^4.1.14",
     "@tensorflow-models/body-segmentation": "^1.0.2",
     "@tensorflow/tfjs-backend-webgl": "^4.22.0",
