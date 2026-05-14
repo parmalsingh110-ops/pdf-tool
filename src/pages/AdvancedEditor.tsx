@@ -845,12 +845,119 @@ export default function AdvancedEditor() {
     try {
       const arrayBuffer = await file.arrayBuffer();
       const pdf = await PDFDocument.load(arrayBuffer);
+
+      // Helper: check if text contains non-ASCII / non-WinAnsi characters (Hindi, Devanagari, etc.)
+      const hasNonLatinChars = (text: string) => {
+        for (let i = 0; i < text.length; i++) {
+          if (text.charCodeAt(i) > 0x00FF) return true;
+        }
+        return false;
+      };
+
+      // ── Load Noto Sans Devanagari in BROWSER for Canvas-based text rendering ──
+      // (Canvas handles complex text shaping: conjuncts, ligatures, matra positioning)
+      const loadBrowserFonts = async () => {
+        try {
+          if (!document.fonts.check('12px NotoSansDevanagari')) {
+            const regular = new FontFace(
+              'NotoSansDevanagari',
+              'url(/fonts/NotoSansDevanagari-Regular.ttf)'
+            );
+            await regular.load();
+            document.fonts.add(regular);
+          }
+        } catch (e) { console.warn('Failed to load Devanagari font in browser:', e); }
+        try {
+          if (!document.fonts.check('bold 12px NotoSansDevanagari')) {
+            const bold = new FontFace(
+              'NotoSansDevanagari',
+              'url(/fonts/NotoSansDevanagari-Bold.ttf)',
+              { weight: 'bold' }
+            );
+            await bold.load();
+            document.fonts.add(bold);
+          }
+        } catch { /* bold variant optional */ }
+      };
+
+      // Render non-Latin text via Canvas and return PNG bytes + dimensions in PDF units
+      const renderTextViaCanvas = async (
+        text: string,
+        pdfFontSize: number,
+        colorHex: string,
+        bold?: boolean,
+        italic?: boolean,
+      ) => {
+        const RENDER_SCALE = 4; // 4× for high-res output (~300 DPI)
+        const canvasFontPx = pdfFontSize * RENDER_SCALE;
+
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d')!;
+
+        const weight = bold ? 'bold ' : '';
+        const style = italic ? 'italic ' : '';
+        const fontStr = `${weight}${style}${canvasFontPx}px NotoSansDevanagari, 'Noto Sans Devanagari', sans-serif`;
+
+        // Measure text dimensions
+        ctx.font = fontStr;
+        const metrics = ctx.measureText(text);
+        const actualLeft = metrics.actualBoundingBoxLeft || 0;
+        const actualRight = metrics.actualBoundingBoxRight || metrics.width;
+        const actualAscent = metrics.actualBoundingBoxAscent || canvasFontPx * 0.85;
+        const actualDescent = metrics.actualBoundingBoxDescent || canvasFontPx * 0.25;
+
+        const pad = Math.ceil(canvasFontPx * 0.1);
+        const textW = Math.ceil(actualLeft + actualRight);
+        const textH = Math.ceil(actualAscent + actualDescent);
+        canvas.width = textW + pad * 2;
+        canvas.height = textH + pad * 2;
+
+        // Clear with transparency
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // Re-apply font after canvas resize
+        ctx.font = fontStr;
+        ctx.fillStyle = colorHex;
+        ctx.textBaseline = 'alphabetic';
+        ctx.fillText(text, pad + actualLeft, pad + actualAscent);
+
+        const dataUrl = canvas.toDataURL('image/png');
+        const imgBytes = await fetch(dataUrl).then(r => r.arrayBuffer());
+
+        // Dimensions in PDF coordinate units
+        const imgPdfW = canvas.width / RENDER_SCALE;
+        const imgPdfH = canvas.height / RENDER_SCALE;
+        // Baseline offset from image top in PDF units
+        const baselineFromTop = (pad + actualAscent) / RENDER_SCALE;
+
+        canvas.width = 0;
+        canvas.height = 0;
+
+        return { imgBytes, imgPdfW, imgPdfH, baselineFromTop };
+      };
+
+      // Check if any annotation uses non-Latin text
+      const allTexts = annotations
+        .filter(a => a.type === 'text' && a.text)
+        .map(a => a.text || '');
+      const allTableTexts = annotations
+        .filter(a => a.type === 'table' && a.tableData)
+        .flatMap(a => (a.tableData || []).flat());
+      const allContent = [...allTexts, ...allTableTexts].join('');
+      const needsUnicodeSupport = hasNonLatinChars(allContent);
+
+      // Pre-load browser fonts if needed
+      if (needsUnicodeSupport) {
+        await loadBrowserFonts();
+      }
+
+      // Standard fonts for Latin text
       const helveticaFont = await pdf.embedFont(StandardFonts.Helvetica);
       const helveticaOblique = await pdf.embedFont(StandardFonts.HelveticaOblique);
       const helveticaBold = await pdf.embedFont(StandardFonts.HelveticaBold);
       const helveticaBoldOblique = await pdf.embedFont(StandardFonts.HelveticaBoldOblique);
 
-      const resolveTextFont = (bold?: boolean, italic?: boolean) => {
+      const resolveLatinFont = (bold?: boolean, italic?: boolean) => {
         if (bold && italic) return helveticaBoldOblique;
         if (bold) return helveticaBold;
         if (italic) return helveticaOblique;
@@ -889,25 +996,51 @@ export default function AdvancedEditor() {
               color: rgb(bgR, bgG, bgB),
             });
           }
-          const { r, g, b } = hexToRgb(ann.color || '#000000');
-          const font = resolveTextFont(ann.bold, ann.italic);
-          const baselineFromTopPx = Math.max(textPx, boxPxH * 0.74);
-          page.drawText(ann.text, {
-            x: pdfX,
-            y: pdfY - (baselineFromTopPx / scale),
-            size: textPx / scale,
-            font,
-            color: rgb(r, g, b),
-          });
+
+          if (hasNonLatinChars(ann.text)) {
+            // ── Canvas-based rendering for Hindi/Devanagari (proper text shaping) ──
+            const pdfFontSize = textPx / scale;
+            const colorHex = ann.color || '#000000';
+            const { imgBytes, imgPdfW, imgPdfH, baselineFromTop } =
+              await renderTextViaCanvas(ann.text, pdfFontSize, colorHex, ann.bold, ann.italic);
+
+            const pdfImage = await pdf.embedPng(imgBytes);
+
+            // Position: match the same baseline as drawText would use
+            const baselineFromTopPx = Math.max(textPx, boxPxH * 0.74);
+            const baselinePdfY = pdfY - (baselineFromTopPx / scale);
+            // Align canvas baseline with PDF baseline
+            const imgTopY = baselinePdfY + baselineFromTop;
+
+            page.drawImage(pdfImage, {
+              x: pdfX,
+              y: imgTopY - imgPdfH,
+              width: imgPdfW,
+              height: imgPdfH,
+            });
+          } else {
+            // ── Standard drawText for Latin/ASCII text ──
+            const { r, g, b } = hexToRgb(ann.color || '#000000');
+            const font = resolveLatinFont(ann.bold, ann.italic);
+            const baselineFromTopPx = Math.max(textPx, boxPxH * 0.74);
+            page.drawText(ann.text, {
+              x: pdfX,
+              y: pdfY - (baselineFromTopPx / scale),
+              size: textPx / scale,
+              font,
+              color: rgb(r, g, b),
+            });
+          }
         } else if (ann.type === 'table' && ann.tableData && ann.rows && ann.cols) {
           const cellW = pdfW / ann.cols;
           const cellH = pdfH / ann.rows;
 
-          ann.tableData.forEach((row, ri) => {
-            row.forEach((cell, ci) => {
+          for (let ri = 0; ri < ann.rows; ri++) {
+            for (let ci = 0; ci < ann.cols; ci++) {
+              const cell = ann.tableData[ri]?.[ci] || '';
               const cx = pdfX + (ci * cellW);
               const cy = pdfY - ((ri + 1) * cellH);
-              
+
               page.drawRectangle({
                 x: cx,
                 y: cy,
@@ -919,16 +1052,30 @@ export default function AdvancedEditor() {
               });
 
               if (cell) {
-                page.drawText(cell, {
-                  x: cx + (2 / scale),
-                  y: cy + (cellH / 4),
-                  size: 8 / scale,
-                  font: helveticaFont,
-                  color: rgb(0, 0, 0),
-                });
+                if (hasNonLatinChars(cell)) {
+                  // Canvas rendering for non-Latin table cell text
+                  const cellFontSize = 8 / scale;
+                  const { imgBytes, imgPdfW, imgPdfH } =
+                    await renderTextViaCanvas(cell, cellFontSize, '#000000');
+                  const cellImg = await pdf.embedPng(imgBytes);
+                  page.drawImage(cellImg, {
+                    x: cx + (2 / scale),
+                    y: cy + (cellH - imgPdfH) / 2,
+                    width: imgPdfW,
+                    height: imgPdfH,
+                  });
+                } else {
+                  page.drawText(cell, {
+                    x: cx + (2 / scale),
+                    y: cy + (cellH / 4),
+                    size: 8 / scale,
+                    font: helveticaFont,
+                    color: rgb(0, 0, 0),
+                  });
+                }
               }
-            });
-          });
+            }
+          }
         } else if (ann.type === 'whiteout') {
           const { r, g, b } = hexToRgb(ann.color || '#ffffff');
           const padding = 2 / scale;

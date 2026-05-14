@@ -110,6 +110,63 @@ export default function PdfFormFiller() {
     try {
       const buf = await file.arrayBuffer();
       const pdfDoc = await PDFDocument.load(buf);
+
+      // Check if any field text contains non-WinAnsi characters
+      const hasNonLatinChars = (text: string) => {
+        for (let i = 0; i < text.length; i++) {
+          if (text.charCodeAt(i) > 0x00FF) return true;
+        }
+        return false;
+      };
+
+      const allFieldTexts = fields
+        .filter(f => f.type === 'text' && f.value.trim())
+        .map(f => f.value);
+      const hasCheckbox = fields.some(f => f.type === 'checkbox' && f.checked);
+      const needsUnicode = allFieldTexts.some(hasNonLatinChars) || hasCheckbox;
+
+      // Load Noto Sans Devanagari in BROWSER for Canvas-based text rendering
+      if (needsUnicode) {
+        try {
+          if (!document.fonts.check('12px NotoSansDevanagari')) {
+            const ff = new FontFace('NotoSansDevanagari', 'url(/fonts/NotoSansDevanagari-Regular.ttf)');
+            await ff.load();
+            document.fonts.add(ff);
+          }
+        } catch { /* font load optional */ }
+      }
+
+      // Render non-Latin text via Canvas (proper Devanagari shaping)
+      const renderTextViaCanvas = async (text: string, pdfFontSize: number, colorHex: string) => {
+        const SCALE = 4;
+        const canvasPx = pdfFontSize * SCALE;
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d')!;
+        const fontStr = `${canvasPx}px NotoSansDevanagari, 'Noto Sans Devanagari', sans-serif`;
+        ctx.font = fontStr;
+        const metrics = ctx.measureText(text);
+        const actualLeft = metrics.actualBoundingBoxLeft || 0;
+        const actualRight = metrics.actualBoundingBoxRight || metrics.width;
+        const actualAscent = metrics.actualBoundingBoxAscent || canvasPx * 0.85;
+        const actualDescent = metrics.actualBoundingBoxDescent || canvasPx * 0.25;
+        const pad = Math.ceil(canvasPx * 0.1);
+        canvas.width = Math.ceil(actualLeft + actualRight) + pad * 2;
+        canvas.height = Math.ceil(actualAscent + actualDescent) + pad * 2;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.font = fontStr;
+        ctx.fillStyle = colorHex;
+        ctx.textBaseline = 'alphabetic';
+        ctx.fillText(text, pad + actualLeft, pad + actualAscent);
+        const dataUrl = canvas.toDataURL('image/png');
+        const imgBytes = await fetch(dataUrl).then(r => r.arrayBuffer());
+        const w = canvas.width / SCALE;
+        const h = canvas.height / SCALE;
+        const baselineFromTop = (pad + actualAscent) / SCALE;
+        canvas.width = 0;
+        canvas.height = 0;
+        return { imgBytes, w, h, baselineFromTop };
+      };
+
       const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
       const pages = pdfDoc.getPages();
 
@@ -123,17 +180,34 @@ export default function PdfFormFiller() {
         const pdfY = height - (field.y / pageScale);
 
         if (field.type === 'text' && field.value.trim()) {
-          page.drawText(field.value, {
-            x: pdfX,
-            y: pdfY - field.fontSize,
-            size: field.fontSize,
-            font,
-            color: rgb(0, 0, 0),
-          });
+          if (hasNonLatinChars(field.value)) {
+            // Canvas-based rendering for Hindi/Devanagari
+            const { imgBytes, w, h, baselineFromTop } =
+              await renderTextViaCanvas(field.value, field.fontSize, '#000000');
+            const pdfImage = await pdfDoc.embedPng(imgBytes);
+            const imgTopY = (pdfY - field.fontSize) + baselineFromTop;
+            page.drawImage(pdfImage, {
+              x: pdfX,
+              y: imgTopY - h,
+              width: w,
+              height: h,
+            });
+          } else {
+            page.drawText(field.value, {
+              x: pdfX,
+              y: pdfY - field.fontSize,
+              size: field.fontSize,
+              font,
+              color: rgb(0, 0, 0),
+            });
+          }
         } else if (field.type === 'checkbox' && field.checked) {
           const s = 14 / pageScale;
           page.drawRectangle({ x: pdfX, y: pdfY - s, width: s, height: s, borderColor: rgb(0, 0, 0), borderWidth: 1 });
-          page.drawText('✓', { x: pdfX + 2, y: pdfY - s + 2, size: s - 2, font, color: rgb(0, 0, 0) });
+          // Render checkmark via canvas to avoid WinAnsi error
+          const { imgBytes, w, h } = await renderTextViaCanvas('✓', s - 2, '#000000');
+          const checkImg = await pdfDoc.embedPng(imgBytes);
+          page.drawImage(checkImg, { x: pdfX + 1, y: pdfY - s + 1, width: w, height: h });
         }
       }
 
