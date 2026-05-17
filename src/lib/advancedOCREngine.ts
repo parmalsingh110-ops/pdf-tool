@@ -178,7 +178,7 @@ export async function analysePDF(
 
     let imageDataUrl: string | undefined;
     if (isScanned) {
-      const scale = 2;
+      const scale = 2.5;
       const rv = page.getViewport({ scale });
       const canvas = document.createElement('canvas');
       canvas.width = Math.round(rv.width);
@@ -200,6 +200,25 @@ export async function analysePDF(
 
 // ── Step 2: Extract rich runs from embedded text ───────────────────────────────
 
+/**
+ * Detect if a character is from a complex script (Devanagari, Bengali, etc.)
+ * that must NOT have spaces inserted between glyph fragments.
+ */
+function isComplexScript(text: string): boolean {
+  // Devanagari, Bengali, Gurmukhi, Gujarati, Oriya, Tamil, Telugu, Kannada, Malayalam, Sinhala
+  return /[\u0900-\u0D7F\u0D80-\u0DFF]/.test(text);
+}
+
+/**
+ * Check if a font name suggests it's an identity / CID font that pdfjs may
+ * fragment character-by-character (common for Hindi PDFs).
+ */
+function isFragmentedFont(fontName: string): boolean {
+  const n = fontName.toLowerCase();
+  return n.includes('identity') || n.includes('cid') || n.includes('composite')
+    || n.includes('unicode') || n.includes('truetype') || n.includes('type0');
+}
+
 export async function extractRichRuns(
   file: File,
   pageAnalyses: PageAnalysis[],
@@ -216,24 +235,132 @@ export async function extractRichRuns(
     const page = await pdf.getPage(pa.pageIndex + 1);
     const content = await page.getTextContent({ includeMarkedContent: false } as any);
 
+    // ── Collect ALL items (including empty ones for whitespace detection) ──
+    interface RawItem {
+      str: string;
+      x: number;
+      y: number;  // already flipped (0 = top)
+      w: number;
+      h: number;
+      fontSize: number;
+      fontName: string;
+      bold: boolean;
+      italic: boolean;
+      hasEOL: boolean;
+    }
+    const rawItems: RawItem[] = [];
+
     for (const item of content.items as any[]) {
-      if (!item.str?.trim()) continue;
+      if (item.str === undefined || item.str === null) continue;
       const [a, , , d, tx, ty] = item.transform;
-      // Font size: use the scale factor from the matrix
       const fontSize = Math.abs(d) || Math.abs(a) || 12;
-      const w = item.width ?? fontSize * item.str.length * 0.55;
+      const w = item.width ?? (item.str.length > 0 ? fontSize * item.str.length * 0.55 : 0);
       const h = item.height ?? fontSize;
       const fontName: string = item.fontName ?? '';
 
-      runs.push({
-        text: item.str,
+      rawItems.push({
+        str: item.str,
         x: tx,
-        y: pa.height - ty - h,   // flip: 0 = top of page
+        y: pa.height - ty - h,
         w, h,
         fontSize: Math.max(6, Math.round(fontSize)),
+        fontName,
         bold: isBoldFont(fontName),
         italic: isItalicFont(fontName),
-        fontName,
+        hasEOL: !!item.hasEOL,
+      });
+    }
+
+    // ── Pre-merge adjacent fragments on the same line ──
+    // pdfjs often splits Devanagari/Hindi into individual glyph items.
+    // We merge items that are on the same Y-line and spatially adjacent
+    // (gap < fontSize * 0.3) AND share the same font into single runs.
+    // Empty-string items (" ") are treated as explicit word separators.
+    const merged: RawItem[] = [];
+
+    for (let ri = 0; ri < rawItems.length; ri++) {
+      const cur = rawItems[ri];
+
+      // If current item is empty/whitespace-only, it acts as a word separator
+      // — push it so the next non-empty item starts a new run
+      if (!cur.str.trim()) {
+        // Insert a space marker into the last merged run if exists
+        if (merged.length > 0 && !merged[merged.length - 1].str.endsWith(' ')) {
+          merged[merged.length - 1].str += ' ';
+        }
+        continue;
+      }
+
+      const prev = merged.length > 0 ? merged[merged.length - 1] : null;
+      if (!prev) {
+        merged.push({ ...cur });
+        continue;
+      }
+
+      // Check if same visual line (Y within tolerance)
+      const lineH = Math.max(prev.h, cur.h, prev.fontSize, cur.fontSize);
+      const sameY = Math.abs(prev.y - cur.y) < lineH * 0.55;
+
+      if (!sameY) {
+        merged.push({ ...cur });
+        continue;
+      }
+
+      // Spatial gap between previous run end and current run start
+      const prevRight = prev.x + prev.w;
+      const gap = cur.x - prevRight;
+      const avgCharW = prev.fontSize * 0.5; // approximate average character width
+
+      // Same font family check (relaxed — just compare base name)
+      const sameFont = prev.fontName === cur.fontName
+        || prev.fontName.split('+').pop() === cur.fontName.split('+').pop();
+
+      // Merge conditions:
+      // 1. Spatially adjacent (gap < 30% of fontSize) AND same font → merge directly
+      // 2. For complex scripts, be more aggressive (gap < 60% of fontSize)
+      const isComplex = isComplexScript(prev.str) || isComplexScript(cur.str);
+      const gapThreshold = isComplex ? prev.fontSize * 0.6 : prev.fontSize * 0.3;
+
+      if (sameFont && gap < gapThreshold && gap > -prev.fontSize * 2) {
+        // Check if previous ended with a space marker (explicit word boundary)
+        if (prev.str.endsWith(' ')) {
+          prev.str += cur.str;
+        } else if (gap > avgCharW * 0.6 && !isComplex) {
+          // For Latin text with notable gap, insert space
+          prev.str += ' ' + cur.str;
+        } else {
+          // For adjacent/complex script fragments, join directly
+          prev.str += cur.str;
+        }
+        prev.w = (cur.x + cur.w) - prev.x;
+        prev.bold = prev.bold || cur.bold;
+        prev.italic = prev.italic || cur.italic;
+      } else if (gap >= gapThreshold && gap < avgCharW * 3) {
+        // Clear word gap — insert space and merge
+        prev.str += ' ' + cur.str;
+        prev.w = (cur.x + cur.w) - prev.x;
+        prev.bold = prev.bold || cur.bold;
+        prev.italic = prev.italic || cur.italic;
+      } else {
+        // Too far apart or different font → new run
+        merged.push({ ...cur });
+      }
+    }
+
+    // ── Convert merged items to RichRun[] ──
+    for (const item of merged) {
+      const text = item.str.trim();
+      if (!text) continue;
+      runs.push({
+        text,
+        x: item.x,
+        y: item.y,
+        w: item.w,
+        h: item.h,
+        fontSize: item.fontSize,
+        bold: item.bold,
+        italic: item.italic,
+        fontName: item.fontName,
         pageIndex: pa.pageIndex,
         pageW: pa.width,
         pageH: pa.height,
@@ -252,7 +379,7 @@ export async function ocrScannedPages(
   lang: OCRLanguage,
   onProgress?: (msg: string, pct: number) => void,
 ): Promise<RichRun[]> {
-  const scanned = pageAnalyses.filter(p => p.isScanned && p.imageDataUrl);
+  const scanned = pageAnalyses.filter(p => p.imageDataUrl);
   if (!scanned.length) return [];
 
   const tesseractLang = lang === 'auto' ? AUTO_DETECT_LANG : lang;
@@ -265,7 +392,7 @@ export async function ocrScannedPages(
   });
 
   const runs: RichRun[] = [];
-  const OCR_SCALE = 2;
+  const OCR_SCALE = 2.5;
 
   for (let pi = 0; pi < scanned.length; pi++) {
     const pa = scanned[pi];
@@ -399,10 +526,28 @@ export function groupRunsIntoParagraphs(runs: RichRun[]): RichParagraph[] {
       });
       if (!allRuns.length) continue;
 
-      // Text: join runs in each line with space, separate lines with \n
-      const lineTexts = pg.lines.map(lg =>
-        lg.runs.sort((a, b) => a.x - b.x).map(r => r.text).join(' ')
-      );
+      // Text: join runs in each line with smart spacing, separate lines with \n
+      const lineTexts = pg.lines.map(lg => {
+        const sorted = lg.runs.sort((a, b) => a.x - b.x);
+        let lineStr = '';
+        for (let si = 0; si < sorted.length; si++) {
+          const r = sorted[si];
+          if (si === 0) { lineStr = r.text; continue; }
+          const prev = sorted[si - 1];
+          const gap = r.x - (prev.x + prev.w);
+          const charW = prev.fontSize * 0.5;
+          const complex = isComplexScript(prev.text) || isComplexScript(r.text);
+          // For complex scripts with small gap, join directly
+          if (complex && gap < charW * 0.8) {
+            lineStr += r.text;
+          } else if (gap > charW * 0.3) {
+            lineStr += ' ' + r.text;
+          } else {
+            lineStr += r.text;
+          }
+        }
+        return lineStr;
+      });
       const text = lineTexts.join('\n');
 
       const xs     = allRuns.map(r => r.x);
@@ -467,6 +612,71 @@ export interface PipelineResult {
 
 // ── Master pipeline ────────────────────────────────────────────────────────────
 
+function mergeOcrWithDigital(
+  embeddedRuns: RichRun[],
+  ocrRuns: RichRun[],
+  pageAnalyses: PageAnalysis[]
+): RichRun[] {
+  const finalRuns: RichRun[] = [];
+
+  for (const pa of pageAnalyses) {
+    const pEmbedded = embeddedRuns.filter(r => r.pageIndex === pa.pageIndex);
+    const pOcr = ocrRuns.filter(r => r.pageIndex === pa.pageIndex);
+
+    if (pa.isScanned || pEmbedded.length === 0) {
+      finalRuns.push(...pOcr);
+      continue;
+    }
+
+    const matchedEmbedded = new Set<RichRun>();
+
+    // Hybrid Match for Digital Pages: Use OCR for accurate text, but steal exact formatting from embedded
+    for (const ol of pOcr) {
+      let bestMatch: RichRun | null = null;
+      let maxOverlapArea = 0;
+
+      for (const el of pEmbedded) {
+        const overlapW = Math.max(0, Math.min(ol.x + ol.w, el.x + el.w) - Math.max(ol.x, el.x));
+        const overlapH = Math.max(0, Math.min(ol.y + ol.h, el.y + el.h) - Math.max(ol.y, el.y));
+        const area = overlapW * overlapH;
+
+        if (area > maxOverlapArea) {
+          maxOverlapArea = area;
+          bestMatch = el;
+        }
+
+        // Mark embedded run as matched if it has significant overlap with ANY OCR run
+        if (area > Math.min(ol.w * ol.h, el.w * el.h) * 0.1) {
+          matchedEmbedded.add(el);
+        }
+      }
+
+      // Only accept OCR text if it overlaps an embedded text run significantly.
+      // This strictly prevents Tesseract from hallucinating text on logos, QR codes, etc.
+      if (bestMatch && maxOverlapArea > Math.min(ol.w * ol.h, bestMatch.w * bestMatch.h) * 0.1) {
+        finalRuns.push({
+          ...ol,
+          fontSize: bestMatch.fontSize,
+          bold: bestMatch.bold,
+          italic: bestMatch.italic,
+          fontName: bestMatch.fontName,
+          // We intentionally keep ol.y so that natural OCR line breaks are preserved,
+          // instead of collapsing multiple lines onto the same Y baseline.
+        });
+      }
+    }
+
+    // Include embedded runs that didn't match any OCR line (e.g. icons, headers)
+    for (const el of pEmbedded) {
+      if (!matchedEmbedded.has(el)) {
+        finalRuns.push(el);
+      }
+    }
+  }
+
+  return finalRuns;
+}
+
 export async function runOCRPipeline(
   file: File,
   options: PipelineOptions,
@@ -482,15 +692,37 @@ export async function runOCRPipeline(
   onProgress?.('Extracting embedded text…', 25);
   const embeddedRuns = await extractRichRuns(file, pageAnalyses, onProgress);
 
-  let ocrRuns: RichRun[] = [];
-  if (useOcr && hasAnyScannedPage) {
-    onProgress?.('Starting OCR engine…', 45);
-    ocrRuns = await ocrScannedPages(pageAnalyses, lang, onProgress);
+  let finalRuns = embeddedRuns;
+
+  if (useOcr) {
+    onProgress?.('Preparing Advanced OCR engine…', 45);
+    
+    // Generate imageDataUrls for digital pages to enable OCR mapping
+    const ab = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(ab) }).promise;
+    
+    for (let pi = 0; pi < pageAnalyses.length; pi++) {
+      const pa = pageAnalyses[pi];
+      if (!pa.imageDataUrl) {
+         onProgress?.(`Rendering digital page ${pi + 1} for OCR analysis…`, 45 + (pi / pageAnalyses.length) * 10);
+         const page = await pdf.getPage(pi + 1);
+         const scale = 2.5; // Must match OCR_SCALE = 2.5 in ocrScannedPages
+         const rv = page.getViewport({ scale });
+         const canvas = document.createElement('canvas');
+         canvas.width = Math.round(rv.width);
+         canvas.height = Math.round(rv.height);
+         const ctx = canvas.getContext('2d')!;
+         await page.render({ canvasContext: ctx, viewport: rv, canvas }).promise;
+         pa.imageDataUrl = canvas.toDataURL('image/jpeg', 0.9);
+      }
+    }
+
+    const ocrRuns = await ocrScannedPages(pageAnalyses, lang, onProgress);
+    finalRuns = mergeOcrWithDigital(embeddedRuns, ocrRuns, pageAnalyses);
   }
 
   onProgress?.('Analysing layout and formatting…', 88);
-  const allRuns   = [...embeddedRuns, ...ocrRuns];
-  const paragraphs = groupRunsIntoParagraphs(allRuns);
+  const paragraphs = groupRunsIntoParagraphs(finalRuns);
 
   onProgress?.('Done!', 100);
   return { paragraphs, pageAnalyses, pdfPageCount: pageAnalyses.length, hasAnyScannedPage, hasAnyTextPage };

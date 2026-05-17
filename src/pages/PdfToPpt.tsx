@@ -63,12 +63,15 @@ async function buildPptx(
         const wIn = Math.max(0.5, ((para.right - para.x) / vp.width) * slideW);
         const hIn = Math.max(0.2, (para.fontSize / vp.height) * slideH * 2.2);
         const align = para.alignment === 'center' ? 'center' : para.alignment === 'right' ? 'r' : 'left';
+        // Pick appropriate font for the text content
+        const isDevanagari = /[\u0900-\u097F]/.test(para.text);
+        const fontFace = isDevanagari ? 'Mangal' : 'Calibri';
         try {
           slide.addText(para.text.replace(/\n/g, ' ').trim(), {
             x: xIn, y: yIn,
             w: Math.min(wIn, slideW - xIn), h: hIn,
             fontSize: Math.max(6, Math.round(para.fontSize * 0.8)),
-            fontFace: 'Calibri',
+            fontFace,
             align: align as any,
             color: 'FFFFFF',
             transparency: 100,
@@ -109,7 +112,7 @@ export default function PdfToPpt() {
     try {
       const analyses = await analysePDF(f, onProgress);
       setPageAnalyses(analyses);
-      analyses.some(p => p.isScanned) ? setStage('scan_detected') : await doConvert(f, analyses, false);
+      setStage('scan_detected');
     } catch (e: any) { setErrorMsg(e?.message || 'Failed to analyse PDF.'); setStage('error'); }
   };
 

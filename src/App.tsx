@@ -98,6 +98,7 @@ const PixelResizer = lazy(() => import('./pages/PixelResizer'));
 const ImageResizer = lazy(() => import('./pages/ImageResizer'));
 const ImageTextEditor = lazy(() => import('./pages/ImageTextEditor'));
 const PassportPhotoSheet = lazy(() => import('./pages/PassportPhotoSheet'));
+const IncreasePdfSize = lazy(() => import('./pages/IncreasePdfSize'));
 
 export default function App() {
   return (
@@ -199,6 +200,7 @@ export default function App() {
           <Route path="color-extractor" element={<ColorExtractor />} />
           <Route path="present" element={<PdfPresenter />} />
           <Route path="file-hash" element={<FileHash />} />
+          <Route path="increase-size" element={<IncreasePdfSize />} />
         </Route>
     </Routes>
   );
