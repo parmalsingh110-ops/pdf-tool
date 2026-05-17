@@ -29,6 +29,7 @@ const categories = [
       { title: 'Merge PDF', path: '/merge', icon: Combine, color: 'text-red-500', bg: 'bg-red-50' },
       { title: 'Split PDF', path: '/split', icon: Scissors, color: 'text-orange-500', bg: 'bg-orange-50' },
       { title: 'Compress PDF', path: '/compress', icon: Minimize2, color: 'text-green-500', bg: 'bg-green-50' },
+      { title: 'Increase PDF Size', path: '/increase-size', icon: Maximize, color: 'text-blue-600', bg: 'bg-blue-50' },
       { title: 'PDF to JPG', path: '/pdf-to-jpg', icon: ImageIcon, color: 'text-yellow-500', bg: 'bg-yellow-50' },
       { title: 'JPG to PDF', path: '/jpg-to-pdf', icon: FileImage, color: 'text-yellow-500', bg: 'bg-yellow-50' },
       { title: 'Organize PDF', path: '/organize', icon: Layers, color: 'text-blue-500', bg: 'bg-blue-50' },
