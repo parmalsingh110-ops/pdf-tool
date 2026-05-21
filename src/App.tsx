@@ -54,6 +54,7 @@ import CertifyDocument from './pages/CertifyDocument';
 import BatchProtect from './pages/BatchProtect';
 import InkSaverPDF from './pages/InkSaverPDF';
 import UniversalConverter from './pages/UniversalConverter';
+import CodeToPdf from './pages/CodeToPdf';
 
 // New Advanced Tools
 import ImageCollage from './pages/ImageCollage';
@@ -165,6 +166,7 @@ export default function App() {
           <Route path="batch-protect" element={<BatchProtect />} />
           <Route path="ink-saver" element={<InkSaverPDF />} />
           <Route path="universal-converter" element={<UniversalConverter />} />
+          <Route path="code-to-pdf" element={<CodeToPdf />} />
 
           {/* 10 New Advanced Tools */}
           <Route path="image-collage" element={<ImageCollage />} />
