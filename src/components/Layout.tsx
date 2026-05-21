@@ -53,6 +53,7 @@ const ROUTE_TITLES: Record<string, string> = {
   '/convert-tiff': 'Convert to TIFF',
   '/all-tools': 'All tools',
   '/privacy': 'Privacy',
+  '/code-to-pdf': 'Code to PDF',
 };
 
 // Navigation mega-menu data  — hover to open
@@ -87,6 +88,7 @@ const NAV_GROUPS: NavGroup[] = [
       { to: '/searchable-pdf', label: 'Searchable PDF (OCR)', icon: ScanSearch },
       { to: '/universal-converter', label: 'Universal Converter', icon: RefreshCw },
       { to: '/screenshot-to-pdf', label: 'Screenshot to PDF', icon: FileText },
+      { to: '/code-to-pdf', label: 'Code / HTML to PDF', icon: Code },
     ],
   },
   {
