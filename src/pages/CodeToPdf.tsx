@@ -1,4 +1,4 @@
-import { useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { FileCode, Download, Copy, Check, Upload, Trash2, RefreshCw } from 'lucide-react';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 
@@ -473,6 +473,10 @@ async function generateCodePdf(
 
 // ─── React component ─────────────────────────────────────────────────
 
+// Sensible limits so we don't melt the browser.
+const MAX_CODE_CHARS = 2_000_000; // ~2 MB
+const MAX_FILE_BYTES =  10 * 1024 * 1024; // 10 MB source file
+
 export default function CodeToPdf() {
   const [code, setCode]             = useState('');
   const [filename, setFilename]     = useState('untitled');
@@ -485,6 +489,29 @@ export default function CodeToPdf() {
   const [copied, setCopied]         = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
+  const lastUrlRef = useRef<string | null>(null);
+  const mountedRef = useRef(true);
+  const jobIdRef   = useRef(0);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      if (lastUrlRef.current) {
+        try { URL.revokeObjectURL(lastUrlRef.current); } catch { /* */ }
+        lastUrlRef.current = null;
+      }
+    };
+  }, []);
+
+  const setPdfUrlSafe = (next: string | null) => {
+    if (lastUrlRef.current && lastUrlRef.current !== next) {
+      try { URL.revokeObjectURL(lastUrlRef.current); } catch { /* */ }
+    }
+    lastUrlRef.current = next;
+    setPdfUrl(next);
+  };
+
   const detectedLang = useCallback((): string => {
     if (langId !== 'auto') return langId;
     const ext = filename.split('.').pop()?.toLowerCase() ?? '';
@@ -494,49 +521,67 @@ export default function CodeToPdf() {
   const lang = detectedLang();
   const langLabel = LANGUAGES.find(l => l.id === lang)?.label ?? lang;
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const loadFromFile = (file: File) => {
+    if (file.size > MAX_FILE_BYTES) {
+      setError(`File is too large (max ${(MAX_FILE_BYTES / 1024 / 1024).toFixed(0)} MB). Try a smaller code file.`);
+      return;
+    }
     setFilename(file.name);
     const ext = file.name.split('.').pop()?.toLowerCase() ?? '';
     if (EXT_TO_LANG[ext]) setLangId(EXT_TO_LANG[ext]);
     const reader = new FileReader();
     reader.onload = ev => {
-      setCode(ev.target?.result as string ?? '');
-      setPdfUrl(null);
-      setError(null);
+      if (!mountedRef.current) return;
+      let text = (ev.target?.result as string) ?? '';
+      if (text.length > MAX_CODE_CHARS) {
+        text = text.slice(0, MAX_CODE_CHARS);
+        setError(`File was truncated to ${(MAX_CODE_CHARS / 1024 / 1024).toFixed(1)} MB to keep the browser responsive.`);
+      } else {
+        setError(null);
+      }
+      setCode(text);
+      setPdfUrlSafe(null);
+    };
+    reader.onerror = () => {
+      if (!mountedRef.current) return;
+      setError('Could not read the file. It may be binary or corrupted.');
     };
     reader.readAsText(file, 'utf-8');
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) loadFromFile(file);
     e.target.value = '';
   };
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     const file = e.dataTransfer.files[0];
-    if (!file) return;
-    setFilename(file.name);
-    const ext = file.name.split('.').pop()?.toLowerCase() ?? '';
-    if (EXT_TO_LANG[ext]) setLangId(EXT_TO_LANG[ext]);
-    const reader = new FileReader();
-    reader.onload = ev => {
-      setCode(ev.target?.result as string ?? '');
-      setPdfUrl(null);
-      setError(null);
-    };
-    reader.readAsText(file, 'utf-8');
+    if (file) loadFromFile(file);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleConvert = async () => {
     if (!code.trim()) { setError('Please paste or upload code first.'); return; }
+    if (code.length > MAX_CODE_CHARS) {
+      setError(`Code is too large (max ${(MAX_CODE_CHARS / 1024 / 1024).toFixed(1)} MB).`);
+      return;
+    }
+    const myJobId = ++jobIdRef.current;
     setIsGenerating(true);
     setError(null);
-    setPdfUrl(null);
+    setPdfUrlSafe(null);
     try {
       const blob = await generateCodePdf(code, filename, lang, showLineNums, fontSize);
-      setPdfUrl(URL.createObjectURL(blob));
+      if (!mountedRef.current || jobIdRef.current !== myJobId) return;
+      setPdfUrlSafe(URL.createObjectURL(blob));
     } catch (e: any) {
-      setError(e?.message ?? 'PDF generation failed');
+      if (!mountedRef.current || jobIdRef.current !== myJobId) return;
+      console.error('[CodeToPdf]', e);
+      setError(e?.message ?? 'PDF generation failed.');
     } finally {
+      if (!mountedRef.current || jobIdRef.current !== myJobId) return;
       setIsGenerating(false);
     }
   };
@@ -660,7 +705,16 @@ export default function CodeToPdf() {
             )}
             <textarea
               value={code}
-              onChange={e => { setCode(e.target.value); setPdfUrl(null); }}
+              onChange={e => {
+                const v = e.target.value;
+                if (v.length > MAX_CODE_CHARS) {
+                  setError(`Maximum ${(MAX_CODE_CHARS / 1024 / 1024).toFixed(1)} MB of code allowed.`);
+                  return;
+                }
+                if (error && v.length <= MAX_CODE_CHARS) setError(null);
+                setCode(v);
+                setPdfUrlSafe(null);
+              }}
               spellCheck={false}
               className="w-full h-full min-h-[320px] p-4 font-mono text-sm bg-slate-950 dark:bg-slate-950 text-slate-100 resize-none outline-none leading-relaxed"
               placeholder=""
@@ -686,7 +740,7 @@ export default function CodeToPdf() {
                     {copied ? 'Copied!' : 'Copy Code'}
                   </button>
                   <button
-                    onClick={() => { setCode(''); setPdfUrl(null); setError(null); }}
+                    onClick={() => { setCode(''); setPdfUrlSafe(null); setError(null); }}
                     className="flex items-center gap-1.5 px-3 py-2 bg-red-50 dark:bg-red-950/30 hover:bg-red-100 dark:hover:bg-red-900/40 text-red-600 dark:text-red-400 text-xs font-semibold rounded-lg transition-colors"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
