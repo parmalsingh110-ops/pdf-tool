@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { FileCog, Download, FileText, BarChart2, Layers, RefreshCw } from 'lucide-react';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import * as pdfjsLib from 'pdfjs-dist';
@@ -775,16 +775,26 @@ function txtFromSlides(slides: string[]): Blob {
 // ─── Existing PDF converters (unchanged) ────────────────────────────
 
 async function convertImageFile(f: File, outType: Target, quality: number): Promise<Blob> {
-  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
-    const m = new Image();
-    m.onload = () => resolve(m);
-    m.onerror = reject;
-    m.src = URL.createObjectURL(f);
-  });
+  const tempUrl = URL.createObjectURL(f);
+  let img: HTMLImageElement;
+  try {
+    img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const m = new Image();
+      m.onload  = () => resolve(m);
+      m.onerror = () => reject(new Error('Could not load image — file may be corrupted.'));
+      m.src = tempUrl;
+    });
+  } finally {
+    URL.revokeObjectURL(tempUrl);
+  }
+
+  if (!img.width || !img.height) throw new Error('Image has zero dimensions.');
+
   const canvas = document.createElement('canvas');
-  canvas.width = img.width; canvas.height = img.height;
+  canvas.width = img.width;
+  canvas.height = img.height;
   const ctx = canvas.getContext('2d');
-  if (!ctx) throw new Error('Canvas not available');
+  if (!ctx) throw new Error('Canvas context not available in this browser.');
   ctx.drawImage(img, 0, 0);
 
   if (outType === 'pdf') {
@@ -797,7 +807,7 @@ async function convertImageFile(f: File, outType: Target, quality: number): Prom
   }
   const mime = outType === 'png' ? 'image/png' : outType === 'webp' ? 'image/webp' : 'image/jpeg';
   const out = await new Promise<Blob | null>(res => canvas.toBlob(res, mime, quality));
-  if (!out) throw new Error('Image conversion failed');
+  if (!out) throw new Error('Image conversion failed.');
   return out;
 }
 
@@ -892,6 +902,24 @@ const KIND_ICONS: Record<Kind, any> = {
   unknown: FileCog,
 };
 
+// Per-file-type safety caps so a giant upload doesn't crash the browser tab.
+const MAX_SIZE_BYTES: Record<Kind, number> = {
+  pdf:     200 * 1024 * 1024,   // 200 MB
+  image:   100 * 1024 * 1024,   // 100 MB
+  text:     50 * 1024 * 1024,   //  50 MB
+  docx:    100 * 1024 * 1024,
+  xlsx:    100 * 1024 * 1024,
+  pptx:    150 * 1024 * 1024,
+  unknown:  50 * 1024 * 1024,
+};
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
+  return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
+}
+
 export default function UniversalConverter() {
   const [file, setFile]           = useState<File | null>(null);
   const [target, setTarget]       = useState<Target>('pdf');
@@ -902,17 +930,50 @@ export default function UniversalConverter() {
   const [error, setError]         = useState<string | null>(null);
   const [progress, setProgress]   = useState('');
 
+  // Track current job so stale results from a cancelled job can't race ahead.
+  const jobIdRef    = useRef(0);
+  const mountedRef  = useRef(true);
+  const lastUrlRef  = useRef<string | null>(null);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      // Final cleanup: revoke any unreleased blob URL.
+      if (lastUrlRef.current) {
+        try { URL.revokeObjectURL(lastUrlRef.current); } catch { /* */ }
+        lastUrlRef.current = null;
+      }
+    };
+  }, []);
+
+  // Helper that always revokes the previous URL before storing a new one.
+  const setResultUrlSafe = (next: string | null) => {
+    if (lastUrlRef.current && lastUrlRef.current !== next) {
+      try { URL.revokeObjectURL(lastUrlRef.current); } catch { /* */ }
+    }
+    lastUrlRef.current = next;
+    setResultUrl(next);
+  };
+
   const kind = file ? detectKind(file) : 'unknown';
   const targets = useMemo(() => TARGETS_FOR_KIND[kind] ?? [], [kind]);
   const KindIcon = KIND_ICONS[kind] ?? FileCog;
 
   const handleDrop = (accepted: File[]) => {
     if (!accepted.length) return;
-    setFile(accepted[0]);
-    setResultUrl(null);
+    const f = accepted[0];
+    const k = detectKind(f);
+    const cap = MAX_SIZE_BYTES[k];
+    if (f.size > cap) {
+      setError(`File is ${formatBytes(f.size)} — please keep ${KIND_LABELS[k]} files under ${formatBytes(cap)}.`);
+      setFile(null);
+      return;
+    }
+    setFile(f);
+    setResultUrlSafe(null);
     setError(null);
     setProgress('');
-    const k = detectKind(accepted[0]);
     const available = TARGETS_FOR_KIND[k];
     if (available?.length) setTarget(available[0]);
   };
@@ -923,6 +984,7 @@ export default function UniversalConverter() {
       setError('This conversion is not supported for the selected file type.');
       return;
     }
+    const myJobId = ++jobIdRef.current;
     setIsProcessing(true);
     setError(null);
     setProgress('Preparing…');
@@ -980,8 +1042,11 @@ export default function UniversalConverter() {
         throw new Error('Unsupported file type for conversion.');
       }
 
+      // Discard result if a newer job was started or the component unmounted.
+      if (!mountedRef.current || jobIdRef.current !== myJobId) return;
+
       const url = URL.createObjectURL(blob!);
-      setResultUrl(url);
+      setResultUrlSafe(url);
 
       // For PDF→image the output is always a ZIP
       const ext = (kind === 'pdf' && (target === 'png' || target === 'jpg' || target === 'jpeg'))
@@ -990,9 +1055,11 @@ export default function UniversalConverter() {
       setResultExt(ext);
 
     } catch (e: any) {
-      console.error(e);
+      if (!mountedRef.current || jobIdRef.current !== myJobId) return;
+      console.error('[UniversalConverter]', e);
       setError(e?.message ?? 'Conversion failed. Please check the file and try again.');
     } finally {
+      if (!mountedRef.current || jobIdRef.current !== myJobId) return;
       setIsProcessing(false);
       setProgress('');
     }
@@ -1125,7 +1192,7 @@ export default function UniversalConverter() {
                   {isProcessing ? 'Converting…' : `Convert to ${TARGET_LABELS[target] ?? target.toUpperCase()}`}
                 </button>
                 <button
-                  onClick={() => { setFile(null); setError(null); setResultUrl(null); }}
+                  onClick={() => { setFile(null); setError(null); setResultUrlSafe(null); }}
                   className="px-5 py-3.5 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold rounded-xl hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
                 >
                   Cancel
@@ -1149,7 +1216,7 @@ export default function UniversalConverter() {
                 </a>
               </div>
               <button
-                onClick={() => { setFile(null); setResultUrl(null); setError(null); }}
+                onClick={() => { setFile(null); setResultUrlSafe(null); setError(null); }}
                 className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white font-medium transition-colors"
               >
                 ← Convert another file

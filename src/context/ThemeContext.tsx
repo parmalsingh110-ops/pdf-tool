@@ -10,17 +10,51 @@ const ThemeContext = createContext<{
   toggleTheme: () => void;
 } | null>(null);
 
+/** Safe storage helpers — Safari private mode + disabled cookies + quota
+ *  errors throw on access, which would otherwise crash the whole app at boot. */
+function safeRead(): Theme | null {
+  try {
+    if (typeof window === 'undefined' || !window.localStorage) return null;
+    const v = window.localStorage.getItem(STORAGE_KEY);
+    return v === 'dark' || v === 'light' ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+function safeWrite(v: Theme): void {
+  try {
+    if (typeof window === 'undefined' || !window.localStorage) return;
+    window.localStorage.setItem(STORAGE_KEY, v);
+  } catch {
+    /* ignore */
+  }
+}
+
+function prefersDark(): boolean {
+  try {
+    return typeof window !== 'undefined' &&
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(prefers-color-scheme: dark)').matches;
+  } catch {
+    return false;
+  }
+}
+
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme, setThemeState] = useState<Theme>(() => {
-    if (typeof window === 'undefined') return 'light';
-    const s = localStorage.getItem(STORAGE_KEY) as Theme | null;
-    if (s === 'dark' || s === 'light') return s;
-    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    const stored = safeRead();
+    if (stored) return stored;
+    return prefersDark() ? 'dark' : 'light';
   });
 
   useEffect(() => {
-    document.documentElement.classList.toggle('dark', theme === 'dark');
-    localStorage.setItem(STORAGE_KEY, theme);
+    try {
+      document.documentElement.classList.toggle('dark', theme === 'dark');
+    } catch {
+      /* defensive — should never fail in browsers, but don't crash if it does */
+    }
+    safeWrite(theme);
   }, [theme]);
 
   const setTheme = useCallback((t: Theme) => setThemeState(t), []);
