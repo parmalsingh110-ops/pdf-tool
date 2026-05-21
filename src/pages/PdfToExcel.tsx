@@ -22,11 +22,40 @@ function buildXlsx(paras: RichParagraph[], pageCount: number): Blob {
   for (let pi = 0; pi < pageCount; pi++) {
     const pageParas = (byPage.get(pi) ?? []).sort((a, b) => a.y - b.y);
     const aoaData: string[][] = [];
+
     for (const para of pageParas) {
       const lineTexts = para.text.split('\n').filter(t => t.trim());
       for (const lt of lineTexts) {
-        const cols = lt.split(/\s{3,}/).map(s => s.trim()).filter(Boolean);
-        aoaData.push(cols.length > 1 ? cols : [lt.trim()]);
+        // Smart column splitting: use tab characters or 4+ spaces as column separators
+        // Avoid splitting on regular word spaces (critical for Hindi/Devanagari text)
+        const cols = lt.split(/\t|[ ]{4,}/).map(s => s.trim()).filter(Boolean);
+        if (cols.length > 1) {
+          aoaData.push(cols);
+        } else {
+          // Check if runs in this paragraph have large X-gaps indicating table columns
+          const lineRuns = para.runs.filter(r => {
+            // Find runs whose text appears in this line
+            return lt.includes(r.text.trim().substring(0, 10));
+          });
+          if (lineRuns.length > 1) {
+            // Sort by x position
+            lineRuns.sort((a, b) => a.x - b.x);
+            const avgFontSize = lineRuns.reduce((s, r) => s + r.fontSize, 0) / lineRuns.length;
+            // Check for large gaps between runs (> 3× font size = table column)
+            const segments: string[] = [lineRuns[0].text];
+            for (let ri = 1; ri < lineRuns.length; ri++) {
+              const gap = lineRuns[ri].x - (lineRuns[ri - 1].x + lineRuns[ri - 1].w);
+              if (gap > avgFontSize * 3) {
+                segments.push(lineRuns[ri].text);
+              } else {
+                segments[segments.length - 1] += ' ' + lineRuns[ri].text;
+              }
+            }
+            aoaData.push(segments.map(s => s.trim()).filter(Boolean));
+          } else {
+            aoaData.push([lt.trim()]);
+          }
+        }
       }
     }
     if (!aoaData.length) continue;
@@ -35,7 +64,7 @@ function buildXlsx(paras: RichParagraph[], pageCount: number): Blob {
       row.forEach((c, ci) => { acc[ci] = Math.max(acc[ci] ?? 8, c.length + 2); });
       return acc;
     }, []);
-    ws['!cols'] = colWidths.map(w => ({ wch: w }));
+    ws['!cols'] = colWidths.map(w => ({ wch: Math.min(w, 60) }));
     XLSX.utils.book_append_sheet(workbook, ws, `Page ${pi + 1}`);
   }
   if (!workbook.SheetNames.length)
@@ -72,7 +101,7 @@ export default function PdfToExcel() {
     try {
       const analyses = await analysePDF(f, onProgress);
       setPageAnalyses(analyses);
-      analyses.some(p => p.isScanned) ? setStage('scan_detected') : await doConvert(f, analyses, false);
+      setStage('scan_detected');
     } catch (e: any) { setErrorMsg(e?.message || 'Failed to analyse PDF.'); setStage('error'); }
   };
 

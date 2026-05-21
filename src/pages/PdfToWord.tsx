@@ -38,6 +38,41 @@ function toTwips(pts: number): number {
   return Math.round(pts * 20);
 }
 
+/**
+ * Detect the best Word-compatible font for the given text and PDF font name.
+ * Devanagari/Hindi → Mangal (renders conjuncts correctly in Word)
+ * Latin text → Calibri (modern default)
+ * Other scripts → use PDF font or fallback to Arial Unicode MS
+ */
+function pickDocxFont(text: string, pdfFontName: string): string {
+  // Devanagari range: U+0900–U+097F
+  if (/[\u0900-\u097F]/.test(text)) return 'Mangal';
+  // Bengali
+  if (/[\u0980-\u09FF]/.test(text)) return 'Vrinda';
+  // Gujarati
+  if (/[\u0A80-\u0AFF]/.test(text)) return 'Shruti';
+  // Gurmukhi (Punjabi)
+  if (/[\u0A00-\u0A7F]/.test(text)) return 'Raavi';
+  // Tamil
+  if (/[\u0B80-\u0BFF]/.test(text)) return 'Latha';
+  // Telugu
+  if (/[\u0C00-\u0C7F]/.test(text)) return 'Gautami';
+  // Kannada
+  if (/[\u0C80-\u0CFF]/.test(text)) return 'Tunga';
+  // Malayalam
+  if (/[\u0D00-\u0D7F]/.test(text)) return 'Kartika';
+  // Arabic/Urdu
+  if (/[\u0600-\u06FF\u0750-\u077F]/.test(text)) return 'Arial';
+  // CJK
+  if (/[\u4E00-\u9FFF\u3000-\u303F]/.test(text)) return 'SimSun';
+  // If PDF has a readable font name (after subset prefix like ABCDEF+FontName)
+  const cleaned = pdfFontName.replace(/^[A-Z]{6}\+/, '').replace(/[-_,].*$/, '');
+  if (cleaned && !cleaned.toLowerCase().includes('identity') && cleaned.length > 2) {
+    return cleaned;
+  }
+  return 'Calibri';
+}
+
 function buildDocxFromParagraphs(paras: RichParagraph[], pageCount: number): Document {
   const children: Paragraph[] = [];
   let currentPage = -1;
@@ -51,22 +86,28 @@ function buildDocxFromParagraphs(paras: RichParagraph[], pageCount: number): Doc
       currentPage = para.pageIndex;
     }
 
-    // Paragraph spacing: translate PDF gap to Word spacing-before
-    const spaceBefore = Math.round(Math.min(para.paragraphSpaceBefore * 20, 720)); // cap at 36pt
+    // Paragraph spacing: exact vertical gap translated to Word spacing-before (uncapped)
+    const spaceBefore = Math.round(para.paragraphSpaceBefore * 20);
 
-    // Indentation
+    // Indentation: only apply if text is left-aligned or justified to prevent messing up centered/right-aligned text
     const indentProps: { left?: number; hanging?: number } | undefined =
-      para.indent > 2
+      para.indent > 2 && (para.alignment === 'left' || para.alignment === 'justify')
         ? { left: toTwips(para.indent) }
         : undefined;
 
     // Split multi-line paragraph text back into sub-lines and create separate runs
     const lineTexts = para.text.split('\n').filter(t => t.trim());
 
+    // Determine best font from paragraph runs
+    const dominantFontName = para.runs.length > 0 ? para.runs[0].fontName : '';
+
     // Build one Paragraph per logical line of the PDF (preserving visual line breaks)
     for (let li = 0; li < lineTexts.length; li++) {
       const lineText = lineTexts[li];
       if (!lineText.trim()) continue;
+
+      // Pick font based on actual text content
+      const font = pickDocxFont(lineText, dominantFontName);
 
       // For the first line, use paragraph spacing; subsequent lines have no extra space
       const run = new TextRun({
@@ -74,7 +115,7 @@ function buildDocxFromParagraphs(paras: RichParagraph[], pageCount: number): Doc
         bold: para.bold,
         italics: para.italic,
         size: toHalfPt(para.fontSize),
-        font: 'Mangal',   // Mangal renders Devanagari (Hindi) correctly in Word
+        font,
       });
 
       children.push(new Paragraph({
@@ -100,7 +141,7 @@ function buildDocxFromParagraphs(paras: RichParagraph[], pageCount: number): Doc
       default: {
         document: {
           run: {
-            font: 'Mangal',
+            font: 'Calibri',
             size: 24,    // 12pt default
           },
         },
@@ -145,7 +186,7 @@ export default function PdfToWord() {
     try {
       const analyses = await analysePDF(f, onProgress);
       setPageAnalyses(analyses);
-      analyses.some(p => p.isScanned) ? setStage('scan_detected') : await doConvert(f, analyses, false);
+      setStage('scan_detected');
     } catch (e: any) { setErrorMsg(e?.message || 'Failed to analyse PDF.'); setStage('error'); }
   };
 
@@ -254,17 +295,31 @@ export function LangPicker({ lang, setLang, open, setOpen, label, accent }: any)
 export function ScanDialog({ file, pageAnalyses, lang, setLang, langOpen, setLangOpen, selLabel, accent, onOcr, onSkip, onReset }: any) {
   const scanned = (pageAnalyses as PageAnalysis[]).filter(p=>p.isScanned).length;
   const textPgs = (pageAnalyses as PageAnalysis[]).filter(p=>p.hasText).length;
+  const isDigital = scanned === 0;
+
   return (
     <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-lg overflow-hidden">
-      <div className="bg-amber-50 dark:bg-amber-950/40 border-b border-amber-200 dark:border-amber-800 px-6 py-5 flex items-center gap-3">
-        <div className="w-10 h-10 bg-amber-100 dark:bg-amber-900/50 rounded-xl flex items-center justify-center">
-          <Scan className="w-5 h-5 text-amber-600 dark:text-amber-400"/>
+      {isDigital ? (
+        <div className="bg-blue-50 dark:bg-blue-950/40 border-b border-blue-200 dark:border-blue-800 px-6 py-5 flex items-center gap-3">
+          <div className="w-10 h-10 bg-blue-100 dark:bg-blue-900/50 rounded-xl flex items-center justify-center">
+            <FileText className="w-5 h-5 text-blue-600 dark:text-blue-400"/>
+          </div>
+          <div>
+            <h3 className="font-bold text-blue-900 dark:text-blue-200">Digital PDF Detected</h3>
+            <p className="text-sm text-blue-700 dark:text-blue-400">Select conversion mode</p>
+          </div>
         </div>
-        <div>
-          <h3 className="font-bold text-amber-900 dark:text-amber-200">Scanned PDF Detected</h3>
-          <p className="text-sm text-amber-700 dark:text-amber-400">{scanned} of {pageAnalyses.length} pages are image-only</p>
+      ) : (
+        <div className="bg-amber-50 dark:bg-amber-950/40 border-b border-amber-200 dark:border-amber-800 px-6 py-5 flex items-center gap-3">
+          <div className="w-10 h-10 bg-amber-100 dark:bg-amber-900/50 rounded-xl flex items-center justify-center">
+            <Scan className="w-5 h-5 text-amber-600 dark:text-amber-400"/>
+          </div>
+          <div>
+            <h3 className="font-bold text-amber-900 dark:text-amber-200">Scanned PDF Detected</h3>
+            <p className="text-sm text-amber-700 dark:text-amber-400">{scanned} of {pageAnalyses.length} pages are image-only</p>
+          </div>
         </div>
-      </div>
+      )}
       <div className="p-6 space-y-5">
         <div className="flex items-center gap-3 p-4 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700">
           <FileText className="w-8 h-8 text-slate-500"/>
@@ -285,20 +340,34 @@ export function ScanDialog({ file, pageAnalyses, lang, setLang, langOpen, setLan
         </div>
         <LangPicker lang={lang} setLang={setLang} open={langOpen} setOpen={setLangOpen} label={selLabel} accent={accent}/>
         <div className="flex flex-col gap-3">
-          <button onClick={onOcr}
-            className="w-full flex items-center justify-center gap-2 px-6 py-4 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-md transition-all hover:scale-[1.01]">
-            <Scan className="w-5 h-5"/>Apply with OCR (Recommended)
-            <span className="ml-1 text-xs font-normal bg-blue-500 px-2 py-0.5 rounded-full">Best Quality</span>
-          </button>
-          <button onClick={onSkip}
-            className="w-full flex items-center justify-center gap-2 px-6 py-4 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-semibold rounded-xl border border-slate-200 dark:border-slate-700 transition-all">
-            Continue without OCR <span className="ml-1 text-xs text-slate-400">(text pages only)</span>
-          </button>
+          {isDigital ? (
+            <>
+              <button onClick={onSkip}
+                className="w-full flex items-center justify-center gap-2 px-6 py-4 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-md transition-all hover:scale-[1.01]">
+                <Zap className="w-5 h-5"/> Standard Conversion (Fast)
+              </button>
+              <button onClick={onOcr}
+                className="w-full flex items-center justify-center gap-2 px-6 py-4 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-semibold rounded-xl border border-slate-200 dark:border-slate-700 transition-all">
+                <Scan className="w-5 h-5"/> Advanced OCR Mode <span className="ml-1 text-xs text-slate-400">(Fixes garbled Hindi/Regional fonts)</span>
+              </button>
+            </>
+          ) : (
+            <>
+              <button onClick={onOcr}
+                className="w-full flex items-center justify-center gap-2 px-6 py-4 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-md transition-all hover:scale-[1.01]">
+                <Scan className="w-5 h-5"/> Apply with OCR (Recommended)
+              </button>
+              <button onClick={onSkip}
+                className="w-full flex items-center justify-center gap-2 px-6 py-4 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-semibold rounded-xl border border-slate-200 dark:border-slate-700 transition-all">
+                Continue without OCR
+              </button>
+            </>
+          )}
           <button onClick={onReset} className="text-sm text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-center py-1">← Choose a different file</button>
         </div>
         <div className="flex items-start gap-2 text-xs text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-800/50 rounded-lg p-3">
           <Info className="w-3.5 h-3.5 shrink-0 mt-0.5 text-blue-400"/>
-          OCR reads text from scanned images and preserves position, alignment, bold, and font size in the output.
+          {isDigital ? "If the output document has unreadable or garbled characters, use Advanced OCR Mode to fix it while preserving exact formatting." : "OCR reads text from scanned images and preserves position, alignment, bold, and font size in the output."}
         </div>
       </div>
     </div>

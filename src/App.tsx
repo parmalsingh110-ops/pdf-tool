@@ -54,6 +54,7 @@ import CertifyDocument from './pages/CertifyDocument';
 import BatchProtect from './pages/BatchProtect';
 import InkSaverPDF from './pages/InkSaverPDF';
 import UniversalConverter from './pages/UniversalConverter';
+import CodeToPdf from './pages/CodeToPdf';
 
 // New Advanced Tools
 import ImageCollage from './pages/ImageCollage';
@@ -98,6 +99,7 @@ const PixelResizer = lazy(() => import('./pages/PixelResizer'));
 const ImageResizer = lazy(() => import('./pages/ImageResizer'));
 const ImageTextEditor = lazy(() => import('./pages/ImageTextEditor'));
 const PassportPhotoSheet = lazy(() => import('./pages/PassportPhotoSheet'));
+const IncreasePdfSize = lazy(() => import('./pages/IncreasePdfSize'));
 
 export default function App() {
   return (
@@ -164,6 +166,7 @@ export default function App() {
           <Route path="batch-protect" element={<BatchProtect />} />
           <Route path="ink-saver" element={<InkSaverPDF />} />
           <Route path="universal-converter" element={<UniversalConverter />} />
+          <Route path="code-to-pdf" element={<CodeToPdf />} />
 
           {/* 10 New Advanced Tools */}
           <Route path="image-collage" element={<ImageCollage />} />
@@ -199,6 +202,7 @@ export default function App() {
           <Route path="color-extractor" element={<ColorExtractor />} />
           <Route path="present" element={<PdfPresenter />} />
           <Route path="file-hash" element={<FileHash />} />
+          <Route path="increase-size" element={<IncreasePdfSize />} />
         </Route>
     </Routes>
   );
