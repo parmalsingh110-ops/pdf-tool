@@ -34,6 +34,7 @@ import {
 import { useTheme } from '../context/ThemeContext';
 import { readRecentTools, recordToolVisit, type RecentEntry } from '../lib/recentFiles';
 import KeyboardShortcutsModal from './KeyboardShortcutsModal';
+import ErrorBoundary from './ErrorBoundary';
 
 const ROUTE_TITLES: Record<string, string> = {
   '/': 'Home',
@@ -280,15 +281,17 @@ export default function Layout() {
         </div>
       </header>
       <main className="flex-1 flex flex-col pt-16">
-        <Suspense
-          fallback={
-            <div className="flex-1 flex items-center justify-center min-h-[40vh] text-slate-500 dark:text-slate-400 text-sm font-medium">
-              Loading tool…
-            </div>
-          }
-        >
-          <Outlet />
-        </Suspense>
+        <ErrorBoundary locationKey={location.pathname}>
+          <Suspense
+            fallback={
+              <div className="flex-1 flex items-center justify-center min-h-[40vh] text-slate-500 dark:text-slate-400 text-sm font-medium">
+                Loading tool…
+              </div>
+            }
+          >
+            <Outlet />
+          </Suspense>
+        </ErrorBoundary>
       </main>
       <footer className="bg-slate-50 dark:bg-slate-900 py-12 border-t border-slate-200/70 dark:border-slate-800">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 grid grid-cols-2 md:grid-cols-5 gap-8">
