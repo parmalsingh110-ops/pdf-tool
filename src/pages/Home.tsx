@@ -6,7 +6,7 @@ import {
   ContactRound, Zap, BarChart3, ShieldOff, RotateCw, Crop, Palette,
   Presentation, BookOpen, Stamp, Layers2, Lock, Unlock, Droplet, Hash,
   Layers, RefreshCw, Code, ShieldCheck, FileX, MonitorSmartphone,
-  Images, Copy, Info, Download, ScanSearch, Clock3,
+  Images, Copy, Info, Download, ScanSearch, Clock3, Maximize,
 } from 'lucide-react';
 import { readRecentTools, type RecentEntry } from '../lib/recentFiles';
 
@@ -84,10 +84,11 @@ const TOOL_GROUPS = [
   },
   {
     title: 'Compress & Optimize',
-    desc: 'Reduce file sizes for email, uploads, and printing while preserving quality.',
+    desc: 'Reduce or artificially increase file sizes for email, uploads, and portals.',
     color: 'emerald',
     tools: [
       { title: 'Compress PDF', desc: 'Smart compression.', path: '/compress', icon: Minimize2 },
+      { title: 'Increase PDF Size', desc: 'Inflate file size.', path: '/increase-size', icon: Maximize },
       { title: 'Target Size PDF', desc: 'Aim for exact KB.', path: '/target-compress', icon: Target },
       { title: 'Ink Saver PDF', desc: 'Optimize for printing.', path: '/ink-saver', icon: Sparkles },
       { title: 'Grayscale PDF', desc: 'Convert to B&W.', path: '/grayscale-pdf', icon: Droplet },
