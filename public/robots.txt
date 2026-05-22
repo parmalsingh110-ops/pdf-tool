@@ -1,4 +1,16 @@
 User-agent: *
 Allow: /
 
+# Block admin/private paths
+Disallow: /api/
+Disallow: /_next/
+Disallow: /node_modules/
+
+# Crawl delay to be respectful
+Crawl-delay: 1
+
+# Primary Sitemap
 Sitemap: https://pdfmediasuite.in/sitemap.xml
+
+# Host
+Host: https://pdfmediasuite.in
