@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { usePageSEO } from '../lib/usePageSEO';
 import { Link } from 'react-router-dom';
 import { 
   Combine, Scissors, Minimize2, Image as ImageIcon, FileImage, Layers, 
@@ -160,6 +161,11 @@ const categories = [
 ];
 
 export default function AllTools() {
+  usePageSEO(
+    'All PDF & Image Tools — 90+ Free Online Tools',
+    'Browse all 90+ free PDF and image tools on PDF Media Suite. Merge PDF, split PDF, compress PDF, convert PDF to Word/Excel/JPG, image resizer, remove background, OCR, digital signature, redact PDF, watermark, QR code generator, and many more — all free, browser-based, private.',
+    'all pdf tools, free pdf tools list, online pdf converter, pdf editor online, image editor online, pdf to word, pdf to excel, merge pdf free, compress pdf free, pdf media suite tools'
+  );
   const [sortMode, setSortMode] = useState<'most-used' | 'newest' | 'a-z'>('most-used');
   const [query, setQuery] = useState('');
 
@@ -321,6 +327,113 @@ export default function AllTools() {
           </div>
         </div>
       </div>
+
+      {/* ===== SEO CONTENT BLOCK — Rich text for Google indexing ===== */}
+      <section className="max-w-7xl mx-auto px-6 py-16 border-t border-slate-200 dark:border-slate-800">
+        <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-6">Complete List of PDF & Image Tools</h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 text-sm text-slate-600 dark:text-slate-400">
+          <div>
+            <h3 className="font-bold text-slate-800 dark:text-slate-200 mb-2">PDF Essentials</h3>
+            <ul className="space-y-1">
+              <li>✅ <strong>Merge PDF</strong> — Combine multiple PDF files into one document</li>
+              <li>✅ <strong>Split PDF</strong> — Separate PDF into individual pages or ranges</li>
+              <li>✅ <strong>Compress PDF</strong> — Reduce PDF file size, extreme or lossless</li>
+              <li>✅ <strong>Edit PDF</strong> — Annotate, add text, edit layouts</li>
+              <li>✅ <strong>Organize PDF</strong> — Drag-and-drop page reordering</li>
+              <li>✅ <strong>Rotate PDF Pages</strong> — Rotate by 90/180/270 degrees</li>
+              <li>✅ <strong>Protect PDF</strong> — Add 256-bit AES password encryption</li>
+              <li>✅ <strong>Unlock PDF</strong> — Remove PDF password protection</li>
+              <li>✅ <strong>Watermark PDF</strong> — Add custom text watermarks</li>
+              <li>✅ <strong>Page Numbers</strong> — Add page numbers to PDF</li>
+            </ul>
+          </div>
+          <div>
+            <h3 className="font-bold text-slate-800 dark:text-slate-200 mb-2">Convert PDF</h3>
+            <ul className="space-y-1">
+              <li>✅ <strong>PDF to Word</strong> — Convert PDF to editable DOCX</li>
+              <li>✅ <strong>PDF to Excel</strong> — Extract tables to XLSX format</li>
+              <li>✅ <strong>PDF to PowerPoint</strong> — PDF slides to PPTX</li>
+              <li>✅ <strong>PDF to JPG</strong> — Each page as a JPEG image</li>
+              <li>✅ <strong>JPG to PDF</strong> — Images into a PDF document</li>
+              <li>✅ <strong>PDF to Images ZIP</strong> — All pages as downloadable ZIP</li>
+              <li>✅ <strong>Searchable PDF (OCR)</strong> — Make scanned PDFs searchable</li>
+              <li>✅ <strong>Screenshot to PDF</strong> — Convert screenshots to PDF</li>
+              <li>✅ <strong>Universal Converter</strong> — DOCX/XLSX/PPTX to PDF</li>
+              <li>✅ <strong>PDF to GIF</strong> — Animated GIF from PDF pages</li>
+              <li>✅ <strong>Code to PDF</strong> — Syntax-highlighted code as PDF</li>
+            </ul>
+          </div>
+          <div>
+            <h3 className="font-bold text-slate-800 dark:text-slate-200 mb-2">Image Tools</h3>
+            <ul className="space-y-1">
+              <li>✅ <strong>Image Resizer</strong> — Resize in px, cm, mm, % or target KB</li>
+              <li>✅ <strong>Image Crop</strong> — Crop with preset aspect ratios</li>
+              <li>✅ <strong>Remove Background</strong> — AI-powered background removal</li>
+              <li>✅ <strong>Passport Photo Sheet</strong> — Print-ready photo grids</li>
+              <li>✅ <strong>Image Format Converter</strong> — JPG ↔ PNG ↔ WebP</li>
+              <li>✅ <strong>Image Watermark</strong> — Add watermarks to images</li>
+              <li>✅ <strong>Image Text Editor (OCR)</strong> — Edit text inside images</li>
+              <li>✅ <strong>Exact Image Size</strong> — Resize image to exact KB</li>
+              <li>✅ <strong>Color Extractor</strong> — Get HEX/RGB color palette</li>
+              <li>✅ <strong>Image Collage</strong> — Combine multiple images into grid</li>
+              <li>✅ <strong>Image Metadata (EXIF)</strong> — Read and edit EXIF data</li>
+            </ul>
+          </div>
+          <div>
+            <h3 className="font-bold text-slate-800 dark:text-slate-200 mb-2">Security & Compliance</h3>
+            <ul className="space-y-1">
+              <li>✅ <strong>PDF Redaction</strong> — Permanently black out sensitive text</li>
+              <li>✅ <strong>Remove Metadata</strong> — Strip all hidden document data</li>
+              <li>✅ <strong>Digital Signature</strong> — Sign PDF with cryptographic key</li>
+              <li>✅ <strong>Signature Pad</strong> — Draw handwritten e-signature</li>
+              <li>✅ <strong>Validate Signatures</strong> — Verify PDF signatures</li>
+              <li>✅ <strong>Certify Document</strong> — Official PDF certification</li>
+              <li>✅ <strong>Batch Protect</strong> — Password multiple PDFs at once</li>
+              <li>✅ <strong>Invisible Watermark</strong> — Hidden steganographic mark</li>
+              <li>✅ <strong>File Hash SHA-256</strong> — Verify document integrity</li>
+              <li>✅ <strong>PDF/A Conversion</strong> — Archival format for long-term storage</li>
+            </ul>
+          </div>
+          <div>
+            <h3 className="font-bold text-slate-800 dark:text-slate-200 mb-2">Pro & Advanced Tools</h3>
+            <ul className="space-y-1">
+              <li>✅ <strong>PDF Stamp</strong> — Add DRAFT/CONFIDENTIAL stamps</li>
+              <li>✅ <strong>PDF Stats</strong> — Word count, reading time, page count</li>
+              <li>✅ <strong>PDF Booklet</strong> — Format for fold-and-print booklet</li>
+              <li>✅ <strong>Slide Presenter</strong> — Fullscreen PDF presentation mode</li>
+              <li>✅ <strong>Extract Pages</strong> — Visual page picker and extractor</li>
+              <li>✅ <strong>Remove Blank Pages</strong> — Auto-delete empty PDF pages</li>
+              <li>✅ <strong>PDF Overlay</strong> — Layer two PDFs with transparency</li>
+              <li>✅ <strong>PDF Comparison</strong> — Diff two PDF documents side by side</li>
+              <li>✅ <strong>QR Code Generator</strong> — Create QR codes as PDF</li>
+              <li>✅ <strong>Document Scanner</strong> — Scan documents with camera</li>
+              <li>✅ <strong>PDF Form Filler</strong> — Fill interactive PDF form fields</li>
+            </ul>
+          </div>
+          <div>
+            <h3 className="font-bold text-slate-800 dark:text-slate-200 mb-2">Compress & Optimize</h3>
+            <ul className="space-y-1">
+              <li>✅ <strong>Target Size Compress</strong> — Compress PDF to exact KB/MB</li>
+              <li>✅ <strong>Increase PDF Size</strong> — Inflate file size for portals</li>
+              <li>✅ <strong>Ink Saver PDF</strong> — Optimize for printing, save ink</li>
+              <li>✅ <strong>Grayscale PDF</strong> — Convert to black and white PDF</li>
+              <li>✅ <strong>Invert PDF Colors</strong> — Dark mode PDF conversion</li>
+              <li>✅ <strong>Flatten PDF</strong> — Remove interactive form fields</li>
+              <li>✅ <strong>Search & Replace</strong> — Find and replace text in PDF</li>
+              <li>✅ <strong>Headers & Footers</strong> — Add custom header/footer</li>
+              <li>✅ <strong>Bates Numbering</strong> — Legal document numbering</li>
+              <li>✅ <strong>Image to Base64</strong> — Encode images for HTML/CSS</li>
+            </ul>
+          </div>
+        </div>
+        <p className="mt-10 text-slate-500 dark:text-slate-500 text-sm max-w-4xl">
+          PDF Media Suite (pdfmediasuite.in) is a completely free, browser-based tool suite for PDF and image processing.
+          All 90+ tools work directly in your browser — no file uploads to servers, no account required, 100% private.
+          Whether you need to <strong>merge PDF</strong>, <strong>compress PDF</strong>, <strong>convert PDF to Word</strong>,
+          <strong>remove background from images</strong>, <strong>resize images</strong>, <strong>add watermarks</strong>,
+          <strong>sign documents</strong>, or <strong>redact sensitive information</strong> — we have the right tool for you.
+        </p>
+      </section>
     </div>
   );
 }
