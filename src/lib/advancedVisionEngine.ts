@@ -3,9 +3,9 @@ export const getVisionApiKey = () => import.meta.env.VITE_GEMINI_API_KEY || '';
 const GEMINI_MODELS = [
   'gemini-2.5-flash',
   'gemini-2.5-pro',
-  'gemini-1.5-flash',
-  'gemini-1.5-pro',
-  'gemini-1.5-flash-8b'
+  'gemini-2.0-flash',
+  'gemini-2.0-flash-lite',
+  'gemini-3.5-flash'
 ];
 
 export async function fetchGeminiWithFallback(apiKey: string, requestBody: any): Promise<Response> {
@@ -266,12 +266,14 @@ ${JSON.stringify(paras)}`;
 }
 
 export interface UniversalLayoutElement {
-  type: 'text' | 'image' | 'table';
+  type: 'text' | 'image' | 'table' | 'row';
   text?: string;
   font_size?: number;
   bold?: boolean;
   italic?: boolean;
   alignment?: 'left' | 'center' | 'right' | 'justify';
+  left_text?: string;
+  right_text?: string;
   description?: string;
   bbox?: [number, number, number, number]; // [ymin, xmin, ymax, xmax] 0-1000
   rows?: any[][];
@@ -287,7 +289,7 @@ export async function extractUniversalLayout(base64Image: string): Promise<Unive
   const apiKey = getVisionApiKey();
   if (!apiKey) throw new Error('Vision API key is not configured.');
 
-  const prompt = `You are a world-class Document Layout Analyzer. Your task is to perfectly recreate the structure, formatting, and content of this document page.
+  const prompt = `You are an expert Document Layout Analyzer. Your task is to perfectly recreate the structure, formatting, and content of this document page.
 Return ONLY a valid JSON object matching this strict schema:
 {
   "page_width": 800,
@@ -302,26 +304,36 @@ Return ONLY a valid JSON object matching this strict schema:
       "alignment": "center" // one of: left, center, right, justify
     },
     {
+      "type": "row",
+      "left_text": "Text on the left side",
+      "right_text": "Text on the right side",
+      "font_size": 14,
+      "bold": true
+    },
+    {
       "type": "image",
       "description": "QR Code / Signature / State Emblem / Photo",
+      "alignment": "right", // left, center, or right based on its visual position
       "bbox": [ymin, xmin, ymax, xmax] // normalized 0-1000
     },
     {
       "type": "table",
+      "has_borders": true,
       "rows": [
         [
-          { "text": "Cell value", "bold": true }
+          { "text": "Cell value", "bold": true, "alignment": "left" }
         ]
       ]
     }
   ]
 }
 
-RULES:
-1. Capture ALL text, preserving exact formatting (bold, alignment, relative size).
-2. For EVERY image, logo, QR code, or signature, add an "image" element with a highly accurate bounding box [ymin, xmin, ymax, xmax].
-3. For tables, use the "table" type with nested rows.
-4. Output MUST be valid JSON. No markdown backticks.`;
+CRITICAL RULES:
+1. EXACT FORMATTING: Capture ALL text, preserving exact bolding, alignment, and relative font sizes.
+2. IMAGES & QRs: For EVERY image, logo, stamp, QR code, or signature, output an "image" element with a highly accurate bounding box [ymin, xmin, ymax, xmax]. Our system will crop this exactly.
+3. SIDE-BY-SIDE TEXT (CRITICAL): If two pieces of text are on the exact same horizontal line but spaced far apart (e.g. "FROM: BVC" on left, "BOARDING AT: BVC" on right), use the "row" type with "left_text" and "right_text". DO NOT use tables for simple side-by-side text.
+4. TABLES: ONLY use the "table" type for actual grid data with borders.
+5. Output MUST be valid JSON. No markdown backticks.`;
 
   const base64Data = base64Image.split(',')[1] || base64Image;
 

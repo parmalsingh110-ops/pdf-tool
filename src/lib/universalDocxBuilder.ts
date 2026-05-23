@@ -1,9 +1,18 @@
-import { Document, Paragraph, TextRun, AlignmentType, ImageRun, Table, TableRow, TableCell, WidthType, BorderStyle } from 'docx';
-import { UniversalLayoutResponse, UniversalLayoutElement } from './advancedVisionEngine';
+import { Document, Paragraph, TextRun, AlignmentType, ImageRun, Table, TableRow, TableCell, WidthType, BorderStyle, TabStopType, TabStopPosition } from 'docx';
+import { UniversalLayoutResponse } from './advancedVisionEngine';
 
-/**
- * Helper to crop an image from a canvas given a normalized bbox [ymin, xmin, ymax, xmax] 0-1000
- */
+export interface UniversalLayoutElement {
+  type: 'text' | 'image' | 'table';
+  text?: string;
+  font_size?: number;
+  bold?: boolean;
+  italic?: boolean;
+  alignment?: 'left' | 'center' | 'right' | 'justify';
+  description?: string;
+  bbox?: [number, number, number, number];
+  rows?: any[][];
+  has_borders?: boolean;
+}
 async function cropImageFromCanvas(canvas: HTMLCanvasElement, bbox: [number, number, number, number]): Promise<{ data: Uint8Array, width: number, height: number } | null> {
   const [ymin, xmin, ymax, xmax] = bbox;
   const x = (xmin / 1000) * canvas.width;
@@ -96,15 +105,44 @@ export async function buildUniversalDocx(pages: { layout: UniversalLayoutRespons
           allChildren.push(p);
         }
       }
+      else if (el.type === 'row') {
+        const p = new Paragraph({
+          tabStops: [
+            { type: TabStopType.RIGHT, position: 9000 }
+          ],
+          spacing: { after: 120 },
+          children: [
+            new TextRun({
+              text: el.left_text || '',
+              bold: el.bold,
+              size: (el.font_size || 12) * 2
+            }),
+            new TextRun({
+              text: "\t" + (el.right_text || ''),
+              bold: el.bold,
+              size: (el.font_size || 12) * 2
+            })
+          ]
+        });
+        allChildren.push(p);
+      }
       else if (el.type === 'table' && el.rows && el.rows.length > 0) {
         const tableRows = el.rows.map(row => {
           const cells = row.map(cell => {
             const cellText = typeof cell === 'string' ? cell : (cell.text || '');
             const isBold = typeof cell === 'object' && cell.bold;
+            const align = typeof cell === 'object' ? getAlignment(cell.alignment) : AlignmentType.LEFT;
             return new TableCell({
-              margins: { top: 100, bottom: 100, left: 100, right: 100 },
+              margins: { top: 50, bottom: 50, left: 50, right: 50 },
+              borders: el.has_borders === false ? {
+                top: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+                bottom: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+                left: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+                right: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+              } : undefined,
               children: [
                 new Paragraph({
+                  alignment: align,
                   children: [new TextRun({ text: cellText, bold: isBold, size: 24 })]
                 })
               ]
@@ -116,7 +154,14 @@ export async function buildUniversalDocx(pages: { layout: UniversalLayoutRespons
         const table = new Table({
           rows: tableRows,
           width: { size: 100, type: WidthType.PERCENTAGE },
-          borders: {
+          borders: el.has_borders === false ? {
+            top: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+            bottom: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+            left: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+            right: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+            insideHorizontal: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+            insideVertical: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+          } : {
             top: { style: BorderStyle.SINGLE, size: 1 },
             bottom: { style: BorderStyle.SINGLE, size: 1 },
             left: { style: BorderStyle.SINGLE, size: 1 },
