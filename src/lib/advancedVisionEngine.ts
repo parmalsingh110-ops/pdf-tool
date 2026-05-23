@@ -230,3 +230,37 @@ ${rawText.slice(0, 8000)}`;
 
   return rawText.split('\n').filter(Boolean);
 }
+
+/**
+ * polishExtractedParagraphs — Takes an array of extracted strings and asks
+ * Gemini to fix OCR typos without changing the meaning or array length.
+ */
+export async function polishExtractedParagraphs(paras: string[]): Promise<string[]> {
+  const apiKey = getVisionApiKey();
+  if (!apiKey || !paras.length) return paras;
+
+  const prompt = `You are an OCR corrector. Below is a JSON array of strings extracted from a document.
+Fix any obvious spelling or OCR mistakes, but DO NOT change the meaning, structure, or number of items.
+Return ONLY a valid JSON array of strings of the exact same length. No markdown.
+
+Input:
+${JSON.stringify(paras)}`;
+
+  const requestBody = {
+    contents: [{ parts: [{ text: prompt }] }],
+    generationConfig: { temperature: 0.1 }
+  };
+
+  try {
+    const response = await fetchGeminiWithFallback(apiKey, requestBody);
+    const data = await response.json();
+    const raw = data.candidates?.[0]?.content?.parts?.[0]?.text || '[]';
+    const cleaned = raw.replace(/```json|```/g, '').trim();
+    const parsed = JSON.parse(cleaned);
+    if (Array.isArray(parsed) && parsed.length === paras.length) {
+      return parsed.map(String);
+    }
+  } catch { /* fallback */ }
+
+  return paras;
+}
