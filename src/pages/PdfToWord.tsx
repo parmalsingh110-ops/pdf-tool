@@ -196,43 +196,28 @@ export default function PdfToWord() {
   const doConvert = async (f: File, analyses: PageAnalysis[], useOcr: boolean) => {
     setStage('processing'); setProgress(0);
     try {
-      // Invisible AI Enhancement attempt
-      try {
-        if (import.meta.env.VITE_GEMINI_API_KEY) {
-          onProgress('Analyzing document structure...', 20);
-          const ab = await f.arrayBuffer();
-          const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(ab) }).promise;
-          const page = await pdf.getPage(1);
-          const viewport = page.getViewport({ scale: 2 });
-          const canvas = document.createElement('canvas');
-          canvas.width = viewport.width; canvas.height = viewport.height;
-          const ctx = canvas.getContext('2d')!;
-          await page.render({ canvasContext: ctx, viewport, canvas }).promise;
-          const base64Image = canvas.toDataURL('image/jpeg', 0.8);
-
-          onProgress('Extracting layout and formatting...', 50);
-          const docData = await extractDocumentLayout(base64Image);
-
-          onProgress('Building perfectly formatted Word Doc...', 80);
-          const doc = buildDocxFromVisionJSON(docData);
-          const blob = await Packer.toBlob(doc);
-          
-          setResultUrl(URL.createObjectURL(blob));
-          setStats({ paras: 1, scanned: analyses.length, text: 0 });
-          setStage('done');
-          return; // Exit early if AI succeeds
-        }
-      } catch (aiError) {
-        console.warn("Advanced engine failed, falling back to local processing", aiError);
-      }
-
-      // Fallback to robust local OCR and extraction
       onProgress('Processing with local engine...', 10);
       const result = await runOCRPipeline(f, { lang, useOcr, onProgress });
-      const doc  = buildDocxFromParagraphs(result.paragraphs, result.pdfPageCount);
+      let finalParas = result.paragraphs;
+
+      try {
+        if (import.meta.env.VITE_GEMINI_API_KEY && finalParas.length > 0) {
+          onProgress('AI polishing OCR text...', 90);
+          const { polishExtractedParagraphs } = await import('../lib/advancedVisionEngine');
+          const rawStrings = finalParas.map(p => p.text);
+          const polished = await polishExtractedParagraphs(rawStrings);
+          if (polished.length === finalParas.length) {
+            finalParas = finalParas.map((p, i) => ({ ...p, text: polished[i] }));
+          }
+        }
+      } catch (aiError) {
+        console.warn("AI polishing failed, using raw local text", aiError);
+      }
+
+      const doc  = buildDocxFromParagraphs(finalParas, result.pdfPageCount);
       const blob = await Packer.toBlob(doc);
       setResultUrl(URL.createObjectURL(blob));
-      setStats({ paras: result.paragraphs.length, scanned: result.pageAnalyses.filter(p => p.isScanned).length, text: result.pageAnalyses.filter(p => p.hasText).length });
+      setStats({ paras: finalParas.length, scanned: result.pageAnalyses.filter(p => p.isScanned).length, text: result.pageAnalyses.filter(p => p.hasText).length });
       setStage('done');
     } catch (e: any) { setErrorMsg(e?.message || 'Conversion failed.'); setStage('error'); }
   };
