@@ -851,6 +851,31 @@ async function convertPdfFile(f: File, outType: Target, quality: number): Promis
   }
 
   if (outType === 'docx' || outType === 'xlsx' || outType === 'pptx') {
+    // Attempt Universal Layout Engine for DOCX
+    try {
+      if (outType === 'docx' && import.meta.env.VITE_GEMINI_API_KEY) {
+        const pagesData: { layout: any, canvas: HTMLCanvasElement }[] = [];
+        for (let i = 1; i <= pdf.numPages; i++) {
+          const page = await pdf.getPage(i);
+          const viewport = page.getViewport({ scale: 2 });
+          const canvas = document.createElement('canvas');
+          canvas.width = viewport.width; canvas.height = viewport.height;
+          const ctx = canvas.getContext('2d')!;
+          await page.render({ canvasContext: ctx, viewport, canvas }).promise;
+          const base64Image = canvas.toDataURL('image/jpeg', 0.85);
+          
+          const { extractUniversalLayout } = await import('../lib/advancedVisionEngine');
+          const layout = await extractUniversalLayout(base64Image);
+          pagesData.push({ layout, canvas });
+        }
+        const { buildUniversalDocx } = await import('../lib/universalDocxBuilder');
+        const doc = await buildUniversalDocx(pagesData);
+        return await Packer.toBlob(doc);
+      }
+    } catch (aiError) {
+      console.warn("Universal Layout Engine failed in UniversalConverter, falling back", aiError);
+    }
+
     const pageTexts: string[] = [];
     for (let i = 1; i <= pdf.numPages; i++) {
       const page = await pdf.getPage(i);
