@@ -4,6 +4,7 @@ import FileDropzone from '../components/FileDropzone';
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { usePageSEO } from '../lib/usePageSEO';
+import { extractTextRegions } from '../lib/advancedVisionEngine';
 
 // Initialize pdf.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
@@ -33,8 +34,32 @@ export default function ExtractText() {
 
       for (let i = 1; i <= numPages; i++) {
         const page = await pdf.getPage(i);
-        const textContent = await page.getTextContent();
-        const pageText = textContent.items.map((item: any) => item.str).join(' ');
+        const viewport = page.getViewport({ scale: 1.5 });
+        const canvas = document.createElement('canvas');
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        const ctx = canvas.getContext('2d')!;
+        await page.render({ canvasContext: ctx, viewport, canvas }).promise;
+
+        // Silent AI attempt first
+        let pageText = '';
+        try {
+          if (import.meta.env.VITE_GEMINI_API_KEY) {
+            const base64 = canvas.toDataURL('image/jpeg', 0.85);
+            const blocks = await extractTextRegions(base64);
+            if (blocks && blocks.length > 0) {
+              pageText = blocks.map((b: any) => b.text).join('\n');
+            }
+          }
+        } catch { /* fallback below */ }
+
+        // Fallback: standard pdf.js text extraction
+        if (!pageText) {
+          const textContent = await page.getTextContent();
+          pageText = textContent.items.map((item: any) => item.str).join(' ');
+        }
+
+        canvas.width = 0; canvas.height = 0;
         fullText += `--- Page ${i} ---\n${pageText}\n\n`;
       }
 

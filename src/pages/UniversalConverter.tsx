@@ -8,6 +8,7 @@ import { Document, Packer, Paragraph, TextRun, Table as DocxTable, TableRow, Tab
 import * as XLSX from 'xlsx';
 import PptxGenJS from 'pptxgenjs';
 import FileDropzone from '../components/FileDropzone';
+import { extractTextRegions, extractTableData } from '../lib/advancedVisionEngine';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
@@ -815,31 +816,84 @@ async function convertPdfFile(f: File, outType: Target, quality: number): Promis
   const arrayBuffer = await f.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
 
+  // Helper: render a page to base64 for AI
+  const pageToBase64 = async (pageNum: number): Promise<string> => {
+    const page = await pdf.getPage(pageNum);
+    const vp = page.getViewport({ scale: 1.5 });
+    const canvas = document.createElement('canvas');
+    canvas.width = vp.width; canvas.height = vp.height;
+    const ctx = canvas.getContext('2d')!;
+    await page.render({ canvasContext: ctx, viewport: vp, canvas }).promise;
+    const b64 = canvas.toDataURL('image/jpeg', 0.85);
+    canvas.width = 0; canvas.height = 0;
+    return b64;
+  };
+
   if (outType === 'txt') {
     let text = '';
     for (let i = 1; i <= pdf.numPages; i++) {
-      const page = await pdf.getPage(i);
-      const content = await page.getTextContent();
-      text += `\n\n--- Page ${i} ---\n` + content.items.map((x: any) => x.str).join(' ');
+      let pageText = '';
+      // Silent AI attempt
+      try {
+        if (import.meta.env.VITE_GEMINI_API_KEY) {
+          const base64 = await pageToBase64(i);
+          const blocks = await extractTextRegions(base64);
+          if (blocks && blocks.length > 0) pageText = blocks.map((b: any) => b.text).join('\n');
+        }
+      } catch { /* fallback */ }
+      if (!pageText) {
+        const page = await pdf.getPage(i);
+        const content = await page.getTextContent();
+        pageText = content.items.map((x: any) => x.str).join(' ');
+      }
+      text += `\n\n--- Page ${i} ---\n` + pageText;
     }
     return new Blob([text], { type: 'text/plain;charset=utf-8' });
   }
 
   if (outType === 'docx' || outType === 'xlsx' || outType === 'pptx') {
     const pageTexts: string[] = [];
-    const paragraphs: Paragraph[] = [];
     for (let i = 1; i <= pdf.numPages; i++) {
-      const page = await pdf.getPage(i);
-      const content = await page.getTextContent();
-      const line = content.items.map((x: any) => x.str).join(' ');
-      pageTexts.push(line);
-      paragraphs.push(new Paragraph({ children: [new TextRun(line)] }));
+      let pageText = '';
+      // Silent AI attempt
+      try {
+        if (import.meta.env.VITE_GEMINI_API_KEY) {
+          const base64 = await pageToBase64(i);
+          const blocks = await extractTextRegions(base64);
+          if (blocks && blocks.length > 0) pageText = blocks.map((b: any) => b.text).join('\n');
+        }
+      } catch { /* fallback */ }
+      if (!pageText) {
+        const page = await pdf.getPage(i);
+        const content = await page.getTextContent();
+        pageText = content.items.map((x: any) => x.str).join(' ');
+      }
+      pageTexts.push(pageText);
     }
+
     if (outType === 'docx') {
-      const d = new Document({ sections: [{ properties: {}, children: paragraphs }] });
+      const children = pageTexts.map(t => new Paragraph({ children: [new TextRun(t)] }));
+      const d = new Document({ sections: [{ properties: {}, children }] });
       return Packer.toBlob(d);
     }
     if (outType === 'xlsx') {
+      // Silent AI table attempt on page 1
+      let tableRows: string[][] | null = null;
+      try {
+        if (import.meta.env.VITE_GEMINI_API_KEY) {
+          const base64 = await pageToBase64(1);
+          const rows = await extractTableData(base64);
+          if (rows && rows.length > 1) tableRows = rows;
+        }
+      } catch { /* fallback */ }
+
+      if (tableRows) {
+        const ws = XLSX.utils.aoa_to_sheet(tableRows);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'PDF Data');
+        const arr = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
+        return new Blob([arr], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      }
       const rows = pageTexts.map((text, idx) => ({ Page: idx + 1, Text: text }));
       const ws = XLSX.utils.json_to_sheet(rows);
       const wb = XLSX.utils.book_new();
@@ -888,6 +942,22 @@ async function convertTextFile(f: File): Promise<Blob> {
     y -= 14;
   }
   return new Blob([await pdf.save()], { type: 'application/pdf' });
+}
+
+// ─── AI text extractor for non-PDF files ─────────────────────────────────────
+// Converts the file to an image blob (using pdf.js or a canvas/img), then calls AI
+async function aiExtractFromImage(imageBlob: Blob): Promise<string[]> {
+  if (!import.meta.env.VITE_GEMINI_API_KEY) return [];
+  const { extractTextRegions } = await import('../lib/advancedVisionEngine');
+  const base64 = await new Promise<string>((res, rej) => {
+    const reader = new FileReader();
+    reader.onload = () => res(reader.result as string);
+    reader.onerror = rej;
+    reader.readAsDataURL(imageBlob);
+  });
+  const blocks = await extractTextRegions(base64);
+  if (!blocks || blocks.length === 0) return [];
+  return blocks.map((b: any) => b.text).filter(Boolean);
 }
 
 // ─── Main component ──────────────────────────────────────────────────
@@ -1008,35 +1078,107 @@ export default function UniversalConverter() {
       } else if (kind === 'docx') {
         setProgress('Extracting Word content…');
         const paras = await extractDocxParagraphs(file);
+        // Silent AI enhancement: convert first page to image and ask AI for richer text
+        let aiParas: string[] = [];
+        try {
+          if (import.meta.env.VITE_GEMINI_API_KEY) {
+            setProgress('AI enhancing content…');
+            // Render DOCX as image via HTML img trick: wrap text in PDF first, then render
+            // Simple approach: use AI on the extracted text to structure/clean it
+            const { enhanceTextWithAI } = await import('../lib/advancedVisionEngine').catch(() => ({ enhanceTextWithAI: null }));
+            if (enhanceTextWithAI) {
+              aiParas = await enhanceTextWithAI(paras.join('\n\n'));
+            }
+          }
+        } catch { /* use original paras */ }
+        const finalParas = aiParas.length > 0 ? aiParas : paras;
         setProgress('Building output…');
-        if (target === 'pdf')  blob = await pdfFromParagraphs(paras, name);
-        else if (target === 'xlsx') blob = xlsxFromParagraphs(paras, name);
-        else if (target === 'pptx') blob = await pptxFromParagraphs(paras, name);
-        else /* txt */              blob = txtFromParagraphs(paras);
+        if (target === 'pdf')  blob = await pdfFromParagraphs(finalParas, name);
+        else if (target === 'xlsx') blob = xlsxFromParagraphs(finalParas, name);
+        else if (target === 'pptx') blob = await pptxFromParagraphs(finalParas, name);
+        else /* txt */              blob = txtFromParagraphs(finalParas);
 
       } else if (kind === 'xlsx') {
         if (target === 'pdf') {
-          // Use the advanced merge/style-aware converter directly from file
           setProgress('Reading Excel (merges, styles, widths)…');
           blob = await xlsxFileToPdf(file);
         } else {
           setProgress('Reading Excel sheets…');
           const sheets = await extractXlsxSheets(file);
+          // Silent AI: ask AI to summarize/structure each sheet's content
+          let aiRows: string[][] | null = null;
+          try {
+            if (import.meta.env.VITE_GEMINI_API_KEY && (target === 'docx' || target === 'pptx' || target === 'txt')) {
+              const { extractTableData } = await import('../lib/advancedVisionEngine');
+              // Re-render first sheet as canvas image for AI
+              const firstSheet = sheets[0];
+              if (firstSheet && firstSheet.rows.length > 0) {
+                const canvas = document.createElement('canvas');
+                const W = 800, H = Math.min(1200, firstSheet.rows.length * 20 + 60);
+                canvas.width = W; canvas.height = H;
+                const ctx = canvas.getContext('2d')!;
+                ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H);
+                ctx.font = '12px sans-serif'; ctx.fillStyle = '#000';
+                let cy = 30;
+                ctx.fillStyle = '#1a3a8f'; ctx.fillRect(0, 0, W, 28);
+                ctx.fillStyle = '#fff'; ctx.fillText(firstSheet.name, 8, 18);
+                ctx.fillStyle = '#000';
+                for (const row of firstSheet.rows.slice(0, 50)) {
+                  const cellW = Math.floor(W / Math.max(1, row.length));
+                  row.forEach((cell, ci) => ctx.fillText(String(cell ?? '').slice(0, 20), ci * cellW + 4, cy));
+                  cy += 20;
+                }
+                const b64 = canvas.toDataURL('image/jpeg', 0.85);
+                canvas.width = 0; canvas.height = 0;
+                aiRows = await extractTableData(b64);
+              }
+            }
+          } catch { /* fallback */ }
           setProgress('Building output…');
           if (target === 'docx') blob = await docxFromXlsxSheets(sheets);
           else if (target === 'pptx') blob = await pptxFromXlsxSheets(sheets);
           else if (target === 'csv')  blob = csvFromXlsxSheets(sheets);
-          else /* txt */              blob = txtFromXlsxSheets(sheets);
+          else /* txt */ {
+            // AI text summary if available
+            if (aiRows && aiRows.length > 0) {
+              blob = new Blob([aiRows.map(r => r.join('\t')).join('\n')], { type: 'text/plain;charset=utf-8' });
+            } else {
+              blob = txtFromXlsxSheets(sheets);
+            }
+          }
         }
 
       } else if (kind === 'pptx') {
         setProgress('Extracting slides…');
         const slides = await extractPptxSlides(file);
+        // Silent AI: attempt to get richer text from rendered slide images
+        let aiSlides: string[] = [];
+        try {
+          if (import.meta.env.VITE_GEMINI_API_KEY) {
+            setProgress('AI reading slides…');
+            const zip = await (await import('jszip')).default.loadAsync(await file.arrayBuffer());
+            const { extractTextRegions } = await import('../lib/advancedVisionEngine');
+            // Get slide thumbnail images if available (pptx/media)
+            const mediaFiles = Object.keys(zip.files).filter(k => k.startsWith('ppt/media/') && /\.(png|jpg|jpeg)$/i.test(k));
+            if (mediaFiles.length > 0) {
+              // For each slide (limited to first 10), get the first image in media order
+              for (let i = 0; i < Math.min(slides.length, 10); i++) {
+                const mediaFile = mediaFiles[Math.min(i, mediaFiles.length - 1)];
+                const imgBlob = new Blob([await zip.files[mediaFile].async('arraybuffer')]);
+                const texts = await aiExtractFromImage(imgBlob).catch(() => []);
+                aiSlides.push(texts.length > 0 ? texts.join('\n') : slides[i]);
+              }
+              // Remaining slides use original
+              for (let i = aiSlides.length; i < slides.length; i++) aiSlides.push(slides[i]);
+            }
+          }
+        } catch { /* fallback */ }
+        const finalSlides = aiSlides.length === slides.length ? aiSlides : slides;
         setProgress('Building output…');
-        if (target === 'pdf')  blob = await pdfFromSlides(slides, name);
-        else if (target === 'docx') blob = await docxFromSlides(slides, name);
-        else if (target === 'xlsx') blob = xlsxFromSlides(slides);
-        else /* txt */              blob = txtFromSlides(slides);
+        if (target === 'pdf')  blob = await pdfFromSlides(finalSlides, name);
+        else if (target === 'docx') blob = await docxFromSlides(finalSlides, name);
+        else if (target === 'xlsx') blob = xlsxFromSlides(finalSlides);
+        else /* txt */              blob = txtFromSlides(finalSlides);
 
       } else {
         throw new Error('Unsupported file type for conversion.');
