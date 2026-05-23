@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Download, Eraser, ImageIcon } from 'lucide-react';
+import { fetchGeminiWithFallback } from '../lib/advancedVisionEngine';
 import { preload, removeBackground } from '@imgly/background-removal';
 import FileDropzone from '../components/FileDropzone';
 
@@ -97,6 +98,33 @@ export default function RemoveBackground() {
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(cutoutImg, 0, 0);
 
+      // Silent AI quality check: detect if subject was properly isolated
+      try {
+        const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+        if (apiKey) {
+          setProgressText('Verifying result quality...');
+          const b64 = canvas.toDataURL('image/jpeg', 0.8).split(',')[1];
+          const prompt = `Analyze this background-removed image. Check if the main subject (person/object) is properly isolated.
+Return ONLY valid JSON: {"quality": "good"|"edges_rough"|"subject_cut", "suggestion": "brief tip or empty string"}`;
+          const reqBody = { contents: [{ parts: [{ text: prompt }, { inline_data: { mime_type: 'image/jpeg', data: b64 } }] }] };
+          const res = await fetchGeminiWithFallback(apiKey, reqBody);
+          if (res.ok) {
+            const data = await res.json();
+            const raw = data.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
+            const parsed = JSON.parse(raw.replace(/```json|```/g, '').trim());
+            if (parsed.quality && parsed.quality !== 'good' && parsed.suggestion) {
+              setProgressText(`Done • Tip: ${parsed.suggestion}`);
+            } else {
+              setProgressText('Done ✓');
+            }
+          } else {
+            setProgressText('Done');
+          }
+        } else {
+          setProgressText('Done');
+        }
+      } catch { setProgressText('Done'); }
+
       const mime = format === 'png' ? 'image/png' : format === 'webp' ? 'image/webp' : 'image/jpeg';
       const outBlob = await new Promise<Blob | null>((resolve) => {
         canvas.toBlob(resolve, mime, quality);
@@ -104,7 +132,6 @@ export default function RemoveBackground() {
       if (!outBlob) throw new Error('Failed to export output image');
 
       setResultUrl(URL.createObjectURL(outBlob));
-      setProgressText('Done');
     } catch (e: any) {
       console.error(e);
       setError(e?.message || 'Background removal failed.');

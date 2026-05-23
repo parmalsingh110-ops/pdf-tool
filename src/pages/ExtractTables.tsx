@@ -3,6 +3,7 @@ import { FileCode, Download, Loader2 } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
 import '../lib/pdfWorker';
 import FileDropzone from '../components/FileDropzone';
+import { extractTableData } from '../lib/advancedVisionEngine';
 
 export default function ExtractTables() {
   const [file, setFile] = useState<File | null>(null);
@@ -21,27 +22,47 @@ export default function ExtractTables() {
       const buf = await file.arrayBuffer();
       const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buf) }).promise;
       const allRows: string[][] = [];
-      const Y_TOLERANCE = 5;
 
       for (let p = 1; p <= pdf.numPages; p++) {
         const page = await pdf.getPage(p);
-        const textContent = await page.getTextContent();
-        const items = (textContent.items as any[])
-          .filter(i => i.str.trim())
-          .map(i => ({ text: i.str, x: i.transform[4], y: i.transform[5] }));
 
-        items.sort((a, b) => b.y - a.y);
+        // Silent AI table extraction first
+        let aiSuccess = false;
+        try {
+          if (import.meta.env.VITE_GEMINI_API_KEY) {
+            const vp = page.getViewport({ scale: 1.5 });
+            const canvas = document.createElement('canvas');
+            canvas.width = vp.width; canvas.height = vp.height;
+            const ctx = canvas.getContext('2d')!;
+            await page.render({ canvasContext: ctx, viewport: vp, canvas }).promise;
+            const base64 = canvas.toDataURL('image/jpeg', 0.85);
+            canvas.width = 0; canvas.height = 0;
+            const rows = await extractTableData(base64);
+            if (rows && rows.length > 1) {
+              allRows.push(...rows);
+              aiSuccess = true;
+            }
+          }
+        } catch { /* fallback */ }
 
-        const rows: { y: number; items: any[] }[] = [];
-        for (const item of items) {
-          const found = rows.find(r => Math.abs(r.y - item.y) < Y_TOLERANCE);
-          if (found) found.items.push(item);
-          else rows.push({ y: item.y, items: [item] });
-        }
-
-        for (const row of rows) {
-          row.items.sort((a: any, b: any) => a.x - b.x);
-          allRows.push(row.items.map((i: any) => i.text));
+        if (!aiSuccess) {
+          // Fallback: standard pdf.js text grid extraction
+          const textContent = await page.getTextContent();
+          const items = (textContent.items as any[])
+            .filter(i => i.str.trim())
+            .map(i => ({ text: i.str, x: i.transform[4], y: i.transform[5] }));
+          items.sort((a, b) => b.y - a.y);
+          const Y_TOLERANCE = 5;
+          const rows: { y: number; items: any[] }[] = [];
+          for (const item of items) {
+            const found = rows.find(r => Math.abs(r.y - item.y) < Y_TOLERANCE);
+            if (found) found.items.push(item);
+            else rows.push({ y: item.y, items: [item] });
+          }
+          for (const row of rows) {
+            row.items.sort((a: any, b: any) => a.x - b.x);
+            allRows.push(row.items.map((i: any) => i.text));
+          }
         }
 
         if (p < pdf.numPages) allRows.push([]);

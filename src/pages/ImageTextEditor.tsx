@@ -12,8 +12,10 @@ import {
   RotateCw,
   ZoomIn,
   Columns2,
+  Zap,
 } from 'lucide-react';
 import FileDropzone from '../components/FileDropzone';
+import { extractTextRegions } from '../lib/advancedVisionEngine';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
@@ -424,6 +426,55 @@ export default function ImageTextEditor() {
       await workerRef.current?.terminate();
       workerRef.current = null;
 
+      // Invisible AI Enhancement attempt
+      try {
+        if (import.meta.env.VITE_GEMINI_API_KEY) {
+          const aiBlocks = await extractTextRegions(ocrSource);
+          const aiWords: EditableWord[] = [];
+          let idx = 0;
+          for (const block of aiBlocks) {
+            if (!block.text || !block.box_2d || block.box_2d.length !== 4) continue;
+            const [ymin, xmin, ymax, xmax] = block.box_2d;
+
+            const wReal = natural.w * (upscaleOcr ? 2 : 1);
+            const hReal = natural.h * (upscaleOcr ? 2 : 1);
+
+            const x0 = (xmin / 1000) * wReal;
+            const y0 = (ymin / 1000) * hReal;
+            const x1 = (xmax / 1000) * wReal;
+            const y1 = (ymax / 1000) * hReal;
+            const h = y1 - y0;
+
+            aiWords.push({
+              id: `ai-${idx++}`,
+              bbox: { x0, y0, x1, y1 },
+              origText: block.text,
+              text: block.text,
+              fontSize: Math.max(10, Math.round(h * 0.75)),
+              bold: false,
+              italic: false,
+              color: '#111827',
+              fontFamily: 'system-ui, sans-serif',
+              confidence: 100,
+              dirty: false,
+              lineHeight: 1.25,
+              letterSpacing: 0,
+              textAlign: 'left',
+            });
+          }
+
+          if (aiWords.length > 0) {
+            const mapped = coordScale === 1 ? aiWords : aiWords.map((w) => ({ ...w, bbox: scaleBbox(w.bbox, coordScale) }));
+            setWords(mapped);
+            setOcrBusy(false);
+            setOcrProgress(100);
+            return; // Exit early
+          }
+        }
+      } catch (aiError) {
+        console.warn("Advanced engine failed, falling back to local OCR", aiError);
+      }
+
       const worker = await createWorker(lang, 1, {
         logger: (m) => {
           if (m.status === 'recognizing text') {
@@ -813,16 +864,14 @@ export default function ImageTextEditor() {
                     key={w.id}
                     type="button"
                     onClick={() => setSelectedId(w.id)}
-                    className={`w-full text-left px-2 py-1.5 rounded-lg text-xs truncate border flex items-center gap-1.5 ${
-                      selectedId === w.id
+                    className={`w-full text-left px-2 py-1.5 rounded-lg text-xs truncate border flex items-center gap-1.5 ${selectedId === w.id
                         ? 'border-sky-500 bg-sky-950/50 text-sky-100'
                         : 'border-transparent hover:bg-slate-700/80 text-slate-300'
-                    }`}
+                      }`}
                   >
                     {/* Confidence dot */}
-                    <span className={`inline-block w-1.5 h-1.5 rounded-full shrink-0 ${
-                      w.confidence >= 85 ? 'bg-emerald-400' : w.confidence >= 60 ? 'bg-amber-400' : 'bg-rose-400'
-                    }`} title={`Confidence: ${Math.round(w.confidence)}%`} />
+                    <span className={`inline-block w-1.5 h-1.5 rounded-full shrink-0 ${w.confidence >= 85 ? 'bg-emerald-400' : w.confidence >= 60 ? 'bg-amber-400' : 'bg-rose-400'
+                      }`} title={`Confidence: ${Math.round(w.confidence)}%`} />
                     {w.dirty ? '✎ ' : ''}
                     <span className="truncate">{w.text}</span>
                     <button
@@ -845,9 +894,8 @@ export default function ImageTextEditor() {
                 <button
                   type="button"
                   onClick={() => setToolMode('select')}
-                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold ${
-                    toolMode === 'select' ? 'bg-sky-600 text-white' : 'bg-slate-800 text-slate-300 border border-slate-600'
-                  }`}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold ${toolMode === 'select' ? 'bg-sky-600 text-white' : 'bg-slate-800 text-slate-300 border border-slate-600'
+                    }`}
                 >
                   <MousePointer2 className="w-3.5 h-3.5" />
                   Select
@@ -858,9 +906,8 @@ export default function ImageTextEditor() {
                     setToolMode('draw');
                     setSelectedId(null);
                   }}
-                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold ${
-                    toolMode === 'draw' ? 'bg-amber-600 text-white' : 'bg-slate-800 text-slate-300 border border-slate-600'
-                  }`}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold ${toolMode === 'draw' ? 'bg-amber-600 text-white' : 'bg-slate-800 text-slate-300 border border-slate-600'
+                    }`}
                 >
                   <SquareDashed className="w-3.5 h-3.5" />
                   Add text region
@@ -910,11 +957,10 @@ export default function ImageTextEditor() {
                 <button
                   type="button"
                   onClick={() => setCompareSplit((v) => !v)}
-                  className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold border ${
-                    compareSplit
+                  className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold border ${compareSplit
                       ? 'bg-violet-600 text-white border-violet-500'
                       : 'bg-slate-800 text-slate-200 border-slate-600'
-                  }`}
+                    }`}
                 >
                   <Columns2 className="w-3.5 h-3.5" />
                   Compare
@@ -931,9 +977,8 @@ export default function ImageTextEditor() {
               <div className="w-full flex justify-center overflow-auto max-h-[min(58vh,620px)] rounded-xl border border-slate-800/80 bg-slate-950/50 p-2">
                 <div
                   ref={previewBoxRef}
-                  className={`relative rounded-lg border border-slate-700 bg-slate-950 overflow-hidden shadow-xl shrink-0 ${
-                    toolMode === 'draw' ? 'cursor-crosshair' : ''
-                  }`}
+                  className={`relative rounded-lg border border-slate-700 bg-slate-950 overflow-hidden shadow-xl shrink-0 ${toolMode === 'draw' ? 'cursor-crosshair' : ''
+                    }`}
                   style={{ width: viewW, height: viewH }}
                   onMouseDown={(e) => {
                     if (toolMode !== 'draw' || !previewBoxRef.current) return;
@@ -1031,11 +1076,10 @@ export default function ImageTextEditor() {
                           if (toolMode === 'draw') return;
                           setSelectedId(w.id);
                         }}
-                        className={`absolute z-20 box-border transition-colors ${
-                          selectedId === w.id
+                        className={`absolute z-20 box-border transition-colors ${selectedId === w.id
                             ? 'bg-sky-500/35 border-2 border-sky-400'
                             : 'bg-sky-400/10 border border-sky-500/40 hover:bg-sky-400/25'
-                        } ${toolMode === 'draw' ? 'pointer-events-none opacity-40' : ''}`}
+                          } ${toolMode === 'draw' ? 'pointer-events-none opacity-40' : ''}`}
                         style={{
                           left: b.x0 * viewScale,
                           top: b.y0 * viewScale,
