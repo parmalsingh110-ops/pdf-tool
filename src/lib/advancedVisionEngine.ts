@@ -264,3 +264,92 @@ ${JSON.stringify(paras)}`;
 
   return paras;
 }
+
+export interface UniversalLayoutElement {
+  type: 'text' | 'image' | 'table';
+  text?: string;
+  font_size?: number;
+  bold?: boolean;
+  italic?: boolean;
+  alignment?: 'left' | 'center' | 'right' | 'justify';
+  description?: string;
+  bbox?: [number, number, number, number]; // [ymin, xmin, ymax, xmax] 0-1000
+  rows?: any[][];
+}
+
+export interface UniversalLayoutResponse {
+  page_width: number;
+  page_height: number;
+  elements: UniversalLayoutElement[];
+}
+
+export async function extractUniversalLayout(base64Image: string): Promise<UniversalLayoutResponse> {
+  const apiKey = getVisionApiKey();
+  if (!apiKey) throw new Error('Vision API key is not configured.');
+
+  const prompt = `You are a world-class Document Layout Analyzer. Your task is to perfectly recreate the structure, formatting, and content of this document page.
+Return ONLY a valid JSON object matching this strict schema:
+{
+  "page_width": 800,
+  "page_height": 1100,
+  "elements": [
+    {
+      "type": "text",
+      "text": "Exact text string",
+      "font_size": 14,
+      "bold": true,
+      "italic": false,
+      "alignment": "center" // one of: left, center, right, justify
+    },
+    {
+      "type": "image",
+      "description": "QR Code / Signature / State Emblem / Photo",
+      "bbox": [ymin, xmin, ymax, xmax] // normalized 0-1000
+    },
+    {
+      "type": "table",
+      "rows": [
+        [
+          { "text": "Cell value", "bold": true }
+        ]
+      ]
+    }
+  ]
+}
+
+RULES:
+1. Capture ALL text, preserving exact formatting (bold, alignment, relative size).
+2. For EVERY image, logo, QR code, or signature, add an "image" element with a highly accurate bounding box [ymin, xmin, ymax, xmax].
+3. For tables, use the "table" type with nested rows.
+4. Output MUST be valid JSON. No markdown backticks.`;
+
+  const base64Data = base64Image.split(',')[1] || base64Image;
+
+  const requestBody = {
+    contents: [{
+      parts: [
+        { text: prompt },
+        { inline_data: { mime_type: "image/jpeg", data: base64Data } }
+      ]
+    }],
+    generationConfig: {
+      temperature: 0.1,
+      response_mime_type: "application/json",
+    }
+  };
+
+  const response = await fetchGeminiWithFallback(apiKey, requestBody);
+  if (!response.ok) {
+    const errData = await response.json().catch(() => ({}));
+    throw new Error(errData.error?.message || 'Vision Layout extraction failed');
+  }
+
+  const data = await response.json();
+  const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
+
+  try {
+    return JSON.parse(rawText.replace(/\`\`\`json|\`\`\`/g, '').trim());
+  } catch (e) {
+    throw new Error('Failed to parse Vision Layout JSON response');
+  }
+}
