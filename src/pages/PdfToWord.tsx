@@ -195,6 +195,44 @@ export default function PdfToWord() {
 
   const doConvert = async (f: File, analyses: PageAnalysis[], useOcr: boolean) => {
     setStage('processing'); setProgress(0);
+
+    // Advanced Universal AI Layout Engine
+    try {
+      if (import.meta.env.VITE_GEMINI_API_KEY) {
+        onProgress('Analyzing full document layout & extracting images...', 20);
+        
+        const ab = await f.arrayBuffer();
+        const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(ab) }).promise;
+        const pagesData: { layout: any, canvas: HTMLCanvasElement }[] = [];
+        
+        for (let i = 1; i <= pdf.numPages; i++) {
+          onProgress(`Extracting layout for page ${i} of ${pdf.numPages}...`, 20 + (i / pdf.numPages) * 40);
+          const page = await pdf.getPage(i);
+          const viewport = page.getViewport({ scale: 2 }); // High res for image cropping
+          const canvas = document.createElement('canvas');
+          canvas.width = viewport.width; canvas.height = viewport.height;
+          const ctx = canvas.getContext('2d')!;
+          await page.render({ canvasContext: ctx, viewport, canvas }).promise;
+          
+          const base64Image = canvas.toDataURL('image/jpeg', 0.85);
+          const { extractUniversalLayout } = await import('../lib/advancedVisionEngine');
+          const layout = await extractUniversalLayout(base64Image);
+          pagesData.push({ layout, canvas });
+        }
+
+        onProgress('Reconstructing exact Word layout with images...', 80);
+        const { buildUniversalDocx } = await import('../lib/universalDocxBuilder');
+        const doc = await buildUniversalDocx(pagesData);
+        const blob = await Packer.toBlob(doc);
+        
+        setResultUrl(URL.createObjectURL(blob));
+        setStats({ paras: pagesData.length, scanned: analyses.length, text: 0 });
+        setStage('done');
+        return; // Success! Exit early.
+      }
+    } catch (aiError) {
+      console.warn("Universal AI Layout Engine failed, falling back to local + polisher", aiError);
+    }
     try {
       onProgress('Processing with local engine...', 10);
       const result = await runOCRPipeline(f, { lang, useOcr, onProgress });
