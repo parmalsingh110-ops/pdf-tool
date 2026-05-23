@@ -832,20 +832,19 @@ async function convertPdfFile(f: File, outType: Target, quality: number): Promis
   if (outType === 'txt') {
     let text = '';
     for (let i = 1; i <= pdf.numPages; i++) {
-      let pageText = '';
-      // Silent AI attempt
+      const page = await pdf.getPage(i);
+      const content = await page.getTextContent();
+      let pageText = content.items.map((x: any) => x.str).join(' ');
+
+      // AI Polishing
       try {
-        if (import.meta.env.VITE_GEMINI_API_KEY) {
-          const base64 = await pageToBase64(i);
-          const blocks = await extractTextRegions(base64);
-          if (blocks && blocks.length > 0) pageText = blocks.map((b: any) => b.text).join('\n');
+        if (import.meta.env.VITE_GEMINI_API_KEY && pageText.trim().length > 10) {
+          const { enhanceTextWithAI } = await import('../lib/advancedVisionEngine');
+          const paras = await enhanceTextWithAI(pageText);
+          pageText = paras.join('\n\n');
         }
       } catch { /* fallback */ }
-      if (!pageText) {
-        const page = await pdf.getPage(i);
-        const content = await page.getTextContent();
-        pageText = content.items.map((x: any) => x.str).join(' ');
-      }
+
       text += `\n\n--- Page ${i} ---\n` + pageText;
     }
     return new Blob([text], { type: 'text/plain;charset=utf-8' });
@@ -854,20 +853,19 @@ async function convertPdfFile(f: File, outType: Target, quality: number): Promis
   if (outType === 'docx' || outType === 'xlsx' || outType === 'pptx') {
     const pageTexts: string[] = [];
     for (let i = 1; i <= pdf.numPages; i++) {
-      let pageText = '';
-      // Silent AI attempt
+      const page = await pdf.getPage(i);
+      const content = await page.getTextContent();
+      let pageText = content.items.map((x: any) => x.str).join(' ');
+
+      // AI Polishing
       try {
-        if (import.meta.env.VITE_GEMINI_API_KEY) {
-          const base64 = await pageToBase64(i);
-          const blocks = await extractTextRegions(base64);
-          if (blocks && blocks.length > 0) pageText = blocks.map((b: any) => b.text).join('\n');
+        if (import.meta.env.VITE_GEMINI_API_KEY && pageText.trim().length > 10) {
+          const { enhanceTextWithAI } = await import('../lib/advancedVisionEngine');
+          const paras = await enhanceTextWithAI(pageText);
+          pageText = paras.join('\n\n');
         }
       } catch { /* fallback */ }
-      if (!pageText) {
-        const page = await pdf.getPage(i);
-        const content = await page.getTextContent();
-        pageText = content.items.map((x: any) => x.str).join(' ');
-      }
+
       pageTexts.push(pageText);
     }
 
