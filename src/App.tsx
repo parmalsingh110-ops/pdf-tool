@@ -105,105 +105,105 @@ export default function App() {
   return (
     <Routes>
       <Route path="/" element={<Layout />}>
-          <Route index element={<Home />} />
-          <Route path="merge" element={<MergePDF />} />
-          <Route path="split" element={<SplitPDF />} />
-          <Route path="compress" element={<CompressPDF />} />
-          <Route path="pdf-to-jpg" element={<PDFToJPG />} />
-          <Route path="jpg-to-pdf" element={<JPGToPDF />} />
-          <Route path="organize" element={<OrganizePDF />} />
-          <Route path="protect" element={<ProtectPDF />} />
-          <Route path="unlock" element={<UnlockPDF />} />
-          <Route path="watermark" element={<WatermarkPDF />} />
-          <Route path="page-numbers" element={<PageNumbersPDF />} />
-          <Route path="edit" element={<AdvancedEditor />} />
-          <Route path="target-compress" element={<TargetPDFCompress />} />
-          <Route path="exact-image-size" element={<ExactImageSize />} />
-          <Route path="pixel-resizer" element={<PixelResizer />} />
-          <Route path="image-resizer" element={<ImageResizer />} />
-          <Route path="image-text-editor" element={<ImageTextEditor />} />
-          <Route path="searchable-pdf" element={<SearchablePdf />} />
-          <Route path="extract-text" element={<ExtractText />} />
-          <Route path="edit-metadata" element={<EditMetadata />} />
-          <Route path="flatten-pdf" element={<FlattenPDF />} />
-          <Route path="reverse" element={<ReversePDF />} />
-          <Route path="add-margins" element={<AddMargins />} />
-          <Route path="all-tools" element={<AllTools />} />
-          <Route path="privacy" element={<Privacy />} />
+        <Route index element={<Home />} />
+        <Route path="merge" element={<MergePDF />} />
+        <Route path="split" element={<SplitPDF />} />
+        <Route path="compress" element={<CompressPDF />} />
+        <Route path="pdf-to-jpg" element={<PDFToJPG />} />
+        <Route path="jpg-to-pdf" element={<JPGToPDF />} />
+        <Route path="organize" element={<OrganizePDF />} />
+        <Route path="protect" element={<ProtectPDF />} />
+        <Route path="unlock" element={<UnlockPDF />} />
+        <Route path="watermark" element={<WatermarkPDF />} />
+        <Route path="page-numbers" element={<PageNumbersPDF />} />
+        <Route path="edit" element={<AdvancedEditor />} />
+        <Route path="target-compress" element={<TargetPDFCompress />} />
+        <Route path="exact-image-size" element={<ExactImageSize />} />
+        <Route path="pixel-resizer" element={<PixelResizer />} />
+        <Route path="image-resizer" element={<ImageResizer />} />
+        <Route path="image-text-editor" element={<ImageTextEditor />} />
+        <Route path="searchable-pdf" element={<SearchablePdf />} />
+        <Route path="extract-text" element={<ExtractText />} />
+        <Route path="edit-metadata" element={<EditMetadata />} />
+        <Route path="flatten-pdf" element={<FlattenPDF />} />
+        <Route path="reverse" element={<ReversePDF />} />
+        <Route path="add-margins" element={<AddMargins />} />
+        <Route path="all-tools" element={<AllTools />} />
+        <Route path="privacy" element={<Privacy />} />
 
-          {/* New 29 Native & Simulated Tools */}
-          <Route path="grayscale-pdf" element={<GrayscalePDF />} />
-          <Route path="invert-colors" element={<InvertColorsPDF />} />
-          <Route path="remove-metadata" element={<RemoveMetadata />} />
-          <Route path="password-strength" element={<PasswordStrength />} />
-          <Route path="convert-webp" element={<ConvertToWebP />} />
-          <Route path="bates-numbering" element={<BatesNumbering />} />
-          <Route path="headers-footers" element={<HeadersFooters />} />
+        {/* New 29 Native & Simulated Tools */}
+        <Route path="grayscale-pdf" element={<GrayscalePDF />} />
+        <Route path="invert-colors" element={<InvertColorsPDF />} />
+        <Route path="remove-metadata" element={<RemoveMetadata />} />
+        <Route path="password-strength" element={<PasswordStrength />} />
+        <Route path="convert-webp" element={<ConvertToWebP />} />
+        <Route path="bates-numbering" element={<BatesNumbering />} />
+        <Route path="headers-footers" element={<HeadersFooters />} />
 
-          <Route path="extract-images" element={<ExtractAllImages />} />
-          <Route path="pdf-to-word" element={<PdfToWord />} />
-          <Route path="pdf-to-excel" element={<PdfToExcel />} />
-          <Route path="pdf-to-ppt" element={<PdfToPpt />} />
-          <Route path="extract-tables" element={<ExtractTables />} />
-          <Route path="font-extractor" element={<FontExtractor />} />
-          <Route path="search-replace" element={<SearchReplace />} />
-          <Route path="remove-text" element={<RemoveText />} />
-          <Route path="highlight-text" element={<HighlightText />} />
-          <Route path="pdf-to-gif" element={<PdfToGif />} />
-          <Route path="video-to-pdf" element={<VideoToPdf />} />
-          <Route path="remove-background" element={<RemoveBackground />} />
-          <Route path="passport-photo-sheet" element={<PassportPhotoSheet />} />
-          <Route path="convert-tiff" element={<ConvertToTiff />} />
-          <Route path="extract-media" element={<ExtractMedia />} />
+        <Route path="extract-images" element={<ExtractAllImages />} />
+        <Route path="pdf-to-word" element={<PdfToWord />} />
+        <Route path="pdf-to-excel" element={<PdfToExcel />} />
+        <Route path="pdf-to-ppt" element={<PdfToPpt />} />
+        <Route path="extract-tables" element={<ExtractTables />} />
+        <Route path="font-extractor" element={<FontExtractor />} />
+        <Route path="search-replace" element={<SearchReplace />} />
+        <Route path="remove-text" element={<RemoveText />} />
+        <Route path="highlight-text" element={<HighlightText />} />
+        <Route path="pdf-to-gif" element={<PdfToGif />} />
+        <Route path="video-to-pdf" element={<VideoToPdf />} />
+        <Route path="remove-background" element={<RemoveBackground />} />
+        <Route path="passport-photo-sheet" element={<PassportPhotoSheet />} />
+        <Route path="convert-tiff" element={<ConvertToTiff />} />
+        <Route path="extract-media" element={<ExtractMedia />} />
 
-          <Route path="crypto-sign" element={<CryptographicSignatures />} />
-          <Route path="validate-signatures" element={<ValidateSignatures />} />
-          <Route path="pdf-a-conversion" element={<PdfAConversion />} />
-          <Route path="add-drm" element={<AddDrm />} />
-          <Route path="invisible-watermark" element={<InvisibleWatermark />} />
-          <Route path="self-destruct" element={<SelfDestruct />} />
-          <Route path="certify-document" element={<CertifyDocument />} />
-          <Route path="batch-protect" element={<BatchProtect />} />
-          <Route path="ink-saver" element={<InkSaverPDF />} />
-          <Route path="universal-converter" element={<UniversalConverter />} />
-          <Route path="code-to-pdf" element={<CodeToPdf />} />
+        <Route path="crypto-sign" element={<CryptographicSignatures />} />
+        <Route path="validate-signatures" element={<ValidateSignatures />} />
+        <Route path="pdf-a-conversion" element={<PdfAConversion />} />
+        <Route path="add-drm" element={<AddDrm />} />
+        <Route path="invisible-watermark" element={<InvisibleWatermark />} />
+        <Route path="self-destruct" element={<SelfDestruct />} />
+        <Route path="certify-document" element={<CertifyDocument />} />
+        <Route path="batch-protect" element={<BatchProtect />} />
+        <Route path="ink-saver" element={<InkSaverPDF />} />
+        <Route path="universal-converter" element={<UniversalConverter />} />
+        <Route path="code-to-pdf" element={<CodeToPdf />} />
 
-          {/* 10 New Advanced Tools */}
-          <Route path="image-collage" element={<ImageCollage />} />
-          <Route path="qr-code" element={<QrCodeGenerator />} />
-          <Route path="signature-pad" element={<SignaturePad />} />
-          <Route path="document-scanner" element={<DocumentScanner />} />
-          <Route path="pdf-comparison" element={<PdfComparison />} />
-          <Route path="smart-image-to-pdf" element={<SmartImageToPdf />} />
-          <Route path="pdf-form-filler" element={<PdfFormFiller />} />
-          <Route path="image-color-correction" element={<ImageColorCorrection />} />
-          <Route path="pdf-page-cropper" element={<PdfPageCropper />} />
-          <Route path="image-noise-reduction" element={<ImageNoiseReduction />} />
-          <Route path="image-insert" element={<ImageInsertTool />} />
+        {/* 10 New Advanced Tools */}
+        <Route path="image-collage" element={<ImageCollage />} />
+        <Route path="qr-code" element={<QrCodeGenerator />} />
+        <Route path="signature-pad" element={<SignaturePad />} />
+        <Route path="document-scanner" element={<DocumentScanner />} />
+        <Route path="pdf-comparison" element={<PdfComparison />} />
+        <Route path="smart-image-to-pdf" element={<SmartImageToPdf />} />
+        <Route path="pdf-form-filler" element={<PdfFormFiller />} />
+        <Route path="image-color-correction" element={<ImageColorCorrection />} />
+        <Route path="pdf-page-cropper" element={<PdfPageCropper />} />
+        <Route path="image-noise-reduction" element={<ImageNoiseReduction />} />
+        <Route path="image-insert" element={<ImageInsertTool />} />
 
-          {/* 20 New Advanced Features */}
-          <Route path="pdf-stats" element={<PdfStats />} />
-          <Route path="extract-pages" element={<ExtractPages />} />
-          <Route path="booklet" element={<Booklet />} />
-          <Route path="duplicate-pages" element={<DuplicatePages />} />
-          <Route path="rotate-pages" element={<RotatePages />} />
-          <Route path="redact" element={<RedactPdf />} />
-          <Route path="image-converter" element={<ImageConverter />} />
-          <Route path="image-watermark" element={<ImageWatermark />} />
-          <Route path="image-crop" element={<ImageCrop />} />
-          <Route path="image-metadata" element={<ImageMetadata />} />
-          <Route path="screenshot-to-pdf" element={<ScreenshotToPdf />} />
-          <Route path="page-counter" element={<PageCounter />} />
-          <Route path="stamp" element={<PdfStamp />} />
-          <Route path="remove-blank-pages" element={<RemoveBlankPages />} />
-          <Route path="pdf-to-images" element={<PdfToImages />} />
-          <Route path="image-to-base64" element={<ImageToBase64 />} />
-          <Route path="pdf-overlay" element={<PdfOverlay />} />
-          <Route path="color-extractor" element={<ColorExtractor />} />
-          <Route path="present" element={<PdfPresenter />} />
-          <Route path="file-hash" element={<FileHash />} />
-          <Route path="increase-size" element={<IncreasePdfSize />} />
-        </Route>
+        {/* 20 New Advanced Features */}
+        <Route path="pdf-stats" element={<PdfStats />} />
+        <Route path="extract-pages" element={<ExtractPages />} />
+        <Route path="booklet" element={<Booklet />} />
+        <Route path="duplicate-pages" element={<DuplicatePages />} />
+        <Route path="rotate-pages" element={<RotatePages />} />
+        <Route path="redact" element={<RedactPdf />} />
+        <Route path="image-converter" element={<ImageConverter />} />
+        <Route path="image-watermark" element={<ImageWatermark />} />
+        <Route path="image-crop" element={<ImageCrop />} />
+        <Route path="image-metadata" element={<ImageMetadata />} />
+        <Route path="screenshot-to-pdf" element={<ScreenshotToPdf />} />
+        <Route path="page-counter" element={<PageCounter />} />
+        <Route path="stamp" element={<PdfStamp />} />
+        <Route path="remove-blank-pages" element={<RemoveBlankPages />} />
+        <Route path="pdf-to-images" element={<PdfToImages />} />
+        <Route path="image-to-base64" element={<ImageToBase64 />} />
+        <Route path="pdf-overlay" element={<PdfOverlay />} />
+        <Route path="color-extractor" element={<ColorExtractor />} />
+        <Route path="present" element={<PdfPresenter />} />
+        <Route path="file-hash" element={<FileHash />} />
+        <Route path="increase-size" element={<IncreasePdfSize />} />
+      </Route>
     </Routes>
   );
 }

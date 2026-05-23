@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Download, Camera, RefreshCw, User, FileImage, Loader2, RotateCcw, Eye } from 'lucide-react';
+import { Download, Camera, RefreshCw, User, FileImage, Loader2, RotateCcw, Eye, Sparkles } from 'lucide-react';
 import { preload, removeBackground } from '@imgly/background-removal';
 import * as tf from '@tensorflow/tfjs-core';
 import '@tensorflow/tfjs-backend-webgl';
@@ -24,6 +24,7 @@ import {
   ADJUSTMENT_RANGES,
   PRESETS,
 } from '../lib/photoAdjustments';
+import { fetchGeminiWithFallback } from '../lib/advancedVisionEngine';
 
 const PHOTO_W_MM = 35;
 const PHOTO_H_MM = 45;
@@ -169,6 +170,7 @@ export default function PassportPhotoSheet() {
   const [adjustments, setAdjustments] = useState<PhotoAdjustments>({ ...DEFAULT_ADJUSTMENTS });
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>('edit');
   const [openGroup, setOpenGroup] = useState<string | null>('💡 Light');
+  const [aiEnhancing, setAiEnhancing] = useState(false);
 
   // === NEW: Sheet preview ===
   const sheetCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -243,6 +245,64 @@ export default function PassportPhotoSheet() {
     return () => ro.disconnect();
   }, [nw, nh, img]);
 
+  const runAiEnhance = async () => {
+    if (!img || !crop) return;
+    const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+    if (!apiKey) {
+      alert("Please configure Gemini API Key in Settings to use AI Auto Enhance.");
+      return;
+    }
+    setAiEnhancing(true);
+    try {
+      // Create a small preview image to send to AI
+      const tempCanvas = document.createElement('canvas');
+      const maxPrev = 512;
+      const scale = Math.min(1, maxPrev / Math.max(crop.w, crop.h));
+      tempCanvas.width = Math.round(crop.w * scale);
+      tempCanvas.height = Math.round(crop.h * scale);
+      const tctx = tempCanvas.getContext('2d');
+      if (!tctx) throw new Error("Canvas context failed");
+      tctx.drawImage(img, crop.x, crop.y, crop.w, crop.h, 0, 0, tempCanvas.width, tempCanvas.height);
+      const b64 = tempCanvas.toDataURL('image/jpeg', 0.8).split(',')[1];
+      tempCanvas.width = 0; tempCanvas.height = 0;
+
+      const prompt = `You are an expert professional portrait photo editor. Analyze this passport photo.
+Your goal is to make it look HD, clear, well-lit, and give it a premium studio look WITHOUT altering or modifying the person's face structure in any way.
+Return ONLY a valid JSON object with the exact slider adjustments needed. Do not return any other text.
+Use these keys and ranges:
+"exposure" (-100 to 100), "contrast" (-100 to 100), "highlights" (-100 to 100), "shadows" (-100 to 100), "whites" (-100 to 100), "blacks" (-100 to 100),
+"temperature" (-100 to 100), "tint" (-100 to 100), "saturation" (-100 to 100), "vibrance" (-100 to 100),
+"clarity" (-100 to 100) (adds crispness/HD feel), "dehaze" (0 to 100).
+Example format:
+{"exposure": 5, "contrast": 12, "highlights": 8, "shadows": -5, "whites": 15, "blacks": -10, "temperature": -2, "tint": 0, "saturation": 5, "vibrance": 10, "clarity": 15, "dehaze": 5}`;
+
+      const requestBody = {
+        contents: [{ parts: [{ text: prompt }, { inline_data: { mime_type: 'image/jpeg', data: b64 } }] }],
+        generationConfig: { temperature: 0.1, response_mime_type: "application/json" }
+      };
+
+      const res = await fetchGeminiWithFallback(apiKey, requestBody);
+      
+      const data = await res.json();
+      const raw = data.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
+      const parsed = JSON.parse(raw.replace(/```json|```/g, '').trim());
+      
+      // Merge with default to ensure all keys exist
+      const newAdj = { ...DEFAULT_ADJUSTMENTS };
+      for (const key of Object.keys(DEFAULT_ADJUSTMENTS)) {
+        if (parsed[key] !== undefined && typeof parsed[key] === 'number') {
+          newAdj[key as keyof PhotoAdjustments] = parsed[key];
+        }
+      }
+      setAdjustments(newAdj);
+    } catch (e: any) {
+      console.error(e);
+      alert("AI Enhance failed. Please try manual adjustments.");
+    } finally {
+      setAiEnhancing(false);
+    }
+  };
+
   const runAutoDetect = useCallback(async () => {
     if (!img || !nw || !nh) return;
     setError(null);
@@ -263,6 +323,58 @@ export default function PassportPhotoSheet() {
         x0: (bboxSmall.x0 / sw) * nw, y0: (bboxSmall.y0 / sh) * nh,
         x1: (bboxSmall.x1 / sw) * nw, y1: (bboxSmall.y1 / sh) * nh,
       };
+
+      // If TF detection failed or gave very small bbox, try Gemini as fallback
+      if (!bbox || (bbox.x1 - bbox.x0 < nw * 0.1)) {
+        setDetectMsg('Trying AI face detection…');
+        try {
+          const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+          if (apiKey) {
+            const tmpCanvas = document.createElement('canvas');
+            const scale = Math.min(1, 600 / Math.max(nw, nh));
+            tmpCanvas.width = Math.round(nw * scale);
+            tmpCanvas.height = Math.round(nh * scale);
+            const tc = tmpCanvas.getContext('2d')!;
+            tc.drawImage(img, 0, 0, tmpCanvas.width, tmpCanvas.height);
+            const b64 = tmpCanvas.toDataURL('image/jpeg', 0.85).split(',')[1];
+            tmpCanvas.width = 0;
+
+            const prompt = `Analyze this portrait photo. Return ONLY valid JSON with face bounding box as fraction of image size (0.0-1.0):
+{"face_x": 0.3, "face_y": 0.1, "face_w": 0.4, "face_h": 0.5, "has_face": true}
+If no face found, return {"has_face": false}.`;
+            const res = await fetch(
+              `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+              {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ contents: [{ parts: [{ text: prompt }, { inline_data: { mime_type: 'image/jpeg', data: b64 } }] }] })
+              }
+            );
+            if (res.ok) {
+              const data = await res.json();
+              const raw = data.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
+              const parsed = JSON.parse(raw.replace(/```json|```/g, '').trim());
+              if (parsed.has_face && parsed.face_x !== undefined) {
+                const fx = parsed.face_x * nw, fy = parsed.face_y * nh;
+                const fw = parsed.face_w * nw, fh = parsed.face_h * nh;
+                // Expand face bbox to passport proportions (include top of head + shoulders)
+                const expandedBbox = {
+                  x0: Math.max(0, fx - fw * 0.3),
+                  y0: Math.max(0, fy - fh * 0.5),
+                  x1: Math.min(nw, fx + fw * 1.3),
+                  y1: Math.min(nh, fy + fh * 2.2),
+                };
+                const next = suggestCropFromPerson(nw, nh, expandedBbox, PASSPORT_ASPECT);
+                setCrop(clampCropRect(next, nw, nh, PASSPORT_ASPECT));
+                setDetectMsg('AI detected face — crop updated!');
+                setTimeout(() => setDetectMsg(''), 4000);
+                return;
+              }
+            }
+          }
+        } catch { /* use default center crop */ }
+      }
+
       const next = suggestCropFromPerson(nw, nh, bbox, PASSPORT_ASPECT);
       setCrop(clampCropRect(next, nw, nh, PASSPORT_ASPECT));
       setDetectMsg(bbox ? 'Crop updated from person outline.' : 'No clear person mask — centered crop.');
@@ -273,6 +385,7 @@ export default function PassportPhotoSheet() {
       setTimeout(() => setDetectMsg(''), 4000);
     }
   }, [img, nw, nh, ensureSegmenter]);
+
 
   const onPointerDownCrop = useCallback((e: React.PointerEvent) => {
     if (!crop) return;
@@ -636,6 +749,15 @@ export default function PassportPhotoSheet() {
                       </button>
                     )}
                   </div>
+
+                  <button
+                    onClick={runAiEnhance}
+                    disabled={aiEnhancing || !img || !crop}
+                    className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-700 hover:to-fuchsia-700 text-white font-bold rounded-xl shadow-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {aiEnhancing ? <Loader2 className="w-5 h-5 animate-spin" /> : <Sparkles className="w-5 h-5" />}
+                    {aiEnhancing ? 'AI is analyzing & enhancing...' : 'Auto Enhance (AI)'}
+                  </button>
 
                   <div className="space-y-2">
                     <div className="grid grid-cols-2 gap-1.5">

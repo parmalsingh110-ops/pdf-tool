@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { Download, FileText, Loader2, ScanSearch } from 'lucide-react';
-import { PDFDocument } from 'pdf-lib';
+import { PDFDocument, rgb } from 'pdf-lib';
 import { createWorker } from 'tesseract.js';
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
+import { extractTextRegions } from '../lib/advancedVisionEngine';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
@@ -20,6 +21,7 @@ export default function SearchablePdf() {
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState(0);
   const [lang, setLang] = useState<OCRLang>('eng');
+  const [engine, setEngine] = useState<'ai' | 'tesseract'>('ai');
   const [error, setError] = useState<string | null>(null);
   const workerRef = useRef<Awaited<ReturnType<typeof createWorker>> | null>(null);
 
@@ -73,22 +75,57 @@ export default function SearchablePdf() {
 
         await page.render({ canvasContext: ctx, viewport: renderViewport, canvas }).promise;
 
-        const { data } = await worker.recognize(canvas, { pdfTitle: file.name }, { pdf: true });
-        
-        if (!data.pdf) {
-          throw new Error('Failed to generate PDF from OCR engine');
+        // Silent AI attempt — adds hidden text layer
+        let aiTextAdded = false;
+        if (engine === 'ai') {
+          try {
+            if (import.meta.env.VITE_GEMINI_API_KEY) {
+              const base64 = canvas.toDataURL('image/jpeg', 0.85);
+              const blocks = await extractTextRegions(base64);
+              if (blocks && blocks.length > 0) {
+                // Build a pdf page with the image and AI text as invisible overlay
+                const aiPdf = await PDFDocument.create();
+                const aiPage = aiPdf.addPage([viewport.width, viewport.height]);
+                
+                // Draw the image first
+                const jpgBytes = await fetch(base64).then(r => r.arrayBuffer());
+                const jpgImage = await aiPdf.embedJpg(jpgBytes);
+                aiPage.drawImage(jpgImage, {
+                  x: 0,
+                  y: 0,
+                  width: viewport.width,
+                  height: viewport.height,
+                });
+
+                for (const block of blocks) {
+                  if (!block.text || !block.box_2d || block.box_2d.length < 4) continue;
+                  const [ymin, xmin, ymax, xmax] = block.box_2d;
+                  const x = (xmin / 1000) * viewport.width;
+                  const y = viewport.height - (ymax / 1000) * viewport.height;
+                  const fontSize = Math.max(6, Math.round(((ymax - ymin) / 1000) * viewport.height * 0.75));
+                  aiPage.drawText(block.text, { x, y, size: fontSize, color: rgb(0,0,0), opacity: 0 });
+                }
+                const aiBytes = await aiPdf.save();
+                const tempPdf = await PDFDocument.load(aiBytes);
+                const [copiedPage] = await outPdf.copyPages(tempPdf, [0]);
+                outPdf.addPage(copiedPage);
+                aiTextAdded = true;
+              }
+            }
+          } catch (e) { console.warn("AI text layer failed", e); /* fallback to Tesseract */ }
         }
 
-        const tempPdf = await PDFDocument.load(new Uint8Array(data.pdf));
-        const [copiedPage] = await outPdf.copyPages(tempPdf, [0]);
-        
-        // Scale down the page contents to match the original size, as tesseract's output
-        // is based on the 2x scaled canvas we passed to it.
-        copiedPage.scaleContent(1 / renderScale, 1 / renderScale);
-        copiedPage.setSize(viewport.width, viewport.height);
-        
-        outPdf.addPage(copiedPage);
+        if (!aiTextAdded) {
+          const { data } = await worker.recognize(canvas, { pdfTitle: file.name }, { pdf: true });
+          if (!data.pdf) throw new Error('Failed to generate PDF from OCR engine');
+          const tempPdf = await PDFDocument.load(new Uint8Array(data.pdf));
+          const [copiedPage] = await outPdf.copyPages(tempPdf, [0]);
+          copiedPage.scaleContent(1 / renderScale, 1 / renderScale);
+          copiedPage.setSize(viewport.width, viewport.height);
+          outPdf.addPage(copiedPage);
+        }
 
+        canvas.width = 0; canvas.height = 0;
         setProgress(Math.round((i / totalPages) * 100));
       }
 
@@ -149,12 +186,25 @@ export default function SearchablePdf() {
 
             <div className="grid sm:grid-cols-[1fr_auto] gap-4 items-end">
               <label className="text-sm text-slate-600 dark:text-slate-300">
+                OCR Engine
+                <select
+                  className="mt-1 w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
+                  value={engine}
+                  onChange={(e) => setEngine(e.target.value as 'ai' | 'tesseract')}
+                  disabled={busy}
+                >
+                  <option value="ai">AI Vision OCR (Smart)</option>
+                  <option value="tesseract">Standard OCR (Tesseract)</option>
+                </select>
+              </label>
+              
+              <label className={`text-sm text-slate-600 dark:text-slate-300 ${engine === 'ai' ? 'opacity-50' : ''}`}>
                 OCR Language
                 <select
                   className="mt-1 w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
                   value={lang}
                   onChange={(e) => setLang(e.target.value as OCRLang)}
-                  disabled={busy}
+                  disabled={busy || engine === 'ai'}
                 >
                   <option value="eng">English</option>
                   <option value="hin">Hindi</option>

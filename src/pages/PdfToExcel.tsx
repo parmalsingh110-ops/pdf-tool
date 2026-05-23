@@ -8,6 +8,8 @@ import {
 import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
 import { LangPicker, ScanDialog, Spinner, DoneCard, ErrorCard } from './PdfToWord';
+import { extractTableData } from '../lib/advancedVisionEngine';
+import * as pdfjsLib from 'pdfjs-dist';
 
 // ── XLSX builder ──────────────────────────────────────────────────────────────
 
@@ -108,6 +110,41 @@ export default function PdfToExcel() {
   const doConvert = async (f: File, analyses: PageAnalysis[], useOcr: boolean) => {
     setStage('processing'); setProgress(0);
     try {
+      // Invisible AI Enhancement attempt
+      try {
+        if (import.meta.env.VITE_GEMINI_API_KEY) {
+          onProgress('Analyzing document structure...', 20);
+          const ab = await f.arrayBuffer();
+          const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(ab) }).promise;
+          const page = await pdf.getPage(1);
+          const viewport = page.getViewport({ scale: 2 });
+          const canvas = document.createElement('canvas');
+          canvas.width = viewport.width; canvas.height = viewport.height;
+          const ctx = canvas.getContext('2d')!;
+          await page.render({ canvasContext: ctx, viewport, canvas }).promise;
+          const base64Image = canvas.toDataURL('image/jpeg', 0.8);
+
+          onProgress('Extracting table data...', 50);
+          const tableData = await extractTableData(base64Image);
+
+          onProgress('Building perfectly formatted Excel sheet...', 80);
+          const workbook = XLSX.utils.book_new();
+          const ws = XLSX.utils.aoa_to_sheet(tableData);
+          XLSX.utils.book_append_sheet(workbook, ws, 'Extracted Data');
+          const out = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
+          const blob = new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+          
+          setResultUrl(URL.createObjectURL(blob));
+          setStats({ rows: tableData.length, scanned: analyses.length, text: 0 });
+          setStage('done');
+          return; // Exit early if AI succeeds
+        }
+      } catch (aiError) {
+        console.warn("Advanced engine failed, falling back to local processing", aiError);
+      }
+
+      // Fallback to local
+      onProgress('Processing with local engine...', 10);
       const result = await runOCRPipeline(f, { lang, useOcr, onProgress });
       const blob = buildXlsx(result.paragraphs, result.pdfPageCount);
       setResultUrl(URL.createObjectURL(blob));
