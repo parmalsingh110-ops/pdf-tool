@@ -119,8 +119,25 @@ export default function PdfToPpt() {
   const doConvert = async (f: File, analyses: PageAnalysis[], useOcr: boolean) => {
     setStage('processing'); setProgress(0);
     try {
+      onProgress('Processing with local engine...', 10);
       const result = await runOCRPipeline(f, { lang, useOcr, onProgress });
-      const blob = await buildPptx(f, result.pageAnalyses, result.paragraphs, useOcr, onProgress);
+      let finalParas = result.paragraphs;
+
+      try {
+        if (import.meta.env.VITE_GEMINI_API_KEY && finalParas.length > 0) {
+          onProgress('AI polishing OCR text...', 90);
+          const { polishExtractedParagraphs } = await import('../lib/advancedVisionEngine');
+          const rawStrings = finalParas.map(p => p.text);
+          const polished = await polishExtractedParagraphs(rawStrings);
+          if (polished.length === finalParas.length) {
+            finalParas = finalParas.map((p, i) => ({ ...p, text: polished[i] }));
+          }
+        }
+      } catch (aiError) {
+        console.warn("AI polishing failed, using raw local text", aiError);
+      }
+
+      const blob = await buildPptx(f, result.pageAnalyses, finalParas, useOcr, onProgress);
       setResultUrl(URL.createObjectURL(blob));
       setStats({ slides: result.pdfPageCount, scanned: result.pageAnalyses.filter(p => p.isScanned).length, text: result.pageAnalyses.filter(p => p.hasText).length });
       setStage('done');
