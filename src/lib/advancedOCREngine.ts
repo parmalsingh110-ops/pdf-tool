@@ -6,6 +6,7 @@
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { createWorker } from 'tesseract.js';
+import { extractTextRegions } from './advancedVisionEngine';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
@@ -129,7 +130,7 @@ export const LANGUAGE_OPTIONS: { value: OCRLanguage; label: string; script: stri
   { value: 'isl',     label: '🇮🇸 Icelandic (Íslenska)',          script: 'Latin' },
 ];
 
-const AUTO_DETECT_LANG = 'eng+hin+chi_sim+ara+rus+jpn+kor';
+const AUTO_DETECT_LANG = 'eng+hin';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -382,6 +383,52 @@ export async function ocrScannedPages(
   const scanned = pageAnalyses.filter(p => p.imageDataUrl);
   if (!scanned.length) return [];
 
+  const runs: RichRun[] = [];
+  const OCR_SCALE = 2.5;
+
+  // Invisible AI Enhancement attempt
+  try {
+    if (import.meta.env.VITE_GEMINI_API_KEY) {
+      let aiSuccess = true;
+      for (let pi = 0; pi < scanned.length; pi++) {
+        const pa = scanned[pi];
+        onProgress?.(`Advanced scanning page ${pa.pageIndex + 1}…`, 45 + (pi / scanned.length) * 40);
+        
+        const aiBlocks = await extractTextRegions(pa.imageDataUrl!);
+        
+        for (const block of aiBlocks) {
+          if (!block.text || !block.box_2d || block.box_2d.length !== 4) continue;
+          const [ymin, xmin, ymax, xmax] = block.box_2d;
+          
+          // Image was rendered at scale = 2.0 (in analysePDF), we need to project back to page coords.
+          // box_2d is 0-1000 scale.
+          // Image width = pa.width * 2.0, Image height = pa.height * 2.0
+          // Wait, analysePDF renders scanned images at scale=2.0. So pa.width and pa.height are the original viewport dimensions.
+          const x = (xmin / 1000) * pa.width;
+          const y = (ymin / 1000) * pa.height;
+          const w = ((xmax - xmin) / 1000) * pa.width;
+          const h = ((ymax - ymin) / 1000) * pa.height;
+          
+          runs.push({
+            text: block.text,
+            x, y, w, h,
+            fontSize: Math.max(8, Math.round(h * 0.75)),
+            bold: false, italic: false, fontName: '',
+            pageIndex: pa.pageIndex,
+            pageW: pa.width, pageH: pa.height,
+            leftMargin: pa.leftMargin, rightMargin: pa.rightMargin,
+          });
+        }
+      }
+      
+      if (runs.length > 0) return runs;
+    }
+  } catch (aiError) {
+    console.warn("Advanced engine failed, falling back to local Tesseract OCR", aiError);
+    runs.length = 0; // Clear partial runs if any page failed
+  }
+
+  // Fallback to local Tesseract OCR
   const tesseractLang = lang === 'auto' ? AUTO_DETECT_LANG : lang;
   const worker = await createWorker(tesseractLang, 1, {
     logger: (m: any) => {
@@ -391,12 +438,9 @@ export async function ocrScannedPages(
     },
   });
 
-  const runs: RichRun[] = [];
-  const OCR_SCALE = 2.5;
-
   for (let pi = 0; pi < scanned.length; pi++) {
     const pa = scanned[pi];
-    onProgress?.(`Running OCR on page ${pa.pageIndex + 1}…`, 45 + (pi / scanned.length) * 40);
+    onProgress?.(`Running local OCR on page ${pa.pageIndex + 1}…`, 45 + (pi / scanned.length) * 40);
     const { data } = await worker.recognize(pa.imageDataUrl!, {}, { blocks: true });
 
     for (const block of (data as any).blocks ?? []) {
@@ -540,6 +584,10 @@ export function groupRunsIntoParagraphs(runs: RichRun[]): RichParagraph[] {
           // For complex scripts with small gap, join directly
           if (complex && gap < charW * 0.8) {
             lineStr += r.text;
+          } else if (gap > charW * 1.5) {
+            // Preserve spatial layout with non-breaking spaces
+            const spaceCount = Math.max(1, Math.round(gap / (prev.fontSize * 0.25)));
+            lineStr += '\u00A0'.repeat(spaceCount) + r.text;
           } else if (gap > charW * 0.3) {
             lineStr += ' ' + r.text;
           } else {

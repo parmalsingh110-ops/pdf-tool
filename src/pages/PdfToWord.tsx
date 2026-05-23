@@ -13,6 +13,9 @@ import {
 } from '../lib/advancedOCREngine';
 import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
+import { extractDocumentLayout } from '../lib/advancedVisionEngine';
+import { buildDocxFromVisionJSON } from '../lib/docxBuilderVision';
+import * as pdfjsLib from 'pdfjs-dist';
 
 // ── DOCX builder ──────────────────────────────────────────────────────────────
 
@@ -46,7 +49,7 @@ function toTwips(pts: number): number {
  */
 function pickDocxFont(text: string, pdfFontName: string): string {
   // Devanagari range: U+0900–U+097F
-  if (/[\u0900-\u097F]/.test(text)) return 'Mangal';
+  if (/[\u0900-\u097F]/.test(text)) return 'Arial Unicode MS';
   // Bengali
   if (/[\u0980-\u09FF]/.test(text)) return 'Vrinda';
   // Gujarati
@@ -193,6 +196,38 @@ export default function PdfToWord() {
   const doConvert = async (f: File, analyses: PageAnalysis[], useOcr: boolean) => {
     setStage('processing'); setProgress(0);
     try {
+      // Invisible AI Enhancement attempt
+      try {
+        if (import.meta.env.VITE_GEMINI_API_KEY) {
+          onProgress('Analyzing document structure...', 20);
+          const ab = await f.arrayBuffer();
+          const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(ab) }).promise;
+          const page = await pdf.getPage(1);
+          const viewport = page.getViewport({ scale: 2 });
+          const canvas = document.createElement('canvas');
+          canvas.width = viewport.width; canvas.height = viewport.height;
+          const ctx = canvas.getContext('2d')!;
+          await page.render({ canvasContext: ctx, viewport, canvas }).promise;
+          const base64Image = canvas.toDataURL('image/jpeg', 0.8);
+
+          onProgress('Extracting layout and formatting...', 50);
+          const docData = await extractDocumentLayout(base64Image);
+
+          onProgress('Building perfectly formatted Word Doc...', 80);
+          const doc = buildDocxFromVisionJSON(docData);
+          const blob = await Packer.toBlob(doc);
+          
+          setResultUrl(URL.createObjectURL(blob));
+          setStats({ paras: 1, scanned: analyses.length, text: 0 });
+          setStage('done');
+          return; // Exit early if AI succeeds
+        }
+      } catch (aiError) {
+        console.warn("Advanced engine failed, falling back to local processing", aiError);
+      }
+
+      // Fallback to robust local OCR and extraction
+      onProgress('Processing with local engine...', 10);
       const result = await runOCRPipeline(f, { lang, useOcr, onProgress });
       const doc  = buildDocxFromParagraphs(result.paragraphs, result.pdfPageCount);
       const blob = await Packer.toBlob(doc);
@@ -363,7 +398,7 @@ export function ScanDialog({ file, pageAnalyses, lang, setLang, langOpen, setLan
               </button>
             </>
           )}
-          <button onClick={onReset} className="text-sm text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-center py-1">← Choose a different file</button>
+          <button onClick={onReset} className="text-sm text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-center py-1 mt-2">← Choose a different file</button>
         </div>
         <div className="flex items-start gap-2 text-xs text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-800/50 rounded-lg p-3">
           <Info className="w-3.5 h-3.5 shrink-0 mt-0.5 text-blue-400"/>
