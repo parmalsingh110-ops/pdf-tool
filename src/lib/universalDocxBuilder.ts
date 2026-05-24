@@ -1,18 +1,9 @@
-import { Document, Paragraph, TextRun, AlignmentType, ImageRun, Table, TableRow, TableCell, WidthType, BorderStyle, TabStopType, TabStopPosition } from 'docx';
-import { UniversalLayoutResponse } from './advancedVisionEngine';
+import { Document, Paragraph, TextRun, AlignmentType, ImageRun, Table, TableRow, TableCell, WidthType, BorderStyle, TabStopType } from 'docx';
+import { UniversalLayoutResponse, UniversalLayoutElement } from './advancedVisionEngine';
 
-export interface UniversalLayoutElement {
-  type: 'text' | 'image' | 'table';
-  text?: string;
-  font_size?: number;
-  bold?: boolean;
-  italic?: boolean;
-  alignment?: 'left' | 'center' | 'right' | 'justify';
-  description?: string;
-  bbox?: [number, number, number, number];
-  rows?: any[][];
-  has_borders?: boolean;
-}
+/**
+ * Crop an image region from a canvas given a normalized bbox [ymin, xmin, ymax, xmax] (0-1000).
+ */
 async function cropImageFromCanvas(canvas: HTMLCanvasElement, bbox: [number, number, number, number]): Promise<{ data: Uint8Array, width: number, height: number } | null> {
   const [ymin, xmin, ymax, xmax] = bbox;
   const x = (xmin / 1000) * canvas.width;
@@ -23,14 +14,14 @@ async function cropImageFromCanvas(canvas: HTMLCanvasElement, bbox: [number, num
   if (w <= 0 || h <= 0) return null;
 
   const cropCanvas = document.createElement('canvas');
-  cropCanvas.width = w;
-  cropCanvas.height = h;
+  cropCanvas.width = Math.round(w);
+  cropCanvas.height = Math.round(h);
   const ctx = cropCanvas.getContext('2d');
   if (!ctx) return null;
 
-  ctx.drawImage(canvas, x, y, w, h, 0, 0, w, h);
+  ctx.drawImage(canvas, x, y, w, h, 0, 0, cropCanvas.width, cropCanvas.height);
   
-  const base64 = cropCanvas.toDataURL('image/jpeg', 0.9);
+  const base64 = cropCanvas.toDataURL('image/jpeg', 0.92);
   const base64Data = base64.split(',')[1];
   if (!base64Data) return null;
 
@@ -41,16 +32,39 @@ async function cropImageFromCanvas(canvas: HTMLCanvasElement, bbox: [number, num
     bytes[i] = binaryStr.charCodeAt(i);
   }
 
-  // Scale down for docx if too large, max width ~600px
-  let outW = w;
-  let outH = h;
-  if (outW > 600) {
-    const ratio = 600 / outW;
-    outW = 600;
-    outH = h * ratio;
+  // Scale for docx: target ~550px max width for good quality
+  let outW = cropCanvas.width;
+  let outH = cropCanvas.height;
+  if (outW > 550) {
+    const ratio = 550 / outW;
+    outW = 550;
+    outH = cropCanvas.height * ratio;
   }
 
   return { data: bytes, width: Math.round(outW), height: Math.round(outH) };
+}
+
+/**
+ * Capture the entire page as a single full-page image for embedding.
+ */
+async function captureFullPageImage(canvas: HTMLCanvasElement): Promise<{ data: Uint8Array, width: number, height: number } | null> {
+  const base64 = canvas.toDataURL('image/jpeg', 0.88);
+  const base64Data = base64.split(',')[1];
+  if (!base64Data) return null;
+
+  const binaryStr = atob(base64Data);
+  const len = binaryStr.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binaryStr.charCodeAt(i);
+  }
+
+  // Standard A4 Word page width is about 595pt = ~550px at screen resolution
+  const targetW = 550;
+  const ratio = targetW / canvas.width;
+  const targetH = Math.round(canvas.height * ratio);
+
+  return { data: bytes, width: targetW, height: targetH };
 }
 
 function getAlignment(align?: string): AlignmentType {
@@ -62,78 +76,115 @@ function getAlignment(align?: string): AlignmentType {
   }
 }
 
+/**
+ * Build a Word document from AI-extracted layout data.
+ * 
+ * Key design decisions:
+ * - Elements are grouped into "lines" based on Y-coordinate proximity.
+ * - Vertical spacing between lines is calculated from bbox gaps and translated to Word twips.
+ * - Side-by-side elements on the same line use TabStops for horizontal positioning.
+ * - If layout has no elements (AI failed / scanned without OCR), embed the full page as an image.
+ */
 export async function buildUniversalDocx(pages: { layout: UniversalLayoutResponse, canvas: HTMLCanvasElement }[]): Promise<Document> {
   const allChildren: any[] = [];
+
+  // A4 page has ~15840 twips of usable height (792pt * 20). We map 1000 bbox units to this.
+  // 1 bbox unit ≈ 15.84 twips. We use a multiplier for gap-to-twips conversion.
+  const TWIPS_PER_BBOX_UNIT = 14; // Tuned for A4-ish pages
 
   for (let i = 0; i < pages.length; i++) {
     const { layout, canvas } = pages[i];
     
-    // Add page break if not first page
+    // Page break before every page except the first
     if (i > 0) {
       allChildren.push(new Paragraph({ pageBreakBefore: true }));
     }
 
-    for (const el of layout.elements || []) {
-      if (el.type === 'text') {
-        const p = new Paragraph({
-          alignment: getAlignment(el.alignment),
-          spacing: { after: 120 },
+    // Filter elements that have valid bbox
+    const elements = (layout.elements || []).filter(
+      (el: any) => el.bbox && Array.isArray(el.bbox) && el.bbox.length === 4
+    );
+
+    // If no elements were extracted (AI failed, or scanned page without OCR),
+    // embed the entire page as a full-page image so the user doesn't get a blank page.
+    if (elements.length === 0) {
+      const fullImg = await captureFullPageImage(canvas);
+      if (fullImg) {
+        allChildren.push(new Paragraph({
+          alignment: AlignmentType.CENTER,
           children: [
-            new TextRun({
-              text: el.text || '',
-              bold: el.bold,
-              italics: el.italic,
-              size: (el.font_size || 12) * 2 // docx size is in half-points
+            new ImageRun({
+              data: fullImg.data,
+              transformation: { width: fullImg.width, height: fullImg.height }
             })
           ]
-        });
-        allChildren.push(p);
-      } 
-      else if (el.type === 'image' && el.bbox) {
-        const imgData = await cropImageFromCanvas(canvas, el.bbox);
-        if (imgData) {
-          const p = new Paragraph({
-            alignment: getAlignment(el.alignment || 'center'),
-            spacing: { after: 200, before: 100 },
-            children: [
-              new ImageRun({
-                data: imgData.data,
-                transformation: { width: imgData.width, height: imgData.height }
-              })
-            ]
-          });
-          allChildren.push(p);
+        }));
+      }
+      continue;
+    }
+    
+    // Sort all elements top-to-bottom by ymin
+    elements.sort((a: any, b: any) => a.bbox[0] - b.bbox[0]);
+
+    // ── Group elements into visual "lines" ──
+    // Two elements are on the same line if their ymin values are within 20 units (~2% of page).
+    type Line = (typeof elements[0])[];
+    const lines: Line[] = [];
+
+    for (const el of elements) {
+      if (lines.length === 0) {
+        lines.push([el]);
+        continue;
+      }
+      const lastLine = lines[lines.length - 1];
+      // Average ymin of elements already on this line
+      const avgY = lastLine.reduce((s: number, e: any) => s + e.bbox[0], 0) / lastLine.length;
+      const yDiff = Math.abs(el.bbox[0] - avgY);
+      
+      // Tables always get their own line
+      if (el.type === 'table' || lastLine.some((e: any) => e.type === 'table')) {
+        lines.push([el]);
+      } else if (yDiff < 20) {
+        // Same horizontal line
+        lastLine.push(el);
+      } else {
+        lines.push([el]);
+      }
+    }
+
+    // Sort elements within each line left-to-right by xmin
+    for (const line of lines) {
+      line.sort((a: any, b: any) => a.bbox[1] - b.bbox[1]);
+    }
+
+    let prevLineYMax = -1; // Track bottom of previous line for gap calculation
+
+    for (const line of lines) {
+      const lineYMin = Math.min(...line.map((e: any) => e.bbox[0]));
+      const lineYMax = Math.max(...line.map((e: any) => e.bbox[2]));
+      
+      // ── Calculate vertical spacing ──
+      let spacingBefore = 0;
+      if (prevLineYMax >= 0) {
+        const gap = Math.max(0, lineYMin - prevLineYMax);
+        spacingBefore = Math.round(gap * TWIPS_PER_BBOX_UNIT);
+      }
+      prevLineYMax = lineYMax;
+
+      // ── Handle table element ──
+      if (line.length === 1 && line[0].type === 'table') {
+        const el = line[0];
+        if (spacingBefore > 40) {
+          allChildren.push(new Paragraph({ spacing: { before: spacingBefore } }));
         }
-      }
-      else if (el.type === 'row') {
-        const p = new Paragraph({
-          tabStops: [
-            { type: TabStopType.RIGHT, position: 9000 }
-          ],
-          spacing: { after: 120 },
-          children: [
-            new TextRun({
-              text: el.left_text || '',
-              bold: el.bold,
-              size: (el.font_size || 12) * 2
-            }),
-            new TextRun({
-              text: "\t" + (el.right_text || ''),
-              bold: el.bold,
-              size: (el.font_size || 12) * 2
-            })
-          ]
-        });
-        allChildren.push(p);
-      }
-      else if (el.type === 'table' && el.rows && el.rows.length > 0) {
-        const tableRows = el.rows.map(row => {
-          const cells = row.map(cell => {
+        
+        const tableRows = (el.rows || []).map((row: any) => {
+          const cells = row.map((cell: any) => {
             const cellText = typeof cell === 'string' ? cell : (cell.text || '');
             const isBold = typeof cell === 'object' && cell.bold;
-            const align = typeof cell === 'object' ? getAlignment(cell.alignment) : AlignmentType.LEFT;
+            const cellAlign = typeof cell === 'object' ? getAlignment(cell.alignment) : AlignmentType.LEFT;
             return new TableCell({
-              margins: { top: 50, bottom: 50, left: 50, right: 50 },
+              margins: { top: 40, bottom: 40, left: 60, right: 60 },
               borders: el.has_borders === false ? {
                 top: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
                 bottom: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
@@ -142,8 +193,8 @@ export async function buildUniversalDocx(pages: { layout: UniversalLayoutRespons
               } : undefined,
               children: [
                 new Paragraph({
-                  alignment: align,
-                  children: [new TextRun({ text: cellText, bold: isBold, size: 24 })]
+                  alignment: cellAlign,
+                  children: [new TextRun({ text: cellText, bold: isBold, size: 22 })]
                 })
               ]
             });
@@ -151,10 +202,9 @@ export async function buildUniversalDocx(pages: { layout: UniversalLayoutRespons
           return new TableRow({ children: cells });
         });
 
-        const table = new Table({
-          rows: tableRows,
-          width: { size: 100, type: WidthType.PERCENTAGE },
-          borders: el.has_borders === false ? {
+        if (tableRows.length > 0) {
+          const noBorder = el.has_borders === false;
+          const borderDef = noBorder ? {
             top: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
             bottom: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
             left: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
@@ -168,19 +218,82 @@ export async function buildUniversalDocx(pages: { layout: UniversalLayoutRespons
             right: { style: BorderStyle.SINGLE, size: 1 },
             insideHorizontal: { style: BorderStyle.SINGLE, size: 1 },
             insideVertical: { style: BorderStyle.SINGLE, size: 1 },
+          };
+          allChildren.push(new Table({
+            rows: tableRows,
+            width: { size: 100, type: WidthType.PERCENTAGE },
+            borders: borderDef,
+          }));
+        }
+        continue;
+      }
+
+      // ── Handle text/image line ──
+      const runs: any[] = [];
+      const tabStops: any[] = [];
+      
+      // Determine alignment: if only one element, use its alignment; if multiple, use LEFT with tabs
+      let lineAlignment = getAlignment(line[0].alignment);
+      if (line.length > 1) {
+        lineAlignment = AlignmentType.LEFT;
+      }
+
+      for (let j = 0; j < line.length; j++) {
+        const el = line[j];
+        const isFirst = j === 0;
+
+        if (el.type === 'image') {
+          const imgData = await cropImageFromCanvas(canvas, el.bbox);
+          if (imgData) {
+            if (!isFirst) {
+              // Add a tab to position the image
+              tabStops.push({ type: TabStopType.LEFT, position: Math.round(el.bbox[1] * 9.5) });
+              runs.push(new TextRun("\t"));
+            }
+            runs.push(new ImageRun({
+              data: imgData.data,
+              transformation: { width: imgData.width, height: imgData.height }
+            }));
           }
-        });
-        allChildren.push(table);
-        allChildren.push(new Paragraph({ spacing: { after: 200 } })); // space after table
+        } else {
+          // Text element
+          let prefix = "";
+          if (!isFirst) {
+            prefix = "\t";
+            tabStops.push({ type: TabStopType.LEFT, position: Math.round(el.bbox[1] * 9.5) });
+          }
+          runs.push(new TextRun({
+            text: prefix + (el.text || ''),
+            bold: el.bold,
+            italics: el.italic,
+            size: (el.font_size || 11) * 2, // half-points
+          }));
+        }
+      }
+
+      if (runs.length > 0) {
+        allChildren.push(new Paragraph({
+          alignment: lineAlignment,
+          spacing: { before: spacingBefore, after: 0 },
+          tabStops: tabStops.length > 0 ? tabStops : undefined,
+          children: runs,
+        }));
       }
     }
   }
 
   return new Document({
+    styles: {
+      default: {
+        document: {
+          run: { font: 'Calibri', size: 22 },
+        },
+      },
+    },
     sections: [{
       properties: {
         page: {
-          margin: { top: 1000, right: 1000, bottom: 1000, left: 1000 }
+          margin: { top: 720, right: 720, bottom: 720, left: 720 } // 0.5 inch margins
         }
       },
       children: allChildren
