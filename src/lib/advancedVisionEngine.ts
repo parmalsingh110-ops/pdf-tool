@@ -266,16 +266,14 @@ ${JSON.stringify(paras)}`;
 }
 
 export interface UniversalLayoutElement {
-  type: 'text' | 'image' | 'table' | 'row';
+  type: 'text' | 'image' | 'table';
   text?: string;
   font_size?: number;
   bold?: boolean;
   italic?: boolean;
   alignment?: 'left' | 'center' | 'right' | 'justify';
-  left_text?: string;
-  right_text?: string;
   description?: string;
-  bbox?: [number, number, number, number]; // [ymin, xmin, ymax, xmax] 0-1000
+  bbox: [number, number, number, number]; // REQUIRED: [ymin, xmin, ymax, xmax] 0-1000
   rows?: any[][];
 }
 
@@ -289,51 +287,64 @@ export async function extractUniversalLayout(base64Image: string): Promise<Unive
   const apiKey = getVisionApiKey();
   if (!apiKey) throw new Error('Vision API key is not configured.');
 
-  const prompt = `You are an expert Document Layout Analyzer. Your task is to perfectly recreate the structure, formatting, and content of this document page.
-Return ONLY a valid JSON object matching this strict schema:
+  const prompt = `You are a PIXEL-PERFECT Document Layout Analyzer. Analyze this document image and output EVERY element with PRECISE spatial coordinates.
+
+The coordinate system uses a 0-1000 normalized scale where (0,0) is top-left and (1000,1000) is bottom-right.
+"bbox" format is always [ymin, xmin, ymax, xmax].
+
+Return ONLY valid JSON matching this schema:
 {
   "page_width": 800,
   "page_height": 1100,
   "elements": [
     {
       "type": "text",
-      "text": "Exact text string",
+      "text": "Full text string on this line",
       "font_size": 14,
       "bold": true,
       "italic": false,
-      "alignment": "center" // one of: left, center, right, justify
-    },
-    {
-      "type": "row",
-      "left_text": "Text on the left side",
-      "right_text": "Text on the right side",
-      "font_size": 14,
-      "bold": true
+      "alignment": "center",
+      "bbox": [ymin, xmin, ymax, xmax]
     },
     {
       "type": "image",
-      "description": "QR Code / Signature / State Emblem / Photo",
-      "alignment": "right", // left, center, or right based on its visual position
-      "bbox": [ymin, xmin, ymax, xmax] // normalized 0-1000
+      "description": "What the image depicts",
+      "alignment": "right",
+      "bbox": [ymin, xmin, ymax, xmax]
     },
     {
       "type": "table",
       "has_borders": true,
-      "rows": [
-        [
-          { "text": "Cell value", "bold": true, "alignment": "left" }
-        ]
-      ]
+      "bbox": [ymin, xmin, ymax, xmax],
+      "rows": [[ { "text": "Cell", "bold": true } ]]
     }
   ]
 }
 
 CRITICAL RULES:
-1. EXACT FORMATTING: Capture ALL text, preserving exact bolding, alignment, and relative font sizes.
-2. IMAGES & QRs: For EVERY image, logo, stamp, QR code, or signature, output an "image" element with a highly accurate bounding box [ymin, xmin, ymax, xmax]. Our system will crop this exactly.
-3. SIDE-BY-SIDE TEXT (CRITICAL): If two pieces of text are on the exact same horizontal line but spaced far apart (e.g. "FROM: BVC" on left, "BOARDING AT: BVC" on right), use the "row" type with "left_text" and "right_text". DO NOT use tables for simple side-by-side text.
-4. TABLES: ONLY use the "table" type for actual grid data with borders.
-5. Output MUST be valid JSON. No markdown backticks.`;
+
+1. BOUNDING BOX ACCURACY IS THE #1 PRIORITY.
+   - Every "bbox" MUST tightly and accurately wrap ONLY the content it describes.
+   - ymin = top edge of the text/image, ymax = bottom edge, xmin = left edge, xmax = right edge.
+   - Pay special attention to the VERTICAL GAPS between lines. If two lines have a large visible gap between them, their ymin/ymax values must reflect that gap accurately. Do NOT place consecutive lines with overlapping or touching bboxes when there is visible whitespace between them.
+
+2. ALIGNMENT DETECTION.
+   - "left": text starts near the left margin.
+   - "center": text is visually centered on the page.
+   - "right": text is pushed to the right side of the page.
+   - Do NOT default everything to "left". Look carefully at where the text sits on the page.
+
+3. SIDE-BY-SIDE TEXT.
+   - If two text phrases sit on the SAME horizontal line but are separated by a large gap (e.g., "FROM: BVC" on the left and "BOARDING AT: BVC" on the right), output them as TWO SEPARATE "text" elements, each with their own bbox. The first one will have a smaller xmax and the second will have a larger xmin.
+
+4. IMAGES, SIGNATURES, QR CODES, STAMPS.
+   - Output each as type "image" with a tight bbox that wraps ONLY the visual graphic.
+   - CRITICAL: The bbox MUST NOT include any surrounding printed text. Crop tightly around the image boundary only.
+
+5. TABLES.
+   - Only use type "table" for actual bordered grid/tabular data. NOT for layout positioning.
+
+6. Output valid JSON only. No markdown fences, no explanation text.`;
 
   const base64Data = base64Image.split(',')[1] || base64Image;
 
