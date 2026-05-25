@@ -181,6 +181,7 @@ export async function buildUniversalDocx(pages: { layout: UniversalLayoutRespons
         const tableRows = (el.rows || []).map((row: any) => {
           const cells = row.map((cell: any) => {
             const cellText = typeof cell === 'string' ? cell : (cell.text || '');
+            const safeCellText = cellText.replace(/[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F-\x9F]/g, '');
             const isBold = typeof cell === 'object' && cell.bold;
             const cellAlign = typeof cell === 'object' ? getAlignment(cell.alignment) : AlignmentType.LEFT;
             return new TableCell({
@@ -194,7 +195,7 @@ export async function buildUniversalDocx(pages: { layout: UniversalLayoutRespons
               children: [
                 new Paragraph({
                   alignment: cellAlign,
-                  children: [new TextRun({ text: cellText, bold: isBold, size: 22 })]
+                  children: [new TextRun({ text: safeCellText, bold: isBold, size: 22 })]
                 })
               ]
             });
@@ -262,8 +263,9 @@ export async function buildUniversalDocx(pages: { layout: UniversalLayoutRespons
             prefix = "\t";
             tabStops.push({ type: TabStopType.LEFT, position: Math.round(el.bbox[1] * 9.5) });
           }
+          const safeElText = (el.text || '').replace(/[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F-\x9F]/g, '');
           runs.push(new TextRun({
-            text: prefix + (el.text || ''),
+            text: prefix + safeElText,
             bold: el.bold,
             italics: el.italic,
             size: (el.font_size || 11) * 2, // half-points
@@ -296,7 +298,7 @@ export async function buildUniversalDocx(pages: { layout: UniversalLayoutRespons
           margin: { top: 720, right: 720, bottom: 720, left: 720 } // 0.5 inch margins
         }
       },
-      children: allChildren
+      children: allChildren.length > 0 ? allChildren : [new Paragraph({ children: [new TextRun("")] })]
     }]
   });
 }
