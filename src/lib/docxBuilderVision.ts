@@ -154,6 +154,9 @@ export function buildDocxFromVisionJSON(data: DocumentLayoutResponse): Document 
   });
 
   return new Document({
+    settings: {
+      compat: { compatibilityMode: 15 },
+    },
     sections: [{
       properties: {
         page: {
