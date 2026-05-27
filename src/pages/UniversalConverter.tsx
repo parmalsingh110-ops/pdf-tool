@@ -632,8 +632,11 @@ async function docxFromParagraphs(paragraphs: string[], title?: string): Promise
     const safeP = p.replace(/[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F-\x9F]/g, '');
     children.push(new Paragraph({ children: [new TextRun(safeP)] }));
   }
-  if (children.length === 0) children.push(new Paragraph({ children: [new TextRun("")] }));
-  const d = new Document({ sections: [{ properties: {}, children }] });
+  if (children.length === 0) children.push(new Paragraph({ children: [new TextRun('')] }));
+  const d = new Document({
+    settings: { compat: { compatibilityMode: 15 } },
+    sections: [{ properties: {}, children }]
+  });
   return Packer.toBlob(d);
 }
 
@@ -657,8 +660,11 @@ async function docxFromXlsxSheets(sheets: XlsxSheet[]): Promise<Blob> {
     children.push(new DocxTable({ rows: tableRows, width: { size: 9000, type: WidthType.DXA } }));
     children.push(new Paragraph({}));
   }
-  if (children.length === 0) children.push(new Paragraph({ children: [new TextRun("")] }));
-  const d = new Document({ sections: [{ properties: {}, children }] });
+  if (children.length === 0) children.push(new Paragraph({ children: [new TextRun('')] }));
+  const d = new Document({
+    settings: { compat: { compatibilityMode: 15 } },
+    sections: [{ properties: {}, children }]
+  });
   return Packer.toBlob(d);
 }
 
@@ -672,8 +678,11 @@ async function docxFromSlides(slides: string[], title?: string): Promise<Blob> {
     if (safeText) children.push(new Paragraph({ children: [new TextRun(safeText)] }));
     children.push(new Paragraph({}));
   });
-  if (children.length === 0) children.push(new Paragraph({ children: [new TextRun("")] }));
-  const d = new Document({ sections: [{ properties: {}, children }] });
+  if (children.length === 0) children.push(new Paragraph({ children: [new TextRun('')] }));
+  const d = new Document({
+    settings: { compat: { compatibilityMode: 15 } },
+    sections: [{ properties: {}, children }]
+  });
   return Packer.toBlob(d);
 }
 
