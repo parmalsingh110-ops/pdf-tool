@@ -9,6 +9,8 @@ import {
   Images, Copy, Info, Download, ScanSearch, Clock3, Maximize,
 } from 'lucide-react';
 import { readRecentTools, type RecentEntry } from '../lib/recentFiles';
+import { usePageSEO } from '../lib/usePageSEO';
+
 
 /* =============================================
    TOOL CATEGORIES — ordered by user usefulness
@@ -122,6 +124,13 @@ const COLOR_MAP: Record<string, { card: string; iconBg: string; iconText: string
 
 export default function Home() {
   const [recent, setRecent] = useState<RecentEntry[]>([]);
+  // Set canonical for homepage
+  usePageSEO(
+    'PDF Media Suite — Free Online PDF & Image Tools',
+    'Free online PDF editor, merger, splitter, compressor, image resizer, background remover, and 90+ tools. Fast, private, browser-based. No uploads required.',
+    undefined,
+    '/'
+  );
   // Dynamic SEO
   useEffect(() => {
     document.title = 'MediaSuite — Free Online PDF & Image Tools | Merge, Split, Compress, Convert';

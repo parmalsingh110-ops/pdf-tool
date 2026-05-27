@@ -112,9 +112,11 @@ function buildDocxFromParagraphs(paras: RichParagraph[], pageCount: number): Doc
       // Pick font based on actual text content
       const font = pickDocxFont(lineText, dominantFontName);
 
+      const safeText = lineText.replace(/[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F-\x9F]/g, '');
+
       // For the first line, use paragraph spacing; subsequent lines have no extra space
       const run = new TextRun({
-        text: lineText,
+        text: safeText,
         bold: para.bold,
         italics: para.italic,
         size: toHalfPt(para.fontSize),
@@ -139,6 +141,10 @@ function buildDocxFromParagraphs(paras: RichParagraph[], pageCount: number): Doc
     }
   }
 
+  if (children.length === 0) {
+    children.push(new Paragraph({ children: [new TextRun("")] }));
+  }
+
   return new Document({
     styles: {
       default: {
@@ -148,6 +154,12 @@ function buildDocxFromParagraphs(paras: RichParagraph[], pageCount: number): Doc
             size: 24,    // 12pt default
           },
         },
+      },
+    },
+    settings: {
+      // Compatibility mode 15 = Word 2013+ — prevents "corrupt file" errors in older Word
+      compat: {
+        compatibilityMode: 15,
       },
     },
     sections: [{

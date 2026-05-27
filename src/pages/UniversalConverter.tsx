@@ -626,8 +626,13 @@ async function pdfFromSlides(slides: string[], title?: string): Promise<Blob> {
 
 async function docxFromParagraphs(paragraphs: string[], title?: string): Promise<Blob> {
   const children: any[] = [];
-  if (title) children.push(new Paragraph({ text: title, heading: HeadingLevel.HEADING_1 }));
-  for (const p of paragraphs) children.push(new Paragraph({ children: [new TextRun(p)] }));
+  const safeTitle = (title || '').replace(/[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F-\x9F]/g, '');
+  if (safeTitle) children.push(new Paragraph({ text: safeTitle, heading: HeadingLevel.HEADING_1 }));
+  for (const p of paragraphs) {
+    const safeP = p.replace(/[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F-\x9F]/g, '');
+    children.push(new Paragraph({ children: [new TextRun(safeP)] }));
+  }
+  if (children.length === 0) children.push(new Paragraph({ children: [new TextRun("")] }));
   const d = new Document({ sections: [{ properties: {}, children }] });
   return Packer.toBlob(d);
 }
@@ -637,31 +642,37 @@ async function docxFromXlsxSheets(sheets: XlsxSheet[]): Promise<Blob> {
   for (const { name, rows } of sheets) {
     if (!rows.length) continue;
     const maxCols = Math.max(...rows.map(r => r.length));
-    children.push(new Paragraph({ text: `Sheet: ${name}`, heading: HeadingLevel.HEADING_2 }));
+    const safeName = name.replace(/[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F-\x9F]/g, '');
+    children.push(new Paragraph({ text: `Sheet: ${safeName}`, heading: HeadingLevel.HEADING_2 }));
     const tableRows = rows.slice(0, 300).map((row, ri) =>
       new TableRow({
-        children: Array.from({ length: maxCols }, (_, ci) =>
-          new TableCell({
-            children: [new Paragraph({ children: [new TextRun({ text: String(row[ci] ?? ''), bold: ri === 0 })] })],
-          })
-        ),
+        children: Array.from({ length: maxCols }, (_, ci) => {
+          const safeText = String(row[ci] ?? '').replace(/[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F-\x9F]/g, '');
+          return new TableCell({
+            children: [new Paragraph({ children: [new TextRun({ text: safeText, bold: ri === 0 })] })],
+          });
+        }),
       })
     );
     children.push(new DocxTable({ rows: tableRows, width: { size: 9000, type: WidthType.DXA } }));
     children.push(new Paragraph({}));
   }
+  if (children.length === 0) children.push(new Paragraph({ children: [new TextRun("")] }));
   const d = new Document({ sections: [{ properties: {}, children }] });
   return Packer.toBlob(d);
 }
 
 async function docxFromSlides(slides: string[], title?: string): Promise<Blob> {
   const children: any[] = [];
-  if (title) children.push(new Paragraph({ text: title, heading: HeadingLevel.HEADING_1 }));
+  const safeTitle = (title || '').replace(/[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F-\x9F]/g, '');
+  if (safeTitle) children.push(new Paragraph({ text: safeTitle, heading: HeadingLevel.HEADING_1 }));
   slides.forEach((text, i) => {
     children.push(new Paragraph({ text: `Slide ${i + 1}`, heading: HeadingLevel.HEADING_2 }));
-    if (text) children.push(new Paragraph({ children: [new TextRun(text)] }));
+    const safeText = (text || '').replace(/[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F-\x9F]/g, '');
+    if (safeText) children.push(new Paragraph({ children: [new TextRun(safeText)] }));
     children.push(new Paragraph({}));
   });
+  if (children.length === 0) children.push(new Paragraph({ children: [new TextRun("")] }));
   const d = new Document({ sections: [{ properties: {}, children }] });
   return Packer.toBlob(d);
 }
@@ -895,8 +906,15 @@ async function convertPdfFile(f: File, outType: Target, quality: number): Promis
     }
 
     if (outType === 'docx') {
-      const children = pageTexts.map(t => new Paragraph({ children: [new TextRun(t)] }));
-      const d = new Document({ sections: [{ properties: {}, children }] });
+      const children = pageTexts.map(t => {
+        const safe = (t || '').replace(/[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F-\x9F]/g, '');
+        return new Paragraph({ children: [new TextRun(safe)] });
+      });
+      if (children.length === 0) children.push(new Paragraph({ children: [new TextRun('')] }));
+      const d = new Document({
+        settings: { compat: { compatibilityMode: 15 } },
+        sections: [{ properties: {}, children }]
+      });
       return Packer.toBlob(d);
     }
     if (outType === 'xlsx') {
