@@ -5,8 +5,9 @@ export function buildDocxFromVisionJSON(data: DocumentLayoutResponse): Document 
   const children: Paragraph[] = [];
 
   // Helper functions
-  const boldRun = (text: string, size = 22) => new TextRun({ text, bold: true, size });
-  const normalRun = (text: string, size = 22) => new TextRun({ text, size });
+  const sanitize = (s: string) => String(s || '').replace(/[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F-\x9F]/g, '');
+  const boldRun = (text: string, size = 22) => new TextRun({ text: sanitize(text), bold: true, size });
+  const normalRun = (text: string, size = 22) => new TextRun({ text: sanitize(text), size });
   const sp = (after = 200) => ({ spacing: { after } });
 
   // TITLE
@@ -14,7 +15,7 @@ export function buildDocxFromVisionJSON(data: DocumentLayoutResponse): Document 
     children.push(new Paragraph({
       alignment: AlignmentType.CENTER,
       ...sp(60),
-      children: [new TextRun({ text: line, bold: true, size: 24 })]
+      children: [new TextRun({ text: sanitize(line), bold: true, size: 24 })]
     }));
   });
 
@@ -25,7 +26,7 @@ export function buildDocxFromVisionJSON(data: DocumentLayoutResponse): Document 
       ...sp(220),
       children: [
         normalRun('DIARY NO: -  '),
-        new TextRun({ text: data.diary_no, size: 22, underline: { type: UnderlineType.SINGLE } })
+        new TextRun({ text: sanitize(data.diary_no), size: 22, underline: { type: UnderlineType.SINGLE } })
       ]
     }));
   }
@@ -40,7 +41,7 @@ export function buildDocxFromVisionJSON(data: DocumentLayoutResponse): Document 
 
   // FIELDS — Train, Date, Class, Seats on one line
   const trainFields = (data.fields || []).filter(f => 
-    ['TRAIN NO', 'D.O.J', 'CLASS', 'NO OF SEATS'].some(k => f.label.includes(k))
+    ['TRAIN NO', 'D.O.J', 'CLASS', 'NO OF SEATS'].some(k => sanitize(f.label).includes(k))
   );
   if (trainFields.length) {
     const runs: TextRun[] = [];
@@ -52,9 +53,9 @@ export function buildDocxFromVisionJSON(data: DocumentLayoutResponse): Document 
   }
 
   // FROM / TO / BOARDING
-  const fromField = (data.fields || []).find(f => f.label.includes('FROM'));
-  const toField = (data.fields || []).find(f => f.label.includes('TO'));
-  const boardingField = (data.fields || []).find(f => f.label.includes('BOARDING'));
+  const fromField = (data.fields || []).find(f => sanitize(f.label).includes('FROM'));
+  const toField = (data.fields || []).find(f => sanitize(f.label).includes('TO'));
+  const boardingField = (data.fields || []).find(f => sanitize(f.label).includes('BOARDING'));
   if (fromField || toField) {
     children.push(new Paragraph({
       ...sp(180),
@@ -68,8 +69,8 @@ export function buildDocxFromVisionJSON(data: DocumentLayoutResponse): Document 
   }
 
   // PNR / DATE OF BOOKING
-  const pnrField = (data.fields || []).find(f => f.label.includes('PNR'));
-  const dobField = (data.fields || []).find(f => f.label.includes('TICKET BOOKING') || f.label.includes('DATE OF TICKET'));
+  const pnrField = (data.fields || []).find(f => sanitize(f.label).includes('PNR'));
+  const dobField = (data.fields || []).find(f => sanitize(f.label).includes('TICKET BOOKING') || sanitize(f.label).includes('DATE OF TICKET'));
   if (pnrField) {
     children.push(new Paragraph({
       ...sp(260),
@@ -139,7 +140,7 @@ export function buildDocxFromVisionJSON(data: DocumentLayoutResponse): Document 
     children.push(new Paragraph({
       alignment: AlignmentType.RIGHT,
       ...sp(60),
-      children: [new TextRun({ text: line, size: 22 })]
+      children: [new TextRun({ text: sanitize(line), size: 22 })]
     }));
   });
   
