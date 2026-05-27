@@ -156,6 +156,12 @@ function buildDocxFromParagraphs(paras: RichParagraph[], pageCount: number): Doc
         },
       },
     },
+    settings: {
+      // Compatibility mode 15 = Word 2013+ — prevents "corrupt file" errors in older Word
+      compat: {
+        compatibilityMode: 15,
+      },
+    },
     sections: [{
       properties: { type: SectionType.CONTINUOUS },
       children,

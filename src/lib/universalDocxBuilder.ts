@@ -114,6 +114,7 @@ export async function buildUniversalDocx(pages: { layout: UniversalLayoutRespons
           alignment: AlignmentType.CENTER,
           children: [
             new ImageRun({
+              type: 'jpg',
               data: fullImg.data,
               transformation: { width: fullImg.width, height: fullImg.height }
             })
@@ -252,6 +253,7 @@ export async function buildUniversalDocx(pages: { layout: UniversalLayoutRespons
               runs.push(new TextRun("\t"));
             }
             runs.push(new ImageRun({
+              type: 'jpg',
               data: imgData.data,
               transformation: { width: imgData.width, height: imgData.height }
             }));
@@ -290,6 +292,12 @@ export async function buildUniversalDocx(pages: { layout: UniversalLayoutRespons
         document: {
           run: { font: 'Calibri', size: 22 },
         },
+      },
+    },
+    settings: {
+      // Ensure compatibility with older Word versions (prevents corrupt file errors)
+      compat: {
+        compatibilityMode: 15,  // Word 2013+ compatibility mode
       },
     },
     sections: [{

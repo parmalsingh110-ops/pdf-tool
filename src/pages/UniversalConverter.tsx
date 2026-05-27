@@ -906,8 +906,15 @@ async function convertPdfFile(f: File, outType: Target, quality: number): Promis
     }
 
     if (outType === 'docx') {
-      const children = pageTexts.map(t => new Paragraph({ children: [new TextRun(t)] }));
-      const d = new Document({ sections: [{ properties: {}, children }] });
+      const children = pageTexts.map(t => {
+        const safe = (t || '').replace(/[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F-\x9F]/g, '');
+        return new Paragraph({ children: [new TextRun(safe)] });
+      });
+      if (children.length === 0) children.push(new Paragraph({ children: [new TextRun('')] }));
+      const d = new Document({
+        settings: { compat: { compatibilityMode: 15 } },
+        sections: [{ properties: {}, children }]
+      });
       return Packer.toBlob(d);
     }
     if (outType === 'xlsx') {
