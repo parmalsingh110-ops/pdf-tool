@@ -689,15 +689,17 @@ async function docxFromSlides(slides: string[], title?: string): Promise<Blob> {
 // ─── XLSX builders ──────────────────────────────────────────────────
 
 function xlsxFromParagraphs(paragraphs: string[], sheetName = 'Content'): Blob {
-  const ws = XLSX.utils.json_to_sheet(paragraphs.map((t, i) => ({ '#': i + 1, Text: t })));
+  const sanitize = (s: string) => String(s || '').replace(/[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F-\x9F]/g, '');
+  const ws = XLSX.utils.json_to_sheet(paragraphs.map((t, i) => ({ '#': i + 1, Text: sanitize(t) })));
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, sheetName.slice(0, 31));
+  XLSX.utils.book_append_sheet(wb, ws, sanitize(sheetName).slice(0, 31));
   const arr = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
   return new Blob([arr], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
 }
 
 function xlsxFromSlides(slides: string[]): Blob {
-  const ws = XLSX.utils.json_to_sheet(slides.map((t, i) => ({ Slide: i + 1, Content: t })));
+  const sanitize = (s: string) => String(s || '').replace(/[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F-\x9F]/g, '');
+  const ws = XLSX.utils.json_to_sheet(slides.map((t, i) => ({ Slide: i + 1, Content: sanitize(t) })));
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Slides');
   const arr = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
@@ -707,20 +709,22 @@ function xlsxFromSlides(slides: string[]): Blob {
 // ─── PPTX builders ──────────────────────────────────────────────────
 
 async function pptxFromParagraphs(paragraphs: string[], title?: string): Promise<Blob> {
+  const sanitize = (s: string) => String(s || '').replace(/[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F-\x9F]/g, '');
   const pptx = new PptxGenJS();
   pptx.layout = 'LAYOUT_STANDARD';
   for (let i = 0; i < paragraphs.length; i += 6) {
     const slide = pptx.addSlide();
     if (title && i === 0) {
-      slide.addText(title, { x: 0.5, y: 0.1, w: 9, h: 0.55, bold: true, fontSize: 22, color: '1a3a8f' });
+      slide.addText(sanitize(title), { x: 0.5, y: 0.1, w: 9, h: 0.55, bold: true, fontSize: 22, color: '1a3a8f' });
     }
     const chunk = paragraphs.slice(i, i + 6);
-    slide.addText(chunk.join('\n\n'), { x: 0.5, y: title && i === 0 ? 0.8 : 0.4, w: 9, h: 5.8, fontSize: 13, color: '111111' });
+    slide.addText(sanitize(chunk.join('\n\n')), { x: 0.5, y: title && i === 0 ? 0.8 : 0.4, w: 9, h: 5.8, fontSize: 13, color: '111111' });
   }
   return pptx.write({ outputType: 'blob' }) as Promise<Blob>;
 }
 
 async function pptxFromXlsxSheets(sheets: XlsxSheet[]): Promise<Blob> {
+  const sanitize = (s: string) => String(s || '').replace(/[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F-\x9F]/g, '');
   const pptx = new PptxGenJS();
   pptx.layout = 'LAYOUT_WIDE';
   for (const { name, rows } of sheets) {
@@ -728,10 +732,10 @@ async function pptxFromXlsxSheets(sheets: XlsxSheet[]): Promise<Blob> {
     const maxCols = Math.max(...rows.map(r => r.length));
     const displayRows = rows.slice(0, 25);
     const slide = pptx.addSlide();
-    slide.addText(`Sheet: ${name}`, { x: 0.3, y: 0.1, w: 12, h: 0.45, fontSize: 18, bold: true, color: '1a3a8f' });
+    slide.addText(`Sheet: ${sanitize(name)}`, { x: 0.3, y: 0.1, w: 12, h: 0.45, fontSize: 18, bold: true, color: '1a3a8f' });
     const tableData = displayRows.map((row, ri) =>
       Array.from({ length: maxCols }, (_, ci) => ({
-        text: String(row[ci] ?? ''),
+        text: sanitize(String(row[ci] ?? '')),
         options: {
           fill: { color: ri === 0 ? '1f4e9c' : ri % 2 === 0 ? 'eff4ff' : 'ffffff' },
           color: ri === 0 ? 'ffffff' : '111111',
@@ -751,12 +755,13 @@ async function pptxFromXlsxSheets(sheets: XlsxSheet[]): Promise<Blob> {
 }
 
 async function pptxFromSlides(slides: string[], title?: string): Promise<Blob> {
+  const sanitize = (s: string) => String(s || '').replace(/[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F-\x9F]/g, '');
   const pptx = new PptxGenJS();
   pptx.layout = 'LAYOUT_STANDARD';
   slides.forEach((text, i) => {
     const slide = pptx.addSlide();
-    slide.addText(`${title ? title + '  ·  ' : ''}Slide ${i + 1}`, { x: 0.5, y: 0.1, w: 9, h: 0.5, bold: true, fontSize: 18, color: '1a3a8f' });
-    slide.addText(text || '(No text)', { x: 0.5, y: 0.75, w: 9, h: 5.5, fontSize: 13 });
+    slide.addText(`${sanitize(title) ? sanitize(title) + '  ·  ' : ''}Slide ${i + 1}`, { x: 0.5, y: 0.1, w: 9, h: 0.5, bold: true, fontSize: 18, color: '1a3a8f' });
+    slide.addText(sanitize(text) || '(No text)', { x: 0.5, y: 0.75, w: 9, h: 5.5, fontSize: 13 });
   });
   return pptx.write({ outputType: 'blob' }) as Promise<Blob>;
 }
