@@ -156,13 +156,39 @@ async def pdf_to_word(file: UploadFile = File(...)):
     out = temp_path(".docx")
     try:
         inp.write_bytes(await file.read())
+        
+        # 1. Check if it's scanned (images) before OCR
+        scanned = is_pdf_scanned(inp)
+        
+        # 2. Run OCR if needed
         inp = ensure_auto_ocr(inp)
 
-        cv = Converter(str(inp))
-        cv.convert(str(out), multi_processing=False,
-                   line_overlap_threshold=0.9,
-                   min_svg_gap_dx=15.0)
-        cv.close()
+        if scanned:
+            # 3A. SCANNED PDF -> Extract clean text to drop the giant background image
+            print(f"[PDF2Word] Scanned PDF detected. Extracting clean OCR text to Word for {inp.name}")
+            import fitz
+            from docx import Document
+            docx_doc = Document()
+            pdf = fitz.open(inp)
+            
+            for i, page in enumerate(pdf):
+                text = page.get_text("text").strip()
+                if text:
+                    for line in text.split('\n'):
+                        if line.strip():
+                            docx_doc.add_paragraph(line)
+                if i < len(pdf) - 1:
+                    docx_doc.add_page_break()
+            pdf.close()
+            docx_doc.save(str(out))
+        else:
+            # 3B. NATIVE PDF -> Use pdf2docx to preserve exact layout
+            print(f"[PDF2Word] Native PDF detected. Using pdf2docx for exact layout for {inp.name}")
+            cv = Converter(str(inp))
+            cv.convert(str(out), multi_processing=False,
+                       line_overlap_threshold=0.9,
+                       min_svg_gap_dx=15.0)
+            cv.close()
 
         return FileResponse(
             str(out),
