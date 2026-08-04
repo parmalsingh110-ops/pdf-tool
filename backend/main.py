@@ -106,6 +106,24 @@ def ensure_auto_ocr(inp_path: Path) -> Path:
         return inp_path
 
     print(f"[Auto-OCR] Detected scanned PDF, running OCR: {inp_path.name}")
+    
+    # ─── PADDLE OCR TEST (User Requested) ───────────────────────────
+    try:
+        print("[Auto-OCR] Attempting PaddleOCR first...")
+        from paddleocr import PaddleOCR
+        # WARNING: Loading this model on Render Free Tier (512MB RAM) 
+        # will likely cause an instant OOM (Out of Memory) crash.
+        ocr = PaddleOCR(use_angle_cls=True, lang='en')
+        print("[Auto-OCR] PaddleOCR loaded successfully!")
+        # Note: PaddleOCR extracts text strings, it doesn't build a 
+        # searchable PDF file automatically. We need a PDF file for the 
+        # next steps (like Word/Excel conversion).
+        raise Exception("PaddleOCR loaded, but cannot generate a searchable PDF file directly.")
+    except Exception as e:
+        print(f"[Auto-OCR] PaddleOCR Failed/Skipped: {e}")
+        print("[Auto-OCR] Falling back to Tesseract (ocrmypdf) for stable PDF generation...")
+    # ────────────────────────────────────────────────────────────────
+
     try:
         result = subprocess.run(
             ["ocrmypdf", "--force-ocr", "-l", "eng+hin",
