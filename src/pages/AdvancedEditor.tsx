@@ -122,6 +122,9 @@ export default function AdvancedEditor() {
   const [undoStack, setUndoStack] = useState<Annotation[][]>([]);
   const [redoStack, setRedoStack] = useState<Annotation[][]>([]);
 
+  // === NEW: Select granularity (word / line / paragraph) ===
+  const [selectionGranularity, setSelectionGranularity] = useState<'word' | 'line' | 'paragraph'>('word');
+
   // === NEW: Drag move ===
   const [isDragging, setIsDragging] = useState(false);
   const [dragTarget, setDragTarget] = useState<string | null>(null);
@@ -874,8 +877,50 @@ export default function AdvancedEditor() {
 
     setIsProcessing(true);
     try {
-      const arrayBuffer = await file.arrayBuffer();
-      const pdf = await PDFDocument.load(arrayBuffer);
+      // 1. Separate native text replacements (from selection) vs other annotations
+      const nativeEdits = annotations.filter(a => a.type === 'text' && a.sourceWidth && a.sourceWidth > 0);
+      const otherAnnotations = annotations.filter(a => !(a.type === 'text' && a.sourceWidth && a.sourceWidth > 0));
+
+      let currentFileBuffer = await file.arrayBuffer();
+
+      // 2. If there are native text edits, send to Python backend first
+      if (nativeEdits.length > 0) {
+        const editPayload = nativeEdits.map(ann => ({
+          page: ann.pageIndex,
+          x: ann.x / pageViewport.scale,
+          // Convert from top-left (frontend) to standard coords expected by backend
+          y: ann.y / pageViewport.scale,
+          w: (ann.width || ann.sourceWidth || 100) / pageViewport.scale,
+          h: (ann.height || ann.sourceHeight || 20) / pageViewport.scale,
+          newText: ann.text || '',
+          fontSize: (ann.fontSize || 14) / pageViewport.scale,
+          color: ann.color || '#000000',
+          bgColor: ann.backgroundColor || '#ffffff',
+          bold: ann.bold || false,
+          italic: ann.italic || false
+        }));
+
+        console.log("Sending Native Edits to Python Backend:", editPayload);
+
+        const formData = new FormData();
+        formData.append('file', new File([currentFileBuffer], file.name, { type: file.type }));
+        formData.append('edits', JSON.stringify(editPayload));
+
+        const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+        const res = await fetch(`${API_BASE_URL}/edit-pdf`, {
+          method: 'POST',
+          body: formData,
+        });
+
+        if (!res.ok) {
+          const errText = await res.text();
+          throw new Error('Native Python backend edit failed: ' + errText);
+        }
+        currentFileBuffer = await res.arrayBuffer();
+      }
+
+      // 3. Apply the rest of the annotations (drawings, signatures, highlights, NEW text) using pdf-lib
+      const pdf = await PDFDocument.load(currentFileBuffer);
 
       // Helper: check if text contains non-ASCII / non-WinAnsi characters (Hindi, Devanagari, etc.)
       const hasNonLatinChars = (text: string) => {
@@ -886,7 +931,6 @@ export default function AdvancedEditor() {
       };
 
       // ── Load Noto Sans Devanagari in BROWSER for Canvas-based text rendering ──
-      // (Canvas handles complex text shaping: conjuncts, ligatures, matra positioning)
       const loadBrowserFonts = async () => {
         try {
           if (!document.fonts.check('12px NotoSansDevanagari')) {
@@ -911,7 +955,6 @@ export default function AdvancedEditor() {
         } catch { /* bold variant optional */ }
       };
 
-      // Render non-Latin text via Canvas and return PNG bytes + dimensions in PDF units
       const renderTextViaCanvas = async (
         text: string,
         pdfFontSize: number,
@@ -919,7 +962,7 @@ export default function AdvancedEditor() {
         bold?: boolean,
         italic?: boolean,
       ) => {
-        const RENDER_SCALE = 4; // 4× for high-res output (~300 DPI)
+        const RENDER_SCALE = 4;
         const canvasFontPx = pdfFontSize * RENDER_SCALE;
 
         const canvas = document.createElement('canvas');
@@ -929,7 +972,6 @@ export default function AdvancedEditor() {
         const style = italic ? 'italic ' : '';
         const fontStr = `${weight}${style}${canvasFontPx}px NotoSansDevanagari, 'Noto Sans Devanagari', sans-serif`;
 
-        // Measure text dimensions
         ctx.font = fontStr;
         const metrics = ctx.measureText(text);
         const actualLeft = metrics.actualBoundingBoxLeft || 0;
@@ -943,10 +985,7 @@ export default function AdvancedEditor() {
         canvas.width = textW + pad * 2;
         canvas.height = textH + pad * 2;
 
-        // Clear with transparency
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-        // Re-apply font after canvas resize
         ctx.font = fontStr;
         ctx.fillStyle = colorHex;
         ctx.textBaseline = 'alphabetic';
@@ -955,34 +994,27 @@ export default function AdvancedEditor() {
         const dataUrl = canvas.toDataURL('image/png');
         const imgBytes = await fetch(dataUrl).then(r => r.arrayBuffer());
 
-        // Dimensions in PDF coordinate units
         const imgPdfW = canvas.width / RENDER_SCALE;
         const imgPdfH = canvas.height / RENDER_SCALE;
-        // Baseline offset from image top in PDF units
         const baselineFromTop = (pad + actualAscent) / RENDER_SCALE;
 
-        canvas.width = 0;
-        canvas.height = 0;
-
+        canvas.width = 0; canvas.height = 0;
         return { imgBytes, imgPdfW, imgPdfH, baselineFromTop };
       };
 
-      // Check if any annotation uses non-Latin text
-      const allTexts = annotations
+      const allTexts = otherAnnotations
         .filter(a => a.type === 'text' && a.text)
         .map(a => a.text || '');
-      const allTableTexts = annotations
+      const allTableTexts = otherAnnotations
         .filter(a => a.type === 'table' && a.tableData)
         .flatMap(a => (a.tableData || []).flat());
       const allContent = [...allTexts, ...allTableTexts].join('');
       const needsUnicodeSupport = hasNonLatinChars(allContent);
 
-      // Pre-load browser fonts if needed
       if (needsUnicodeSupport) {
         await loadBrowserFonts();
       }
 
-      // Standard fonts for Latin text
       const helveticaFont = await pdf.embedFont(StandardFonts.Helvetica);
       const helveticaOblique = await pdf.embedFont(StandardFonts.HelveticaOblique);
       const helveticaBold = await pdf.embedFont(StandardFonts.HelveticaBold);
@@ -997,7 +1029,7 @@ export default function AdvancedEditor() {
 
       const pages = pdf.getPages();
 
-      for (const ann of annotations) {
+      for (const ann of otherAnnotations) {
         const page = pages[ann.pageIndex];
         if (!page) continue;
         const { height: pageHeight } = page.getSize();
@@ -1029,18 +1061,14 @@ export default function AdvancedEditor() {
           }
 
           if (hasNonLatinChars(ann.text)) {
-            // ── Canvas-based rendering for Hindi/Devanagari (proper text shaping) ──
             const pdfFontSize = textPx / scale;
             const colorHex = ann.color || '#000000';
             const { imgBytes, imgPdfW, imgPdfH, baselineFromTop } =
               await renderTextViaCanvas(ann.text, pdfFontSize, colorHex, ann.bold, ann.italic);
 
             const pdfImage = await pdf.embedPng(imgBytes);
-
-            // Position: match the same baseline as drawText would use
             const baselineFromTopPx = Math.max(textPx, boxPxH * 0.74);
             const baselinePdfY = pdfY - (baselineFromTopPx / scale);
-            // Align canvas baseline with PDF baseline
             const imgTopY = baselinePdfY + baselineFromTop;
 
             page.drawImage(pdfImage, {
@@ -1050,7 +1078,6 @@ export default function AdvancedEditor() {
               height: imgPdfH,
             });
           } else {
-            // ── Standard drawText for Latin/ASCII text ──
             const { r, g, b } = hexToRgb(ann.color || '#000000');
             const font = resolveLatinFont(ann.bold, ann.italic);
             const baselineFromTopPx = Math.max(textPx, boxPxH * 0.74);
@@ -1084,7 +1111,6 @@ export default function AdvancedEditor() {
 
               if (cell) {
                 if (hasNonLatinChars(cell)) {
-                  // Canvas rendering for non-Latin table cell text
                   const cellFontSize = 8 / scale;
                   const { imgBytes, imgPdfW, imgPdfH } =
                     await renderTextViaCanvas(cell, cellFontSize, '#000000');
@@ -1150,7 +1176,6 @@ export default function AdvancedEditor() {
             height: pdfH,
           });
         } else if (ann.type === 'freehand' && ann.pathData) {
-          // Freehand: draw as a series of thin lines
           const { r, g, b } = hexToRgb(ann.color || '#000000');
           const parts = ann.pathData.split(/\s+/);
           let prevX = 0, prevY = 0;
@@ -1205,6 +1230,133 @@ export default function AdvancedEditor() {
     }
   };
 
+  // ─────────────────────────────────────────────────────────────────────
+  // TEXT GROUPING HELPERS (for Word / Line / Paragraph selection modes)
+  // ─────────────────────────────────────────────────────────────────────
+
+  /**
+   * WORD MODE: Split a single pdfjs text-block (which may be a full phrase)
+   * into individual word sub-blocks, using canvas measureText to calculate
+   * each word's proportional x position and width.
+   */
+  const splitBlockIntoWords = (block: DetectedTextBlock): DetectedTextBlock[] => {
+    const words = block.text.trim().split(/\s+/).filter(w => w.length > 0);
+    if (words.length <= 1) return [block]; // already a single word
+
+    // Measure relative widths with canvas
+    const mc = document.createElement('canvas');
+    const mctx = mc.getContext('2d');
+    if (!mctx) return [block]; // fallback: return whole block
+
+    const fontStr = `${block.italic ? 'italic ' : ''}${block.bold ? '700 ' : ''}${Math.max(8, block.fontSize)}px Helvetica, Arial, sans-serif`;
+    mctx.font = fontStr;
+
+    const wordMeasures = words.map(w => mctx.measureText(w).width);
+    const spaceW = mctx.measureText(' ').width;
+    const totalMeasured =
+      wordMeasures.reduce((a, b) => a + b, 0) +
+      spaceW * (words.length - 1);
+
+    // Scale factor: map measured pixels → actual screen pixels
+    const scale = totalMeasured > 0 ? block.w / totalMeasured : 1;
+
+    const result: DetectedTextBlock[] = [];
+    let cx = block.x;
+    for (let i = 0; i < words.length; i++) {
+      const ww = Math.max(4, Math.round(wordMeasures[i] * scale));
+      result.push({
+        ...block,
+        text: words[i],
+        x: Math.round(cx),
+        w: ww,
+      });
+      cx += ww + spaceW * scale;
+    }
+    return result;
+  };
+
+  /**
+   * LINE MODE: Merge adjacent pdfjs items that are on the SAME visual row
+   * AND horizontally very close (gap < fontSize * 0.25 OR < 6px).
+   * Strict threshold prevents table-column items from being merged.
+   */
+  const mergeBlocksToLines = (blocks: DetectedTextBlock[]): DetectedTextBlock[] => {
+    if (!blocks.length) return [];
+    const sorted = [...blocks].sort((a, b) => {
+      const yDiff = a.y - b.y;
+      if (Math.abs(yDiff) > Math.max(a.h, b.h) * 0.45) return yDiff;
+      return a.x - b.x;
+    });
+    const result: DetectedTextBlock[] = [];
+    let group: DetectedTextBlock = { ...sorted[0] };
+    for (let i = 1; i < sorted.length; i++) {
+      const next = sorted[i];
+      const sameRow = Math.abs(next.y - group.y) < Math.max(group.h, next.h) * 0.45;
+      const hGap = next.x - (group.x + group.w);
+      // STRICT gap: only merge if gap is very small (same logical phrase)
+      // fontSize * 0.25 ≈ one-quarter em — avoids merging across table columns
+      const closeEnough = hGap >= -2 && hGap < Math.max(6, group.fontSize * 0.25);
+      if (sameRow && closeEnough) {
+        const rightEdge = next.x + next.w;
+        group = {
+          ...group,
+          text: group.text + (hGap > 1 ? ' ' : '') + next.text,
+          w: rightEdge - group.x,
+          h: Math.max(group.h, next.h),
+          fontSize: Math.max(group.fontSize, next.fontSize),
+          bold: group.bold || next.bold,
+          italic: group.italic || next.italic,
+          fgColor: group.fgColor || next.fgColor,
+          bgColor: group.bgColor || next.bgColor,
+        };
+      } else {
+        result.push(group);
+        group = { ...next };
+      }
+    }
+    result.push(group);
+    return result;
+  };
+
+  /**
+   * PARAGRAPH MODE: Merge vertically adjacent line-groups into paragraph blocks.
+   * Lines must share similar left-margin (< 15px) and have small vertical gap
+   * (< 0.8× line height) to be considered part of the same paragraph.
+   */
+  const mergeLinesToParagraphs = (lines: DetectedTextBlock[]): DetectedTextBlock[] => {
+    if (!lines.length) return [];
+    const sorted = [...lines].sort((a, b) => a.y - b.y);
+    const result: DetectedTextBlock[] = [];
+    let para: DetectedTextBlock = { ...sorted[0] };
+    for (let i = 1; i < sorted.length; i++) {
+      const next = sorted[i];
+      const vertGap = next.y - (para.y + para.h);
+      const lineH = Math.max(para.h, next.h);
+      // Strict left-alignment: left edges within 15px
+      const alignedLeft = Math.abs(next.x - para.x) < 15;
+      // Gap must be small — less than 0.8 line heights (not a paragraph break)
+      const sameParagraph = vertGap >= 0 && vertGap < lineH * 0.8 && alignedLeft;
+      if (sameParagraph) {
+        const newBottom = next.y + next.h;
+        const newRight = Math.max(para.x + para.w, next.x + next.w);
+        para = {
+          ...para,
+          text: para.text + ' ' + next.text,
+          w: newRight - para.x,
+          h: newBottom - para.y,
+          fontSize: Math.max(para.fontSize, next.fontSize),
+          bold: para.bold || next.bold,
+          italic: para.italic || next.italic,
+        };
+      } else {
+        result.push(para);
+        para = { ...next };
+      }
+    }
+    result.push(para);
+    return result;
+  };
+
   const toolButton = (tool: Tool, icon: React.ReactNode, label: string, title?: string) => (
     <button
       onClick={() => setActiveTool(activeTool === tool ? null : tool)}
@@ -1234,6 +1386,27 @@ export default function AdvancedEditor() {
           <div className="bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between shadow-sm z-10 flex-wrap gap-2">
             <div className="flex items-center gap-1 flex-wrap">
               {toolButton('select', <MousePointer2 className="w-5 h-5" />, 'Select', 'Select & Edit Existing Text (click on text in the PDF)')}
+              {/* Granularity toggle — only visible when Select is active */}
+              {activeTool === 'select' && (
+                <div className="flex items-center gap-0.5 ml-1 bg-indigo-50 rounded-lg p-0.5 border border-indigo-200">
+                  {(['word', 'line', 'paragraph'] as const).map(g => (
+                    <button
+                      key={g}
+                      type="button"
+                      onClick={() => setSelectionGranularity(g)}
+                      title={g === 'word' ? 'Select individual word/phrase' : g === 'line' ? 'Select full line' : 'Select paragraph'}
+                      className={`px-2 py-1 rounded text-xs font-semibold transition-colors ${
+                        selectionGranularity === g
+                          ? 'bg-indigo-600 text-white shadow-sm'
+                          : 'text-indigo-600 hover:bg-indigo-100'
+                      }`}
+                    >
+                      {g === 'word' ? 'W' : g === 'line' ? 'L' : 'P'}
+                    </button>
+                  ))}
+                  <span className="text-[10px] text-indigo-500 px-1 capitalize">{selectionGranularity}</span>
+                </div>
+              )}
               <div className="w-px h-6 bg-gray-200 mx-1"></div>
               {toolButton('text', <Type className="w-5 h-5" />, 'Text', 'Add New Text')}
               <button
@@ -1631,84 +1804,108 @@ export default function AdvancedEditor() {
                     </div>
                   ))}
 
-                  {/* ── SELECT MODE: Clickable text-block overlays ── */}
-                  {/* When Select tool is active, show blue boxes on every detected text item */}
-                  {/* so user can see exactly where to click to edit existing text           */}
-                  {activeTool === 'select' && detectedText.map((block, idx) => {
-                    // Don't show overlay if already replaced by an annotation
-                    const replaced = annotations.some(a =>
-                      a.pageIndex === currentPage - 1 &&
-                      a.type === 'text' &&
-                      Math.abs(a.x - block.x) < 6 &&
-                      Math.abs(a.y - block.y) < 6
-                    );
-                    if (replaced || !block.text.trim() || block.w < 2) return null;
+                  {/* ── SELECT MODE: Smart Word / Line / Paragraph Overlays ── */}
+                  {activeTool === 'select' && (() => {
+                    // Compute grouped blocks based on granularity
+                    const baseGroups: DetectedTextBlock[] =
+                      selectionGranularity === 'word'
+                        // Word mode: split each pdfjs item (phrase) into individual words
+                        ? detectedText.flatMap(b => splitBlockIntoWords(b))
+                        : selectionGranularity === 'line'
+                        ? mergeBlocksToLines(detectedText)
+                        : mergeLinesToParagraphs(mergeBlocksToLines(detectedText));
 
-                    return (
-                      <div
-                        key={`selblock-${idx}`}
-                        title={block.text}
-                        style={{
-                          position: 'absolute',
-                          left: block.x,
-                          top: block.y,
-                          width: Math.max(block.w, 10),
-                          height: Math.max(block.h, 8),
-                          border: '1.5px dashed rgba(99,102,241,0.55)',
-                          backgroundColor: 'rgba(99,102,241,0.05)',
-                          cursor: 'text',
-                          zIndex: 15,
-                          boxSizing: 'border-box',
-                          borderRadius: 1,
-                          pointerEvents: 'all',
-                        }}
-                        onMouseEnter={e => {
-                          const el = e.currentTarget as HTMLElement;
-                          el.style.backgroundColor = 'rgba(99,102,241,0.20)';
-                          el.style.borderColor = 'rgba(99,102,241,0.9)';
-                          el.style.borderStyle = 'solid';
-                        }}
-                        onMouseLeave={e => {
-                          const el = e.currentTarget as HTMLElement;
-                          el.style.backgroundColor = 'rgba(99,102,241,0.05)';
-                          el.style.borderColor = 'rgba(99,102,241,0.55)';
-                          el.style.borderStyle = 'dashed';
-                        }}
-                        onMouseDown={e => {
-                          e.stopPropagation();
-                          pushUndo();
-                          const id = Date.now().toString() + '_tb';
-                          // Font size: must fit within block height, cap at 120px
-                          const fs = Math.max(6, Math.min(block.fontSize, block.h - 1, 120));
-                          const bw = Math.min(Math.max(block.w, 20), 600);
-                          const bh = Math.max(block.h, fs + 2);
-                          const textAnn: Annotation = {
-                            id,
-                            type: 'text',
-                            pageIndex: currentPage - 1,
-                            x: block.x,
-                            y: block.y,
-                            width: bw,
-                            height: bh,
-                            text: block.text,
-                            fontSize: fs,
-                            // Use detected colors from canvas sampling
-                            color: block.fgColor || '#000000',
-                            backgroundColor: block.bgColor || '#ffffff',
-                            // Use detected bold/italic from font name
-                            bold: block.bold || false,
-                            italic: block.italic || false,
-                            lockPosition: false,
-                            sourceWidth: bw,
-                            sourceHeight: bh,
-                          };
-                          setAnnotations(prev => [...prev, textAnn]);
-                          setSelectedId(textAnn.id);
-                          setActiveTool(null);
-                        }}
-                      />
-                    );
-                  })}
+
+                    return baseGroups.map((block, idx) => {
+                      // Skip if already covered by an annotation
+                      const replaced = annotations.some(a =>
+                        a.pageIndex === currentPage - 1 &&
+                        a.type === 'text' &&
+                        Math.abs(a.x - block.x) < 8 &&
+                        Math.abs(a.y - block.y) < 8
+                      );
+                      if (replaced || !block.text.trim() || block.w < 2) return null;
+
+                      // Granularity badge label
+                      const badge = selectionGranularity === 'word' ? 'W' : selectionGranularity === 'line' ? 'L' : 'P';
+
+                      return (
+                        <div
+                          key={`selblock-${selectionGranularity}-${idx}`}
+                          title={`[${badge}] ${block.text}`}
+                          style={{
+                            position: 'absolute',
+                            left: block.x,
+                            top: block.y,
+                            width: Math.max(block.w, 10),
+                            height: Math.max(block.h, 8),
+                            border: selectionGranularity === 'paragraph'
+                              ? '1.5px dashed rgba(16,185,129,0.65)'
+                              : selectionGranularity === 'line'
+                              ? '1.5px dashed rgba(245,158,11,0.65)'
+                              : '1.5px dashed rgba(99,102,241,0.55)',
+                            backgroundColor: selectionGranularity === 'paragraph'
+                              ? 'rgba(16,185,129,0.04)'
+                              : selectionGranularity === 'line'
+                              ? 'rgba(245,158,11,0.04)'
+                              : 'rgba(99,102,241,0.04)',
+                            cursor: 'text',
+                            zIndex: 15,
+                            boxSizing: 'border-box',
+                            borderRadius: 2,
+                            pointerEvents: 'all',
+                          }}
+                          onMouseEnter={e => {
+                            const el = e.currentTarget as HTMLElement;
+                            el.style.backgroundColor = selectionGranularity === 'paragraph'
+                              ? 'rgba(16,185,129,0.18)'
+                              : selectionGranularity === 'line'
+                              ? 'rgba(245,158,11,0.18)'
+                              : 'rgba(99,102,241,0.18)';
+                            el.style.borderStyle = 'solid';
+                          }}
+                          onMouseLeave={e => {
+                            const el = e.currentTarget as HTMLElement;
+                            el.style.backgroundColor = selectionGranularity === 'paragraph'
+                              ? 'rgba(16,185,129,0.04)'
+                              : selectionGranularity === 'line'
+                              ? 'rgba(245,158,11,0.04)'
+                              : 'rgba(99,102,241,0.04)';
+                            el.style.borderStyle = 'dashed';
+                          }}
+                          onMouseDown={e => {
+                            e.stopPropagation();
+                            pushUndo();
+                            const id = Date.now().toString() + '_tb';
+                            const fs = Math.max(6, Math.min(block.fontSize, block.h - 1, 120));
+                            const bw = Math.min(Math.max(block.w, 20), 800);
+                            const bh = Math.max(block.h, fs + 2);
+                            const textAnn: Annotation = {
+                              id,
+                              type: 'text',
+                              pageIndex: currentPage - 1,
+                              x: block.x,
+                              y: block.y,
+                              width: bw,
+                              height: bh,
+                              text: block.text,
+                              fontSize: fs,
+                              color: block.fgColor || '#000000',
+                              backgroundColor: block.bgColor || '#ffffff',
+                              bold: block.bold || false,
+                              italic: block.italic || false,
+                              lockPosition: false,
+                              sourceWidth: bw,
+                              sourceHeight: bh,
+                            };
+                            setAnnotations(prev => [...prev, textAnn]);
+                            setSelectedId(textAnn.id);
+                            setActiveTool(null);
+                          }}
+                        />
+                      );
+                    });
+                  })()}
 
                   {/* Live freehand path */}
                   {isDrawing && activeTool === 'freehand' && freehandPoints.length > 1 && (

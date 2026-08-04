@@ -1,229 +1,132 @@
-import React, { useState, useRef } from 'react';
-import { FileText, Download, Loader2, ArrowRight } from 'lucide-react';
-import mammoth from 'mammoth';
-import html2canvas from 'html2canvas';
-import { PDFDocument } from 'pdf-lib';
+import React, { useState } from 'react';
+import { FileText, CheckCircle2, Download, RotateCcw, AlertTriangle } from 'lucide-react';
 import FileDropzone from '../components/FileDropzone';
+import { usePageSEO } from '../lib/usePageSEO';
+
+type Stage = 'idle' | 'processing' | 'done' | 'error';
 
 export default function WordToPdfExact() {
-  const [file, setFile] = useState<File | null>(null);
-  const [status, setStatus] = useState<string>('');
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [resultUrl, setResultUrl] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [htmlContent, setHtmlContent] = useState<string>('');
+  usePageSEO(
+    'Office to PDF Converter — Exact Formatting',
+    'Convert Word, Excel, and PowerPoint files to PDF with 100% perfect formatting using our powerful backend.',
+  );
 
-  const handleConvert = async () => {
-    if (!file || !containerRef.current) return;
-    setIsProcessing(true);
-    setError(null);
+  const [file, setFile] = useState<File | null>(null);
+  const [stage, setStage] = useState<Stage>('idle');
+  const [resultUrl, setResultUrl] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState('');
+
+  const handleDrop = async (files: File[]) => {
+    if (!files.length) return;
+    const f = files[0];
+    
+    // Check if it's an office file
+    const ext = f.name.split('.').pop()?.toLowerCase();
+    const validExts = ['docx', 'doc', 'pptx', 'ppt', 'xlsx', 'xls', 'odt', 'odp'];
+    if (!ext || !validExts.includes(ext)) {
+      setErrorMsg('Please upload a valid Office file (.docx, .pptx, .xlsx, etc.)');
+      setStage('error');
+      return;
+    }
+
+    setFile(f);
     setResultUrl(null);
+    setErrorMsg('');
+    setStage('processing');
 
     try {
-      setStatus('Reading Word file...');
-      const arrayBuffer = await file.arrayBuffer();
+      const formData = new FormData();
+      formData.append('file', f);
 
-      setStatus('Converting to exact HTML (via Mammoth)...');
-      const result = await mammoth.convertToHtml(
-        { arrayBuffer },
-        { includeDefaultStyleMap: true }
-      );
-      
-      const html = result.value;
-      if (!html) throw new Error("No content found in document.");
-      
-      setHtmlContent(html);
-
-      // Wait a moment for the DOM to render the new HTML content
-      await new Promise(resolve => setTimeout(resolve, 500));
-
-      const renderDiv = containerRef.current.querySelector('#render-target') as HTMLElement;
-      if (!renderDiv) throw new Error("Render target not found");
-
-      setStatus('Rendering HTML to Canvas Image...');
-      
-      // html2canvas capture
-      const canvas = await html2canvas(renderDiv, {
-        scale: 2,
-        useCORS: true,
-        logging: false,
-        backgroundColor: '#ffffff'
-      } as any);
-
-      setStatus('Building PDF...');
-      const pdfDoc = await PDFDocument.create();
-      
-      // Calculate how many A4 pages we need
-      const A4_WIDTH = 595.28;
-      const A4_HEIGHT = 841.89;
-      
-      // Scale canvas to fit A4 width
-      const scale = A4_WIDTH / canvas.width;
-      const scaledHeight = canvas.height * scale;
-      
-      // Number of pages needed
-      const numPages = Math.ceil(scaledHeight / A4_HEIGHT);
-      
-      const imgBytes = await new Promise<Uint8Array>((resolve) => {
-        canvas.toBlob(async (blob) => {
-          if (blob) {
-            resolve(new Uint8Array(await blob.arrayBuffer()));
-          }
-        }, 'image/jpeg', 0.95);
+      const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+      const res = await fetch(`${API_BASE_URL}/convert/office-to-pdf`, {
+        method: 'POST',
+        body: formData,
       });
 
-      const pdfImage = await pdfDoc.embedJpg(imgBytes);
-
-      for (let i = 0; i < numPages; i++) {
-        const page = pdfDoc.addPage([A4_WIDTH, A4_HEIGHT]);
-        
-        // Draw the image slice for this page
-        // Note: y coordinate is from bottom-up in pdf-lib
-        const yOffset = A4_HEIGHT * i;
-        
-        page.drawImage(pdfImage, {
-          x: 0,
-          y: A4_HEIGHT - scaledHeight + yOffset, // Shift image up for each page
-          width: A4_WIDTH,
-          height: scaledHeight,
-        });
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(errorText || 'Conversion failed on the server.');
       }
 
-      setStatus('Finalizing PDF...');
-      const pdfBytes = await pdfDoc.save();
-      const blob = new Blob([pdfBytes], { type: 'application/pdf' });
-      const url = URL.createObjectURL(blob);
-      setResultUrl(url);
-
-    } catch (err: any) {
-      console.error(err);
-      setError(err.message || 'An error occurred during conversion.');
-    } finally {
-      setIsProcessing(false);
-      setStatus('');
+      const blob = await res.blob();
+      setResultUrl(URL.createObjectURL(blob));
+      setStage('done');
+    } catch (e: any) {
+      setErrorMsg(e?.message || 'Failed to connect to the backend server. Is it running?');
+      setStage('error');
     }
   };
 
+  const reset = () => {
+    setFile(null);
+    setStage('idle');
+    setResultUrl(null);
+    setErrorMsg('');
+  };
+
   return (
-    <div className="max-w-5xl mx-auto">
-      <div className="text-center mb-8">
-        <h1 className="text-3xl font-bold text-slate-900 mb-4 flex items-center justify-center gap-3">
-          <FileText className="h-8 w-8 text-blue-600" />
-          Word to PDF (Exact Image-based Layout)
-        </h1>
-        <p className="text-slate-600 max-w-2xl mx-auto">
-          Experimental feature: Converts Word (DOCX) to an exact HTML replica, then takes a snapshot and converts it into an image-based PDF.
-        </p>
-      </div>
+    <div className="flex-1 w-full bg-gradient-to-br from-slate-50 to-indigo-50 dark:from-slate-950 dark:to-slate-900 min-h-screen">
+      <div className="max-w-3xl mx-auto px-4 py-10">
+        <div className="text-center mb-10">
+          <div className="w-14 h-14 bg-indigo-600 rounded-2xl flex items-center justify-center shadow-lg shadow-indigo-200 dark:shadow-indigo-900 mx-auto mb-4">
+            <FileText className="w-7 h-7 text-white" />
+          </div>
+          <h1 className="text-4xl font-extrabold text-slate-900 dark:text-white mb-3">Office to PDF</h1>
+          <p className="text-lg text-slate-600 dark:text-slate-400 max-w-xl mx-auto">
+            Convert Word, Excel, and PowerPoint files to PDF.
+            Uses LibreOffice backend for 100% exact formatting preservation.
+          </p>
+        </div>
 
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-8 mb-8">
-        {!file ? (
-          <FileDropzone
-            onDrop={(files) => {
-              const f = files[0];
-              if (f && f.name.toLowerCase().endsWith('.docx')) {
-                setFile(f);
-                setError(null);
-                setResultUrl(null);
-                setHtmlContent('');
-              } else {
-                setError('Please upload a .docx file.');
-              }
-            }}
-            accept={{
-              'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx']
-            }}
-            title="Upload Word Document"
-            subtitle="Drag and drop your .docx file here"
-          />
-        ) : (
-          <div className="space-y-6">
-            <div className="flex items-center justify-between p-4 bg-slate-50 rounded-xl border border-slate-200">
-              <div className="flex items-center gap-3">
-                <FileText className="h-8 w-8 text-blue-500" />
-                <div>
-                  <p className="font-medium text-slate-900">{file.name}</p>
-                  <p className="text-sm text-slate-500">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
-                </div>
-              </div>
-              <button
-                onClick={() => {
-                  setFile(null);
-                  setResultUrl(null);
-                  setHtmlContent('');
-                }}
-                className="text-sm text-red-600 hover:text-red-700 font-medium"
-              >
-                Change File
-              </button>
-            </div>
+        {stage === 'idle' && (
+          <FileDropzone onDrop={handleDrop} multiple={false} title="Drop your Office file here" subtitle="Supports .docx, .pptx, .xlsx, .doc, .ppt, .xls" />
+        )}
 
-            {!resultUrl && !isProcessing && (
-              <button
-                onClick={handleConvert}
-                className="w-full py-4 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-medium transition-colors flex items-center justify-center gap-2"
-              >
-                Start Conversion <ArrowRight className="h-5 w-5" />
-              </button>
-            )}
-
-            {isProcessing && (
-              <div className="p-8 text-center bg-blue-50 rounded-xl border border-blue-100">
-                <Loader2 className="h-8 w-8 text-blue-600 animate-spin mx-auto mb-4" />
-                <p className="text-blue-900 font-medium">{status}</p>
-              </div>
-            )}
-
-            {error && (
-              <div className="p-4 bg-red-50 text-red-700 rounded-xl border border-red-200">
-                {error}
-              </div>
-            )}
-
-            {resultUrl && (
-              <div className="p-6 bg-green-50 rounded-xl border border-green-200 text-center">
-                <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <Download className="h-8 w-8 text-green-600" />
-                </div>
-                <h3 className="text-xl font-semibold text-green-900 mb-2">Conversion Complete!</h3>
-                <p className="text-green-700 mb-6">Your exact layout PDF is ready.</p>
-                <a
-                  href={resultUrl}
-                  download={file.name.replace(/\.docx$/i, '-exact.pdf')}
-                  className="inline-flex items-center gap-2 px-6 py-3 bg-green-600 hover:bg-green-700 text-white rounded-xl font-medium transition-colors"
-                >
-                  Download PDF
-                </a>
-              </div>
-            )}
+        {stage === 'processing' && (
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700 p-8 text-center shadow-sm">
+            <div className="w-16 h-16 rounded-full border-4 border-indigo-200 dark:border-indigo-900 border-t-indigo-600 animate-spin mx-auto mb-4" />
+            <h3 className="text-xl font-bold text-slate-800 dark:text-white mb-2">Converting to PDF…</h3>
+            <p className="text-sm text-slate-500 dark:text-slate-400">Processing file with LibreOffice engine...</p>
           </div>
         )}
-      </div>
 
-      {/* Hidden Render Container for HTML2Canvas */}
-      <div 
-        ref={containerRef} 
-        style={{
-          position: 'absolute',
-          top: '-9999px',
-          left: '-9999px',
-          width: '794px', // A4 pixel width at 96 DPI approx
-          visibility: 'hidden'
-        }}
-      >
-        <div 
-          id="render-target"
-          style={{ 
-            background: 'white', 
-            padding: '40px',
-            color: '#000',
-            fontFamily: 'Arial, sans-serif',
-            fontSize: '14px',
-            lineHeight: '1.5'
-          }}
-          dangerouslySetInnerHTML={{ __html: htmlContent }}
-        />
+        {stage === 'done' && resultUrl && file && (
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-emerald-200 dark:border-emerald-800 shadow-lg overflow-hidden">
+            <div className="bg-emerald-50 dark:bg-emerald-950/40 px-6 py-5 border-b border-emerald-200 dark:border-emerald-800 flex items-center gap-3">
+              <CheckCircle2 className="w-8 h-8 text-emerald-500" />
+              <div>
+                <h3 className="text-xl font-bold text-emerald-900 dark:text-emerald-200">Conversion Complete!</h3>
+                <p className="text-sm text-emerald-700 dark:text-emerald-400">Your perfectly formatted PDF is ready.</p>
+              </div>
+            </div>
+            <div className="p-6 space-y-4">
+              <a href={resultUrl} download={file.name.replace(/\.[^/.]+$/, '') + '.pdf'}
+                className="flex items-center justify-center gap-2 w-full px-6 py-4 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md transition-all hover:scale-[1.01]">
+                <Download className="w-5 h-5" /> Download PDF File
+              </a>
+              <button onClick={reset}
+                className="flex items-center justify-center gap-2 w-full px-6 py-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-semibold rounded-xl border border-slate-200 dark:border-slate-700 transition-colors">
+                <RotateCcw className="w-4 h-4" /> Convert Another File
+              </button>
+            </div>
+          </div>
+        )}
+
+        {stage === 'error' && (
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-red-200 dark:border-red-800 p-6">
+            <div className="flex items-start gap-3 mb-4">
+              <AlertTriangle className="w-6 h-6 text-red-500 shrink-0 mt-0.5" />
+              <div>
+                <h3 className="font-bold text-red-800 dark:text-red-200">Conversion Failed</h3>
+                <p className="text-sm text-red-700 dark:text-red-300 mt-1">{errorMsg}</p>
+              </div>
+            </div>
+            <button onClick={reset} className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white font-medium">
+              <RotateCcw className="w-4 h-4" /> Try again
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
