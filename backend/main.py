@@ -26,6 +26,9 @@ app.add_middleware(
 TEMP_DIR = Path(tempfile.gettempdir()) / "pdf_tool_backend"
 TEMP_DIR.mkdir(exist_ok=True)
 
+@app.get("/")
+def read_root():
+    return {"status": "ok", "message": "PDF Tool Backend is running perfectly! 🚀"}
 
 def temp_path(suffix: str) -> Path:
     return TEMP_DIR / f"{uuid.uuid4().hex}{suffix}"
@@ -46,12 +49,63 @@ def health():
     return {"status": "ok"}
 
 
+# ─── AUTO-OCR HELPER ────────────────────────────────────────────
+def ensure_auto_ocr(inp_path: Path) -> Path:
+    import fitz
+    doc = fitz.open(inp_path)
+    total_text = "".join(page.get_text("text") for page in doc)
+    is_scanned = len(total_text.strip()) < 50
+    doc.close()
+
+    if not is_scanned:
+        return inp_path
+
+    try:
+        subprocess.run([
+            "ocrmypdf", "--force-ocr", "-l", "eng+hin", "--output-type", "pdf", 
+            str(inp_path), str(inp_path)
+        ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception as e:
+        print(f"Auto-OCR failed: {e}")
+
+    # Reconstruct Text-Only PDF
+    doc = fitz.open(inp_path)
+    new_doc = fitz.open()
+    deva_path = Path(__file__).parent.parent / "pdf-tool" / "public" / "fonts" / "NotoSansDevanagari-Regular.ttf"
+    
+    def has_non_latin(text):
+        return any(ord(c) > 0x00FF for c in text)
+
+    for page in doc:
+        new_page = new_doc.new_page(width=page.rect.width, height=page.rect.height)
+        if deva_path.exists():
+            new_page.insert_font(fontname="deva", fontfile=str(deva_path))
+            
+        blocks = page.get_text("dict")["blocks"]
+        for b in blocks:
+            if b.get("type") == 0:
+                for line in b.get("lines", []):
+                    for span in line.get("spans", []):
+                        try:
+                            color = fitz.sRGB_to_pdf(span["color"]) if "color" in span else (0,0,0)
+                            text = span["text"]
+                            fontname = "deva" if has_non_latin(text) and deva_path.exists() else "helv"
+                            new_page.insert_text(fitz.Point(span["origin"][0], span["origin"][1]), 
+                                                 text, fontname=fontname, fontsize=span["size"], color=color)
+                        except Exception:
+                            pass
+    text_only_inp = temp_path("_textonly.pdf")
+    new_doc.save(str(text_only_inp))
+    doc.close()
+    new_doc.close()
+    return text_only_inp
+
+
 # ─── 1. PDF → Word (pdf2docx — layout + tables + images) ──────
 @app.post("/convert/pdf-to-word")
-async def pdf_to_word(file: UploadFile = File(...), ocr_mode: bool = Form(False)):
+async def pdf_to_word(file: UploadFile = File(...)):
     try:
         from pdf2docx import Converter
-        import fitz
     except ImportError:
         raise HTTPException(500, "Run: pip install pdf2docx PyMuPDF")
 
@@ -59,46 +113,7 @@ async def pdf_to_word(file: UploadFile = File(...), ocr_mode: bool = Form(False)
     out = temp_path(".docx")
     try:
         inp.write_bytes(await file.read())
-        
-        # If OCR mode, create a text-only PDF to strip backgrounds and make invisible text visible
-        if ocr_mode:
-            doc = fitz.open(inp)
-            new_doc = fitz.open()
-            
-            def has_non_latin(text):
-                return any(ord(c) > 0x00FF for c in text)
-                
-            deva_path = Path(__file__).parent.parent / "pdf-tool" / "public" / "fonts" / "NotoSansDevanagari-Regular.ttf"
-            
-            for page in doc:
-                new_page = new_doc.new_page(width=page.rect.width, height=page.rect.height)
-                
-                # Pre-register devanagari font if needed
-                if deva_path.exists():
-                    new_page.insert_font(fontname="deva", fontfile=str(deva_path))
-                    
-                blocks = page.get_text("dict")["blocks"]
-                for b in blocks:
-                    if b.get("type") == 0:
-                        for line in b.get("lines", []):
-                            for span in line.get("spans", []):
-                                try:
-                                    color = fitz.sRGB_to_pdf(span["color"]) if "color" in span else (0,0,0)
-                                    text = span["text"]
-                                    fontname = "deva" if has_non_latin(text) and deva_path.exists() else "helv"
-                                    
-                                    new_page.insert_text(fitz.Point(span["origin"][0], span["origin"][1]), 
-                                                         text, fontname=fontname, fontsize=span["size"], color=color)
-                                except Exception:
-                                    pass
-            
-            # Save to a new temp file to avoid locking issues
-            text_only_inp = temp_path("_textonly.pdf")
-            new_doc.save(str(text_only_inp))
-            doc.close()
-            new_doc.close()
-            inp = text_only_inp
-
+        inp = ensure_auto_ocr(inp)
         cv = Converter(str(inp))
         cv.convert(str(out))
         cv.close()
@@ -121,6 +136,7 @@ async def pdf_to_excel(file: UploadFile = File(...), method: str = Form("auto"))
     out = temp_path(".xlsx")
     try:
         inp.write_bytes(await file.read())
+        inp = ensure_auto_ocr(inp)
         wb = openpyxl.Workbook(); wb.remove(wb.active)
         tables_found = False
 
@@ -183,6 +199,7 @@ async def pdf_to_ppt(file: UploadFile = File(...), dpi: int = Form(150)):
     inp = temp_path(".pdf"); out = temp_path(".pptx")
     try:
         inp.write_bytes(await file.read())
+        inp = ensure_auto_ocr(inp)
         doc = fitz.open(str(inp)); prs = Presentation()
         for page in doc:
             pix = page.get_pixmap(matrix=fitz.Matrix(dpi/72, dpi/72))
@@ -470,3 +487,121 @@ async def edit_pdf_endpoint(file: UploadFile = File(...), edits: str = Form(...)
     except Exception as e:
         cleanup(inp, out)
         raise HTTPException(500, str(e))
+
+# ─── 4. Compress PDF ──────────────────────────────────────────
+@app.post("/compress-pdf")
+async def compress_pdf(file: UploadFile = File(...)):
+    inp = temp_path(".pdf")
+    out = temp_path("_compressed.pdf")
+    try:
+        inp.write_bytes(await file.read())
+        
+        # Try Ghostscript first
+        gs_cmd = ["gs", "-sDEVICE=pdfwrite", "-dCompatibilityLevel=1.4", "-dPDFSETTINGS=/ebook", "-dNOPAUSE", "-dQUIET", "-dBATCH", f"-sOutputFile={out}", str(inp)]
+        try:
+            subprocess.run(gs_cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            # Fallback to PyMuPDF compression
+            import fitz
+            doc = fitz.open(inp)
+            doc.save(str(out), garbage=4, deflate=True)
+            doc.close()
+            
+        return FileResponse(str(out), media_type="application/pdf", filename=f"compressed_{file.filename}")
+    except Exception as e:
+        cleanup(inp, out); raise HTTPException(500, str(e))
+
+# ─── 5. Extract Tables (Camelot) ───────────────────────────────
+@app.post("/extract-tables")
+async def extract_tables(file: UploadFile = File(...)):
+    try:
+        import camelot, pandas as pd
+    except ImportError:
+        raise HTTPException(500, "Run: pip install camelot-py[cv] pandas openpyxl")
+    
+    inp = temp_path(".pdf")
+    out = temp_path(".xlsx")
+    try:
+        inp.write_bytes(await file.read())
+        tables = camelot.read_pdf(str(inp), pages='all', flavor='lattice')
+        if not tables or len(tables) == 0:
+            tables = camelot.read_pdf(str(inp), pages='all', flavor='stream')
+            
+        if not tables or len(tables) == 0:
+            raise HTTPException(400, "No tables found in this PDF.")
+            
+        with pd.ExcelWriter(str(out), engine='openpyxl') as writer:
+            for i, table in enumerate(tables):
+                df = table.df
+                df.to_excel(writer, sheet_name=f"Table_{i+1}", index=False, header=False)
+                
+        return FileResponse(str(out), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", filename=f"tables_{Path(file.filename).stem}.xlsx")
+    except Exception as e:
+        cleanup(inp, out); raise HTTPException(500, str(e))
+
+# ─── 6. Extract Images ─────────────────────────────────────────
+@app.post("/extract-images")
+async def extract_images(file: UploadFile = File(...)):
+    import zipfile
+    inp = temp_path(".pdf")
+    out_zip = temp_path(".zip")
+    img_dir = temp_path("_imgdir")
+    img_dir.mkdir(exist_ok=True)
+    
+    try:
+        inp.write_bytes(await file.read())
+        import fitz
+        doc = fitz.open(inp)
+        count = 0
+        for page_num in range(len(doc)):
+            page = doc[page_num]
+            for img_index, img in enumerate(page.get_images(full=True)):
+                xref = img[0]
+                base_image = doc.extract_image(xref)
+                image_bytes = base_image["image"]
+                ext = base_image["ext"]
+                count += 1
+                img_filepath = img_dir / f"page_{page_num+1}_img_{count}.{ext}"
+                img_filepath.write_bytes(image_bytes)
+        doc.close()
+        
+        if count == 0:
+            raise HTTPException(400, "No images found in this PDF.")
+            
+        # Create ZIP
+        with zipfile.ZipFile(str(out_zip), 'w', zipfile.ZIP_DEFLATED) as zipf:
+            for root, _, files in os.walk(img_dir):
+                for f in files:
+                    zipf.write(os.path.join(root, f), f)
+                    
+        return FileResponse(str(out_zip), media_type="application/zip", filename=f"images_{Path(file.filename).stem}.zip")
+    except Exception as e:
+        cleanup(inp, out_zip, img_dir); raise HTTPException(500, str(e))
+
+# ─── 7. Search & Replace ───────────────────────────────────────
+@app.post("/search-replace")
+async def search_replace(file: UploadFile = File(...), search_term: str = Form(...), replace_term: str = Form(...)):
+    inp = temp_path(".pdf")
+    out = temp_path("_replaced.pdf")
+    try:
+        inp.write_bytes(await file.read())
+        import fitz
+        doc = fitz.open(inp)
+        match_count = 0
+        
+        for page in doc:
+            instances = page.search_for(search_term)
+            if instances:
+                match_count += len(instances)
+                for inst in instances:
+                    page.add_redact_annot(inst, fill=(1, 1, 1))
+                page.apply_redactions()
+                for inst in instances:
+                    page.insert_text(fitz.Point(inst.x0, inst.y1 - 2), replace_term, fontsize=11, color=(0,0,0))
+                    
+        doc.save(str(out))
+        doc.close()
+        
+        return FileResponse(str(out), media_type="application/pdf", filename=f"replaced_{file.filename}", headers={"X-Match-Count": str(match_count), "Access-Control-Expose-Headers": "X-Match-Count"})
+    except Exception as e:
+        cleanup(inp, out); raise HTTPException(500, str(e))
