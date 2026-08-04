@@ -1,197 +1,149 @@
-import { useEffect, useRef, useState } from 'react';
-import { Download, FileText, Loader2, ScanSearch } from 'lucide-react';
-import { PDFDocument, rgb } from 'pdf-lib';
-import { createWorker } from 'tesseract.js';
-import * as pdfjsLib from 'pdfjs-dist';
-import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+import React, { useState } from 'react';
+import { Search, Scan, Globe, Zap, CheckCircle2, Download, RotateCcw, AlertTriangle } from 'lucide-react';
 import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
-
-type OCRLang = 'eng' | 'hin' | 'eng+hin';
+type Stage = 'idle' | 'processing' | 'done' | 'error';
+type Lang = 'eng' | 'hin' | 'hin+eng';
 
 export default function SearchablePdf() {
   usePageSEO(
-    'Searchable PDF (OCR)',
-    'Convert scanned or image-only PDFs into searchable PDFs by adding an OCR text layer.',
+    'Make PDF Searchable (OCR) — Powerful Backend API',
+    'Convert scanned PDFs into text-searchable PDFs without changing their appearance.',
   );
+
   const [file, setFile] = useState<File | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [lang, setLang] = useState<OCRLang>('eng');
-  const [error, setError] = useState<string | null>(null);
-  const workerRef = useRef<Awaited<ReturnType<typeof createWorker>> | null>(null);
+  const [stage, setStage] = useState<Stage>('idle');
+  const [resultUrl, setResultUrl] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState('');
+  const [lang, setLang] = useState<Lang>('hin+eng');
+  const [deskew, setDeskew] = useState(true);
 
-  useEffect(() => {
-    return () => {
-      workerRef.current?.terminate().catch(() => undefined);
-      workerRef.current = null;
-    };
-  }, []);
-
-  const onDrop = (accepted: File[]) => {
-    if (accepted.length === 0) return;
-    setFile(accepted[0]);
-    setError(null);
-  };
-
-  const runOcrAndDownload = async () => {
-    if (!file || busy) return;
-    setBusy(true);
-    setError(null);
-    setProgress(0);
+  const handleDrop = async (files: File[]) => {
+    if (!files.length) return;
+    const f = files[0];
+    setFile(f);
+    setResultUrl(null);
+    setErrorMsg('');
+    setStage('processing');
 
     try {
-      const srcBytes = await file.arrayBuffer();
-      const srcPdf = await pdfjsLib.getDocument({ data: srcBytes }).promise;
-      const outPdf = await PDFDocument.create();
-      const totalPages = srcPdf.numPages;
+      const formData = new FormData();
+      formData.append('file', f);
+      formData.append('lang', lang);
+      formData.append('deskew', deskew ? 'true' : 'false');
+      formData.append('rotate', 'true');
 
-      await workerRef.current?.terminate().catch(() => undefined);
-      workerRef.current = await createWorker(lang, 1, {
-        logger: (m) => {
-          if (m.status === 'recognizing text') {
-            const pageProgress = Math.max(0, Math.min(1, m.progress || 0));
-            setProgress(Math.round(pageProgress * 100));
-          }
-        },
+      const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+      const res = await fetch(`${API_BASE_URL}/convert/make-searchable`, {
+        method: 'POST',
+        body: formData,
       });
-      const worker = workerRef.current;
 
-      for (let i = 1; i <= totalPages; i++) {
-        const page = await srcPdf.getPage(i);
-        const viewport = page.getViewport({ scale: 1 });
-        const renderScale = 2;
-        const renderViewport = page.getViewport({ scale: renderScale });
-
-        const canvas = document.createElement('canvas');
-        canvas.width = Math.round(renderViewport.width);
-        canvas.height = Math.round(renderViewport.height);
-        const ctx = canvas.getContext('2d');
-        if (!ctx) throw new Error('Canvas unavailable');
-
-        await page.render({ canvasContext: ctx, viewport: renderViewport, canvas }).promise;
-
-        // Standard Tesseract OCR
-        const { data } = await worker.recognize(canvas, { pdfTitle: file.name }, { pdf: true });
-        if (!data.pdf) throw new Error('Failed to generate PDF from OCR engine');
-        const tempPdf = await PDFDocument.load(new Uint8Array(data.pdf));
-        const [copiedPage] = await outPdf.copyPages(tempPdf, [0]);
-        copiedPage.scaleContent(1 / renderScale, 1 / renderScale);
-        copiedPage.setSize(viewport.width, viewport.height);
-        outPdf.addPage(copiedPage);
-
-        canvas.width = 0; canvas.height = 0;
-        setProgress(Math.round((i / totalPages) * 100));
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(errorText || 'Conversion failed on the server.');
       }
 
-      const outBytes = await outPdf.save();
-      const outBlob = new Blob([outBytes], { type: 'application/pdf' });
-      const outUrl = URL.createObjectURL(outBlob);
-      const a = document.createElement('a');
-      a.href = outUrl;
-      a.download = `${file.name.replace(/\.pdf$/i, '') || 'document'}_searchable.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(outUrl);
-    } catch (e) {
-      console.error(e);
-      const detail = e instanceof Error ? e.message : String(e);
-      setError(
-        `OCR conversion failed. ${detail ? `Details: ${detail}. ` : ''}Try again with "English" first for maximum compatibility.`,
-      );
-    } finally {
-      setBusy(false);
+      const blob = await res.blob();
+      setResultUrl(URL.createObjectURL(blob));
+      setStage('done');
+    } catch (e: any) {
+      setErrorMsg(e?.message || 'Failed to connect to the backend server. Is it running?');
+      setStage('error');
     }
   };
 
+  const reset = () => {
+    setFile(null);
+    setStage('idle');
+    setResultUrl(null);
+    setErrorMsg('');
+  };
+
   return (
-    <div className="flex-1 w-full bg-slate-50 dark:bg-slate-950">
-      <div className="max-w-4xl mx-auto px-6 py-10">
-        <div className="mb-8">
-          <h1 className="text-3xl md:text-4xl font-extrabold text-slate-900 dark:text-white">
-            Searchable PDF (OCR)
-          </h1>
-          <p className="mt-3 text-slate-600 dark:text-slate-400">
-            Image-only or scanned PDF ko searchable text PDF me convert karein. Original page design same rehta hai,
-            bas hidden OCR text layer add hoti hai.
+    <div className="flex-1 w-full bg-gradient-to-br from-slate-50 to-blue-50 dark:from-slate-950 dark:to-slate-900 min-h-screen">
+      <div className="max-w-3xl mx-auto px-4 py-10">
+        <div className="text-center mb-10">
+          <div className="w-14 h-14 bg-blue-600 rounded-2xl flex items-center justify-center shadow-lg shadow-blue-200 dark:shadow-blue-900 mx-auto mb-4">
+            <Search className="w-7 h-7 text-white" />
+          </div>
+          <h1 className="text-4xl font-extrabold text-slate-900 dark:text-white mb-3">Make PDF Searchable</h1>
+          <p className="text-lg text-slate-600 dark:text-slate-400 max-w-xl mx-auto">
+            Run OCR to add a hidden text layer to your scanned PDFs, making them fully searchable and selectable.
           </p>
         </div>
 
-        {!file ? (
-          <FileDropzone
-            onDrop={onDrop}
-            multiple={false}
-            title="Select scanned PDF"
-            subtitle="Drop image-based PDF to make it searchable"
-          />
-        ) : (
-          <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-6 space-y-5">
-            <div className="flex items-start gap-4 p-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60">
-              <div className="w-12 h-12 rounded-lg bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 flex items-center justify-center shrink-0">
-                <FileText className="w-6 h-6" />
+        {stage === 'idle' && (
+          <div className="space-y-4">
+            <div className="bg-white dark:bg-slate-800 p-6 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm space-y-4">
+              <div className="flex flex-col sm:flex-row gap-4 items-center justify-between">
+                <span className="font-semibold text-slate-700 dark:text-slate-200 text-sm">Primary Language:</span>
+                <div className="flex gap-2 w-full sm:w-auto">
+                  {(['eng', 'hin', 'hin+eng'] as Lang[]).map(l => (
+                    <button
+                      key={l}
+                      onClick={() => setLang(l)}
+                      className={`px-4 py-2 text-sm font-medium rounded-lg flex-1 sm:flex-none capitalize transition-colors ${
+                        lang === l ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 border-blue-300 dark:border-blue-700 border' : 'bg-slate-50 dark:bg-slate-700 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-600'
+                      }`}
+                    >
+                      {l === 'eng' ? 'English' : l === 'hin' ? 'Hindi' : 'Hindi + English'}
+                    </button>
+                  ))}
+                </div>
               </div>
-              <div className="min-w-0">
-                <p className="font-semibold text-slate-900 dark:text-white truncate">{file.name}</p>
-                <p className="text-sm text-slate-500 dark:text-slate-400">
-                  {(file.size / 1024 / 1024).toFixed(2)} MB
-                </p>
+              <div className="flex items-center gap-3">
+                <input type="checkbox" id="deskew" checked={deskew} onChange={e => setDeskew(e.target.checked)} className="w-5 h-5 rounded text-blue-600 focus:ring-blue-500" />
+                <label htmlFor="deskew" className="text-sm font-medium text-slate-700 dark:text-slate-300">Auto-deskew (Straighten crooked pages)</label>
               </div>
             </div>
+            <FileDropzone onDrop={handleDrop} multiple={false} title="Drop your Scanned PDF here" subtitle="Uses OCRmyPDF for professional archiving quality" />
+          </div>
+        )}
 
-            <div className="grid sm:grid-cols-[1fr_auto] gap-4 items-end">
-              <label className="text-sm text-slate-600 dark:text-slate-300">
-                OCR Language
-                <select
-                  className="mt-1 w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
-                  value={lang}
-                  onChange={(e) => setLang(e.target.value as OCRLang)}
-                  disabled={busy}
-                >
-                  <option value="eng">English</option>
-                  <option value="hin">Hindi</option>
-                  <option value="eng+hin">Hindi + English</option>
-                </select>
-              </label>
-              <button
-                type="button"
-                onClick={runOcrAndDownload}
-                disabled={busy}
-                className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white font-semibold px-5 py-2.5"
-              >
-                {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <ScanSearch className="w-4 h-4" />}
-                {busy ? `Processing ${progress}%` : 'Convert to Searchable PDF'}
+        {stage === 'processing' && (
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700 p-8 text-center shadow-sm">
+            <div className="w-16 h-16 rounded-full border-4 border-blue-200 dark:border-blue-900 border-t-blue-600 animate-spin mx-auto mb-4" />
+            <h3 className="text-xl font-bold text-slate-800 dark:text-white mb-2">Running OCR Engine…</h3>
+            <p className="text-sm text-slate-500 dark:text-slate-400">Processing text and adding invisible searchable layer...</p>
+          </div>
+        )}
+
+        {stage === 'done' && resultUrl && file && (
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-emerald-200 dark:border-emerald-800 shadow-lg overflow-hidden">
+            <div className="bg-emerald-50 dark:bg-emerald-950/40 px-6 py-5 border-b border-emerald-200 dark:border-emerald-800 flex items-center gap-3">
+              <CheckCircle2 className="w-8 h-8 text-emerald-500" />
+              <div>
+                <h3 className="text-xl font-bold text-emerald-900 dark:text-emerald-200">Searchable PDF Ready!</h3>
+                <p className="text-sm text-emerald-700 dark:text-emerald-400">You can now select, copy, and search text in this PDF.</p>
+              </div>
+            </div>
+            <div className="p-6 space-y-4">
+              <a href={resultUrl} download={file.name.replace(/\.pdf$/i, '') + '_searchable.pdf'}
+                className="flex items-center justify-center gap-2 w-full px-6 py-4 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md transition-all hover:scale-[1.01]">
+                <Download className="w-5 h-5" /> Download Searchable PDF
+              </a>
+              <button onClick={reset}
+                className="flex items-center justify-center gap-2 w-full px-6 py-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-semibold rounded-xl border border-slate-200 dark:border-slate-700 transition-colors">
+                <RotateCcw className="w-4 h-4" /> Process Another File
               </button>
             </div>
+          </div>
+        )}
 
-            {busy && (
-              <div className="h-2 rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden">
-                <div className="h-full bg-blue-600 transition-all" style={{ width: `${progress}%` }} />
+        {stage === 'error' && (
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-red-200 dark:border-red-800 p-6">
+            <div className="flex items-start gap-3 mb-4">
+              <AlertTriangle className="w-6 h-6 text-red-500 shrink-0 mt-0.5" />
+              <div>
+                <h3 className="font-bold text-red-800 dark:text-red-200">OCR Failed</h3>
+                <p className="text-sm text-red-700 dark:text-red-300 mt-1">{errorMsg}</p>
               </div>
-            )}
-
-            {error && (
-              <p className="text-sm rounded-lg border border-red-200 dark:border-red-900/70 bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-300 px-3 py-2">
-                {error}
-              </p>
-            )}
-
-            <div className="flex flex-wrap gap-3">
-              <button
-                type="button"
-                onClick={() => setFile(null)}
-                disabled={busy}
-                className="px-4 py-2 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 text-sm font-medium hover:bg-slate-200 dark:hover:bg-slate-700"
-              >
-                Choose another file
-              </button>
-              <span className="inline-flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400">
-                <Download className="w-3.5 h-3.5" />
-                Output will auto-download after conversion
-              </span>
             </div>
+            <button onClick={reset} className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white font-medium">
+              <RotateCcw className="w-4 h-4" /> Try again
+            </button>
           </div>
         )}
       </div>
