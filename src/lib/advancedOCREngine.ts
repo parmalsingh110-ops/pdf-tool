@@ -31,6 +31,7 @@ export interface RichRun {
   text: string;
   x: number;       // left edge (pts, from left)
   y: number;       // top edge (pts, from top — already flipped)
+  baseline?: number;
   w: number;
   h: number;
   fontSize: number;
@@ -248,6 +249,7 @@ export async function extractRichRuns(
       bold: boolean;
       italic: boolean;
       hasEOL: boolean;
+      baseline: number;
     }
     const rawItems: RawItem[] = [];
 
@@ -269,6 +271,7 @@ export async function extractRichRuns(
         bold: isBoldFont(fontName),
         italic: isItalicFont(fontName),
         hasEOL: !!item.hasEOL,
+        baseline: pa.height - ty,
       });
     }
 
@@ -298,9 +301,9 @@ export async function extractRichRuns(
         continue;
       }
 
-      // Check if same visual line (Y within tolerance)
+      // Check if same visual line (Baseline within tolerance)
       const lineH = Math.max(prev.h, cur.h, prev.fontSize, cur.fontSize);
-      const sameY = Math.abs(prev.y - cur.y) < lineH * 0.55;
+      const sameY = Math.abs(prev.baseline - cur.baseline) < lineH * 0.55;
 
       if (!sameY) {
         merged.push({ ...cur });
@@ -356,6 +359,7 @@ export async function extractRichRuns(
         text,
         x: item.x,
         y: item.y,
+        baseline: item.baseline,
         w: item.w,
         h: item.h,
         fontSize: item.fontSize,
@@ -652,6 +656,7 @@ export interface PipelineOptions {
 
 export interface PipelineResult {
   paragraphs: RichParagraph[];
+  runs: RichRun[];
   pageAnalyses: PageAnalysis[];
   pdfPageCount: number;
   hasAnyScannedPage: boolean;
@@ -773,7 +778,7 @@ export async function runOCRPipeline(
   const paragraphs = groupRunsIntoParagraphs(finalRuns);
 
   onProgress?.('Done!', 100);
-  return { paragraphs, pageAnalyses, pdfPageCount: pageAnalyses.length, hasAnyScannedPage, hasAnyTextPage };
+  return { paragraphs, runs: finalRuns, pageAnalyses, pdfPageCount: pageAnalyses.length, hasAnyScannedPage, hasAnyTextPage };
 }
 
 // ── Legacy shim so old code referencing TextLine still compiles ────────────────

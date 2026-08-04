@@ -80,6 +80,7 @@ const categories = [
       { title: 'Convert to TIFF', path: '/convert-tiff', icon: FileImage, color: 'text-indigo-500', bg: 'bg-indigo-50' },
       { title: 'Image Text Editor (OCR)', path: '/image-text-editor', icon: ScanText, color: 'text-cyan-600', bg: 'bg-cyan-50' },
       { title: 'Universal Converter', path: '/universal-converter', icon: FileType, color: 'text-indigo-600', bg: 'bg-indigo-50' },
+      { title: 'Word to PDF (Exact)', path: '/word-to-pdf-exact', icon: FileType, color: 'text-indigo-600', bg: 'bg-indigo-50' },
       { title: 'Code / HTML to PDF', path: '/code-to-pdf', icon: FileCode, color: 'text-violet-600', bg: 'bg-violet-50' },
       { title: 'Extract Audio/Video', path: '/extract-media', icon: FileCode, color: 'text-teal-500', bg: 'bg-teal-50' },
       { title: 'Grayscale PDF', path: '/grayscale-pdf', icon: Droplet, color: 'text-gray-500', bg: 'bg-gray-100' },

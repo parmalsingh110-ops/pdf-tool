@@ -3,14 +3,14 @@ import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { createWorker } from 'tesseract.js';
-import { 
-  Type, 
-  Square, 
-  Highlighter, 
-  PenTool, 
-  Link as LinkIcon, 
-  Download, 
-  ChevronLeft, 
+import {
+  Type,
+  Square,
+  Highlighter,
+  PenTool,
+  Link as LinkIcon,
+  Download,
+  ChevronLeft,
   ChevronRight,
   X,
   MousePointer2,
@@ -77,8 +77,12 @@ interface DetectedTextBlock {
   y: number;
   w: number;
   h: number;
-  fgColor?: string;
-  bgColor?: string;
+  fontSize: number;   // exact CSS-pixel font size from pdfjs transform
+  fontName?: string;  // pdfjs internal font name
+  bold?: boolean;     // detected from fontName
+  italic?: boolean;   // detected from fontName
+  fgColor?: string;   // sampled text color from canvas
+  bgColor?: string;   // sampled background color from canvas
 }
 
 export default function AdvancedEditor() {
@@ -87,12 +91,12 @@ export default function AdvancedEditor() {
   const [numPages, setNumPages] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageViewport, setPageViewport] = useState<pdfjsLib.PageViewport | null>(null);
-  
+
   const [activeTool, setActiveTool] = useState<Tool>(null);
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detectedText, setDetectedText] = useState<DetectedTextBlock[]>([]);
-  
+
   // Property states (defaults for newly placed text)
   const [fontSize, setFontSize] = useState(14);
   const [textColor, setTextColor] = useState('#000000');
@@ -101,13 +105,13 @@ export default function AdvancedEditor() {
 
   const [isDrawing, setIsDrawing] = useState(false);
   const [startPos, setStartPos] = useState({ x: 0, y: 0 });
-  const [currentRect, setCurrentRect] = useState<{x: number, y: number, w: number, h: number} | null>(null);
-  
+  const [currentRect, setCurrentRect] = useState<{ x: number, y: number, w: number, h: number } | null>(null);
+
   const [showSignatureModal, setShowSignatureModal] = useState(false);
   const [showLinkModal, setShowLinkModal] = useState(false);
-  const [pendingLinkRect, setPendingLinkRect] = useState<{x: number, y: number, w: number, h: number} | null>(null);
+  const [pendingLinkRect, setPendingLinkRect] = useState<{ x: number, y: number, w: number, h: number } | null>(null);
   const [linkUrl, setLinkUrl] = useState('');
-  
+
   const [isProcessing, setIsProcessing] = useState(false);
   const [editedUrl, setEditedUrl] = useState<string | null>(null);
 
@@ -124,7 +128,7 @@ export default function AdvancedEditor() {
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
 
   // === NEW: Freehand ===
-  const [freehandPoints, setFreehandPoints] = useState<{x: number, y:number}[]>([]);
+  const [freehandPoints, setFreehandPoints] = useState<{ x: number, y: number }[]>([]);
   const [freehandColor, setFreehandColor] = useState('#000000');
   const [freehandWidth, setFreehandWidth] = useState(2);
 
@@ -133,7 +137,7 @@ export default function AdvancedEditor() {
 
   // === NEW: Eraser ===
   const [eraserSize, setEraserSize] = useState(20);
-  const [eraserPos, setEraserPos] = useState<{x: number, y: number} | null>(null);
+  const [eraserPos, setEraserPos] = useState<{ x: number, y: number } | null>(null);
 
   // === NEW: Resize for image/signature annotations ===
   const resizeAnnRef = useRef<{ id: string; handle: string; startX: number; startY: number; startAnnX: number; startAnnY: number; startW: number; startH: number } | null>(null);
@@ -214,7 +218,7 @@ export default function AdvancedEditor() {
       setRedoStack([]);
       setOcrDone(false);
       setIsScannedPdf(false);
-      
+
       try {
         const arrayBuffer = await selectedFile.arrayBuffer();
         const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
@@ -229,14 +233,14 @@ export default function AdvancedEditor() {
 
   // === Undo/Redo helpers ===
   const pushUndo = useCallback(() => {
-    setUndoStack(prev => [...prev.slice(-30), annotations.map(a => ({...a}))]);
+    setUndoStack(prev => [...prev.slice(-30), annotations.map(a => ({ ...a }))]);
     setRedoStack([]);
   }, [annotations]);
 
   const doUndo = useCallback(() => {
     if (undoStack.length === 0) return;
     const prev = undoStack[undoStack.length - 1];
-    setRedoStack(r => [...r, annotations.map(a => ({...a}))]);
+    setRedoStack(r => [...r, annotations.map(a => ({ ...a }))]);
     setUndoStack(s => s.slice(0, -1));
     setAnnotations(prev);
     setSelectedId(null);
@@ -245,7 +249,7 @@ export default function AdvancedEditor() {
   const doRedo = useCallback(() => {
     if (redoStack.length === 0) return;
     const next = redoStack[redoStack.length - 1];
-    setUndoStack(s => [...s, annotations.map(a => ({...a}))]);
+    setUndoStack(s => [...s, annotations.map(a => ({ ...a }))]);
     setRedoStack(r => r.slice(0, -1));
     setAnnotations(next);
     setSelectedId(null);
@@ -267,23 +271,23 @@ export default function AdvancedEditor() {
     if (pdfDoc) {
       renderPage(currentPage);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pdfDoc, currentPage, zoomLevel]);
 
   const renderPage = async (pageNum: number) => {
     if (!pdfDoc || !canvasRef.current) return;
-    
+
     try {
       const page = await pdfDoc.getPage(pageNum);
       const viewport = page.getViewport({ scale: zoomLevel });
       setPageViewport(viewport);
-      
+
       const canvas = canvasRef.current;
       const context = canvas.getContext('2d');
       if (context) {
         canvas.height = viewport.height;
         canvas.width = viewport.width;
-        
+
         await page.render({
           canvasContext: context,
           viewport: viewport,
@@ -293,16 +297,73 @@ export default function AdvancedEditor() {
 
       // Text detection for editing
       const textContent = await page.getTextContent();
-      const items = textContent.items.map((item: any) => {
-        const tx = pdfjsLib.Util.transform(viewport.transform, item.transform);
-        return {
-          text: item.str,
-          x: tx[4],
-          y: tx[5] - item.height * viewport.scale,
-          w: item.width * viewport.scale,
-          h: item.height * viewport.scale
-        };
-      }).filter(i => i.text.trim().length > 0);
+      const rawItems: DetectedTextBlock[] = textContent.items
+        .map((item: any) => {
+          const tx = pdfjsLib.Util.transform(viewport.transform, item.transform);
+          // CORRECT font size: use the VERTICAL component of the transform matrix (tx[3]).
+          // tx[3] = -scale * font_size (negative because PDF y-axis is flipped).
+          const fontSizeFromMatrix = Math.abs(tx[3]);
+          const extractedFontSize = fontSizeFromMatrix >= 6 && fontSizeFromMatrix <= 150
+            ? Math.round(fontSizeFromMatrix)
+            : Math.round(Math.min(Math.max(item.height * viewport.scale * 0.82, 6), 150));
+
+          const blockH = Math.round(Math.abs(tx[3]) * 1.25);
+          const topY = tx[5] - blockH;
+          const blockW = Math.round(item.width * viewport.scale);
+
+          // Detect bold / italic from font name
+          const fontName: string = item.fontName || '';
+          const isBold = /bold/i.test(fontName);
+          const isItalic = /italic|oblique/i.test(fontName);
+
+          return {
+            text: item.str,
+            x: Math.round(tx[4]),
+            y: Math.round(topY),
+            w: blockW,
+            h: Math.max(blockH, extractedFontSize + 2),
+            fontSize: extractedFontSize,
+            fontName,
+            bold: isBold,
+            italic: isItalic,
+          };
+        })
+        .filter(i =>
+          i.text.trim().length > 0 &&
+          i.w > 0 &&
+          i.h > 0 &&
+          i.h < 400
+        );
+
+      // Sample canvas pixels to detect text (fg) and background colors
+      // This runs after rendering so canvas has the page pixels
+      const ctx = context; // already obtained above
+      const items: DetectedTextBlock[] = rawItems.map(block => {
+        if (!ctx) return block;
+        try {
+          // Background: sample corner of bounding box (less likely to be text pixel)
+          const bx = Math.max(0, Math.min(block.x + 2, canvas.width - 1));
+          const by = Math.max(0, Math.min(block.y + 2, canvas.height - 1));
+          const bgPx = ctx.getImageData(bx, by, 1, 1).data;
+          const bgColor = `#${bgPx[0].toString(16).padStart(2, '0')}${bgPx[1].toString(16).padStart(2, '0')}${bgPx[2].toString(16).padStart(2, '0')}`;
+
+          // Text color: sample center of bounding box (where text pixels dominate)
+          const cx = Math.max(0, Math.min(Math.round(block.x + block.w * 0.3), canvas.width - 1));
+          const cy = Math.max(0, Math.min(Math.round(block.y + block.h * 0.55), canvas.height - 1));
+          const fgPx = ctx.getImageData(cx, cy, 1, 1).data;
+          const fgColor = `#${fgPx[0].toString(16).padStart(2, '0')}${fgPx[1].toString(16).padStart(2, '0')}${fgPx[2].toString(16).padStart(2, '0')}`;
+
+          // If bg and fg are same (text not at sample point), default fg to black
+          const isSameColor = bgColor === fgColor;
+          return {
+            ...block,
+            bgColor,
+            fgColor: isSameColor ? '#000000' : fgColor,
+          };
+        } catch {
+          return block;
+        }
+      });
 
       setDetectedText(items);
 
@@ -322,7 +383,7 @@ export default function AdvancedEditor() {
       const canvas = canvasRef.current;
       const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(b => resolve(b), 'image/png'));
       if (!blob) throw new Error('Canvas export failed');
-      
+
       const worker = await createWorker(ocrLanguage);
       const { data } = await worker.recognize(blob, {}, { blocks: true });
       await worker.terminate();
@@ -349,21 +410,21 @@ export default function AdvancedEditor() {
 
               if (imgData && w > 0 && h > 0) {
                 let minL = 255, maxL = 0;
-                let fgR=0, fgG=0, fgB=0;
-                let bgR=255, bgG=255, bgB=255;
-                let bgSumR=0, bgSumG=0, bgSumB=0, bgCount=0;
-                let ringSumR=0, ringSumG=0, ringSumB=0, ringCount=0;
+                let fgR = 0, fgG = 0, fgB = 0;
+                let bgR = 255, bgG = 255, bgB = 255;
+                let bgSumR = 0, bgSumG = 0, bgSumB = 0, bgCount = 0;
+                let ringSumR = 0, ringSumG = 0, ringSumB = 0, ringCount = 0;
                 const ringPad = Math.max(2, Math.round(h * 0.2));
 
                 for (let py = y; py < y + h; py++) {
                   for (let px = x; px < x + w; px++) {
                     const i = (py * canvas.width + px) * 4;
                     if (i >= 0 && i < imgData.length) {
-                      const r = imgData[i], g = imgData[i+1], b = imgData[i+2];
-                      const l = 0.299*r + 0.587*g + 0.114*b;
-                      if (l < minL) { minL = l; fgR=r; fgG=g; fgB=b; }
-                      if (l > maxL) { maxL = l; bgR=r; bgG=g; bgB=b; }
-                      if (l > 150) { bgSumR+=r; bgSumG+=g; bgSumB+=b; bgCount++; }
+                      const r = imgData[i], g = imgData[i + 1], b = imgData[i + 2];
+                      const l = 0.299 * r + 0.587 * g + 0.114 * b;
+                      if (l < minL) { minL = l; fgR = r; fgG = g; fgB = b; }
+                      if (l > maxL) { maxL = l; bgR = r; bgG = g; bgB = b; }
+                      if (l > 150) { bgSumR += r; bgSumG += g; bgSumB += b; bgCount++; }
                     }
                   }
                 }
@@ -382,13 +443,13 @@ export default function AdvancedEditor() {
                     }
                   }
                 }
-                fgColor = `#${((1<<24)+(fgR<<16)+(fgG<<8)+fgB).toString(16).slice(1)}`;
+                fgColor = `#${((1 << 24) + (fgR << 16) + (fgG << 8) + fgB).toString(16).slice(1)}`;
                 if (ringCount > 0) {
-                  bgColor = `#${((1<<24)+(Math.round(ringSumR/ringCount)<<16)+(Math.round(ringSumG/ringCount)<<8)+Math.round(ringSumB/ringCount)).toString(16).slice(1)}`;
+                  bgColor = `#${((1 << 24) + (Math.round(ringSumR / ringCount) << 16) + (Math.round(ringSumG / ringCount) << 8) + Math.round(ringSumB / ringCount)).toString(16).slice(1)}`;
                 } else if (bgCount > 0) {
-                   bgColor = `#${((1<<24)+(Math.round(bgSumR/bgCount)<<16)+(Math.round(bgSumG/bgCount)<<8)+Math.round(bgSumB/bgCount)).toString(16).slice(1)}`;
+                  bgColor = `#${((1 << 24) + (Math.round(bgSumR / bgCount) << 16) + (Math.round(bgSumG / bgCount) << 8) + Math.round(bgSumB / bgCount)).toString(16).slice(1)}`;
                 } else {
-                   bgColor = `#${((1<<24)+(bgR<<16)+(bgG<<8)+bgB).toString(16).slice(1)}`;
+                  bgColor = `#${((1 << 24) + (bgR << 16) + (bgG << 8) + bgB).toString(16).slice(1)}`;
                 }
               }
 
@@ -398,6 +459,7 @@ export default function AdvancedEditor() {
                 y: b.y0,
                 w,
                 h,
+                fontSize: Math.round(h * 0.80), // approximate from OCR bounding box height
                 fgColor,
                 bgColor
               });
@@ -451,7 +513,7 @@ export default function AdvancedEditor() {
 
   const handleOverlayMouseDown = (e: React.MouseEvent) => {
     if (!overlayRef.current) return;
-    
+
     const rect = overlayRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
@@ -478,41 +540,10 @@ export default function AdvancedEditor() {
     }
 
     if (activeTool === 'select') {
-      // Check if we clicked on a detected text block
-      const clickedText = detectedText.find(t => 
-        x >= t.x && x <= t.x + t.w && 
-        y >= t.y && y <= t.y + t.h
-      );
-
-      if (clickedText) {
-        pushUndo();
-        const id = Date.now().toString() + '_t';
-        const fittedFont = fitFontSizeToBounds(clickedText.text, clickedText.w, clickedText.h, Math.max(10, Math.round(clickedText.h * 0.74)), defaultBold, defaultItalic);
-        const initialTextW = estimateTextWidth(clickedText.text, fittedFont, defaultBold, defaultItalic);
-        const initialBoxW = Math.max(36, Math.min(clickedText.w, initialTextW + 8));
-        const initialBoxH = Math.max(clickedText.h, Math.round(fittedFont * 1.28));
-        const textAnn: Annotation = {
-          id,
-          type: 'text',
-          pageIndex: currentPage - 1,
-          x: clickedText.x,
-          y: clickedText.y - Math.max(0, (initialBoxH - clickedText.h) / 2),
-          width: initialBoxW,
-          height: initialBoxH,
-          text: clickedText.text,
-          fontSize: fittedFont,
-          color: clickedText.fgColor || '#000000',
-          backgroundColor: clickedText.bgColor || '#ffffff',
-          bold: defaultBold,
-          italic: defaultItalic,
-          lockPosition: false,
-          sourceWidth: clickedText.w,
-          sourceHeight: clickedText.h
-        };
-        setAnnotations(prev => [...prev, textAnn]);
-        setSelectedId(textAnn.id);
-        setActiveTool(null);
-      }
+      // Text block clicks are handled by the selblock overlays (e.stopPropagation)
+      // Clicking blank area in select mode just deselects
+      setSelectedId(null);
+      return;
     } else if (activeTool === 'text') {
       pushUndo();
       const newAnnotation: Annotation = {
@@ -593,9 +624,9 @@ export default function AdvancedEditor() {
       setFreehandPoints(prev => [...prev, { x: currentX, y: currentY }]);
       return;
     }
-    
+
     if (!isDrawing || !currentRect) return;
-    
+
     setCurrentRect({
       x: Math.min(startPos.x, currentX),
       y: Math.min(startPos.y, currentY),
@@ -648,9 +679,9 @@ export default function AdvancedEditor() {
       setFreehandPoints([]);
       return;
     }
-    
+
     setIsDrawing(false);
-    
+
     if (currentRect.w > 5 && currentRect.h > 5) {
       pushUndo();
       if (activeTool === 'link') {
@@ -840,7 +871,7 @@ export default function AdvancedEditor() {
 
   const applyChangesAndSave = async () => {
     if (!file || !pageViewport) return;
-    
+
     setIsProcessing(true);
     try {
       const arrayBuffer = await file.arrayBuffer();
@@ -963,14 +994,14 @@ export default function AdvancedEditor() {
         if (italic) return helveticaOblique;
         return helveticaFont;
       };
-      
+
       const pages = pdf.getPages();
-      
+
       for (const ann of annotations) {
         const page = pages[ann.pageIndex];
         if (!page) continue;
         const { height: pageHeight } = page.getSize();
-        
+
         const scale = pageViewport.scale;
         const pdfX = ann.x / scale;
         const pdfY = pageHeight - (ann.y / scale);
@@ -1151,7 +1182,7 @@ export default function AdvancedEditor() {
               URI: pdf.context.obj(ann.url),
             },
           });
-          
+
           let annots = page.node.Annots();
           if (!annots) {
             annots = pdf.context.obj([]);
@@ -1208,11 +1239,10 @@ export default function AdvancedEditor() {
               <button
                 type="button"
                 onClick={toggleBoldForText}
-                className={`p-2 rounded-lg flex items-center gap-1 transition-colors ${
-                  (selectedTextAnn ? !!selectedTextAnn.bold : defaultBold)
+                className={`p-2 rounded-lg flex items-center gap-1 transition-colors ${(selectedTextAnn ? !!selectedTextAnn.bold : defaultBold)
                     ? 'bg-indigo-100 text-indigo-700'
                     : 'text-gray-600 hover:bg-gray-100'
-                }`}
+                  }`}
                 title="Bold"
               >
                 <Bold className="w-5 h-5" />
@@ -1220,11 +1250,10 @@ export default function AdvancedEditor() {
               <button
                 type="button"
                 onClick={toggleItalicForText}
-                className={`p-2 rounded-lg flex items-center gap-1 transition-colors ${
-                  (selectedTextAnn ? !!selectedTextAnn.italic : defaultItalic)
+                className={`p-2 rounded-lg flex items-center gap-1 transition-colors ${(selectedTextAnn ? !!selectedTextAnn.italic : defaultItalic)
                     ? 'bg-indigo-100 text-indigo-700'
                     : 'text-gray-600 hover:bg-gray-100'
-                }`}
+                  }`}
                 title="Italic"
               >
                 <Italic className="w-5 h-5" />
@@ -1257,7 +1286,7 @@ export default function AdvancedEditor() {
               <div className="flex items-center gap-0.5">
                 <button
                   type="button"
-                  onClick={() => { setActiveTool('signature'); setStartPos({x: 200, y: 300}); setShowSignatureModal(true); }}
+                  onClick={() => { setActiveTool('signature'); setStartPos({ x: 200, y: 300 }); setShowSignatureModal(true); }}
                   className={`p-2 rounded-lg flex items-center gap-1 cursor-pointer transition-colors ${activeTool === 'signature' ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 hover:bg-gray-100'}`}
                   title="Sign"
                 >
@@ -1332,7 +1361,7 @@ export default function AdvancedEditor() {
                 <Redo className="w-5 h-5" />
               </button>
             </div>
-            
+
             <div className="flex items-center gap-3 flex-wrap">
               {/* Zoom */}
               <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
@@ -1346,7 +1375,7 @@ export default function AdvancedEditor() {
               </div>
               {/* Page nav */}
               <div className="flex items-center gap-2 bg-gray-100 rounded-lg p-1">
-                <button 
+                <button
                   onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
                   disabled={currentPage === 1}
                   className="p-1 rounded hover:bg-white disabled:opacity-50"
@@ -1354,7 +1383,7 @@ export default function AdvancedEditor() {
                   <ChevronLeft className="w-5 h-5" />
                 </button>
                 <span className="text-sm font-medium px-2">{currentPage} / {numPages}</span>
-                <button 
+                <button
                   onClick={() => setCurrentPage(Math.min(numPages, currentPage + 1))}
                   disabled={currentPage === numPages}
                   className="p-1 rounded hover:bg-white disabled:opacity-50"
@@ -1402,7 +1431,7 @@ export default function AdvancedEditor() {
             <div className="bg-amber-50 border-b border-amber-200 px-4 py-2 text-sm text-amber-800 flex items-center gap-2">
               <ScanText className="w-4 h-4 shrink-0" />
               <span>
-                Scanned/image-based PDF detected. 
+                Scanned/image-based PDF detected.
                 <strong> For Hindi PDF → select "Hindi OCR" or "Hindi + English"</strong> from the language dropdown, then click "Scan Text".
               </span>
             </div>
@@ -1411,19 +1440,20 @@ export default function AdvancedEditor() {
           {/* Editor Layout: Canvas + Sidebar */}
           <div className="flex-1 flex overflow-hidden">
             <div className="flex-1 overflow-auto p-8 flex justify-center bg-gray-200" onClick={() => setSelectedId(null)}>
-              <div 
-                className="relative shadow-xl bg-white" 
+              <div
+                className="relative shadow-xl bg-white"
                 style={{ width: pageViewport?.width, height: pageViewport?.height }}
                 onClick={(e) => e.stopPropagation()}
               >
                 <canvas ref={canvasRef} className="absolute top-0 left-0" />
-                
+
                 {/* Interactive Overlay */}
-                <div 
+                <div
                   ref={overlayRef}
                   className={`absolute top-0 left-0 w-full h-full z-10 ${
+                    activeTool === 'select' ? 'cursor-default' :
                     activeTool === 'eraser' ? 'cursor-none' :
-                    activeTool === 'freehand' ? 'cursor-crosshair' : 
+                    activeTool === 'freehand' ? 'cursor-crosshair' :
                     activeTool ? 'cursor-crosshair' :
                     isDragging ? 'cursor-grabbing' : ''
                   }`}
@@ -1455,16 +1485,20 @@ export default function AdvancedEditor() {
                     setFreehandPoints([]);
                     if (resizeAnnRef.current) resizeAnnRef.current = null;
                   }}
-                  onMouseLeave={(e) => {
+                  onMouseLeave={() => {
                     setEraserPos(null);
-                    handleOverlayMouseUp();
-                    setFreehandPoints([]);
+                    // Only finalize eraser on leave; DON'T cancel rect drawings
+                    if (isErasingRef.current) {
+                      isErasingRef.current = false;
+                      lastErasedRef.current = new Set();
+                    }
                     if (resizeAnnRef.current) resizeAnnRef.current = null;
+                    if (isDragging) { setIsDragging(false); setDragTarget(null); }
                   }}
                 >
                   {/* Render Annotations for current page */}
                   {annotations.filter(a => a.pageIndex === currentPage - 1).map(ann => (
-                    <div 
+                    <div
                       key={ann.id}
                       onClick={(e) => { if (activeTool === 'eraser') return; e.stopPropagation(); setSelectedId(ann.id); }}
                       onMouseDown={(e) => {
@@ -1474,40 +1508,53 @@ export default function AdvancedEditor() {
                           deleteAnnotation(ann.id);
                         }
                       }}
-                      className={`absolute group ${
-                        activeTool === 'eraser' ? 'cursor-none' : ''
-                      } ${selectedId === ann.id && activeTool !== 'eraser' ? 'ring-2 ring-indigo-500' : ''} ${!activeTool && ann.type !== 'freehand' ? 'cursor-move' : activeTool !== 'eraser' ? 'cursor-pointer' : ''}`}
-                      style={{ 
-                        left: ann.x, 
-                        top: ann.y, 
-                        width: ann.width || (ann.type === 'text' ? Math.max(200, (ann.text?.length || 10) * (ann.fontSize || 14) * 0.6) : undefined), 
+                      className={`absolute group ${activeTool === 'eraser' ? 'cursor-none' : ''
+                        } ${selectedId === ann.id && activeTool !== 'eraser' ? 'ring-2 ring-indigo-500' : ''} ${!activeTool && ann.type !== 'freehand' ? 'cursor-move' : activeTool !== 'eraser' ? 'cursor-pointer' : ''}`}
+                      style={{
+                        left: ann.x,
+                        top: ann.y,
+                        width: ann.width || (ann.type === 'text' ? Math.max(200, (ann.text?.length || 10) * (ann.fontSize || 14) * 0.6) : undefined),
                         height: Math.max(ann.height || 24, ann.type === 'text' ? (ann.fontSize || 14) * 1.5 : 0),
                         backgroundColor: ann.type === 'text' ? (ann.backgroundColor || 'transparent') : ann.type === 'whiteout' ? (ann.color || '#ffffff') : ann.type === 'highlight' ? 'rgba(255, 255, 0, 0.4)' : ann.type === 'link' ? 'rgba(0, 0, 255, 0.2)' : 'transparent',
                         border: ann.type === 'link' ? '1px dashed blue' : ann.type === 'table' ? '1px solid #ccc' : 'none'
                       }}
                     >
                       {ann.type === 'text' && (
-                        <input 
-                          type="text" 
+                        <input
+                          type="text"
                           value={ann.text}
                           onChange={(e) => updateAnnotationText(ann.id, e.target.value)}
-                          className="bg-transparent border border-transparent outline-none text-black w-full h-full px-[1px] py-0 m-0 leading-none"
+                          className="bg-transparent border-none outline-none w-full h-full m-0 p-0 box-border"
                           style={{
                             fontSize: `${ann.fontSize || 14}px`,
                             color: ann.color || '#000000',
                             fontWeight: ann.bold ? 700 : 400,
                             fontStyle: ann.italic ? 'italic' : 'normal',
-                            lineHeight: '1',
-                            textAlign: 'left',
+                            lineHeight: `${ann.height || 20}px`,
+                            whiteSpace: 'nowrap',
+                            fontFamily: 'Helvetica, Arial, sans-serif',
                           }}
                           autoFocus
                           onClick={(e) => e.stopPropagation()}
+                          onMouseDown={(e) => e.stopPropagation()}
+                          onKeyDown={(e) => {
+                            e.stopPropagation();
+                            if (e.key === 'Enter' || e.key === 'Tab') {
+                              e.preventDefault();
+                              // Finish editing — deselect
+                              setSelectedId(null);
+                            }
+                            if (e.key === 'Escape') {
+                              // Cancel — revert and deselect
+                              setSelectedId(null);
+                            }
+                          }}
                         />
                       )}
                       {ann.type === 'table' && ann.tableData && (
-                        <div 
-                          className="w-full h-full grid bg-white" 
-                          style={{ 
+                        <div
+                          className="w-full h-full grid bg-white"
+                          style={{
                             gridTemplateRows: `repeat(${ann.rows}, 1fr)`,
                             gridTemplateColumns: `repeat(${ann.cols}, 1fr)`
                           }}
@@ -1568,9 +1615,9 @@ export default function AdvancedEditor() {
                           LINK
                         </div>
                       )}
-                      
+
                       {/* Delete & Move indicators */}
-                      <button 
+                      <button
                         onClick={(e) => { e.stopPropagation(); pushUndo(); deleteAnnotation(ann.id); }}
                         className="absolute -top-3 -right-3 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity z-20 shadow-sm"
                       >
@@ -1584,16 +1631,95 @@ export default function AdvancedEditor() {
                     </div>
                   ))}
 
+                  {/* ── SELECT MODE: Clickable text-block overlays ── */}
+                  {/* When Select tool is active, show blue boxes on every detected text item */}
+                  {/* so user can see exactly where to click to edit existing text           */}
+                  {activeTool === 'select' && detectedText.map((block, idx) => {
+                    // Don't show overlay if already replaced by an annotation
+                    const replaced = annotations.some(a =>
+                      a.pageIndex === currentPage - 1 &&
+                      a.type === 'text' &&
+                      Math.abs(a.x - block.x) < 6 &&
+                      Math.abs(a.y - block.y) < 6
+                    );
+                    if (replaced || !block.text.trim() || block.w < 2) return null;
+
+                    return (
+                      <div
+                        key={`selblock-${idx}`}
+                        title={block.text}
+                        style={{
+                          position: 'absolute',
+                          left: block.x,
+                          top: block.y,
+                          width: Math.max(block.w, 10),
+                          height: Math.max(block.h, 8),
+                          border: '1.5px dashed rgba(99,102,241,0.55)',
+                          backgroundColor: 'rgba(99,102,241,0.05)',
+                          cursor: 'text',
+                          zIndex: 15,
+                          boxSizing: 'border-box',
+                          borderRadius: 1,
+                          pointerEvents: 'all',
+                        }}
+                        onMouseEnter={e => {
+                          const el = e.currentTarget as HTMLElement;
+                          el.style.backgroundColor = 'rgba(99,102,241,0.20)';
+                          el.style.borderColor = 'rgba(99,102,241,0.9)';
+                          el.style.borderStyle = 'solid';
+                        }}
+                        onMouseLeave={e => {
+                          const el = e.currentTarget as HTMLElement;
+                          el.style.backgroundColor = 'rgba(99,102,241,0.05)';
+                          el.style.borderColor = 'rgba(99,102,241,0.55)';
+                          el.style.borderStyle = 'dashed';
+                        }}
+                        onMouseDown={e => {
+                          e.stopPropagation();
+                          pushUndo();
+                          const id = Date.now().toString() + '_tb';
+                          // Font size: must fit within block height, cap at 120px
+                          const fs = Math.max(6, Math.min(block.fontSize, block.h - 1, 120));
+                          const bw = Math.min(Math.max(block.w, 20), 600);
+                          const bh = Math.max(block.h, fs + 2);
+                          const textAnn: Annotation = {
+                            id,
+                            type: 'text',
+                            pageIndex: currentPage - 1,
+                            x: block.x,
+                            y: block.y,
+                            width: bw,
+                            height: bh,
+                            text: block.text,
+                            fontSize: fs,
+                            // Use detected colors from canvas sampling
+                            color: block.fgColor || '#000000',
+                            backgroundColor: block.bgColor || '#ffffff',
+                            // Use detected bold/italic from font name
+                            bold: block.bold || false,
+                            italic: block.italic || false,
+                            lockPosition: false,
+                            sourceWidth: bw,
+                            sourceHeight: bh,
+                          };
+                          setAnnotations(prev => [...prev, textAnn]);
+                          setSelectedId(textAnn.id);
+                          setActiveTool(null);
+                        }}
+                      />
+                    );
+                  })}
+
                   {/* Live freehand path */}
                   {isDrawing && activeTool === 'freehand' && freehandPoints.length > 1 && (
                     <svg className="absolute inset-0 w-full h-full pointer-events-none" style={{ width: pageViewport?.width, height: pageViewport?.height }}>
-                      <path 
-                        d={freehandPoints.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ')} 
-                        fill="none" 
-                        stroke={freehandColor} 
-                        strokeWidth={freehandWidth} 
-                        strokeLinecap="round" 
-                        strokeLinejoin="round" 
+                      <path
+                        d={freehandPoints.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ')}
+                        fill="none"
+                        stroke={freehandColor}
+                        strokeWidth={freehandWidth}
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
                       />
                     </svg>
                   )}
@@ -1615,7 +1741,7 @@ export default function AdvancedEditor() {
 
                   {/* Current Drawing Rect */}
                   {isDrawing && currentRect && (
-                    <div 
+                    <div
                       className="absolute border border-indigo-500 bg-indigo-500/20"
                       style={{
                         left: currentRect.x,
@@ -1711,8 +1837,8 @@ export default function AdvancedEditor() {
                               const newRows = parseInt(e.target.value);
                               const currentCols = annotations.find(a => a.id === selectedId)?.cols || 3;
                               const currentData = annotations.find(a => a.id === selectedId)?.tableData || [];
-                              const newData = Array.from({ length: newRows }, (_, r) => 
-                                Array.from({ length: currentCols }, (_, c) => 
+                              const newData = Array.from({ length: newRows }, (_, r) =>
+                                Array.from({ length: currentCols }, (_, c) =>
                                   currentData[r]?.[c] || ''
                                 )
                               );
@@ -1732,8 +1858,8 @@ export default function AdvancedEditor() {
                               const newCols = parseInt(e.target.value);
                               const currentRows = annotations.find(a => a.id === selectedId)?.rows || 3;
                               const currentData = annotations.find(a => a.id === selectedId)?.tableData || [];
-                              const newData = Array.from({ length: currentRows }, (_, r) => 
-                                Array.from({ length: newCols }, (_, c) => 
+                              const newData = Array.from({ length: currentRows }, (_, r) =>
+                                Array.from({ length: newCols }, (_, c) =>
                                   currentData[r]?.[c] || ''
                                 )
                               );
@@ -1797,7 +1923,7 @@ export default function AdvancedEditor() {
                         <input type="color" value={freehandColor} onChange={e => setFreehandColor(e.target.value)} className="w-full h-10 p-1 border border-gray-300 rounded-lg cursor-pointer" />
                         {/* Color presets */}
                         <div className="flex gap-1.5 mt-2 flex-wrap">
-                          {['#000000','#ef4444','#3b82f6','#22c55e','#f59e0b','#8b5cf6','#ec4899','#06b6d4'].map(c => (
+                          {['#000000', '#ef4444', '#3b82f6', '#22c55e', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4'].map(c => (
                             <button key={c} type="button" onClick={() => setFreehandColor(c)}
                               className={`w-6 h-6 rounded-full border-2 transition-transform hover:scale-110 ${freehandColor === c ? 'border-indigo-500 scale-110' : 'border-gray-300'}`}
                               style={{ background: c }} title={c} />
@@ -1872,7 +1998,7 @@ export default function AdvancedEditor() {
                   }}
                   className="w-8 h-8 p-0.5 border border-gray-300 rounded cursor-pointer flex-shrink-0"
                 />
-                {['#000000','#1d4ed8','#dc2626','#16a34a','#7c3aed','#db2777','#0891b2','#d97706','#1e3a8a','#7f1d1d'].map(c => (
+                {['#000000', '#1d4ed8', '#dc2626', '#16a34a', '#7c3aed', '#db2777', '#0891b2', '#d97706', '#1e3a8a', '#7f1d1d'].map(c => (
                   <button key={c} type="button"
                     onClick={() => { setSignatureColor(c); sigCanvasRef.current?.clear(); }}
                     className={`w-7 h-7 rounded-full border-2 transition-transform hover:scale-110 flex-shrink-0 ${signatureColor === c ? 'border-indigo-500 scale-110 ring-2 ring-indigo-300' : 'border-gray-300'}`}
@@ -1896,7 +2022,7 @@ export default function AdvancedEditor() {
               </div>
             </div>
             <div className="border-2 border-dashed border-gray-300 rounded-lg mb-4 bg-gray-50">
-              <SignatureCanvas 
+              <SignatureCanvas
                 ref={sigCanvasRef}
                 canvasProps={{ className: 'w-full h-48 rounded-lg' }}
                 penColor={signatureColor}
@@ -1906,20 +2032,20 @@ export default function AdvancedEditor() {
               />
             </div>
             <div className="flex justify-between gap-4">
-              <button 
+              <button
                 onClick={() => sigCanvasRef.current?.clear()}
                 className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg font-medium"
               >
                 Clear
               </button>
               <div className="flex gap-2">
-                <button 
+                <button
                   onClick={() => { setShowSignatureModal(false); setActiveTool(null); }}
                   className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg font-medium"
                 >
                   Cancel
                 </button>
-                <button 
+                <button
                   onClick={saveSignature}
                   className="px-6 py-2 bg-indigo-600 text-white rounded-lg font-bold hover:bg-indigo-700"
                 >
@@ -1936,7 +2062,7 @@ export default function AdvancedEditor() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl p-6 w-full max-w-md shadow-2xl">
             <h3 className="text-xl font-bold text-gray-900 mb-4">Add Link URL</h3>
-            <input 
+            <input
               type="url"
               value={linkUrl}
               onChange={(e) => setLinkUrl(e.target.value)}
@@ -1945,13 +2071,13 @@ export default function AdvancedEditor() {
               autoFocus
             />
             <div className="flex justify-end gap-2">
-              <button 
+              <button
                 onClick={() => { setShowLinkModal(false); setPendingLinkRect(null); setActiveTool(null); }}
                 className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg font-medium"
               >
                 Cancel
               </button>
-              <button 
+              <button
                 onClick={saveLink}
                 disabled={!linkUrl}
                 className="px-6 py-2 bg-indigo-600 text-white rounded-lg font-bold hover:bg-indigo-700 disabled:opacity-50"

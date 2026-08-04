@@ -3,74 +3,138 @@ import { Table2, Scan, Globe, Zap } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import {
   analysePDF, runOCRPipeline,
-  LANGUAGE_OPTIONS, OCRLanguage, PageAnalysis, RichParagraph,
+  LANGUAGE_OPTIONS, OCRLanguage, PageAnalysis, RichRun,
 } from '../lib/advancedOCREngine';
 import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
 import { LangPicker, ScanDialog, Spinner, DoneCard, ErrorCard } from './PdfToWord';
-import { extractTableData } from '../lib/advancedVisionEngine';
-import * as pdfjsLib from 'pdfjs-dist';
+
+// ── Visual line grouping ───────────────────────────────────────────────────────
+
+interface VisualLine {
+  runs: RichRun[];
+  baseline: number;
+  yTop: number;
+  yBottom: number;
+}
+
+function groupRunsIntoLines(runs: RichRun[]): VisualLine[] {
+  if (!runs.length) return [];
+  const sorted = [...runs].sort((a, b) => {
+    const aB = a.baseline ?? (a.y + a.h);
+    const bB = b.baseline ?? (b.y + b.h);
+    return aB !== bB ? aB - bB : a.x - b.x;
+  });
+
+  const lines: VisualLine[] = [];
+  for (const run of sorted) {
+    const rb = run.baseline ?? (run.y + run.h);
+    const rh = run.h || run.fontSize;
+    const tol = Math.max(4, rh * 0.6);
+    let found = false;
+    for (const ln of lines) {
+      if (Math.abs(ln.baseline - rb) <= tol) {
+        ln.runs.push(run);
+        ln.baseline = (ln.baseline * (ln.runs.length - 1) + rb) / ln.runs.length;
+        ln.yTop = Math.min(ln.yTop, run.y);
+        ln.yBottom = Math.max(ln.yBottom, run.y + rh);
+        found = true;
+        break;
+      }
+    }
+    if (!found) lines.push({ runs: [run], baseline: rb, yTop: run.y, yBottom: run.y + rh });
+  }
+
+  lines.sort((a, b) => a.baseline - b.baseline);
+  for (const ln of lines) ln.runs.sort((a, b) => a.x - b.x);
+  return lines;
+}
+
+/** Split a visual line's runs into column segments using gap analysis */
+function splitLineIntoColumns(runs: RichRun[]): string[] {
+  if (!runs.length) return [];
+  const segments: RichRun[][] = [];
+  let cur: RichRun[] = [runs[0]];
+
+  for (let i = 1; i < runs.length; i++) {
+    const prev = runs[i - 1];
+    const curr = runs[i];
+    const gap = curr.x - (prev.x + prev.w);
+    const avgFS = (prev.fontSize + curr.fontSize) / 2;
+    // Column gap threshold: 1.5× avg char width or 10 pts minimum
+    if (gap > Math.max(avgFS * 1.5, 10)) {
+      segments.push(cur);
+      cur = [curr];
+    } else {
+      cur.push(curr);
+    }
+  }
+  segments.push(cur);
+
+  return segments.map(seg => {
+    let text = '';
+    for (let i = 0; i < seg.length; i++) {
+      if (i > 0) {
+        const gap = seg[i].x - (seg[i - 1].x + seg[i - 1].w);
+        if (gap > seg[i - 1].fontSize * 0.3) text += ' ';
+      }
+      text += seg[i].text;
+    }
+    return text.trim();
+  }).filter(Boolean);
+}
 
 // ── XLSX builder ──────────────────────────────────────────────────────────────
 
-function buildXlsx(paras: RichParagraph[], pageCount: number): Blob {
+/**
+ * Build XLSX from RichRun[]:
+ * - Groups runs into visual lines
+ * - Splits each line into columns using spatial gap analysis
+ * - Each PDF page becomes a separate sheet
+ * - Bold/all-caps first row treated as column headers
+ */
+function buildXlsxFromRuns(runs: RichRun[], pageCount: number): Blob {
   const workbook = XLSX.utils.book_new();
-  const byPage = new Map<number, RichParagraph[]>();
-  for (const p of paras) {
-    if (!byPage.has(p.pageIndex)) byPage.set(p.pageIndex, []);
-    byPage.get(p.pageIndex)!.push(p);
-  }
 
   for (let pi = 0; pi < pageCount; pi++) {
-    const pageParas = (byPage.get(pi) ?? []).sort((a, b) => a.y - b.y);
-    const aoaData: string[][] = [];
+    const pageRuns = runs.filter(r => r.pageIndex === pi);
+    if (!pageRuns.length) continue;
 
-    for (const para of pageParas) {
-      const lineTexts = para.text.split('\n').filter(t => t.trim());
-      for (const lt of lineTexts) {
-        // Smart column splitting: use tab characters or 4+ spaces as column separators
-        // Avoid splitting on regular word spaces (critical for Hindi/Devanagari text)
-        const cols = lt.split(/\t|[ ]{4,}/).map(s => s.trim()).filter(Boolean);
-        if (cols.length > 1) {
-          aoaData.push(cols);
-        } else {
-          // Check if runs in this paragraph have large X-gaps indicating table columns
-          const lineRuns = para.runs.filter(r => {
-            // Find runs whose text appears in this line
-            return lt.includes(r.text.trim().substring(0, 10));
-          });
-          if (lineRuns.length > 1) {
-            // Sort by x position
-            lineRuns.sort((a, b) => a.x - b.x);
-            const avgFontSize = lineRuns.reduce((s, r) => s + r.fontSize, 0) / lineRuns.length;
-            // Check for large gaps between runs (> 3× font size = table column)
-            const segments: string[] = [lineRuns[0].text];
-            for (let ri = 1; ri < lineRuns.length; ri++) {
-              const gap = lineRuns[ri].x - (lineRuns[ri - 1].x + lineRuns[ri - 1].w);
-              if (gap > avgFontSize * 3) {
-                segments.push(lineRuns[ri].text);
-              } else {
-                segments[segments.length - 1] += ' ' + lineRuns[ri].text;
-              }
-            }
-            aoaData.push(segments.map(s => s.trim()).filter(Boolean));
-          } else {
-            aoaData.push([lt.trim()]);
-          }
-        }
-      }
-    }
-    if (!aoaData.length) continue;
+    const lines = groupRunsIntoLines(pageRuns);
+    if (!lines.length) continue;
+
+    // Split each line into columns
+    const rawRows = lines.map(ln => {
+      const cols = splitLineIntoColumns(ln.runs);
+      const hasBold = ln.runs.some(r => r.bold);
+      const isAllCaps = cols.length > 0 && cols.every(c => c === c.toUpperCase() && /[A-Z]/.test(c));
+      return { cols, isHeader: hasBold || isAllCaps };
+    });
+
+    const nonEmpty = rawRows.filter(r => r.cols.some(c => c.trim()));
+    if (!nonEmpty.length) continue;
+
+    const maxCols = Math.max(...nonEmpty.map(r => r.cols.length));
+    const aoaData: string[][] = nonEmpty.map(row =>
+      Array.from({ length: maxCols }, (_, ci) => row.cols[ci] ?? '')
+    );
+
     const ws = XLSX.utils.aoa_to_sheet(aoaData);
+
+    // Column widths
     const colWidths = aoaData.reduce<number[]>((acc, row) => {
       row.forEach((c, ci) => { acc[ci] = Math.max(acc[ci] ?? 8, c.length + 2); });
       return acc;
     }, []);
-    ws['!cols'] = colWidths.map(w => ({ wch: Math.min(w, 60) }));
-    XLSX.utils.book_append_sheet(workbook, ws, `Page ${pi + 1}`);
+    ws['!cols'] = colWidths.map(w => ({ wch: Math.min(w, 50) }));
+
+    const sheetName = `Page ${pi + 1}`.slice(0, 31);
+    XLSX.utils.book_append_sheet(workbook, ws, sheetName);
   }
-  if (!workbook.SheetNames.length)
-    XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([['No data']]), 'Sheet1');
+
+  if (!workbook.SheetNames.length) {
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([['No data extracted']]), 'Sheet1');
+  }
 
   const out = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
   return new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
@@ -110,27 +174,18 @@ export default function PdfToExcel() {
   const doConvert = async (f: File, analyses: PageAnalysis[], useOcr: boolean) => {
     setStage('processing'); setProgress(0);
     try {
-      onProgress('Processing with local engine...', 10);
+      onProgress('Extracting text and detecting table structure...', 10);
       const result = await runOCRPipeline(f, { lang, useOcr, onProgress });
-      let finalParas = result.paragraphs;
 
-      try {
-        if (import.meta.env.VITE_GEMINI_API_KEY && finalParas.length > 0) {
-          onProgress('AI polishing OCR text...', 90);
-          const { polishExtractedParagraphs } = await import('../lib/advancedVisionEngine');
-          const rawStrings = finalParas.map(p => p.text);
-          const polished = await polishExtractedParagraphs(rawStrings);
-          if (polished.length === finalParas.length) {
-            finalParas = finalParas.map((p, i) => ({ ...p, text: polished[i] }));
-          }
-        }
-      } catch (aiError) {
-        console.warn("AI polishing failed, using raw local text", aiError);
-      }
-
-      const blob = buildXlsx(finalParas, result.pdfPageCount);
+      onProgress('Building Excel spreadsheet...', 85);
+      // Use RichRun[] directly for proper column detection
+      const blob = buildXlsxFromRuns(result.runs, result.pdfPageCount);
       setResultUrl(URL.createObjectURL(blob));
-      setStats({ rows: finalParas.length, scanned: result.pageAnalyses.filter(p => p.isScanned).length, text: result.pageAnalyses.filter(p => p.hasText).length });
+      setStats({
+        rows: result.runs.length,
+        scanned: result.pageAnalyses.filter(p => p.isScanned).length,
+        text: result.pageAnalyses.filter(p => p.hasText).length,
+      });
       setStage('done');
     } catch (e: any) { setErrorMsg(e?.message || 'Conversion failed.'); setStage('error'); }
   };
@@ -148,9 +203,10 @@ export default function PdfToExcel() {
           <h1 className="text-4xl font-extrabold text-slate-900 dark:text-white mb-3">PDF to Excel</h1>
           <p className="text-lg text-slate-600 dark:text-slate-400 max-w-xl mx-auto">
             Extract tables and data from any PDF — scanned or digital — into a structured Excel spreadsheet.
+            Columns, headers, and data structure are all preserved.
           </p>
           <div className="flex flex-wrap justify-center gap-2 mt-5">
-            {[{icon:Scan,t:'Auto OCR Detection'},{icon:Globe,t:'50+ Languages'},{icon:Zap,t:'Column Preserved'}].map(({icon:Icon,t})=>(
+            {[{icon:Scan,t:'Auto OCR Detection'},{icon:Globe,t:'50+ Languages'},{icon:Zap,t:'Table Structure Preserved'}].map(({icon:Icon,t})=>(
               <span key={t} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-full text-xs font-semibold text-slate-700 dark:text-slate-200 shadow-sm">
                 <Icon className="w-3.5 h-3.5 text-emerald-500" />{t}
               </span>
@@ -164,15 +220,15 @@ export default function PdfToExcel() {
             <FileDropzone onDrop={handleDrop} multiple={false} title="Drop your PDF here" subtitle="Scanned, image-based, or digital PDFs — all supported" />
           </div>
         )}
-        {stage === 'analysing'  && <Spinner title="Analysing PDF…"               msg={progressMsg} pct={progress} color="emerald" />}
-        {stage === 'processing' && <Spinner title="Converting PDF to Excel…"      msg={progressMsg} pct={progress} color="emerald" />}
+        {stage === 'analysing'  && <Spinner title="Analysing PDF…"              msg={progressMsg} pct={progress} color="emerald" />}
+        {stage === 'processing' && <Spinner title="Converting PDF to Excel…"    msg={progressMsg} pct={progress} color="emerald" />}
         {stage === 'scan_detected' && file && (
           <ScanDialog file={file} pageAnalyses={pageAnalyses} lang={lang} setLang={setLang} langOpen={langOpen} setLangOpen={setLangOpen} selLabel={selLabel} accent="emerald"
             onOcr={()=>doConvert(file,pageAnalyses,true)} onSkip={()=>doConvert(file,pageAnalyses,false)} onReset={reset} />
         )}
         {stage === 'done' && resultUrl && file && (
           <DoneCard href={resultUrl} filename={file.name.replace(/\.pdf$/i,'')+'_converted.xlsx'} label="Download Excel File (.xlsx)"
-            stats={`${stats.rows} rows · ${stats.scanned} OCR page(s) · ${stats.text} digital page(s)`} accent="emerald" onReset={reset} />
+            stats={`${stats.rows} text runs · ${stats.scanned} OCR page(s) · ${stats.text} digital page(s)`} accent="emerald" onReset={reset} />
         )}
         {stage === 'error' && <ErrorCard msg={errorMsg} onReset={reset} />}
       </div>
