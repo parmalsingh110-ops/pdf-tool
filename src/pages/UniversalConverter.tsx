@@ -4,11 +4,15 @@ import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import JSZip from 'jszip';
-import { Document, Packer, Paragraph, TextRun, Table as DocxTable, TableRow, TableCell, WidthType, HeadingLevel } from 'docx';
+import {
+  Document, Packer, Paragraph, TextRun, Table as DocxTable, TableRow, TableCell,
+  WidthType, HeadingLevel, AlignmentType, BorderStyle,
+} from 'docx';
 import * as XLSX from 'xlsx';
 import PptxGenJS from 'pptxgenjs';
 import FileDropzone from '../components/FileDropzone';
 import { extractTextRegions, extractTableData } from '../lib/advancedVisionEngine';
+import { extractDocxContent, DocxElement, DocxParagraph, DocxTable as DTable, DocxTableRow as DRow, safeStr } from '../lib/docxExtractor';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
@@ -85,11 +89,11 @@ function decodeXmlEntities(s: string): string {
 
 // ─── Extractors ──────────────────────────────────────────────────────
 
-async function extractDocxParagraphs(file: File): Promise<string[]> {
+/** Legacy flat-text extractor — only used as a last-resort fallback */
+async function extractDocxParagraphsFlat(file: File): Promise<string[]> {
   const zip = await JSZip.loadAsync(await file.arrayBuffer());
   const docXml = await zip.file('word/document.xml')?.async('string');
   if (!docXml) throw new Error('Invalid DOCX: missing word/document.xml');
-
   const paragraphs: string[] = [];
   const pMatches = [...docXml.matchAll(/<w:p[ >][\s\S]*?<\/w:p>/g)];
   for (const pm of pMatches) {
@@ -176,63 +180,347 @@ function calcColWidths(rows: any[][], maxCols: number, availW: number): number[]
   return widths;
 }
 
-async function extractPptxSlides(file: File): Promise<string[]> {
+interface PptxSlide {
+  title: string;
+  body: string;
+  tableRows: string[][];
+}
+
+async function extractPptxSlides(file: File): Promise<PptxSlide[]> {
   const zip = await JSZip.loadAsync(await file.arrayBuffer());
-  const slides: string[] = [];
+  const slides: PptxSlide[] = [];
   let i = 1;
   while (i <= 200) {
     const f = zip.file(`ppt/slides/slide${i}.xml`);
     if (!f) break;
     const xml = await f.async('string');
-    const texts = [...xml.matchAll(/<a:t[^>]*>([^<]*)<\/a:t>/g)]
+
+    // Detect title placeholder (ph type="title" or ph type="ctrTitle")
+    let title = '';
+    const titleMatch = xml.match(/<p:sp>[\s\S]*?<p:ph\s[^>]*type="(?:title|ctrTitle)"[^>]*\/>[\s\S]*?<\/p:sp>/);
+    if (titleMatch) {
+      const titleTexts = [...titleMatch[0].matchAll(/<a:t[^>]*>([^<]*)<\/a:t>/g)]
+        .map(m => decodeXmlEntities(m[1]))
+        .filter(Boolean);
+      title = titleTexts.join(' ').trim();
+    }
+
+    // Tables: extract <a:tbl> elements
+    const tableRows: string[][] = [];
+    const tableMatches = [...xml.matchAll(/<a:tbl>[\s\S]*?<\/a:tbl>/g)];
+    for (const tm of tableMatches) {
+      const rowMatches = [...tm[0].matchAll(/<a:tr[\s>][\s\S]*?<\/a:tr>/g)];
+      for (const rm of rowMatches) {
+        const cellMatches = [...rm[0].matchAll(/<a:tc[\s>][\s\S]*?<\/a:tc>/g)];
+        const cells = cellMatches.map(cm => {
+          return [...cm[0].matchAll(/<a:t[^>]*>([^<]*)<\/a:t>/g)]
+            .map(m => decodeXmlEntities(m[1]))
+            .join('')
+            .trim();
+        });
+        if (cells.some(c => c)) tableRows.push(cells);
+      }
+    }
+
+    // Body text: all text NOT in the title placeholder and NOT in tables
+    // Strip table XML first
+    let bodyXml = xml;
+    for (const tm of tableMatches) bodyXml = bodyXml.replace(tm[0], '');
+    if (titleMatch) bodyXml = bodyXml.replace(titleMatch[0], '');
+
+    const bodyTexts = [...bodyXml.matchAll(/<a:t[^>]*>([^<]*)<\/a:t>/g)]
       .map(m => decodeXmlEntities(m[1].trim()))
       .filter(Boolean);
-    slides.push(texts.join(' '));
+    const body = bodyTexts.join(' ').trim();
+
+    slides.push({ title, body, tableRows });
     i++;
   }
   return slides;
 }
 
-// ─── PDF builders ───────────────────────────────────────────────────
+/** Flat text fallback for compatibility */
+async function extractPptxSlidesFlat(file: File): Promise<string[]> {
+  const structured = await extractPptxSlides(file);
+  return structured.map(s => [s.title, s.body].filter(Boolean).join('\n'));
+}
 
 async function pdfFromParagraphs(paragraphs: string[], title?: string): Promise<Blob> {
   const doc = await PDFDocument.create();
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const bold = await doc.embedFont(StandardFonts.HelveticaBold);
-  const W = 595, H = 842, margin = 50, lh = 16, sz = 12;
+  const italic = await doc.embedFont(StandardFonts.HelveticaOblique);
+  const boldItalic = await doc.embedFont(StandardFonts.HelveticaBoldOblique);
+  const W = 595, H = 842, margin = 50, lh = 16, sz = 11;
   let page = doc.addPage([W, H]);
   let y = H - margin;
 
   if (title) {
-    page.drawText(title.slice(0, 80), { x: margin, y, size: 16, font: bold, color: rgb(0.1, 0.1, 0.5) });
-    y -= 30;
+    page.drawText(safeStr(title).slice(0, 80), { x: margin, y, size: 18, font: bold, color: rgb(0.1, 0.1, 0.5) });
+    y -= 28;
   }
 
   const ensurePage = () => {
     if (y < margin + lh) { page = doc.addPage([W, H]); y = H - margin; }
   };
 
-  const drawWrapped = (text: string) => {
+  const drawWrapped = (text: string, useFont?: any, useSz?: number) => {
+    const f = useFont || font;
+    const s = useSz || sz;
+    const maxW = W - margin * 2;
     const words = text.split(' ');
     let line = '';
     for (const w of words) {
       const test = line ? `${line} ${w}` : w;
-      if (font.widthOfTextAtSize(test, sz) > W - margin * 2 && line) {
+      let testW = 0;
+      try { testW = f.widthOfTextAtSize(test, s); } catch { testW = test.length * s * 0.5; }
+      if (testW > maxW && line) {
         ensurePage();
-        page.drawText(line, { x: margin, y, size: sz, font, color: rgb(0.07, 0.07, 0.07) });
-        y -= lh;
+        try { page.drawText(line, { x: margin, y, size: s, font: f, color: rgb(0.07, 0.07, 0.07) }); } catch {}
+        y -= s * 1.4;
         line = w;
       } else line = test;
     }
     if (line) {
       ensurePage();
-      page.drawText(line, { x: margin, y, size: sz, font, color: rgb(0.07, 0.07, 0.07) });
-      y -= lh;
+      try { page.drawText(line, { x: margin, y, size: s, font: f, color: rgb(0.07, 0.07, 0.07) }); } catch {}
+      y -= s * 1.4;
     }
-    y -= 4;
+    y -= 3;
   };
 
-  for (const p of paragraphs) drawWrapped(p);
+  for (const p of paragraphs) {
+    const safe = safeStr(p);
+    if (!safe) continue;
+    drawWrapped(safe);
+  }
+  return new Blob([await doc.save()], { type: 'application/pdf' });
+}
+
+/**
+ * Build a rich PDF from structured DOCX elements (paragraphs with styles + tables).
+ * Renders headings at larger font sizes, preserves bold/italic per-run,
+ * draws tables with borders, header row background, and alternating row colors.
+ */
+async function pdfFromDocxContent(
+  elements: DocxElement[],
+  title?: string,
+): Promise<Blob> {
+  const doc = await PDFDocument.create();
+  const fontReg = await doc.embedFont(StandardFonts.Helvetica);
+  const fontBold = await doc.embedFont(StandardFonts.HelveticaBold);
+  const fontItalic = await doc.embedFont(StandardFonts.HelveticaOblique);
+  const fontBI = await doc.embedFont(StandardFonts.HelveticaBoldOblique);
+
+  const W = 595, H = 842, MARGIN = 50;
+  const AW = W - MARGIN * 2;
+  const BASE_SZ = 11;
+  const LINE_H = BASE_SZ * 1.45;
+
+  let page = doc.addPage([W, H]);
+  let y = H - MARGIN;
+
+  const ensureSpace = (needed: number) => {
+    if (y - needed < MARGIN) {
+      page = doc.addPage([W, H]);
+      y = H - MARGIN;
+    }
+  };
+
+  const pickFont = (isBold: boolean, isItalic: boolean) => {
+    if (isBold && isItalic) return fontBI;
+    if (isBold) return fontBold;
+    if (isItalic) return fontItalic;
+    return fontReg;
+  };
+
+  const headingSizes: Record<number, number> = {
+    1: 22, 2: 18, 3: 15, 4: 13, 5: 12, 6: 11,
+  };
+
+  /** Word-wrap a text line into multiple lines fitting maxW */
+  const wrapText = (text: string, maxW: number, f: any, sz: number): string[] => {
+    if (!text) return [];
+    const words = text.split(/\s+/);
+    const lines: string[] = [];
+    let cur = '';
+    for (const w of words) {
+      if (!w) continue;
+      const test = cur ? `${cur} ${w}` : w;
+      let tw = 0;
+      try { tw = f.widthOfTextAtSize(test, sz); } catch { tw = test.length * sz * 0.5; }
+      if (tw > maxW && cur) {
+        lines.push(cur);
+        cur = w;
+      } else {
+        cur = test;
+      }
+    }
+    if (cur) lines.push(cur);
+    return lines.length ? lines : [''];
+  };
+
+  // Title
+  if (title) {
+    const safeTitle = safeStr(title).slice(0, 120);
+    ensureSpace(30);
+    try { page.drawText(safeTitle, { x: MARGIN, y, size: 20, font: fontBold, color: rgb(0.1, 0.12, 0.5) }); } catch {}
+    y -= 30;
+  }
+
+  for (const el of elements) {
+    if (el.type === 'paragraph') {
+      const p = el as DocxParagraph;
+      const text = safeStr(p.text);
+      if (!text && p.runs.length === 0) {
+        y -= 6; // empty paragraph = small gap
+        continue;
+      }
+
+      const isHeading = p.heading > 0;
+      const sz = isHeading ? (headingSizes[p.heading] ?? BASE_SZ) : BASE_SZ;
+      const isBold = isHeading || p.runs.some(r => r.bold);
+      const isItalic = p.runs.some(r => r.italic);
+      const f = pickFont(isBold, isItalic);
+
+      // Add space before headings
+      if (isHeading) {
+        y -= Math.min(sz * 0.8, 16);
+      }
+
+      // Word wrap
+      const lines = wrapText(text, AW, f, sz);
+      const neededH = lines.length * sz * 1.45 + 4;
+      ensureSpace(neededH);
+
+      // Alignment
+      for (const line of lines) {
+        let x = MARGIN;
+        if (p.alignment === 'center') {
+          let lw = 0;
+          try { lw = f.widthOfTextAtSize(line, sz); } catch { lw = line.length * sz * 0.5; }
+          x = MARGIN + (AW - lw) / 2;
+        } else if (p.alignment === 'right') {
+          let lw = 0;
+          try { lw = f.widthOfTextAtSize(line, sz); } catch { lw = line.length * sz * 0.5; }
+          x = MARGIN + AW - lw;
+        } else if (p.indentLeft > 0) {
+          x = MARGIN + Math.min(p.indentLeft / 20, 100); // twips to points
+        }
+
+        const color = isHeading ? rgb(0.1, 0.12, 0.5) : rgb(0.07, 0.07, 0.07);
+        try { page.drawText(line, { x, y, size: sz, font: f, color }); } catch {}
+        y -= sz * 1.45;
+      }
+      y -= 3;
+
+      // Extra space after heading
+      if (isHeading) y -= 4;
+
+    } else if (el.type === 'table') {
+      const t = el as DTable;
+      if (!t.rows.length) continue;
+
+      const nRows = t.rows.length;
+      const maxCols = Math.max(...t.rows.map((r: DRow) => r.cells.length));
+      if (!maxCols) continue;
+
+      // Calculate column widths (equal distribution)
+      const colW = AW / maxCols;
+      const cellPadH = 4;
+      const cellPadV = 3;
+      const cellFontSz = Math.min(BASE_SZ, 10);
+      const cellLineH = cellFontSz * 1.5;
+
+      y -= 6; // gap before table
+
+      for (let ri = 0; ri < nRows; ri++) {
+        const row = t.rows[ri];
+        const isHeader = row.isHeader;
+
+        // Calculate row height
+        let maxLines = 1;
+        for (const cell of row.cells) {
+          const cellText = safeStr(cell.text);
+          const f = (isHeader || cell.bold) ? fontBold : fontReg;
+          const cellMaxW = colW * (cell.colspan || 1) - cellPadH * 2;
+          const lines = wrapText(cellText, cellMaxW, f, cellFontSz);
+          maxLines = Math.max(maxLines, lines.length);
+        }
+        const rowH = maxLines * cellLineH + cellPadV * 2;
+
+        ensureSpace(rowH + 2);
+
+        // Background
+        if (isHeader) {
+          page.drawRectangle({ x: MARGIN, y: y - rowH, width: AW, height: rowH, color: rgb(0.1, 0.23, 0.56) });
+        } else if (ri % 2 === 0) {
+          page.drawRectangle({ x: MARGIN, y: y - rowH, width: AW, height: rowH, color: rgb(0.94, 0.96, 1.0) });
+        }
+
+        // Cell content
+        let cellX = MARGIN;
+        for (let ci = 0; ci < row.cells.length; ci++) {
+          const cell = row.cells[ci];
+          const cellText = safeStr(cell.text);
+          const cSpan = cell.colspan || 1;
+          const thisCellW = colW * cSpan;
+          const f = (isHeader || cell.bold) ? fontBold : fontReg;
+          const textColor = isHeader ? rgb(1, 1, 1) : rgb(0.07, 0.07, 0.07);
+          const cellMaxW = thisCellW - cellPadH * 2;
+          const lines = wrapText(cellText, cellMaxW, f, cellFontSz);
+
+          for (let li = 0; li < lines.length; li++) {
+            const ty = y - cellPadV - li * cellLineH - cellLineH * 0.2;
+            if (ty < y - rowH + 1) break;
+            try { page.drawText(lines[li], { x: cellX + cellPadH, y: ty, size: cellFontSz, font: f, color: textColor }); } catch {}
+          }
+
+          // Right cell border
+          const rightX = cellX + thisCellW;
+          page.drawLine({
+            start: { x: rightX, y },
+            end: { x: rightX, y: y - rowH },
+            thickness: 0.3,
+            color: rgb(0.6, 0.65, 0.8),
+          });
+
+          cellX += thisCellW;
+        }
+
+        // Left border
+        page.drawLine({
+          start: { x: MARGIN, y },
+          end: { x: MARGIN, y: y - rowH },
+          thickness: 0.3,
+          color: rgb(0.6, 0.65, 0.8),
+        });
+
+        // Bottom border
+        page.drawLine({
+          start: { x: MARGIN, y: y - rowH },
+          end: { x: MARGIN + AW, y: y - rowH },
+          thickness: isHeader ? 0.7 : 0.3,
+          color: isHeader ? rgb(0.1, 0.2, 0.5) : rgb(0.6, 0.65, 0.8),
+        });
+
+        // Top border (only for first row)
+        if (ri === 0) {
+          page.drawLine({
+            start: { x: MARGIN, y },
+            end: { x: MARGIN + AW, y },
+            thickness: 0.5,
+            color: rgb(0.1, 0.2, 0.5),
+          });
+        }
+
+        y -= rowH;
+      }
+
+      y -= 8; // gap after table
+    }
+  }
+
   return new Blob([await doc.save()], { type: 'application/pdf' });
 }
 
@@ -624,17 +912,151 @@ async function pdfFromSlides(slides: string[], title?: string): Promise<Blob> {
 
 // ─── DOCX builders ──────────────────────────────────────────────────
 
+// ─── Rich DOCX builder from structured DocxContent ───────────────────────────
+
+function buildDocxFromStructured(elements: DocxElement[], title?: string): Document {
+  const children: any[] = [];
+
+  if (title) {
+    children.push(new Paragraph({
+      text: safeStr(title),
+      heading: HeadingLevel.HEADING_1,
+      spacing: { after: 200 },
+    }));
+  }
+
+  for (const el of elements) {
+    if (el.type === 'paragraph') {
+      const p = el as DocxParagraph;
+      if (!p.text.trim() && p.runs.length === 0) {
+        // Empty paragraph — add spacer
+        children.push(new Paragraph({ spacing: { before: 80, after: 0 } }));
+        continue;
+      }
+
+      const headingMap: Record<number, (typeof HeadingLevel)[keyof typeof HeadingLevel] | undefined> = {
+        1: HeadingLevel.HEADING_1, 2: HeadingLevel.HEADING_2, 3: HeadingLevel.HEADING_3,
+        4: HeadingLevel.HEADING_4, 5: HeadingLevel.HEADING_5, 6: HeadingLevel.HEADING_6,
+      };
+
+      const alignMap: Record<string, (typeof AlignmentType)[keyof typeof AlignmentType]> = {
+        left: AlignmentType.LEFT, center: AlignmentType.CENTER,
+        right: AlignmentType.RIGHT, justify: AlignmentType.BOTH,
+      };
+
+      // Per-run TextRuns preserving bold/italic/font/size
+      const runs = p.runs.length > 0
+        ? p.runs.map(r => new TextRun({
+            text: safeStr(r.text),
+            bold: r.bold,
+            italics: r.italic,
+            underline: r.underline ? {} : undefined,
+            size: r.fontSize,
+            font: r.fontName || 'Calibri',
+            color: r.color !== 'auto' ? r.color : undefined,
+          }))
+        : [new TextRun({ text: safeStr(p.text) })];
+
+      children.push(new Paragraph({
+        heading: p.heading ? headingMap[p.heading] : undefined,
+        alignment: alignMap[p.alignment] ?? AlignmentType.LEFT,
+        indent: p.indentLeft > 0 ? { left: p.indentLeft } : undefined,
+        spacing: {
+          before: p.spaceBefore || 0,
+          after: p.spaceAfter || 0,
+          line: 276,
+          lineRule: 'auto' as any,
+        },
+        children: runs,
+      }));
+
+    } else if (el.type === 'table') {
+      const t = el as DTable;
+      const docxRows = t.rows.map((row: DRow, ri: number) => {
+        const maxCols = Math.max(...t.rows.map((r: DRow) => r.cells.length));
+        return new TableRow({
+          tableHeader: row.isHeader,
+          children: row.cells.map(cell => {
+            const cellText = safeStr(cell.text);
+            const isHeader = row.isHeader;
+            // Per-run content for cell
+            const cellRuns = cell.paragraphs.flatMap(cp =>
+              cp.runs.length > 0
+                ? cp.runs.map(r => new TextRun({
+                    text: safeStr(r.text),
+                    bold: isHeader || r.bold,
+                    italics: r.italic,
+                    size: r.fontSize || 22,
+                    font: r.fontName || 'Calibri',
+                    color: isHeader ? 'FFFFFF' : (r.color !== 'auto' ? r.color : undefined),
+                  }))
+                : [new TextRun({ text: safeStr(cp.text), bold: isHeader, color: isHeader ? 'FFFFFF' : undefined })]
+            );
+            return new TableCell({
+              columnSpan: cell.colspan > 1 ? cell.colspan : undefined,
+              margins: { top: 60, bottom: 60, left: 100, right: 100 },
+              shading: isHeader ? { fill: '1a3a8f' } : (cell.shading ? { fill: cell.shading } : undefined),
+              children: [
+                new Paragraph({
+                  children: cellRuns.length > 0 ? cellRuns : [new TextRun({ text: cellText, bold: isHeader })],
+                })
+              ],
+            });
+          }),
+        });
+      });
+
+      if (docxRows.length > 0) {
+        children.push(new DocxTable({
+          rows: docxRows,
+          width: { size: 100, type: WidthType.PERCENTAGE },
+          borders: t.hasBorder ? {
+            top:    { style: BorderStyle.SINGLE, size: 4, color: '2563EB' },
+            bottom: { style: BorderStyle.SINGLE, size: 4, color: '2563EB' },
+            left:   { style: BorderStyle.SINGLE, size: 4, color: '2563EB' },
+            right:  { style: BorderStyle.SINGLE, size: 4, color: '2563EB' },
+            insideHorizontal: { style: BorderStyle.SINGLE, size: 2, color: '93C5FD' },
+            insideVertical:   { style: BorderStyle.SINGLE, size: 2, color: '93C5FD' },
+          } : {
+            top:    { style: BorderStyle.SINGLE, size: 2, color: 'CBD5E1' },
+            bottom: { style: BorderStyle.SINGLE, size: 2, color: 'CBD5E1' },
+            left:   { style: BorderStyle.SINGLE, size: 2, color: 'CBD5E1' },
+            right:  { style: BorderStyle.SINGLE, size: 2, color: 'CBD5E1' },
+            insideHorizontal: { style: BorderStyle.SINGLE, size: 1, color: 'E2E8F0' },
+            insideVertical:   { style: BorderStyle.SINGLE, size: 1, color: 'E2E8F0' },
+          },
+        }));
+        children.push(new Paragraph({ spacing: { before: 100, after: 0 } }));
+      }
+    }
+  }
+
+  if (children.length === 0) children.push(new Paragraph({ children: [new TextRun('')] }));
+
+  return new Document({
+    styles: {
+      default: {
+        document: { run: { font: 'Calibri', size: 24 } },
+      },
+    },
+
+    sections: [{
+      properties: { page: { margin: { top: 720, right: 720, bottom: 720, left: 720 } } },
+      children,
+    }],
+  });
+}
+
 async function docxFromParagraphs(paragraphs: string[], title?: string): Promise<Blob> {
   const children: any[] = [];
-  const safeTitle = (title || '').replace(/[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F-\x9F]/g, '');
+  const safeTitle = safeStr(title || '');
   if (safeTitle) children.push(new Paragraph({ text: safeTitle, heading: HeadingLevel.HEADING_1 }));
   for (const p of paragraphs) {
-    const safeP = p.replace(/[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F-\x9F]/g, '');
-    children.push(new Paragraph({ children: [new TextRun(safeP)] }));
+    children.push(new Paragraph({ children: [new TextRun(safeStr(p))] }));
   }
   if (children.length === 0) children.push(new Paragraph({ children: [new TextRun('')] }));
   const d = new Document({
-    settings: { compat: { compatibilityMode: 15 } },
+
     sections: [{ properties: {}, children }]
   });
   return Packer.toBlob(d);
@@ -644,44 +1066,111 @@ async function docxFromXlsxSheets(sheets: XlsxSheet[]): Promise<Blob> {
   const children: any[] = [];
   for (const { name, rows } of sheets) {
     if (!rows.length) continue;
-    const maxCols = Math.max(...rows.map(r => r.length));
-    const safeName = name.replace(/[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F-\x9F]/g, '');
+    const maxCols = Math.max(...rows.map((r: any[]) => r.length));
+    if (!maxCols) continue;
+    const safeName = safeStr(name);
     children.push(new Paragraph({ text: `Sheet: ${safeName}`, heading: HeadingLevel.HEADING_2 }));
-    const tableRows = rows.slice(0, 300).map((row, ri) =>
+
+    const tableRows = rows.slice(0, 500).map((row: any[], ri: number) =>
       new TableRow({
+        tableHeader: ri === 0,
         children: Array.from({ length: maxCols }, (_, ci) => {
-          const safeText = String(row[ci] ?? '').replace(/[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F-\x9F]/g, '');
+          const cellText = safeStr(String(row[ci] ?? ''));
+          const isHeader = ri === 0;
           return new TableCell({
-            children: [new Paragraph({ children: [new TextRun({ text: safeText, bold: ri === 0 })] })],
+            margins: { top: 60, bottom: 60, left: 100, right: 100 },
+            shading: isHeader ? { fill: '1a3a8f' } : (ri % 2 === 0 ? { fill: 'EFF6FF' } : undefined),
+            children: [new Paragraph({
+              children: [new TextRun({
+                text: cellText,
+                bold: isHeader,
+                size: isHeader ? 20 : 18,
+                color: isHeader ? 'FFFFFF' : undefined,
+              })],
+            })],
           });
         }),
       })
     );
-    children.push(new DocxTable({ rows: tableRows, width: { size: 9000, type: WidthType.DXA } }));
-    children.push(new Paragraph({}));
+
+    children.push(new DocxTable({
+      rows: tableRows,
+      width: { size: 100, type: WidthType.PERCENTAGE },
+      borders: {
+        top:    { style: BorderStyle.SINGLE, size: 4, color: '2563EB' },
+        bottom: { style: BorderStyle.SINGLE, size: 4, color: '2563EB' },
+        left:   { style: BorderStyle.SINGLE, size: 4, color: '2563EB' },
+        right:  { style: BorderStyle.SINGLE, size: 4, color: '2563EB' },
+        insideHorizontal: { style: BorderStyle.SINGLE, size: 2, color: '93C5FD' },
+        insideVertical:   { style: BorderStyle.SINGLE, size: 2, color: '93C5FD' },
+      },
+    }));
+    children.push(new Paragraph({ spacing: { before: 200, after: 0 } }));
   }
   if (children.length === 0) children.push(new Paragraph({ children: [new TextRun('')] }));
   const d = new Document({
-    settings: { compat: { compatibilityMode: 15 } },
-    sections: [{ properties: {}, children }]
+    styles: { default: { document: { run: { font: 'Calibri', size: 22 } } } },
+
+    sections: [{ properties: { page: { margin: { top: 720, right: 720, bottom: 720, left: 720 } } }, children }]
   });
   return Packer.toBlob(d);
 }
 
-async function docxFromSlides(slides: string[], title?: string): Promise<Blob> {
+async function docxFromSlides(slides: PptxSlide[], title?: string): Promise<Blob> {
   const children: any[] = [];
-  const safeTitle = (title || '').replace(/[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F-\x9F]/g, '');
-  if (safeTitle) children.push(new Paragraph({ text: safeTitle, heading: HeadingLevel.HEADING_1 }));
-  slides.forEach((text, i) => {
-    children.push(new Paragraph({ text: `Slide ${i + 1}`, heading: HeadingLevel.HEADING_2 }));
-    const safeText = (text || '').replace(/[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F-\x9F]/g, '');
-    if (safeText) children.push(new Paragraph({ children: [new TextRun(safeText)] }));
-    children.push(new Paragraph({}));
-  });
+  const safeTitle = safeStr(title || '');
+  if (safeTitle) children.push(new Paragraph({ text: safeTitle, heading: HeadingLevel.HEADING_1, spacing: { after: 200 } }));
+
+  for (let i = 0; i < slides.length; i++) {
+    const slide = slides[i];
+    // Slide title as H2
+    const slideTitle = slide.title || `Slide ${i + 1}`;
+    children.push(new Paragraph({ text: safeStr(slideTitle), heading: HeadingLevel.HEADING_2 }));
+
+    // Body text
+    if (slide.body) {
+      children.push(new Paragraph({ children: [new TextRun({ text: safeStr(slide.body) })] }));
+    }
+
+    // Tables from this slide
+    if (slide.tableRows.length > 0) {
+      const maxCols = Math.max(...slide.tableRows.map(r => r.length));
+      const tableDocxRows = slide.tableRows.map((row, ri) =>
+        new TableRow({
+          tableHeader: ri === 0,
+          children: Array.from({ length: maxCols }, (_, ci) => {
+            const isHdr = ri === 0;
+            return new TableCell({
+              margins: { top: 60, bottom: 60, left: 100, right: 100 },
+              shading: isHdr ? { fill: '1a3a8f' } : undefined,
+              children: [new Paragraph({
+                children: [new TextRun({ text: safeStr(row[ci] ?? ''), bold: isHdr, color: isHdr ? 'FFFFFF' : undefined })],
+              })],
+            });
+          }),
+        })
+      );
+      children.push(new DocxTable({
+        rows: tableDocxRows,
+        width: { size: 100, type: WidthType.PERCENTAGE },
+        borders: {
+          top: { style: BorderStyle.SINGLE, size: 4, color: '2563EB' },
+          bottom: { style: BorderStyle.SINGLE, size: 4, color: '2563EB' },
+          left: { style: BorderStyle.SINGLE, size: 4, color: '2563EB' },
+          right: { style: BorderStyle.SINGLE, size: 4, color: '2563EB' },
+          insideHorizontal: { style: BorderStyle.SINGLE, size: 2, color: '93C5FD' },
+          insideVertical: { style: BorderStyle.SINGLE, size: 2, color: '93C5FD' },
+        },
+      }));
+    }
+    children.push(new Paragraph({ spacing: { before: 200, after: 0 } }));
+  }
+
   if (children.length === 0) children.push(new Paragraph({ children: [new TextRun('')] }));
   const d = new Document({
-    settings: { compat: { compatibilityMode: 15 } },
-    sections: [{ properties: {}, children }]
+    styles: { default: { document: { run: { font: 'Calibri', size: 24 } } } },
+
+    sections: [{ properties: { page: { margin: { top: 720, right: 720, bottom: 720, left: 720 } } }, children }]
   });
   return Packer.toBlob(d);
 }
@@ -689,19 +1178,54 @@ async function docxFromSlides(slides: string[], title?: string): Promise<Blob> {
 // ─── XLSX builders ──────────────────────────────────────────────────
 
 function xlsxFromParagraphs(paragraphs: string[], sheetName = 'Content'): Blob {
-  const sanitize = (s: string) => String(s || '').replace(/[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F-\x9F]/g, '');
-  const ws = XLSX.utils.json_to_sheet(paragraphs.map((t, i) => ({ '#': i + 1, Text: sanitize(t) })));
+  // Group paragraphs under headings into structured rows
+  const aoa: string[][] = [];
+  for (const p of paragraphs) {
+    const safe = safeStr(p);
+    if (!safe) continue;
+    // Detect if line looks like a table row (tab-separated or multiple |)
+    if (safe.includes('\t') || safe.split('|').length > 2) {
+      const cols = safe.includes('\t')
+        ? safe.split('\t').map(s => s.trim())
+        : safe.split('|').map(s => s.trim()).filter(Boolean);
+      aoa.push(cols);
+    } else {
+      aoa.push([safe]);
+    }
+  }
+  if (!aoa.length) aoa.push(['No content']);
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  const colWidths = aoa.reduce<number[]>((acc, row) => {
+    row.forEach((c, ci) => { acc[ci] = Math.max(acc[ci] ?? 8, c.length + 2); });
+    return acc;
+  }, []);
+  ws['!cols'] = colWidths.map(w => ({ wch: Math.min(w, 60) }));
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, sanitize(sheetName).slice(0, 31));
+  XLSX.utils.book_append_sheet(wb, ws, safeStr(sheetName).slice(0, 31) || 'Content');
   const arr = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
   return new Blob([arr], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
 }
 
-function xlsxFromSlides(slides: string[]): Blob {
-  const sanitize = (s: string) => String(s || '').replace(/[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F-\x9F]/g, '');
-  const ws = XLSX.utils.json_to_sheet(slides.map((t, i) => ({ Slide: i + 1, Content: sanitize(t) })));
+function xlsxFromSlides(slides: PptxSlide[]): Blob {
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'Slides');
+
+  slides.forEach((slide, i) => {
+    // If slide has a table, output the table as a sheet
+    if (slide.tableRows.length > 0) {
+      const ws = XLSX.utils.aoa_to_sheet(slide.tableRows.map(r => r.map(safeStr)));
+      const sheetName = safeStr(slide.title || `Slide ${i + 1}`).slice(0, 31) || `Slide${i + 1}`;
+      try { XLSX.utils.book_append_sheet(wb, ws, sheetName); } catch { /* duplicate name */ }
+    }
+  });
+
+  // Fallback: summary sheet
+  if (!wb.SheetNames.length) {
+    const aoa: string[][] = [['Slide', 'Title', 'Content']];
+    slides.forEach((s, i) => aoa.push([String(i + 1), safeStr(s.title), safeStr(s.body)]));
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    XLSX.utils.book_append_sheet(wb, ws, 'Slides');
+  }
+
   const arr = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
   return new Blob([arr], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
 }
@@ -709,17 +1233,48 @@ function xlsxFromSlides(slides: string[]): Blob {
 // ─── PPTX builders ──────────────────────────────────────────────────
 
 async function pptxFromParagraphs(paragraphs: string[], title?: string): Promise<Blob> {
-  const sanitize = (s: string) => String(s || '').replace(/[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F-\x9F]/g, '');
   const pptx = new PptxGenJS();
-  pptx.layout = 'LAYOUT_STANDARD';
-  for (let i = 0; i < paragraphs.length; i += 6) {
-    const slide = pptx.addSlide();
-    if (title && i === 0) {
-      slide.addText(sanitize(title), { x: 0.5, y: 0.1, w: 9, h: 0.55, bold: true, fontSize: 22, color: '1a3a8f' });
+  pptx.layout = 'LAYOUT_WIDE';
+
+  // Split paragraphs on heading-like lines (short all-caps or ends with ':') to create separate slides
+  const slideGroups: { heading: string; lines: string[] }[] = [];
+  let currentGroup: { heading: string; lines: string[] } = { heading: safeStr(title || 'Document'), lines: [] };
+
+  for (const p of paragraphs) {
+    const safe = safeStr(p);
+    if (!safe) continue;
+    // Detect heading: short line ≤60 chars, either all-caps or ends with colon
+    const isHeading = safe.length <= 60 && (safe === safe.toUpperCase() || safe.endsWith(':'));
+    if (isHeading && currentGroup.lines.length > 0) {
+      slideGroups.push(currentGroup);
+      currentGroup = { heading: safe, lines: [] };
+    } else if (isHeading) {
+      currentGroup.heading = safe;
+    } else {
+      currentGroup.lines.push(safe);
     }
-    const chunk = paragraphs.slice(i, i + 6);
-    slide.addText(sanitize(chunk.join('\n\n')), { x: 0.5, y: title && i === 0 ? 0.8 : 0.4, w: 9, h: 5.8, fontSize: 13, color: '111111' });
   }
+  slideGroups.push(currentGroup);
+
+  // Max 10 lines per slide; overflow creates continuation slides
+  for (const group of slideGroups) {
+    const lines = group.lines;
+    const chunks = lines.length === 0 ? [[]] : [];
+    for (let i = 0; i < Math.max(lines.length, 1); i += 10) {
+      chunks.push(lines.slice(i, i + 10));
+    }
+    for (let ci = 0; ci < chunks.length; ci++) {
+      const slide = pptx.addSlide();
+      // Header bar
+      slide.addShape('rect' as any, { x: 0, y: 0, w: '100%', h: 0.7, fill: { color: '1a3a8f' } });
+      const headingText = chunks.length > 1 ? `${group.heading} (${ci + 1}/${chunks.length})` : group.heading;
+      slide.addText(headingText, { x: 0.3, y: 0.1, w: 12, h: 0.5, bold: true, fontSize: 18, color: 'FFFFFF' });
+      if (chunks[ci].length > 0) {
+        slide.addText(chunks[ci].join('\n'), { x: 0.3, y: 0.85, w: 12, h: 5.5, fontSize: 13, color: '1e293b', valign: 'top' });
+      }
+    }
+  }
+
   return pptx.write({ outputType: 'blob' }) as Promise<Blob>;
 }
 
@@ -754,14 +1309,43 @@ async function pptxFromXlsxSheets(sheets: XlsxSheet[]): Promise<Blob> {
   return pptx.write({ outputType: 'blob' }) as Promise<Blob>;
 }
 
-async function pptxFromSlides(slides: string[], title?: string): Promise<Blob> {
-  const sanitize = (s: string) => String(s || '').replace(/[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F-\x9F]/g, '');
+async function pptxFromSlides(slides: PptxSlide[], title?: string): Promise<Blob> {
   const pptx = new PptxGenJS();
-  pptx.layout = 'LAYOUT_STANDARD';
-  slides.forEach((text, i) => {
-    const slide = pptx.addSlide();
-    slide.addText(`${sanitize(title) ? sanitize(title) + '  ·  ' : ''}Slide ${i + 1}`, { x: 0.5, y: 0.1, w: 9, h: 0.5, bold: true, fontSize: 18, color: '1a3a8f' });
-    slide.addText(sanitize(text) || '(No text)', { x: 0.5, y: 0.75, w: 9, h: 5.5, fontSize: 13 });
+  pptx.layout = 'LAYOUT_WIDE';
+  slides.forEach((slide, i) => {
+    const s = pptx.addSlide();
+    // Header bar
+    s.addShape('rect' as any, { x: 0, y: 0, w: '100%', h: 0.7, fill: { color: '1a3a8f' } });
+    const headingText = slide.title || `Slide ${i + 1}`;
+    s.addText(safeStr(headingText), { x: 0.3, y: 0.1, w: 12, h: 0.5, bold: true, fontSize: 18, color: 'FFFFFF' });
+
+    let nextY = 0.85;
+    if (slide.body) {
+      s.addText(safeStr(slide.body), { x: 0.3, y: nextY, w: 12, h: slide.tableRows.length > 0 ? 2.2 : 5.5, fontSize: 13, color: '1e293b', valign: 'top' });
+      nextY = slide.tableRows.length > 0 ? 3.2 : nextY;
+    }
+
+    // Render table if present
+    if (slide.tableRows.length > 0) {
+      const maxCols = Math.max(...slide.tableRows.map(r => r.length));
+      const tableData = slide.tableRows.map((row, ri) =>
+        Array.from({ length: maxCols }, (_, ci) => ({
+          text: safeStr(row[ci] ?? ''),
+          options: {
+            fill: { color: ri === 0 ? '1f4e9c' : ri % 2 === 0 ? 'eff4ff' : 'ffffff' },
+            color: ri === 0 ? 'ffffff' : '111111',
+            bold: ri === 0,
+            fontSize: 10,
+          },
+        }))
+      );
+      const colW = Math.min(2.0, 12 / maxCols);
+      s.addTable(tableData, {
+        x: 0.3, y: nextY, w: 12,
+        colW: Array(maxCols).fill(colW),
+        border: { type: 'solid', color: '93c5fd', pt: 0.5 },
+      });
+    }
   });
   return pptx.write({ outputType: 'blob' }) as Promise<Blob>;
 }
@@ -794,8 +1378,14 @@ function csvFromXlsxSheets(sheets: XlsxSheet[]): Blob {
   return new Blob([csv], { type: 'text/csv;charset=utf-8' });
 }
 
-function txtFromSlides(slides: string[]): Blob {
-  return new Blob([slides.map((t, i) => `--- Slide ${i + 1} ---\n${t}`).join('\n\n')], { type: 'text/plain;charset=utf-8' });
+function txtFromSlides(slides: PptxSlide[]): Blob {
+  const parts = slides.map((s, i) => {
+    const parts = [`--- Slide ${i + 1}${s.title ? ': ' + s.title : ''} ---`];
+    if (s.body) parts.push(s.body);
+    if (s.tableRows.length > 0) parts.push(s.tableRows.map(r => r.join('\t')).join('\n'));
+    return parts.join('\n');
+  });
+  return new Blob([parts.join('\n\n')], { type: 'text/plain;charset=utf-8' });
 }
 
 // ─── Existing PDF converters (unchanged) ────────────────────────────
@@ -926,7 +1516,7 @@ async function convertPdfFile(f: File, outType: Target, quality: number): Promis
       });
       if (children.length === 0) children.push(new Paragraph({ children: [new TextRun('')] }));
       const d = new Document({
-        settings: { compat: { compatibilityMode: 15 } },
+    
         sections: [{ properties: {}, children }]
       });
       return Packer.toBlob(d);
@@ -1131,27 +1721,50 @@ export default function UniversalConverter() {
         blob = await convertTextFile(file);
 
       } else if (kind === 'docx') {
-        setProgress('Extracting Word content…');
-        const paras = await extractDocxParagraphs(file);
-        // Silent AI enhancement: convert first page to image and ask AI for richer text
-        let aiParas: string[] = [];
-        try {
-          if (import.meta.env.VITE_GEMINI_API_KEY) {
-            setProgress('AI enhancing content…');
-            // Render DOCX as image via HTML img trick: wrap text in PDF first, then render
-            // Simple approach: use AI on the extracted text to structure/clean it
-            const { enhanceTextWithAI } = await import('../lib/advancedVisionEngine').catch(() => ({ enhanceTextWithAI: null }));
-            if (enhanceTextWithAI) {
-              aiParas = await enhanceTextWithAI(paras.join('\n\n'));
+        setProgress('Extracting Word content (tables, headings, formatting)…');
+        const docxContent = await extractDocxContent(file);
+        setProgress('Building output…');
+
+        if (target === 'pdf') {
+          // Build rich PDF from structured content
+          blob = await pdfFromDocxContent(docxContent.elements, name);
+        } else if (target === 'xlsx') {
+          // Each table in DOCX → separate sheet; paragraphs → content sheet
+          const wb = XLSX.utils.book_new();
+          let tableIdx = 0;
+          for (const el of docxContent.elements) {
+            if (el.type === 'table') {
+              const t = el as DTable;
+              const aoa = t.rows.map((r: DRow) => r.cells.map(c => safeStr(c.text)));
+              const ws = XLSX.utils.aoa_to_sheet(aoa);
+              const colW = aoa.reduce<number[]>((acc, row) => {
+                row.forEach((c: string, ci: number) => { acc[ci] = Math.max(acc[ci] ?? 8, c.length + 2); });
+                return acc;
+              }, []);
+              ws['!cols'] = colW.map(w => ({ wch: Math.min(w, 50) }));
+              const sheetName = `Table ${++tableIdx}`.slice(0, 31);
+              XLSX.utils.book_append_sheet(wb, ws, sheetName);
             }
           }
-        } catch { /* use original paras */ }
-        const finalParas = aiParas.length > 0 ? aiParas : paras;
-        setProgress('Building output…');
-        if (target === 'pdf')  blob = await pdfFromParagraphs(finalParas, name);
-        else if (target === 'xlsx') blob = xlsxFromParagraphs(finalParas, name);
-        else if (target === 'pptx') blob = await pptxFromParagraphs(finalParas, name);
-        else /* txt */              blob = txtFromParagraphs(finalParas);
+          // Paragraphs as content sheet
+          if (docxContent.flatText.length > 0) {
+            const textAoa = docxContent.flatText.map(t => [safeStr(t)]);
+            const ws = XLSX.utils.aoa_to_sheet(textAoa);
+            try { XLSX.utils.book_append_sheet(wb, ws, 'Content'); } catch { /* */ }
+          }
+          if (!wb.SheetNames.length) {
+            XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['No content']]), 'Sheet1');
+          }
+          const arr = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
+          blob = new Blob([arr], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+        } else if (target === 'pptx') {
+          blob = await pptxFromParagraphs(docxContent.flatText, name);
+        } else {
+          // DOCX → DOCX (reformat) or txt
+          const doc = buildDocxFromStructured(docxContent.elements, name);
+          if (target === 'docx') blob = await Packer.toBlob(doc);
+          else blob = txtFromParagraphs(docxContent.flatText);
+        }
 
       } else if (kind === 'xlsx') {
         if (target === 'pdf') {
@@ -1204,36 +1817,15 @@ export default function UniversalConverter() {
         }
 
       } else if (kind === 'pptx') {
-        setProgress('Extracting slides…');
+        setProgress('Extracting slides (titles, body, tables)…');
         const slides = await extractPptxSlides(file);
-        // Silent AI: attempt to get richer text from rendered slide images
-        let aiSlides: string[] = [];
-        try {
-          if (import.meta.env.VITE_GEMINI_API_KEY) {
-            setProgress('AI reading slides…');
-            const zip = await (await import('jszip')).default.loadAsync(await file.arrayBuffer());
-            const { extractTextRegions } = await import('../lib/advancedVisionEngine');
-            // Get slide thumbnail images if available (pptx/media)
-            const mediaFiles = Object.keys(zip.files).filter(k => k.startsWith('ppt/media/') && /\.(png|jpg|jpeg)$/i.test(k));
-            if (mediaFiles.length > 0) {
-              // For each slide (limited to first 10), get the first image in media order
-              for (let i = 0; i < Math.min(slides.length, 10); i++) {
-                const mediaFile = mediaFiles[Math.min(i, mediaFiles.length - 1)];
-                const imgBlob = new Blob([await zip.files[mediaFile].async('arraybuffer')]);
-                const texts = await aiExtractFromImage(imgBlob).catch(() => []);
-                aiSlides.push(texts.length > 0 ? texts.join('\n') : slides[i]);
-              }
-              // Remaining slides use original
-              for (let i = aiSlides.length; i < slides.length; i++) aiSlides.push(slides[i]);
-            }
-          }
-        } catch { /* fallback */ }
-        const finalSlides = aiSlides.length === slides.length ? aiSlides : slides;
         setProgress('Building output…');
-        if (target === 'pdf')  blob = await pdfFromSlides(finalSlides, name);
-        else if (target === 'docx') blob = await docxFromSlides(finalSlides, name);
-        else if (target === 'xlsx') blob = xlsxFromSlides(finalSlides);
-        else /* txt */              blob = txtFromSlides(finalSlides);
+        if (target === 'pdf') {
+          const flatSlides = slides.map(s => [s.title, s.body].filter(Boolean).join('\n'));
+          blob = await pdfFromSlides(flatSlides, name);
+        } else if (target === 'docx') blob = await docxFromSlides(slides, name);
+        else if (target === 'xlsx') blob = xlsxFromSlides(slides);
+        else /* txt */              blob = txtFromSlides(slides);
 
       } else {
         throw new Error('Unsupported file type for conversion.');

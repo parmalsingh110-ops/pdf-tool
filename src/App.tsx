@@ -42,6 +42,7 @@ import HighlightText from './pages/HighlightText';
 import PdfToGif from './pages/PdfToGif';
 import VideoToPdf from './pages/VideoToPdf';
 import RemoveBackground from './pages/RemoveBackground';
+import WordToPdfExact from './pages/WordToPdfExact';
 import ConvertToTiff from './pages/ConvertToTiff';
 import ExtractMedia from './pages/ExtractMedia';
 import CryptographicSignatures from './pages/CryptographicSignatures';
@@ -144,6 +145,7 @@ export default function App() {
         <Route path="pdf-to-word" element={<PdfToWord />} />
         <Route path="pdf-to-excel" element={<PdfToExcel />} />
         <Route path="pdf-to-ppt" element={<PdfToPpt />} />
+        <Route path="word-to-pdf-exact" element={<WordToPdfExact />} />
         <Route path="extract-tables" element={<ExtractTables />} />
         <Route path="font-extractor" element={<FontExtractor />} />
         <Route path="search-replace" element={<SearchReplace />} />
