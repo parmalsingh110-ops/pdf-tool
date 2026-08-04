@@ -1,4 +1,5 @@
-import { lazy } from 'react';
+import { lazy, useEffect } from 'react';
+
 import { Routes, Route } from 'react-router-dom';
 import Layout from './components/Layout';
 import Home from './pages/Home';
@@ -103,6 +104,15 @@ const PassportPhotoSheet = lazy(() => import('./pages/PassportPhotoSheet'));
 const IncreasePdfSize = lazy(() => import('./pages/IncreasePdfSize'));
 
 export default function App() {
+  // ── Backend Warmup Ping ─────────────────────────────────────────
+  // Fires once when the user opens the website. This "wakes up" the
+  // Render free-tier backend from sleep so it's ready before the user
+  // uploads a file. If the backend is already awake, this costs nothing.
+  useEffect(() => {
+    const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+    fetch(`${API_BASE}/health`, { method: 'GET' }).catch(() => {/* silent — server may be starting */});
+  }, []);
+
   return (
     <Routes>
       <Route path="/" element={<Layout />}>

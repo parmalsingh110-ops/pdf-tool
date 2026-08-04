@@ -1,6 +1,6 @@
 FROM python:3.12-slim
 
-# Install system dependencies for OCRmyPDF and LibreOffice
+# ── System dependencies ──────────────────────────────────────────
 RUN apt-get update && apt-get install -y --no-install-recommends \
     tesseract-ocr \
     tesseract-ocr-eng \
@@ -9,21 +9,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ghostscript \
     libgl1 \
     libglib2.0-0 \
+    libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
-# Set the working directory
+# ── Python deps (cached layer — only rebuild if requirements.txt changes) ──
 WORKDIR /app
-
-# Copy the requirements file and install dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
-# Copy the rest of the backend application code
+# ── App code ─────────────────────────────────────────────────────
 COPY . .
 
-# Expose the port the app runs on
 EXPOSE 8000
 
-# Command to run the application using uvicorn
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# ── Run with 2 workers + 300s timeout for heavy OCR tasks ────────
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", \
+     "--workers", "2", "--timeout-keep-alive", "300"]
