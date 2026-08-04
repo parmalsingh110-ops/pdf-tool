@@ -1,21 +1,17 @@
 import React, { useState } from 'react';
 import { ImageIcon, Download, Loader2, Package } from 'lucide-react';
-import * as pdfjsLib from 'pdfjs-dist';
-import '../lib/pdfWorker';
-import JSZip from 'jszip';
 import FileDropzone from '../components/FileDropzone';
 
 export default function ExtractAllImages() {
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
-  const [progress, setProgress] = useState('');
-  const [images, setImages] = useState<{ name: string; blob: Blob; url: string }[]>([]);
+  const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const handleDrop = (files: File[]) => {
     if (files[0]) {
       setFile(files[0]);
-      setImages([]);
+      setResultUrl(null);
       setError(null);
     }
   };
@@ -24,92 +20,23 @@ export default function ExtractAllImages() {
     if (!file) return;
     setBusy(true);
     setError(null);
-    setImages([]);
     try {
-      const buf = await file.arrayBuffer();
-      const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buf) }).promise;
-      const result: { name: string; blob: Blob; url: string }[] = [];
+      const formData = new FormData();
+      formData.append('file', file);
       
-      for (let p = 1; p <= pdf.numPages; p++) {
-        setProgress(`Scanning page ${p} of ${pdf.numPages}…`);
-        const page = await pdf.getPage(p);
-        const ops = await page.getOperatorList();
-        
-        // Look for paintImageXObject operations
-        for (let i = 0; i < ops.fnArray.length; i++) {
-          if (
-            ops.fnArray[i] === pdfjsLib.OPS.paintImageXObject ||
-            ops.fnArray[i] === pdfjsLib.OPS.paintJpegXObject
-          ) {
-            const imgName = ops.argsArray[i][0];
-            try {
-              // @ts-ignore — objs.get returns image data
-              const imgData = await new Promise<any>((resolve, reject) => {
-                page.objs.get(imgName, (data: any) => {
-                  if (data) resolve(data);
-                  else reject(new Error('no data'));
-                });
-                setTimeout(() => reject(new Error('timeout')), 3000);
-              });
-              
-              if (imgData && (imgData.width > 10 && imgData.height > 10)) {
-                const canvas = document.createElement('canvas');
-                canvas.width = imgData.width;
-                canvas.height = imgData.height;
-                const ctx = canvas.getContext('2d')!;
-                
-                if (imgData.data && imgData.data instanceof Uint8ClampedArray) {
-                  const idata = new ImageData(imgData.data, imgData.width, imgData.height);
-                  ctx.putImageData(idata, 0, 0);
-                } else if (imgData.src) {
-                  // JPEG data URL
-                  const img = new Image();
-                  img.src = imgData.src;
-                  await new Promise<void>(res => { img.onload = () => res(); });
-                  ctx.drawImage(img, 0, 0);
-                } else if (imgData instanceof HTMLCanvasElement) {
-                  ctx.drawImage(imgData, 0, 0);
-                } else {
-                  continue;
-                }
-                
-                const blob = await new Promise<Blob | null>(res => canvas.toBlob(b => res(b), 'image/png'));
-                if (blob && blob.size > 500) {
-                  const name = `page${p}_img${result.length + 1}.png`;
-                  result.push({ name, blob, url: URL.createObjectURL(blob) });
-                }
-              }
-            } catch {
-              // skip individual image errors
-            }
-          }
-        }
+      const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+      const res = await fetch(`${API_BASE_URL}/extract-images`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(errorText || 'Failed to extract images from server.');
       }
-      
-      if (result.length === 0) {
-        // Fallback: render each page as an image
-        setProgress('No embedded images found. Rendering pages as images…');
-        for (let p = 1; p <= pdf.numPages; p++) {
-          const page = await pdf.getPage(p);
-          const vp = page.getViewport({ scale: 2 });
-          const canvas = document.createElement('canvas');
-          canvas.width = vp.width;
-          canvas.height = vp.height;
-          const ctx = canvas.getContext('2d')!;
-          await page.render({ canvasContext: ctx, viewport: vp, canvas }).promise;
-          const blob = await new Promise<Blob | null>(res => canvas.toBlob(b => res(b), 'image/png'));
-          if (blob) {
-            result.push({
-              name: `page_${p}.png`,
-              blob,
-              url: URL.createObjectURL(blob),
-            });
-          }
-        }
-      }
-      
-      setImages(result);
-      setProgress(`Found ${result.length} image(s).`);
+
+      const blob = await res.blob();
+      setResultUrl(URL.createObjectURL(blob));
     } catch (e: any) {
       setError(e?.message || 'Extraction failed.');
     } finally {
@@ -117,78 +44,60 @@ export default function ExtractAllImages() {
     }
   };
 
-  const downloadAll = async () => {
-    if (images.length === 0) return;
-    const zip = new JSZip();
-    for (const img of images) {
-      zip.file(img.name, img.blob);
-    }
-    const blob = await zip.generateAsync({ type: 'blob' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `extracted_images_${file?.name || 'pdf'}.zip`;
-    a.click();
-    URL.revokeObjectURL(a.href);
+  const reset = () => {
+    setFile(null);
+    setResultUrl(null);
+    setError(null);
   };
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center p-8">
+    <div className="flex-1 flex flex-col items-center justify-center p-8 bg-slate-50 min-h-screen">
       <div className="text-center mb-8">
-        <h1 className="text-4xl font-bold text-gray-900 mb-4">Extract All Images</h1>
-        <p className="text-xl text-gray-600">Extract every image embedded inside a PDF document.</p>
+        <div className="w-16 h-16 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-4">
+          <ImageIcon className="w-8 h-8" />
+        </div>
+        <h1 className="text-4xl font-bold text-slate-800 mb-2">Extract All Images</h1>
+        <p className="text-slate-600 max-w-xl mx-auto">Extracts every single embedded image from your PDF in its original, untouched resolution.</p>
       </div>
 
-      {!file ? (
-        <FileDropzone onDrop={handleDrop} multiple={false} title="Select PDF file" />
-      ) : (
-        <div className="w-full max-w-4xl bg-white rounded-2xl shadow-sm border border-gray-200 p-8">
-          <div className="flex items-center gap-4 p-4 bg-gray-50 rounded-xl border border-gray-200 mb-6">
-            <ImageIcon className="w-8 h-8 text-yellow-600" />
-            <div className="flex-1 min-w-0">
-              <p className="font-semibold text-gray-900 truncate">{file.name}</p>
-              <p className="text-sm text-gray-500">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
+      {!file && !busy && (
+        <FileDropzone onDrop={handleDrop} multiple={false} title="Drop your PDF here" subtitle="Extract original quality images into a ZIP file" />
+      )}
+
+      {file && !resultUrl && !busy && (
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-8 max-w-lg w-full text-center">
+          <p className="text-slate-600 font-medium mb-6">Ready to extract images from: {file.name}</p>
+          <button onClick={extractImages} className="px-6 py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 w-full flex justify-center items-center gap-2">
+            <ImageIcon className="w-5 h-5" /> Extract Images
+          </button>
+        </div>
+      )}
+
+      {busy && (
+        <div className="flex flex-col items-center p-12">
+          <Loader2 className="w-12 h-12 text-blue-600 animate-spin mb-4" />
+          <h2 className="text-xl font-bold text-slate-800 mb-2">Extracting Images...</h2>
+          <p className="text-slate-500">Scanning PDF and extracting original high-resolution assets</p>
+        </div>
+      )}
+
+      {error && (
+        <div className="p-6 bg-red-50 border border-red-200 rounded-xl text-center max-w-md mt-6">
+            <p className="text-red-700 font-semibold mb-4">{error}</p>
+            <button onClick={reset} className="px-6 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium">Try another file</button>
+        </div>
+      )}
+
+      {resultUrl && (
+        <div className="w-full max-w-2xl bg-white rounded-2xl shadow-sm border border-slate-200 p-8 text-center animate-in fade-in">
+            <h2 className="text-2xl font-bold text-slate-800 mb-4">Extraction Complete!</h2>
+            <p className="text-slate-600 mb-8">All embedded images have been perfectly extracted and bundled into a ZIP file.</p>
+            <div className="flex justify-center gap-4">
+                <a href={resultUrl} download={`images_${file?.name.replace('.pdf', '')}.zip`} className="px-8 py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 flex items-center gap-2">
+                    <Package className="w-5 h-5" /> Download ZIP
+                </a>
+                <button onClick={reset} className="px-8 py-3 bg-slate-100 text-slate-700 font-bold rounded-xl hover:bg-slate-200 border border-slate-300">Convert Another</button>
             </div>
-          </div>
-
-          {error && <div className="p-3 bg-red-50 text-red-700 border border-red-200 rounded-lg mb-4 text-sm">{error}</div>}
-          {progress && <p className="text-sm text-gray-600 mb-4">{progress}</p>}
-
-          <div className="flex gap-3 mb-6">
-            <button
-              onClick={extractImages}
-              disabled={busy}
-              className="flex-1 py-3 bg-yellow-600 text-white font-bold rounded-xl hover:bg-yellow-700 disabled:opacity-50 flex items-center justify-center gap-2"
-            >
-              {busy ? <Loader2 className="w-5 h-5 animate-spin" /> : <ImageIcon className="w-5 h-5" />}
-              {busy ? 'Extracting…' : 'Extract Images'}
-            </button>
-            {images.length > 0 && (
-              <button
-                onClick={downloadAll}
-                className="px-6 py-3 bg-green-600 text-white font-bold rounded-xl hover:bg-green-700 flex items-center gap-2"
-              >
-                <Package className="w-5 h-5" />
-                Download ZIP
-              </button>
-            )}
-            <button onClick={() => { setFile(null); setImages([]); }} className="px-5 py-3 bg-gray-100 text-gray-700 font-semibold rounded-xl hover:bg-gray-200">Reset</button>
-          </div>
-
-          {images.length > 0 && (
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-              {images.map((img, i) => (
-                <div key={i} className="bg-gray-50 rounded-xl border border-gray-200 overflow-hidden">
-                  <img src={img.url} alt={img.name} className="w-full h-32 object-contain bg-white" />
-                  <div className="p-2 flex items-center justify-between">
-                    <span className="text-xs text-gray-500 truncate">{img.name}</span>
-                    <a href={img.url} download={img.name} className="text-xs text-blue-600 font-semibold">
-                      <Download className="w-3 h-3" />
-                    </a>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
         </div>
       )}
     </div>

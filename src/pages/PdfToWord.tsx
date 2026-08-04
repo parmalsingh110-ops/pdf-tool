@@ -15,7 +15,6 @@ export default function PdfToWord() {
   const [stage, setStage] = useState<Stage>('idle');
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState('');
-  const [ocrMode, setOcrMode] = useState(false);
 
   const handleDrop = async (files: File[]) => {
     if (!files.length) return;
@@ -28,7 +27,6 @@ export default function PdfToWord() {
     try {
       const formData = new FormData();
       formData.append('file', f);
-      if (ocrMode) formData.append('ocr_mode', 'true');
 
       const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
       const res = await fetch(`${API_BASE_URL}/convert/pdf-to-word`, {
@@ -42,10 +40,12 @@ export default function PdfToWord() {
       }
 
       const blob = await res.blob();
-      setResultUrl(URL.createObjectURL(blob));
+      const url = URL.createObjectURL(blob);
+      setResultUrl(url);
       setStage('done');
-    } catch (e: any) {
-      setErrorMsg(e?.message || 'Failed to connect to the backend server. Is it running?');
+    } catch (err: any) {
+      console.error(err);
+      setErrorMsg(err.message || 'An unexpected error occurred.');
       setStage('error');
     }
   };
@@ -68,10 +68,10 @@ export default function PdfToWord() {
           <h1 className="text-4xl font-extrabold text-slate-900 dark:text-white mb-3">PDF to Word</h1>
           <p className="text-lg text-slate-600 dark:text-slate-400 max-w-xl mx-auto">
             Convert any PDF into a perfectly formatted Word document.
-            Layout, tables, images, and formatting — all preserved perfectly.
+            Auto-Detects scanned PDFs and applies OCR magically.
           </p>
           <div className="flex flex-wrap justify-center gap-2 mt-5">
-            {[{ icon: Scan, t: 'Perfect Layout' }, { icon: Globe, t: 'Tables Preserved' }, { icon: Zap, t: 'Images Retained' }].map(({ icon: Icon, t }) => (
+            {[{ icon: Scan, t: 'Auto OCR' }, { icon: Globe, t: 'Tables Preserved' }, { icon: Zap, t: 'Images Retained' }].map(({ icon: Icon, t }) => (
               <span key={t} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-full text-xs font-semibold text-slate-700 dark:text-slate-200 shadow-sm">
                 <Icon className="w-3.5 h-3.5 text-blue-500" />{t}
               </span>
@@ -80,21 +80,7 @@ export default function PdfToWord() {
         </div>
 
         {stage === 'idle' && (
-          <div className="space-y-4">
-            <div className="flex items-center justify-center gap-2 mb-2">
-              <input 
-                type="checkbox" 
-                id="ocrMode" 
-                checked={ocrMode} 
-                onChange={(e) => setOcrMode(e.target.checked)} 
-                className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500"
-              />
-              <label htmlFor="ocrMode" className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                Scanned PDF (Extract Text Only)
-              </label>
-            </div>
-            <FileDropzone onDrop={handleDrop} multiple={false} title="Drop your PDF here" subtitle="Uses powerful Python backend for perfect formatting" />
-          </div>
+          <FileDropzone onDrop={handleDrop} multiple={false} title="Drop your PDF here" subtitle="Uses powerful Python backend for perfect formatting" />
         )}
 
         {stage === 'processing' && (

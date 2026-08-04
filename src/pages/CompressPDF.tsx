@@ -7,12 +7,12 @@ import * as pdfjsLib from 'pdfjs-dist';
 import '../lib/pdfWorker';
 import { usePageSEO } from '../lib/usePageSEO';
 
-type CompressionLevel = 'extreme' | 'recommended' | 'low';
+type CompressionLevel = 'backend-high-quality' | 'extreme' | 'recommended' | 'low';
 
 export default function CompressPDF() {
   usePageSEO('Compress PDF Online Free', 'Reduce PDF file size while maintaining quality. Free online PDF compressor with multiple compression levels — fast and private.');
   const [file, setFile] = useState<File | null>(null);
-  const [compressionLevel, setCompressionLevel] = useState<CompressionLevel>('recommended');
+  const [compressionLevel, setCompressionLevel] = useState<CompressionLevel>('backend-high-quality');
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingStep, setProcessingStep] = useState('');
   const [progressPct, setProgressPct] = useState(0);
@@ -45,6 +45,23 @@ export default function CompressPDF() {
     setProcessingStep('Starting compression...');
     
     try {
+      if (compressionLevel === 'backend-high-quality') {
+        setProcessingStep('Uploading to server for high-quality vector compression...');
+        const formData = new FormData();
+        formData.append('file', file);
+        const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+        const res = await fetch(`${API_BASE_URL}/compress-pdf`, {
+          method: 'POST',
+          body: formData,
+        });
+        if (!res.ok) throw new Error('Server compression failed');
+        const blob = await res.blob();
+        setUsedFallback(false);
+        const arrayBuf = await blob.arrayBuffer();
+        finishCompression(new Uint8Array(arrayBuf));
+        return;
+      }
+
       const arrayBuffer = await file.arrayBuffer();
       
       if (compressionLevel === 'low') {
@@ -265,6 +282,15 @@ export default function CompressPDF() {
   };
 
   const levels = [
+    { 
+      id: 'backend-high-quality', 
+      title: 'High Quality (Backend)', 
+      desc: 'True compression. Retains text & quality perfectly.', 
+      icon: Target,
+      color: 'text-purple-600',
+      bgColor: 'bg-purple-50',
+      borderColor: 'border-purple-200'
+    },
     { 
       id: 'extreme', 
       title: 'Extreme Compression', 
