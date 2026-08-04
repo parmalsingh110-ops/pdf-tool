@@ -68,37 +68,7 @@ def ensure_auto_ocr(inp_path: Path) -> Path:
     except Exception as e:
         print(f"Auto-OCR failed: {e}")
 
-    # Reconstruct Text-Only PDF
-    doc = fitz.open(inp_path)
-    new_doc = fitz.open()
-    deva_path = Path(__file__).parent.parent / "pdf-tool" / "public" / "fonts" / "NotoSansDevanagari-Regular.ttf"
-    
-    def has_non_latin(text):
-        return any(ord(c) > 0x00FF for c in text)
-
-    for page in doc:
-        new_page = new_doc.new_page(width=page.rect.width, height=page.rect.height)
-        if deva_path.exists():
-            new_page.insert_font(fontname="deva", fontfile=str(deva_path))
-            
-        blocks = page.get_text("dict")["blocks"]
-        for b in blocks:
-            if b.get("type") == 0:
-                for line in b.get("lines", []):
-                    for span in line.get("spans", []):
-                        try:
-                            color = fitz.sRGB_to_pdf(span["color"]) if "color" in span else (0,0,0)
-                            text = span["text"]
-                            fontname = "deva" if has_non_latin(text) and deva_path.exists() else "helv"
-                            new_page.insert_text(fitz.Point(span["origin"][0], span["origin"][1]), 
-                                                 text, fontname=fontname, fontsize=span["size"], color=color)
-                        except Exception:
-                            pass
-    text_only_inp = temp_path("_textonly.pdf")
-    new_doc.save(str(text_only_inp))
-    doc.close()
-    new_doc.close()
-    return text_only_inp
+    return inp_path
 
 
 # ─── 1. PDF → Word (pdf2docx — layout + tables + images) ──────
