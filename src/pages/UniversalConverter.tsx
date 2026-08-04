@@ -1704,6 +1704,23 @@ export default function UniversalConverter() {
     setError(null);
     setProgress('Preparing…');
 
+    // ── Backend helper — tries server API, returns null on failure ──
+    const tryBackend = async (endpoint: string, extraFields?: Record<string, string>): Promise<Blob | null> => {
+      try {
+        const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+        const form = new FormData();
+        form.append('file', file);
+        if (extraFields) {
+          for (const [k, v] of Object.entries(extraFields)) form.append(k, v);
+        }
+        const res = await fetch(`${API_BASE}${endpoint}`, { method: 'POST', body: form });
+        if (!res.ok) return null;
+        return await res.blob();
+      } catch {
+        return null;
+      }
+    };
+
     try {
       let blob: Blob;
       const name = baseName(file.name);
@@ -1713,72 +1730,121 @@ export default function UniversalConverter() {
         blob = await convertImageFile(file, target, quality);
 
       } else if (kind === 'pdf') {
-        setProgress('Reading PDF…');
-        blob = await convertPdfFile(file, target, quality);
+
+        // ── PDF → docx: try Backend first (best layout), fallback to browser ──
+        if (target === 'docx') {
+          setProgress('Converting PDF to Word (server-side for best quality)…');
+          const backendBlob = await tryBackend('/convert/pdf-to-word');
+          if (backendBlob) {
+            blob = backendBlob;
+          } else {
+            setProgress('Server unavailable, converting in browser…');
+            blob = await convertPdfFile(file, target, quality);
+          }
+
+        // ── PDF → xlsx: try Backend first (Camelot tables), fallback to browser ──
+        } else if (target === 'xlsx') {
+          setProgress('Extracting tables from PDF (server-side)…');
+          const backendBlob = await tryBackend('/convert/pdf-to-excel');
+          if (backendBlob) {
+            blob = backendBlob;
+          } else {
+            setProgress('Server unavailable, extracting in browser…');
+            blob = await convertPdfFile(file, target, quality);
+          }
+
+        // ── PDF → pptx: try Backend first (page images + text), fallback to browser ──
+        } else if (target === 'pptx') {
+          setProgress('Converting PDF to PowerPoint (server-side)…');
+          const backendBlob = await tryBackend('/convert/pdf-to-ppt', { dpi: '120' });
+          if (backendBlob) {
+            blob = backendBlob;
+          } else {
+            setProgress('Server unavailable, converting in browser…');
+            blob = await convertPdfFile(file, target, quality);
+          }
+
+        // ── All other PDF conversions (txt, png, jpg, zip) stay browser-side ──
+        } else {
+          setProgress('Reading PDF…');
+          blob = await convertPdfFile(file, target, quality);
+        }
 
       } else if (kind === 'text') {
         setProgress('Converting text…');
         blob = await convertTextFile(file);
 
       } else if (kind === 'docx') {
-        setProgress('Extracting Word content (tables, headings, formatting)…');
-        const docxContent = await extractDocxContent(file);
-        setProgress('Building output…');
-
+        // ── DOCX → PDF: Backend (LibreOffice) gives pixel-perfect output ──
         if (target === 'pdf') {
-          // Build rich PDF from structured content
-          blob = await pdfFromDocxContent(docxContent.elements, name);
-        } else if (target === 'xlsx') {
-          // Each table in DOCX → separate sheet; paragraphs → content sheet
-          const wb = XLSX.utils.book_new();
-          let tableIdx = 0;
-          for (const el of docxContent.elements) {
-            if (el.type === 'table') {
-              const t = el as DTable;
-              const aoa = t.rows.map((r: DRow) => r.cells.map(c => safeStr(c.text)));
-              const ws = XLSX.utils.aoa_to_sheet(aoa);
-              const colW = aoa.reduce<number[]>((acc, row) => {
-                row.forEach((c: string, ci: number) => { acc[ci] = Math.max(acc[ci] ?? 8, c.length + 2); });
-                return acc;
-              }, []);
-              ws['!cols'] = colW.map(w => ({ wch: Math.min(w, 50) }));
-              const sheetName = `Table ${++tableIdx}`.slice(0, 31);
-              XLSX.utils.book_append_sheet(wb, ws, sheetName);
-            }
+          setProgress('Converting Word to PDF (server-side for best quality)…');
+          const backendBlob = await tryBackend('/convert/office-to-pdf');
+          if (backendBlob) {
+            blob = backendBlob;
+          } else {
+            setProgress('Server unavailable, converting in browser…');
+            const docxContent = await extractDocxContent(file);
+            blob = await pdfFromDocxContent(docxContent.elements, name);
           }
-          // Paragraphs as content sheet
-          if (docxContent.flatText.length > 0) {
-            const textAoa = docxContent.flatText.map(t => [safeStr(t)]);
-            const ws = XLSX.utils.aoa_to_sheet(textAoa);
-            try { XLSX.utils.book_append_sheet(wb, ws, 'Content'); } catch { /* */ }
-          }
-          if (!wb.SheetNames.length) {
-            XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['No content']]), 'Sheet1');
-          }
-          const arr = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
-          blob = new Blob([arr], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-        } else if (target === 'pptx') {
-          blob = await pptxFromParagraphs(docxContent.flatText, name);
         } else {
-          // DOCX → DOCX (reformat) or txt
-          const doc = buildDocxFromStructured(docxContent.elements, name);
-          if (target === 'docx') blob = await Packer.toBlob(doc);
-          else blob = txtFromParagraphs(docxContent.flatText);
+          setProgress('Extracting Word content (tables, headings, formatting)…');
+          const docxContent = await extractDocxContent(file);
+          setProgress('Building output…');
+
+          if (target === 'xlsx') {
+            const wb = XLSX.utils.book_new();
+            let tableIdx = 0;
+            for (const el of docxContent.elements) {
+              if (el.type === 'table') {
+                const t = el as DTable;
+                const aoa = t.rows.map((r: DRow) => r.cells.map(c => safeStr(c.text)));
+                const ws = XLSX.utils.aoa_to_sheet(aoa);
+                const colW = aoa.reduce<number[]>((acc, row) => {
+                  row.forEach((c: string, ci: number) => { acc[ci] = Math.max(acc[ci] ?? 8, c.length + 2); });
+                  return acc;
+                }, []);
+                ws['!cols'] = colW.map(w => ({ wch: Math.min(w, 50) }));
+                const sheetName = `Table ${++tableIdx}`.slice(0, 31);
+                XLSX.utils.book_append_sheet(wb, ws, sheetName);
+              }
+            }
+            if (docxContent.flatText.length > 0) {
+              const textAoa = docxContent.flatText.map(t => [safeStr(t)]);
+              const ws = XLSX.utils.aoa_to_sheet(textAoa);
+              try { XLSX.utils.book_append_sheet(wb, ws, 'Content'); } catch { /* */ }
+            }
+            if (!wb.SheetNames.length) {
+              XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['No content']]), 'Sheet1');
+            }
+            const arr = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
+            blob = new Blob([arr], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+          } else if (target === 'pptx') {
+            blob = await pptxFromParagraphs(docxContent.flatText, name);
+          } else {
+            const doc = buildDocxFromStructured(docxContent.elements, name);
+            if (target === 'docx') blob = await Packer.toBlob(doc);
+            else blob = txtFromParagraphs(docxContent.flatText);
+          }
         }
 
       } else if (kind === 'xlsx') {
+        // ── XLSX → PDF: Backend (LibreOffice) for accurate table rendering ──
         if (target === 'pdf') {
-          setProgress('Reading Excel (merges, styles, widths)…');
-          blob = await xlsxFileToPdf(file);
+          setProgress('Converting Excel to PDF (server-side)…');
+          const backendBlob = await tryBackend('/convert/office-to-pdf');
+          if (backendBlob) {
+            blob = backendBlob;
+          } else {
+            setProgress('Server unavailable, converting in browser…');
+            blob = await xlsxFileToPdf(file);
+          }
         } else {
           setProgress('Reading Excel sheets…');
           const sheets = await extractXlsxSheets(file);
-          // Silent AI: ask AI to summarize/structure each sheet's content
           let aiRows: string[][] | null = null;
           try {
             if (import.meta.env.VITE_GEMINI_API_KEY && (target === 'docx' || target === 'pptx' || target === 'txt')) {
               const { extractTableData } = await import('../lib/advancedVisionEngine');
-              // Re-render first sheet as canvas image for AI
               const firstSheet = sheets[0];
               if (firstSheet && firstSheet.rows.length > 0) {
                 const canvas = document.createElement('canvas');
@@ -1805,9 +1871,8 @@ export default function UniversalConverter() {
           setProgress('Building output…');
           if (target === 'docx') blob = await docxFromXlsxSheets(sheets);
           else if (target === 'pptx') blob = await pptxFromXlsxSheets(sheets);
-          else if (target === 'csv')  blob = csvFromXlsxSheets(sheets);
-          else /* txt */ {
-            // AI text summary if available
+          else if (target === 'csv') blob = csvFromXlsxSheets(sheets);
+          else {
             if (aiRows && aiRows.length > 0) {
               blob = new Blob([aiRows.map(r => r.join('\t')).join('\n')], { type: 'text/plain;charset=utf-8' });
             } else {
@@ -1817,15 +1882,26 @@ export default function UniversalConverter() {
         }
 
       } else if (kind === 'pptx') {
-        setProgress('Extracting slides (titles, body, tables)…');
-        const slides = await extractPptxSlides(file);
-        setProgress('Building output…');
+        // ── PPTX → PDF: Backend (LibreOffice) for accurate rendering ──
         if (target === 'pdf') {
-          const flatSlides = slides.map(s => [s.title, s.body].filter(Boolean).join('\n'));
-          blob = await pdfFromSlides(flatSlides, name);
-        } else if (target === 'docx') blob = await docxFromSlides(slides, name);
-        else if (target === 'xlsx') blob = xlsxFromSlides(slides);
-        else /* txt */              blob = txtFromSlides(slides);
+          setProgress('Converting PowerPoint to PDF (server-side)…');
+          const backendBlob = await tryBackend('/convert/office-to-pdf');
+          if (backendBlob) {
+            blob = backendBlob;
+          } else {
+            setProgress('Server unavailable, converting in browser…');
+            const slides = await extractPptxSlides(file);
+            const flatSlides = slides.map(s => [s.title, s.body].filter(Boolean).join('\n'));
+            blob = await pdfFromSlides(flatSlides, name);
+          }
+        } else {
+          setProgress('Extracting slides (titles, body, tables)…');
+          const slides = await extractPptxSlides(file);
+          setProgress('Building output…');
+          if (target === 'docx') blob = await docxFromSlides(slides, name);
+          else if (target === 'xlsx') blob = xlsxFromSlides(slides);
+          else /* txt */             blob = txtFromSlides(slides);
+        }
 
       } else {
         throw new Error('Unsupported file type for conversion.');
@@ -1855,6 +1931,7 @@ export default function UniversalConverter() {
   };
 
   return (
+
     <div className="flex-1 flex flex-col items-center justify-center p-6 md:p-10">
       {/* Header */}
       <div className="text-center mb-8 max-w-2xl">
