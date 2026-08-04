@@ -1,140 +1,89 @@
 import React, { useState } from 'react';
 import { FileCode, Download, Loader2 } from 'lucide-react';
-import * as pdfjsLib from 'pdfjs-dist';
-import '../lib/pdfWorker';
 import FileDropzone from '../components/FileDropzone';
-import { extractTableData } from '../lib/advancedVisionEngine';
 
 export default function ExtractTables() {
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
-  const [csvData, setCsvData] = useState<string | null>(null);
-  const [previewRows, setPreviewRows] = useState<string[][]>([]);
+  const [resultUrl, setResultUrl] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState('');
 
-  const handleDrop = (files: File[]) => {
-    if (files[0]) { setFile(files[0]); setCsvData(null); setPreviewRows([]); }
-  };
+  const handleDrop = async (files: File[]) => {
+    if (files[0]) { 
+      setFile(files[0]); 
+      setResultUrl(null); 
+      setErrorMsg('');
+      setBusy(true);
 
-  const process = async () => {
-    if (!file) return;
-    setBusy(true);
-    try {
-      const buf = await file.arrayBuffer();
-      const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buf) }).promise;
-      const allRows: string[][] = [];
+      try {
+        const formData = new FormData();
+        formData.append('file', files[0]);
+        const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+        const res = await fetch(`${API_BASE_URL}/extract-tables`, {
+          method: 'POST',
+          body: formData,
+        });
 
-      for (let p = 1; p <= pdf.numPages; p++) {
-        const page = await pdf.getPage(p);
-
-        // Silent AI table extraction first
-        let aiSuccess = false;
-        try {
-          if (import.meta.env.VITE_GEMINI_API_KEY) {
-            const vp = page.getViewport({ scale: 1.5 });
-            const canvas = document.createElement('canvas');
-            canvas.width = vp.width; canvas.height = vp.height;
-            const ctx = canvas.getContext('2d')!;
-            await page.render({ canvasContext: ctx, viewport: vp, canvas }).promise;
-            const base64 = canvas.toDataURL('image/jpeg', 0.85);
-            canvas.width = 0; canvas.height = 0;
-            const rows = await extractTableData(base64);
-            if (rows && rows.length > 1) {
-              allRows.push(...rows);
-              aiSuccess = true;
-            }
-          }
-        } catch { /* fallback */ }
-
-        if (!aiSuccess) {
-          // Fallback: standard pdf.js text grid extraction
-          const textContent = await page.getTextContent();
-          const items = (textContent.items as any[])
-            .filter(i => i.str.trim())
-            .map(i => ({ text: i.str, x: i.transform[4], y: i.transform[5] }));
-          items.sort((a, b) => b.y - a.y);
-          const Y_TOLERANCE = 5;
-          const rows: { y: number; items: any[] }[] = [];
-          for (const item of items) {
-            const found = rows.find(r => Math.abs(r.y - item.y) < Y_TOLERANCE);
-            if (found) found.items.push(item);
-            else rows.push({ y: item.y, items: [item] });
-          }
-          for (const row of rows) {
-            row.items.sort((a: any, b: any) => a.x - b.x);
-            allRows.push(row.items.map((i: any) => i.text));
-          }
+        if (!res.ok) {
+            const err = await res.text();
+            throw new Error(err || 'Failed to extract tables');
         }
 
-        if (p < pdf.numPages) allRows.push([]);
+        const blob = await res.blob();
+        setResultUrl(URL.createObjectURL(blob));
+      } catch (e: any) {
+        setErrorMsg(e?.message || 'Failed to extract tables. The PDF might not contain any valid tabular structures.');
+      } finally {
+        setBusy(false);
       }
-
-      // Generate CSV
-      const csv = allRows.map(row => row.map(cell => {
-        if (cell.includes(',') || cell.includes('"') || cell.includes('\n')) {
-          return `"${cell.replace(/"/g, '""')}"`;
-        }
-        return cell;
-      }).join(',')).join('\n');
-
-      setCsvData(csv);
-      setPreviewRows(allRows.slice(0, 20));
-    } catch (e: any) {
-      alert(e?.message || 'Extraction failed.');
-    } finally {
-      setBusy(false);
     }
   };
 
-  const downloadCsv = () => {
-    if (!csvData) return;
-    const blob = new Blob([csvData], { type: 'text/csv;charset=utf-8;' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `tables_${file?.name || 'data'}.csv`;
-    a.click();
-    URL.revokeObjectURL(a.href);
+  const reset = () => {
+    setFile(null);
+    setResultUrl(null);
+    setErrorMsg('');
   };
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center p-8">
+    <div className="flex-1 flex flex-col items-center justify-center p-8 bg-slate-50 min-h-screen">
       <div className="text-center mb-8">
-        <h1 className="text-4xl font-bold text-gray-900 mb-4">Extract Tables to CSV</h1>
-        <p className="text-xl text-gray-600">Extract tabular data from your PDF into downloadable CSV files.</p>
+        <div className="w-16 h-16 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-4">
+          <FileCode className="w-8 h-8" />
+        </div>
+        <h1 className="text-4xl font-bold text-slate-800 mb-2">Extract Tables to Excel</h1>
+        <p className="text-slate-600">Uses powerful Python Backend (Camelot) to perfectly extract tables with exact borders into an .xlsx file.</p>
       </div>
-      {!file ? (
-        <FileDropzone onDrop={handleDrop} multiple={false} title="Select PDF file" />
-      ) : (
-        <div className="w-full max-w-4xl bg-white rounded-2xl shadow-sm border border-gray-200 p-8">
-          <div className="flex gap-3 mb-6">
-            <button onClick={process} disabled={busy} className="flex-1 py-3 bg-emerald-600 text-white font-bold rounded-xl hover:bg-emerald-700 disabled:opacity-50 flex items-center justify-center gap-2">
-              {busy ? <Loader2 className="w-5 h-5 animate-spin" /> : <FileCode className="w-5 h-5" />}
-              {busy ? 'Extracting…' : 'Extract Tables'}
-            </button>
-            {csvData && (
-              <button onClick={downloadCsv} className="px-6 py-3 bg-green-600 text-white font-bold rounded-xl hover:bg-green-700 flex items-center gap-2">
-                <Download className="w-5 h-5" /> Download CSV
-              </button>
-            )}
-            <button onClick={() => { setFile(null); setCsvData(null); }} className="px-5 py-3 bg-gray-100 text-gray-700 font-semibold rounded-xl hover:bg-gray-200">Cancel</button>
-          </div>
-          {previewRows.length > 0 && (
-            <div className="overflow-auto max-h-[400px] border border-gray-200 rounded-xl">
-              <table className="min-w-full text-sm">
-                <tbody>
-                  {previewRows.map((row, ri) => (
-                    <tr key={ri} className={ri % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-                      {row.length === 0 ? <td className="px-3 py-1 text-gray-300 italic">— page break —</td> :
-                        row.map((cell, ci) => (
-                          <td key={ci} className="px-3 py-1 border-r border-gray-200 text-gray-800 whitespace-nowrap">{cell}</td>
-                        ))
-                      }
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              {previewRows.length >= 20 && <p className="text-xs text-gray-500 p-2">Showing first 20 rows. Download CSV for full data.</p>}
+
+      {!file && !busy && (
+        <FileDropzone onDrop={handleDrop} multiple={false} title="Drop your PDF here" subtitle="We'll extract all tables into an Excel file" />
+      )}
+
+      {busy && (
+        <div className="flex flex-col items-center p-12">
+          <Loader2 className="w-12 h-12 text-blue-600 animate-spin mb-4" />
+          <h2 className="text-xl font-bold text-slate-800 mb-2">Analyzing PDF Structure...</h2>
+          <p className="text-slate-500">Detecting table lines and extracting data perfectly</p>
+        </div>
+      )}
+
+      {errorMsg && (
+        <div className="p-6 bg-red-50 border border-red-200 rounded-xl text-center max-w-md">
+            <p className="text-red-700 font-semibold mb-4">{errorMsg}</p>
+            <button onClick={reset} className="px-6 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium">Try another file</button>
+        </div>
+      )}
+
+      {resultUrl && (
+        <div className="w-full max-w-3xl bg-white rounded-2xl shadow-sm border border-slate-200 p-8 text-center">
+            <h2 className="text-2xl font-bold text-slate-800 mb-4">Extraction Complete!</h2>
+            <p className="text-slate-600 mb-8">We found tables in your document. They have been saved into a perfectly formatted Excel spreadsheet.</p>
+            <div className="flex justify-center gap-4">
+                <a href={resultUrl} download={`tables_${file?.name.replace('.pdf', '')}.xlsx`} className="px-8 py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 flex items-center gap-2">
+                    <Download className="w-5 h-5" /> Download Excel (.xlsx)
+                </a>
+                <button onClick={reset} className="px-8 py-3 bg-slate-100 text-slate-700 font-bold rounded-xl hover:bg-slate-200 border border-slate-300">Convert Another</button>
             </div>
-          )}
         </div>
       )}
     </div>
