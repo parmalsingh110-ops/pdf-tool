@@ -13,6 +13,9 @@ from fastapi import FastAPI, UploadFile, File, HTTPException, Form, BackgroundTa
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from starlette.background import BackgroundTask
+from dotenv import load_dotenv
+
+load_dotenv()
 
 app = FastAPI(title="PDF Tool Backend", version="2.0.0")
 
@@ -101,27 +104,63 @@ def is_pdf_scanned(inp_path: Path) -> bool:
         return False
 
 
-def ensure_auto_ocr(inp_path: Path, force: bool = False) -> Path:
-    """If PDF is scanned, or if forced, run OCRmyPDF to make it searchable first."""
+async def run_hybrid_ocr(inp_path: Path, out_path: Path, lang: str = "eng+hin", deskew: bool = True, rotate: bool = True, force_ocr: bool = False):
+    from fastapi.concurrency import run_in_threadpool
+    import os, shutil, uuid
+    
+    ilovepdf_pub = os.environ.get("ILOVEPDF_PUBLIC_KEY", "").strip()
+    ilovepdf_sec = os.environ.get("ILOVEPDF_SECRET_KEY", "").strip()
+
+    if ilovepdf_pub and ilovepdf_sec:
+        print(f"[OCR] Using iLovePDF API for OCR on {inp_path.name}")
+        def run_ilovepdf():
+            from ilovepdf import PdfOcrTask
+            task = PdfOcrTask(public_key=ilovepdf_pub, secret_key=ilovepdf_sec)
+            task.add_file(str(inp_path))
+            task.execute()
+            
+            out_dir = Path(tempfile.gettempdir()) / uuid.uuid4().hex
+            out_dir.mkdir(exist_ok=True)
+            task.download(str(out_dir))
+            
+            downloaded_files = list(out_dir.iterdir())
+            if downloaded_files:
+                shutil.move(str(downloaded_files[0]), str(out_path))
+            shutil.rmtree(out_dir)
+
+        try:
+            await run_in_threadpool(run_ilovepdf)
+            return True
+        except Exception as e:
+            print(f"[OCR] iLovePDF API failed: {e}. Falling back to local OCR.")
+
+    print(f"[OCR] Using local OCRmyPDF for {inp_path.name}")
+    try:
+        import ocrmypdf
+    except ImportError:
+        raise Exception("Run: pip install ocrmypdf")
+
+    def run_ocrmypdf():
+        ocrmypdf.ocr(
+            str(inp_path), str(out_path), language=lang,
+            deskew=deskew, rotate_pages=rotate,
+            skip_text=not force_ocr, force_ocr=force_ocr,
+            output_type="pdf",
+            progress_bar=False
+        )
+    await run_in_threadpool(run_ocrmypdf)
+    return True
+
+async def ensure_auto_ocr(inp_path: Path, force: bool = False) -> Path:
+    """If PDF is scanned, or if forced, run hybrid OCR to make it searchable first."""
     if not force and not is_pdf_scanned(inp_path):
         return inp_path
 
-    print(f"[Auto-OCR] OCR triggered for: {inp_path.name}")
-    
-
+    print(f"[Auto-OCR] Hybrid OCR triggered for: {inp_path.name}")
+    out_path = inp_path.with_name(inp_path.stem + "_ocr.pdf")
     try:
-        result = subprocess.run(
-            ["ocrmypdf", "--force-ocr", "-l", "eng+hin",
-             "--output-type", "pdf", "--optimize", "0",
-             str(inp_path), str(inp_path)],
-            capture_output=True, text=True, timeout=180
-        )
-        if result.returncode == 0:
-            print("[Auto-OCR] OCR completed successfully.")
-        else:
-            print(f"[Auto-OCR] Warning: {result.stderr[:200]}")
-    except subprocess.TimeoutExpired:
-        print("[Auto-OCR] Timed out, proceeding without OCR.")
+        await run_hybrid_ocr(inp_path, out_path, force_ocr=force)
+        shutil.move(str(out_path), str(inp_path))
     except Exception as e:
         print(f"[Auto-OCR] Failed: {e}")
 
@@ -146,7 +185,7 @@ async def pdf_to_word(file: UploadFile = File(...), force_ocr: bool = Form(False
         scanned = force_ocr or is_pdf_scanned(inp)
         
         # 2. Run OCR if needed
-        inp = ensure_auto_ocr(inp, force=force_ocr)
+        inp = await ensure_auto_ocr(inp, force=force_ocr)
 
         if scanned:
             # 3A. SCANNED PDF -> Extract clean text to drop the giant background image
@@ -200,7 +239,7 @@ async def pdf_to_excel(file: UploadFile = File(...), method: str = Form("auto"),
     out = temp_path(".xlsx")
     try:
         inp.write_bytes(await file.read())
-        inp = ensure_auto_ocr(inp, force=force_ocr)
+        inp = await ensure_auto_ocr(inp, force=force_ocr)
 
         wb = openpyxl.Workbook()
         wb.remove(wb.active)
@@ -284,7 +323,7 @@ async def pdf_to_ppt(file: UploadFile = File(...), dpi: int = Form(150), force_o
     out = temp_path(".pptx")
     try:
         inp.write_bytes(await file.read())
-        inp = ensure_auto_ocr(inp, force=force_ocr)
+        inp = await ensure_auto_ocr(inp, force=force_ocr)
 
         doc = fitz.open(str(inp))
         prs = Presentation()
@@ -383,29 +422,22 @@ async def make_searchable(
     rotate: bool = Form(True),
     force_ocr: bool = Form(False)
 ):
-    from fastapi.concurrency import run_in_threadpool
-    
-    try:
-        import ocrmypdf
-    except ImportError:
-        raise HTTPException(500, "Run: pip install ocrmypdf")
-
     inp = temp_path(".pdf")
     out = temp_path("_searchable.pdf")
+    inp.write_bytes(await file.read())
+
+    # Smart Check: If it's not scanned and user didn't force OCR, skip to save credits!
+    if not force_ocr and not is_pdf_scanned(inp):
+        print(f"[OCR] Skipping OCR for {inp.name} because it already has text! (Credit Saver)")
+        # Just return the original file
+        return FileResponse(
+            str(inp), media_type="application/pdf",
+            filename=Path(file.filename).stem + "_searchable.pdf",
+            background=BackgroundTask(cleanup, inp)
+        )
+
     try:
-        inp.write_bytes(await file.read())
-        
-        def run_ocrmypdf():
-            ocrmypdf.ocr(
-                str(inp), str(out), language=lang,
-                deskew=deskew, rotate_pages=rotate,
-                skip_text=not force_ocr, force_ocr=force_ocr,
-                output_type="pdf",
-                progress_bar=False
-            )
-            
-        await run_in_threadpool(run_ocrmypdf)
-        
+        await run_hybrid_ocr(inp, out, lang=lang, deskew=deskew, rotate=rotate, force_ocr=force_ocr)
         return FileResponse(
             str(out), media_type="application/pdf",
             filename=Path(file.filename).stem + "_searchable.pdf",
