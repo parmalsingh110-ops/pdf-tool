@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { FileText, Scan, Globe, Zap, CheckCircle2, Download, RotateCcw, AlertTriangle } from 'lucide-react';
 import FileDropzone from '../components/FileDropzone';
+import BackendLoader from '../components/BackendLoader';
 import { usePageSEO } from '../lib/usePageSEO';
 
 type Stage = 'idle' | 'processing' | 'done' | 'error';
@@ -84,11 +85,23 @@ export default function PdfToWord() {
         )}
 
         {stage === 'processing' && (
-          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700 p-8 text-center shadow-sm">
-            <div className="w-16 h-16 rounded-full border-4 border-blue-200 dark:border-blue-900 border-t-blue-600 animate-spin mx-auto mb-4" />
-            <h3 className="text-xl font-bold text-slate-800 dark:text-white mb-2">Converting PDF to Word…</h3>
-            <p className="text-sm text-slate-500 dark:text-slate-400">Please wait, our powerful backend is extracting tables and layouts.</p>
-          </div>
+          <BackendLoader
+            title="Converting PDF to Word…"
+            accentColor="blue"
+            steps={[
+              { icon: '📤', label: 'Uploading', detail: 'Sending your PDF securely...' },
+              { icon: '🔍', label: 'Analyzing', detail: 'Detecting tables, fonts & layouts...' },
+              { icon: '⚙️', label: 'Converting', detail: 'pdf2docx engine extracting content...' },
+              { icon: '📄', label: 'Packaging', detail: 'Finalizing your .docx file...' },
+            ]}
+            tips={[
+              '💡 Native PDFs preserve tables & images perfectly.',
+              '🔍 Scanned PDFs are auto-detected and OCR is applied.',
+              '⚡ Powered by pdf2docx — the most accurate Python library.',
+              '🔒 Your file is never stored — deleted right after download.',
+              '📊 Multi-column layouts and headers are preserved.',
+            ]}
+          />
         )}
 
         {stage === 'done' && resultUrl && file && (

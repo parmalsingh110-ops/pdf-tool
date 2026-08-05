@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { ImageIcon, Download, Loader2, Package } from 'lucide-react';
 import FileDropzone from '../components/FileDropzone';
+import BackendLoader from '../components/BackendLoader';
 
 export default function ExtractAllImages() {
   const [file, setFile] = useState<File | null>(null);
@@ -74,11 +75,23 @@ export default function ExtractAllImages() {
       )}
 
       {busy && (
-        <div className="flex flex-col items-center p-12">
-          <Loader2 className="w-12 h-12 text-blue-600 animate-spin mb-4" />
-          <h2 className="text-xl font-bold text-slate-800 mb-2">Extracting Images...</h2>
-          <p className="text-slate-500">Scanning PDF and extracting original high-resolution assets</p>
-        </div>
+        <BackendLoader
+          title="Extracting Images…"
+          accentColor="indigo"
+          steps={[
+            { icon: '📤', label: 'Uploading', detail: 'Sending your PDF to server...' },
+            { icon: '🔍', label: 'Scanning', detail: 'Identifying all embedded image objects...' },
+            { icon: '🖼️', label: 'Extracting', detail: 'Pulling images at original quality...' },
+            { icon: '📦', label: 'Zipping', detail: 'Bundling images into a ZIP archive...' },
+          ]}
+          tips={[
+            '🖼️ Images are extracted at their original embedded resolution.',
+            '📎 All formats supported: PNG, JPEG, TIFF, BMP and more.',
+            '📄 Each image is named by page and order for easy sorting.',
+            '🔒 ZIP file is deleted from server after download.',
+            '⚡ Powered by PyMuPDF for precise image object extraction.',
+          ]}
+        />
       )}
 
       {error && (

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Presentation, Scan, Globe, Zap, CheckCircle2, Download, RotateCcw, AlertTriangle } from 'lucide-react';
 import FileDropzone from '../components/FileDropzone';
+import BackendLoader from '../components/BackendLoader';
 import { usePageSEO } from '../lib/usePageSEO';
 
 type Stage = 'idle' | 'processing' | 'done' | 'error';
@@ -75,11 +76,23 @@ export default function PdfToPpt() {
         )}
 
         {stage === 'processing' && (
-          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700 p-8 text-center shadow-sm">
-            <div className="w-16 h-16 rounded-full border-4 border-orange-200 dark:border-orange-900 border-t-orange-600 animate-spin mx-auto mb-4" />
-            <h3 className="text-xl font-bold text-slate-800 dark:text-white mb-2">Converting PDF to PPT…</h3>
-            <p className="text-sm text-slate-500 dark:text-slate-400">Rendering slides and extracting text overlays...</p>
-          </div>
+          <BackendLoader
+            title="Converting PDF to PowerPoint…"
+            accentColor="orange"
+            steps={[
+              { icon: '📤', label: 'Uploading', detail: 'Sending your PDF to server...' },
+              { icon: '🎨', label: 'Rendering', detail: 'Rendering each page at high DPI...' },
+              { icon: '🖼️', label: 'Slide Building', detail: 'Creating PPTX slides with images...' },
+              { icon: '📝', label: 'Text Layer', detail: 'Adding searchable text overlays...' },
+            ]}
+            tips={[
+              '🎨 Each PDF page becomes a beautiful high-DPI slide.',
+              '🔍 Invisible text layer added for searchability in PPTX.',
+              '⚡ Powered by PyMuPDF — renders at 150 DPI for crisp slides.',
+              '🔒 Your file is auto-deleted from server after download.',
+              '📊 Supports all PDF types including scanned documents.',
+            ]}
+          />
         )}
 
         {stage === 'done' && resultUrl && file && (

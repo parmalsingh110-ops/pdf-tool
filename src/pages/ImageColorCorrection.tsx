@@ -17,7 +17,7 @@ export default function ImageColorCorrection() {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [processing, setProcessing] = useState(false);
   const [openGroup, setOpenGroup] = useState<string | null>('💡 Light');
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const imgRef = useRef<HTMLImageElement>(null);
 
   const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {

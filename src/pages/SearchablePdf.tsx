@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Search, Scan, Globe, Zap, CheckCircle2, Download, RotateCcw, AlertTriangle } from 'lucide-react';
 import FileDropzone from '../components/FileDropzone';
+import BackendLoader from '../components/BackendLoader';
 import { usePageSEO } from '../lib/usePageSEO';
 
 type Stage = 'idle' | 'processing' | 'done' | 'error';
@@ -103,11 +104,23 @@ export default function SearchablePdf() {
         )}
 
         {stage === 'processing' && (
-          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700 p-8 text-center shadow-sm">
-            <div className="w-16 h-16 rounded-full border-4 border-blue-200 dark:border-blue-900 border-t-blue-600 animate-spin mx-auto mb-4" />
-            <h3 className="text-xl font-bold text-slate-800 dark:text-white mb-2">Running OCR Engine…</h3>
-            <p className="text-sm text-slate-500 dark:text-slate-400">Processing text and adding invisible searchable layer...</p>
-          </div>
+          <BackendLoader
+            title="Running OCR Engine…"
+            accentColor="violet"
+            steps={[
+              { icon: '📤', label: 'Uploading', detail: 'Sending scanned PDF to server...' },
+              { icon: '🧠', label: 'OCR Init', detail: 'Loading Tesseract OCR model...' },
+              { icon: '🔍', label: 'Reading', detail: 'Recognizing text character by character...' },
+              { icon: '💾', label: 'Embedding', detail: 'Adding invisible text layer to PDF...' },
+            ]}
+            tips={[
+              '🧠 Tesseract OCR supports both English and Hindi scripts.',
+              '🔍 Auto-deskew straightens pages photographed at an angle.',
+              '⚡ The resulting PDF looks identical but is fully searchable.',
+              '🔒 File is deleted from server immediately after download.',
+              '📄 Compatible with all PDF/A archival formats.',
+            ]}
+          />
         )}
 
         {stage === 'done' && resultUrl && file && (

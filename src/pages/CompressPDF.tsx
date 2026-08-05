@@ -6,6 +6,7 @@ import FileDropzone from '../components/FileDropzone';
 import * as pdfjsLib from 'pdfjs-dist';
 import '../lib/pdfWorker';
 import { usePageSEO } from '../lib/usePageSEO';
+import BackendLoader from '../components/BackendLoader';
 
 type CompressionLevel = 'backend-high-quality' | 'extreme' | 'recommended' | 'low';
 
@@ -113,7 +114,7 @@ export default function CompressPDF() {
               }
               canvas.width = Math.round(viewport.width);
               canvas.height = Math.round(viewport.height);
-              await page.render({ canvasContext: ctx, viewport }).promise;
+              await page.render({ canvas, canvasContext: ctx, viewport }).promise;
               const imgBytes = await canvasToJpegBytes(canvas, jpegQ);
               const pdfImage = await newPdfDoc.embedJpg(imgBytes);
               const newPage = newPdfDoc.addPage([canvas.width, canvas.height]);
@@ -218,8 +219,8 @@ export default function CompressPDF() {
           const ctx = canvas.getContext('2d');
           if (!ctx) { page.cleanup(); continue; }
           
-          // ✅ Correct: only pass canvasContext + viewport (no 'canvas' property)
-          await page.render({ canvasContext: ctx, viewport }).promise;
+          // ✅ pdfjs v5: pass canvas + canvasContext + viewport
+          await page.render({ canvas, canvasContext: ctx, viewport }).promise;
           
           // ✅ Reliable base64 decode — avoids fetch(dataUrl) which can fail in some browsers
           const dataUrl = canvas.toDataURL('image/jpeg', quality);
@@ -496,7 +497,27 @@ export default function CompressPDF() {
                     title="PDF Preview"
                   />
                 )}
-               {isProcessing && (
+               {isProcessing && compressionLevel === 'backend-high-quality' && (
+                 <div className="absolute inset-0 bg-black/60 backdrop-blur-sm flex flex-col items-center justify-center p-4">
+                   <BackendLoader
+                     title="Compressing PDF…"
+                     accentColor="blue"
+                     steps={[
+                       { icon: '📤', label: 'Uploading', detail: 'Sending your PDF to server...' },
+                       { icon: '🔍', label: 'Analyzing', detail: 'Checking optimization opportunities...' },
+                       { icon: '⚡', label: 'Compressing', detail: 'Ghostscript applying vector compression...' },
+                       { icon: '💾', label: 'Finalizing', detail: 'Packaging compressed output...' },
+                     ]}
+                     tips={[
+                       '⚡ Ghostscript vector compression keeps text crisp.',
+                       '🎨 Images are re-encoded at optimal quality settings.',
+                       '📉 Typical compression: 40-80% size reduction.',
+                       '🔒 File is deleted from server after download.',
+                     ]}
+                   />
+                 </div>
+               )}
+               {isProcessing && compressionLevel !== 'backend-high-quality' && (
                  <div className="absolute inset-0 bg-black/20 backdrop-blur-sm flex flex-col items-center justify-center text-white p-8">
                      <div className="w-12 h-12 border-4 border-white border-t-transparent rounded-full animate-spin mb-4"></div>
                      <p className="text-xl font-bold">{processingStep}</p>

@@ -1,4 +1,4 @@
-import { lazy, useEffect } from 'react';
+import { lazy, Suspense, useEffect } from 'react';
 
 import { Routes, Route } from 'react-router-dom';
 import Layout from './components/Layout';
@@ -114,6 +114,11 @@ export default function App() {
   }, []);
 
   return (
+    <Suspense fallback={
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', background: '#0f172a' }}>
+        <div style={{ width: 48, height: 48, border: '4px solid #334155', borderTopColor: '#6366f1', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+      </div>
+    }>
     <Routes>
       <Route path="/" element={<Layout />}>
         <Route index element={<Home />} />
@@ -217,5 +222,6 @@ export default function App() {
         <Route path="increase-size" element={<IncreasePdfSize />} />
       </Route>
     </Routes>
+    </Suspense>
   );
 }

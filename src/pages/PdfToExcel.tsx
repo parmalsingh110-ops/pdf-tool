@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Table2, Scan, Globe, Zap, CheckCircle2, Download, RotateCcw, AlertTriangle } from 'lucide-react';
 import FileDropzone from '../components/FileDropzone';
+import BackendLoader from '../components/BackendLoader';
 import { usePageSEO } from '../lib/usePageSEO';
 
 type Stage = 'idle' | 'processing' | 'done' | 'error';
@@ -94,11 +95,23 @@ export default function PdfToExcel() {
         )}
 
         {stage === 'processing' && (
-          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700 p-8 text-center shadow-sm">
-            <div className="w-16 h-16 rounded-full border-4 border-emerald-200 dark:border-emerald-900 border-t-emerald-600 animate-spin mx-auto mb-4" />
-            <h3 className="text-xl font-bold text-slate-800 dark:text-white mb-2">Converting PDF to Excel…</h3>
-            <p className="text-sm text-slate-500 dark:text-slate-400">Detecting tables and grid structures...</p>
-          </div>
+          <BackendLoader
+            title="Converting PDF to Excel…"
+            accentColor="emerald"
+            steps={[
+              { icon: '📤', label: 'Uploading', detail: 'Sending your PDF to server...' },
+              { icon: '🔍', label: 'Scanning', detail: 'Detecting table borders & grids...' },
+              { icon: '📊', label: 'Extracting', detail: 'Camelot is parsing table cells...' },
+              { icon: '💾', label: 'Building', detail: 'Writing rows to Excel spreadsheet...' },
+            ]}
+            tips={[
+              '💡 "Lattice" mode works best for tables with borders.',
+              '📊 "Stream" mode detects borderless/invisible-line tables.',
+              '⚡ Powered by Camelot — Python\'s best table extractor.',
+              '🔒 Files are auto-deleted from server after download.',
+              '📝 Each table is placed on its own separate Excel sheet.',
+            ]}
+          />
         )}
 
         {stage === 'done' && resultUrl && file && (
