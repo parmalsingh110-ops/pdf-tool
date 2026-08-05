@@ -19,6 +19,7 @@ export default function SearchablePdf() {
   const [errorMsg, setErrorMsg] = useState('');
   const [lang, setLang] = useState<Lang>('hin+eng');
   const [deskew, setDeskew] = useState(true);
+  const [forceOcr, setForceOcr] = useState(true);
 
   const handleDrop = async (files: File[]) => {
     if (!files.length) return;
@@ -34,6 +35,7 @@ export default function SearchablePdf() {
       formData.append('lang', lang);
       formData.append('deskew', deskew ? 'true' : 'false');
       formData.append('rotate', 'true');
+      formData.append('force_ocr', forceOcr ? 'true' : 'false');
 
       const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
       const res = await fetch(`${API_BASE_URL}/convert/make-searchable`, {
@@ -94,9 +96,13 @@ export default function SearchablePdf() {
                   ))}
                 </div>
               </div>
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-3 border-t border-slate-200 dark:border-slate-700 pt-4">
                 <input type="checkbox" id="deskew" checked={deskew} onChange={e => setDeskew(e.target.checked)} className="w-5 h-5 rounded text-blue-600 focus:ring-blue-500" />
                 <label htmlFor="deskew" className="text-sm font-medium text-slate-700 dark:text-slate-300">Auto-deskew (Straighten crooked pages)</label>
+              </div>
+              <div className="flex items-center gap-3">
+                <input type="checkbox" id="forceOcr" checked={forceOcr} onChange={e => setForceOcr(e.target.checked)} className="w-5 h-5 rounded text-blue-600 focus:ring-blue-500" />
+                <label htmlFor="forceOcr" className="text-sm font-medium text-slate-700 dark:text-slate-300">Force OCR (Discard existing broken text layer if any)</label>
               </div>
             </div>
             <FileDropzone onDrop={handleDrop} multiple={false} title="Drop your Scanned PDF here" subtitle="Uses OCRmyPDF for professional archiving quality" />
