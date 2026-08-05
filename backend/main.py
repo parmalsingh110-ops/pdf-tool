@@ -101,12 +101,12 @@ def is_pdf_scanned(inp_path: Path) -> bool:
         return False
 
 
-def ensure_auto_ocr(inp_path: Path) -> Path:
-    """If PDF is scanned, run OCRmyPDF to make it searchable first."""
-    if not is_pdf_scanned(inp_path):
+def ensure_auto_ocr(inp_path: Path, force: bool = False) -> Path:
+    """If PDF is scanned, or if forced, run OCRmyPDF to make it searchable first."""
+    if not force and not is_pdf_scanned(inp_path):
         return inp_path
 
-    print(f"[Auto-OCR] Detected scanned PDF, running OCR: {inp_path.name}")
+    print(f"[Auto-OCR] OCR triggered for: {inp_path.name}")
     
 
     try:
@@ -131,7 +131,7 @@ def ensure_auto_ocr(inp_path: Path) -> Path:
 # ─── 1. PDF → Word ─────────────────────────────────────────────
 
 @app.post("/convert/pdf-to-word")
-async def pdf_to_word(file: UploadFile = File(...)):
+async def pdf_to_word(file: UploadFile = File(...), force_ocr: bool = Form(False)):
     try:
         from pdf2docx import Converter
     except ImportError:
@@ -143,10 +143,10 @@ async def pdf_to_word(file: UploadFile = File(...)):
         inp.write_bytes(await file.read())
         
         # 1. Check if it's scanned (images) before OCR
-        scanned = is_pdf_scanned(inp)
+        scanned = force_ocr or is_pdf_scanned(inp)
         
         # 2. Run OCR if needed
-        inp = ensure_auto_ocr(inp)
+        inp = ensure_auto_ocr(inp, force=force_ocr)
 
         if scanned:
             # 3A. SCANNED PDF -> Extract clean text to drop the giant background image
@@ -189,7 +189,7 @@ async def pdf_to_word(file: UploadFile = File(...)):
 # ─── 2. PDF → Excel ────────────────────────────────────────────
 
 @app.post("/convert/pdf-to-excel")
-async def pdf_to_excel(file: UploadFile = File(...), method: str = Form("auto")):
+async def pdf_to_excel(file: UploadFile = File(...), method: str = Form("auto"), force_ocr: bool = Form(False)):
     try:
         import pdfplumber, openpyxl
         from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -200,7 +200,7 @@ async def pdf_to_excel(file: UploadFile = File(...), method: str = Form("auto"))
     out = temp_path(".xlsx")
     try:
         inp.write_bytes(await file.read())
-        inp = ensure_auto_ocr(inp)
+        inp = ensure_auto_ocr(inp, force=force_ocr)
 
         wb = openpyxl.Workbook()
         wb.remove(wb.active)
@@ -270,7 +270,7 @@ async def pdf_to_excel(file: UploadFile = File(...), method: str = Form("auto"))
 # ─── 3. PDF → PPT ──────────────────────────────────────────────
 
 @app.post("/convert/pdf-to-ppt")
-async def pdf_to_ppt(file: UploadFile = File(...), dpi: int = Form(150)):
+async def pdf_to_ppt(file: UploadFile = File(...), dpi: int = Form(150), force_ocr: bool = Form(False)):
     try:
         import fitz
         from pptx import Presentation
@@ -284,7 +284,7 @@ async def pdf_to_ppt(file: UploadFile = File(...), dpi: int = Form(150)):
     out = temp_path(".pptx")
     try:
         inp.write_bytes(await file.read())
-        inp = ensure_auto_ocr(inp)
+        inp = ensure_auto_ocr(inp, force=force_ocr)
 
         doc = fitz.open(str(inp))
         prs = Presentation()
@@ -375,15 +375,16 @@ async def office_to_pdf(file: UploadFile = File(...)):
         raise HTTPException(500, str(e))
 
 
-# ─── 5. Make Searchable PDF (OCRmyPDF) ─────────────────────────
-
 @app.post("/convert/make-searchable")
 async def make_searchable(
     file: UploadFile = File(...),
     lang: str = Form("hin+eng"),
     deskew: bool = Form(True),
-    rotate: bool = Form(True)
+    rotate: bool = Form(True),
+    force_ocr: bool = Form(False)
 ):
+    from fastapi.concurrency import run_in_threadpool
+    
     try:
         import ocrmypdf
     except ImportError:
@@ -393,12 +394,18 @@ async def make_searchable(
     out = temp_path("_searchable.pdf")
     try:
         inp.write_bytes(await file.read())
-        ocrmypdf.ocr(
-            str(inp), str(out), language=lang,
-            deskew=deskew, rotate_pages=rotate,
-            skip_text=True, output_type="pdfa",
-            progress_bar=False
-        )
+        
+        def run_ocrmypdf():
+            ocrmypdf.ocr(
+                str(inp), str(out), language=lang,
+                deskew=deskew, rotate_pages=rotate,
+                skip_text=not force_ocr, force_ocr=force_ocr,
+                output_type="pdf",
+                progress_bar=False
+            )
+            
+        await run_in_threadpool(run_ocrmypdf)
+        
         return FileResponse(
             str(out), media_type="application/pdf",
             filename=Path(file.filename).stem + "_searchable.pdf",
