@@ -1,8 +1,14 @@
 import React, { useState } from 'react';
 import { Search, Download, Loader2 } from 'lucide-react';
 import FileDropzone from '../components/FileDropzone';
+import { usePageSEO } from '../lib/usePageSEO';
+import BackendLoader from '../components/BackendLoader';
 
 export default function SearchReplace() {
+  usePageSEO(
+    'PDF Search & Replace — Find and Replace Text in PDF',
+    'Find and replace any text in your PDF files natively. Uses Python backend for perfect redaction and insertion.',
+  );
   const [file, setFile] = useState<File | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [replaceTerm, setReplaceTerm] = useState('');
@@ -93,6 +99,27 @@ export default function SearchReplace() {
 
           {error && <div className="p-3 bg-red-50 text-red-700 border border-red-200 rounded-lg mb-4 text-sm">{error}</div>}
           {matchCount !== null && <p className="text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg px-4 py-3 mb-4 font-medium">{matchCount} instances replaced.</p>}
+
+          {busy && (
+            <div className="mb-6">
+              <BackendLoader
+                title="Searching & Replacing…"
+                accentColor="blue"
+                steps={[
+                  { icon: '📤', label: 'Uploading', detail: 'Sending your PDF to server...' },
+                  { icon: '🔍', label: 'Searching', detail: 'Scanning every page for matches...' },
+                  { icon: '✏️', label: 'Replacing', detail: 'Redacting old text and inserting new...' },
+                  { icon: '💾', label: 'Saving', detail: 'Rebuilding the final PDF file...' },
+                ]}
+                tips={[
+                  '🔍 Search is case-insensitive across all pages.',
+                  '✏️ Replacement matches original font size perfectly.',
+                  '📦 All matches across every page are replaced at once.',
+                  '🔒 File is auto-deleted from server after download.',
+                ]}
+              />
+            </div>
+          )}
 
           <div className="flex gap-3">
             <button

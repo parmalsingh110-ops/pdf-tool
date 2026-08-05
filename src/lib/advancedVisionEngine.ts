@@ -275,6 +275,7 @@ export interface UniversalLayoutElement {
   description?: string;
   bbox: [number, number, number, number]; // REQUIRED: [ymin, xmin, ymax, xmax] 0-1000
   rows?: any[][];
+  has_borders?: boolean;
 }
 
 export interface UniversalLayoutResponse {

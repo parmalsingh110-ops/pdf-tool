@@ -67,11 +67,11 @@ async function captureFullPageImage(canvas: HTMLCanvasElement): Promise<{ data: 
   return { data: bytes, width: targetW, height: targetH };
 }
 
-function getAlignment(align?: string): AlignmentType {
+function getAlignment(align?: string): typeof AlignmentType[keyof typeof AlignmentType] {
   switch (align) {
     case 'center': return AlignmentType.CENTER;
     case 'right': return AlignmentType.RIGHT;
-    case 'justify': return AlignmentType.JUSTIFY;
+    case 'justify': return AlignmentType.BOTH;
     default: return AlignmentType.LEFT;
   }
 }
@@ -292,12 +292,6 @@ export async function buildUniversalDocx(pages: { layout: UniversalLayoutRespons
         document: {
           run: { font: 'Calibri', size: 22 },
         },
-      },
-    },
-    settings: {
-      // Ensure compatibility with older Word versions (prevents corrupt file errors)
-      compat: {
-        compatibilityMode: 15,  // Word 2013+ compatibility mode
       },
     },
     sections: [{

@@ -177,7 +177,7 @@ export default function PassportPhotoSheet() {
 
   // === LIVE EFFECT PREVIEW ===
   const [livePreviewUrl, setLivePreviewUrl] = useState<string | null>(null);
-  const liveDebounceRef = useRef<ReturnType<typeof setTimeout>>();
+  const liveDebounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const wrapRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ px: number; py: number; start: { x: number; y: number } } | null>(null);

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { FileText, CheckCircle2, Download, RotateCcw, AlertTriangle } from 'lucide-react';
 import FileDropzone from '../components/FileDropzone';
+import BackendLoader from '../components/BackendLoader';
 import { usePageSEO } from '../lib/usePageSEO';
 
 type Stage = 'idle' | 'processing' | 'done' | 'error';
@@ -84,11 +85,23 @@ export default function WordToPdfExact() {
         )}
 
         {stage === 'processing' && (
-          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700 p-8 text-center shadow-sm">
-            <div className="w-16 h-16 rounded-full border-4 border-indigo-200 dark:border-indigo-900 border-t-indigo-600 animate-spin mx-auto mb-4" />
-            <h3 className="text-xl font-bold text-slate-800 dark:text-white mb-2">Converting to PDF…</h3>
-            <p className="text-sm text-slate-500 dark:text-slate-400">Processing file with LibreOffice engine...</p>
-          </div>
+          <BackendLoader
+            title="Converting to PDF…"
+            accentColor="indigo"
+            steps={[
+              { icon: '📤', label: 'Uploading', detail: 'Sending your Office file to server...' },
+              { icon: '📚', label: 'Loading', detail: 'LibreOffice engine initializing...' },
+              { icon: '🖨️', label: 'Rendering', detail: 'Rendering to pixel-perfect PDF...' },
+              { icon: '🎯', label: 'Done', detail: 'Packaging your PDF output...' },
+            ]}
+            tips={[
+              '📚 LibreOffice preserves 100% of your original formatting.',
+              '📄 Supports .docx .pptx .xlsx .doc .ppt .xls .odt and more.',
+              '⚡ Same engine used by enterprise PDF workflows globally.',
+              '🔒 File is deleted from server immediately after download.',
+              '🎨 Fonts, tables, images — everything rendered precisely.',
+            ]}
+          />
         )}
 
         {stage === 'done' && resultUrl && file && (

@@ -1,8 +1,14 @@
 import React, { useState } from 'react';
 import { FileCode, Download, Loader2 } from 'lucide-react';
 import FileDropzone from '../components/FileDropzone';
+import { usePageSEO } from '../lib/usePageSEO';
+import BackendLoader from '../components/BackendLoader';
 
 export default function ExtractTables() {
+  usePageSEO(
+    'Extract Tables from PDF to Excel — Powered by Camelot',
+    'Extract all tables from any PDF into a perfectly structured Excel spreadsheet. Uses Python backend with Camelot for precise extraction.',
+  );
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [resultUrl, setResultUrl] = useState<string | null>(null);
@@ -60,11 +66,23 @@ export default function ExtractTables() {
       )}
 
       {busy && (
-        <div className="flex flex-col items-center p-12">
-          <Loader2 className="w-12 h-12 text-blue-600 animate-spin mb-4" />
-          <h2 className="text-xl font-bold text-slate-800 mb-2">Analyzing PDF Structure...</h2>
-          <p className="text-slate-500">Detecting table lines and extracting data perfectly</p>
-        </div>
+        <BackendLoader
+          title="Extracting Tables…"
+          accentColor="emerald"
+          steps={[
+            { icon: '📤', label: 'Uploading', detail: 'Sending your PDF to server...' },
+            { icon: '🔍', label: 'Detecting', detail: 'Finding table borders and grid lines...' },
+            { icon: '📊', label: 'Parsing', detail: 'Camelot is reading each cell...' },
+            { icon: '💾', label: 'Exporting', detail: 'Writing to formatted Excel sheets...' },
+          ]}
+          tips={[
+            '💡 Camelot is the gold standard for PDF table extraction.',
+            '📊 Both bordered and borderless tables are detected.',
+            '📝 Each detected table gets its own Excel sheet.',
+            '🔒 File deleted from server immediately after download.',
+            '⚡ Works even with complex merged cells and headers.',
+          ]}
+        />
       )}
 
       {errorMsg && (
