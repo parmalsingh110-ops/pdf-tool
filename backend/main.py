@@ -9,9 +9,10 @@ Run:
 
 import os, shutil, tempfile, subprocess, uuid, json
 from pathlib import Path
-from fastapi import FastAPI, UploadFile, File, HTTPException, Form
+from fastapi import FastAPI, UploadFile, File, HTTPException, Form, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
+from starlette.background import BackgroundTask
 
 app = FastAPI(title="PDF Tool Backend", version="2.0.0")
 
@@ -107,22 +108,6 @@ def ensure_auto_ocr(inp_path: Path) -> Path:
 
     print(f"[Auto-OCR] Detected scanned PDF, running OCR: {inp_path.name}")
     
-    # ─── PADDLE OCR TEST (User Requested) ───────────────────────────
-    try:
-        print("[Auto-OCR] Attempting PaddleOCR first...")
-        from paddleocr import PaddleOCR
-        # WARNING: Loading this model on Render Free Tier (512MB RAM) 
-        # will likely cause an instant OOM (Out of Memory) crash.
-        ocr = PaddleOCR(use_angle_cls=True, lang='en')
-        print("[Auto-OCR] PaddleOCR loaded successfully!")
-        # Note: PaddleOCR extracts text strings, it doesn't build a 
-        # searchable PDF file automatically. We need a PDF file for the 
-        # next steps (like Word/Excel conversion).
-        raise Exception("PaddleOCR loaded, but cannot generate a searchable PDF file directly.")
-    except Exception as e:
-        print(f"[Auto-OCR] PaddleOCR Failed/Skipped: {e}")
-        print("[Auto-OCR] Falling back to Tesseract (ocrmypdf) for stable PDF generation...")
-    # ────────────────────────────────────────────────────────────────
 
     try:
         result = subprocess.run(
@@ -193,7 +178,8 @@ async def pdf_to_word(file: UploadFile = File(...)):
         return FileResponse(
             str(out),
             media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            filename=Path(file.filename).stem + ".docx"
+            filename=Path(file.filename).stem + ".docx",
+            background=BackgroundTask(cleanup, inp, out)
         )
     except Exception as e:
         cleanup(inp, out)
@@ -273,7 +259,8 @@ async def pdf_to_excel(file: UploadFile = File(...), method: str = Form("auto"))
         return FileResponse(
             str(out),
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            filename=Path(file.filename).stem + ".xlsx"
+            filename=Path(file.filename).stem + ".xlsx",
+            background=BackgroundTask(cleanup, inp, out)
         )
     except Exception as e:
         cleanup(inp, out)
@@ -336,7 +323,8 @@ async def pdf_to_ppt(file: UploadFile = File(...), dpi: int = Form(150)):
         return FileResponse(
             str(out),
             media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
-            filename=Path(file.filename).stem + ".pptx"
+            filename=Path(file.filename).stem + ".pptx",
+            background=BackgroundTask(cleanup, inp, out)
         )
     except Exception as e:
         cleanup(inp, out)
@@ -379,7 +367,8 @@ async def office_to_pdf(file: UploadFile = File(...)):
         out_pdf = libreoffice_convert(inp, out_dir)
         return FileResponse(
             str(out_pdf), media_type="application/pdf",
-            filename=Path(file.filename).stem + ".pdf"
+            filename=Path(file.filename).stem + ".pdf",
+            background=BackgroundTask(cleanup, inp, out_dir)
         )
     except Exception as e:
         cleanup(inp, out_dir)
@@ -412,7 +401,8 @@ async def make_searchable(
         )
         return FileResponse(
             str(out), media_type="application/pdf",
-            filename=Path(file.filename).stem + "_searchable.pdf"
+            filename=Path(file.filename).stem + "_searchable.pdf",
+            background=BackgroundTask(cleanup, inp, out)
         )
     except Exception as e:
         cleanup(inp, out)
@@ -453,7 +443,8 @@ async def ppt_to_word(file: UploadFile = File(...)):
         return FileResponse(
             str(out),
             media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            filename=Path(file.filename).stem + ".docx"
+            filename=Path(file.filename).stem + ".docx",
+            background=BackgroundTask(cleanup, inp, out)
         )
     except Exception as e:
         cleanup(inp, out)
@@ -499,17 +490,19 @@ async def word_to_ppt(file: UploadFile = File(...)):
                 if content_tf:
                     p = content_tf.add_paragraph()
                     p.text = txt
-                    p.font.size = Pt(18)
+                    if p.runs:
+                        p.runs[0].font.size = Pt(18)
                     p.level = 1 if "Heading 2" in style else 0
 
-        if not prs.slides:
+        if len(prs.slides) == 0:
             prs.slides.add_slide(prs.slide_layouts[6])
         prs.save(str(out))
 
         return FileResponse(
             str(out),
             media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
-            filename=Path(file.filename).stem + ".pptx"
+            filename=Path(file.filename).stem + ".pptx",
+            background=BackgroundTask(cleanup, inp, out)
         )
     except Exception as e:
         cleanup(inp, out)
@@ -581,7 +574,8 @@ async def edit_pdf_endpoint(file: UploadFile = File(...), edits: str = Form(...)
         doc.save(str(out), garbage=3, deflate=True)
         doc.close()
         return FileResponse(str(out), media_type="application/pdf",
-                            filename="edited_" + file.filename)
+                            filename="edited_" + file.filename,
+                            background=BackgroundTask(cleanup, inp, out))
     except Exception as e:
         cleanup(inp, out)
         raise HTTPException(500, str(e))
@@ -617,7 +611,8 @@ async def compress_pdf(
             doc.close()
 
         return FileResponse(str(out), media_type="application/pdf",
-                            filename=f"compressed_{file.filename}")
+                            filename=f"compressed_{file.filename}",
+                            background=BackgroundTask(cleanup, inp, out))
     except Exception as e:
         cleanup(inp, out)
         raise HTTPException(500, str(e))
@@ -660,7 +655,8 @@ async def extract_tables(file: UploadFile = File(...)):
         return FileResponse(
             str(out),
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            filename=f"tables_{Path(file.filename).stem}.xlsx"
+            filename=f"tables_{Path(file.filename).stem}.xlsx",
+            background=BackgroundTask(cleanup, inp, out)
         )
     except HTTPException:
         raise
@@ -716,7 +712,8 @@ async def extract_images(file: UploadFile = File(...)):
                 zipf.write(f, f.name)
 
         return FileResponse(str(out_zip), media_type="application/zip",
-                            filename=f"images_{Path(file.filename).stem}.zip")
+                            filename=f"images_{Path(file.filename).stem}.zip",
+                            background=BackgroundTask(cleanup, inp, out_zip, img_dir))
     except HTTPException:
         raise
     except Exception as e:
@@ -793,7 +790,8 @@ async def search_replace(
             headers={
                 "X-Match-Count": str(match_count),
                 "Access-Control-Expose-Headers": "X-Match-Count"
-            }
+            },
+            background=BackgroundTask(cleanup, inp, out)
         )
     except Exception as e:
         cleanup(inp, out)

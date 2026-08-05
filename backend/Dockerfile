@@ -23,6 +23,9 @@ COPY . .
 
 EXPOSE 8000
 
-# ── Run with 2 workers + 300s timeout for heavy OCR tasks ────────
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", \
-     "--workers", "2", "--timeout-keep-alive", "300"]
+# ── Run with gunicorn (proper request timeout for heavy OCR tasks) ────────────
+CMD ["gunicorn", "main:app", \
+     "-k", "uvicorn.workers.UvicornWorker", \
+     "-w", "2", \
+     "--timeout", "300", \
+     "--bind", "0.0.0.0:8000"]
