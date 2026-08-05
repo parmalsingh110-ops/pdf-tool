@@ -16,6 +16,7 @@ export default function PdfToWord() {
   const [stage, setStage] = useState<Stage>('idle');
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState('');
+  const [forceOcr, setForceOcr] = useState(false);
 
   const handleDrop = async (files: File[]) => {
     if (!files.length) return;
@@ -28,6 +29,7 @@ export default function PdfToWord() {
     try {
       const formData = new FormData();
       formData.append('file', f);
+      formData.append('force_ocr', forceOcr ? 'true' : 'false');
 
       const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
       const res = await fetch(`${API_BASE_URL}/convert/pdf-to-word`, {
@@ -81,7 +83,15 @@ export default function PdfToWord() {
         </div>
 
         {stage === 'idle' && (
-          <FileDropzone onDrop={handleDrop} multiple={false} title="Drop your PDF here" subtitle="Uses powerful Python backend for perfect formatting" />
+          <div className="space-y-4">
+            <div className="bg-white dark:bg-slate-800 p-6 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm flex items-center gap-3">
+              <input type="checkbox" id="forceOcr" checked={forceOcr} onChange={e => setForceOcr(e.target.checked)} className="w-5 h-5 rounded text-blue-600 focus:ring-blue-500" />
+              <label htmlFor="forceOcr" className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                Force OCR (Check this if your PDF is a scanned document but still outputs as an image)
+              </label>
+            </div>
+            <FileDropzone onDrop={handleDrop} multiple={false} title="Drop your PDF here" subtitle="Uses powerful Python backend for perfect formatting" />
+          </div>
         )}
 
         {stage === 'processing' && (
