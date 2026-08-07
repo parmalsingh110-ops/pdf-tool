@@ -7,24 +7,84 @@ Run:
     uvicorn main:app --reload --port 8000
 """
 
-import os, shutil, tempfile, subprocess, uuid, json
+import os, shutil, tempfile, subprocess, uuid, json, time, logging
 from pathlib import Path
-from fastapi import FastAPI, UploadFile, File, HTTPException, Form, BackgroundTasks
+from fastapi import FastAPI, UploadFile, File, HTTPException, Form, BackgroundTasks, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from starlette.background import BackgroundTask
+from starlette.middleware.base import BaseHTTPMiddleware
 from dotenv import load_dotenv
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 
 load_dotenv()
 
+# ─── Logging Setup ─────────────────────────────────────────────
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(message)s",
+    datefmt="%Y-%m-%dT%H:%M:%S",
+)
+logger = logging.getLogger("pdf_tool")
+
+# ─── Rate Limiter Setup ─────────────────────────────────────────
+# Uses client IP to track requests. Protects against bots and scrapers.
+limiter = Limiter(key_func=get_remote_address)
+
 app = FastAPI(title="PDF Tool Backend", version="2.0.0")
 
+# Attach rate limiter to app state
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# ─── Middleware Stack ───────────────────────────────────────────
+# Order matters: CORS → GZip → Bandwidth Logger → CORS
+
+# 1. GZip compression: shrinks JSON/text responses automatically.
+#    minimum_size=500 means responses < 500 bytes won't be compressed (not worth it).
+app.add_middleware(GZipMiddleware, minimum_size=500)
+
+# 2. CORS — allow all origins for the frontend
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 3. Bandwidth Logging Middleware — logs IP, route, method, status, and response size.
+#    This is your "who is eating my bandwidth" tracker in Render logs.
+class BandwidthLoggerMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        start = time.perf_counter()
+        response = await call_next(request)
+
+        # We must NOT buffer the response in memory (bad for large PDFs).
+        # Instead, we wrap the streaming iterator to count bytes as they go out.
+        original_iterator = response.body_iterator
+
+        async def logging_iterator():
+            total_bytes = 0
+            try:
+                async for chunk in original_iterator:
+                    total_bytes += len(chunk)
+                    yield chunk
+            finally:
+                elapsed_ms = round((time.perf_counter() - start) * 1000, 1)
+                size_kb = round(total_bytes / 1024, 2)
+                client_ip = request.headers.get("x-forwarded-for", request.client.host if request.client else "unknown")
+                logger.info(
+                    f"[BANDWIDTH] {client_ip} | {request.method} {request.url.path} "
+                    f"→ {response.status_code} | {size_kb}KB | {elapsed_ms}ms"
+                )
+
+        response.body_iterator = logging_iterator()
+        return response
+
+app.add_middleware(BandwidthLoggerMiddleware)
 
 TEMP_DIR = Path(tempfile.gettempdir()) / "pdf_tool_backend"
 TEMP_DIR.mkdir(exist_ok=True)
@@ -60,22 +120,23 @@ def has_non_latin(text: str) -> bool:
 
 @app.get("/")
 def read_root():
-    return {
-        "status": "ok",
-        "message": "PDF Tool Backend v2.0 is running! 🚀",
-        "endpoints": [
-            "/convert/pdf-to-word", "/convert/pdf-to-excel", "/convert/pdf-to-ppt",
-            "/convert/office-to-pdf", "/convert/make-searchable",
-            "/convert/ppt-to-word", "/convert/word-to-ppt",
-            "/compress-pdf", "/extract-tables", "/extract-images",
-            "/search-replace", "/edit-pdf", "/ocr/analyze",
-        ]
-    }
+    # Minimal root response — avoids large JSON payload draining bandwidth
+    return {"status": "ok", "version": "2.0.0"}
 
 
-@app.get("/health")
-def health():
-    return {"status": "ok"}
+# Ultra-lightweight health check — supports both HEAD (Uptime Robot) and GET.
+# HEAD request: server sends ONLY headers (zero body bytes transferred).
+# GET request: returns a tiny fixed-size JSON body.
+# Rate-limited to 30 requests/minute per IP to block bots.
+@app.api_route("/health", methods=["GET", "HEAD"])
+@limiter.limit("30/minute")
+def health(request: Request, response: Response):
+    if request.method == "HEAD":
+        # Zero bytes sent — perfect for Uptime Robot pings
+        response.status_code = 200
+        return Response(status_code=200)
+    # GET: return a tiny JSON (only ~15 bytes after GZip)
+    return JSONResponse(content={"status": "ok"}, status_code=200)
 
 
 # ─── AUTO-OCR HELPER ────────────────────────────────────────────

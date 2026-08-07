@@ -110,7 +110,8 @@ export default function App() {
   // uploads a file. If the backend is already awake, this costs nothing.
   useEffect(() => {
     const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-    fetch(`${API_BASE}/health`, { method: 'GET' }).catch(() => {/* silent — server may be starting */});
+    // HEAD request = zero bytes returned from server — wakes up Render without any data transfer
+    fetch(`${API_BASE}/health`, { method: 'HEAD' }).catch(() => {/* silent — server may be starting */});
   }, []);
 
   return (
