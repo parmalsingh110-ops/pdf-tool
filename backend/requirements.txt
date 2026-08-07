@@ -14,3 +14,4 @@ numpy
 ocrmypdf>=17.8.1
 ilovepdf>=1.0.0
 python-dotenv>=1.0.0
+slowapi>=0.1.9
