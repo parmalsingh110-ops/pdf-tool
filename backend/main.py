@@ -1,14 +1,37 @@
 """
-PDF Tool — FastAPI Backend v2.0
-================================
+PDF Tool — FastAPI Backend v2.1 (Security Hardened)
+====================================================
 High-quality PDF/Office conversions using Python open-source tools.
+
+Security hardening applied:
+  - Upload size limits (MAX_UPLOAD_MB env var)
+  - Safe error messages (no raw exception leakage)
+  - Rate limiting on all expensive endpoints
+  - Security response headers
+  - CORS restricted to allowed origins
+  - DPI clamping, page-count limits
+  - LibreOffice concurrency semaphore
+  - Safe filenames in all FileResponse
+  - /docs disabled in production (ENABLE_DOCS=false)
+  - All print() replaced with structured logger
+  - iLovePDF API key strictly server-side (env var only)
 
 Run:
     uvicorn main:app --reload --port 8000
 """
 
-import os, shutil, tempfile, subprocess, uuid, json, time, logging
+import os
+import re
+import shutil
+import tempfile
+import subprocess
+import uuid
+import json
+import time
+import logging
+import asyncio
 from pathlib import Path
+
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form, BackgroundTasks, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
@@ -25,38 +48,94 @@ load_dotenv()
 # ─── Logging Setup ─────────────────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s | %(message)s",
+    format="%(asctime)s | %(levelname)s | %(message)s",
     datefmt="%Y-%m-%dT%H:%M:%S",
 )
 logger = logging.getLogger("pdf_tool")
 
+# ─── Security Configuration (from environment) ─────────────────
+# All limits are configurable via Render Environment Variables.
+# Defaults are reasonable for a free-tier public tool.
+
+MAX_UPLOAD_MB: int = int(os.environ.get("MAX_UPLOAD_MB", "50"))
+MAX_UPLOAD_BYTES: int = MAX_UPLOAD_MB * 1024 * 1024
+
+MAX_PDF_PAGES: int = int(os.environ.get("MAX_PDF_PAGES", "300"))
+MAX_DPI: int = int(os.environ.get("MAX_DPI", "300"))
+MIN_DPI: int = 72
+MAX_PROCESSING_SECONDS: int = int(os.environ.get("MAX_PROCESSING_SECONDS", "300"))
+
+# Disable /docs and /redoc in production (set ENABLE_DOCS=true to re-enable)
+ENABLE_DOCS: bool = os.environ.get("ENABLE_DOCS", "false").lower() == "true"
+
+# CORS: comma-separated list of allowed origins
+_raw_origins = os.environ.get(
+    "ALLOWED_ORIGINS",
+    "https://www.pdfmediasuite.in,https://pdfmediasuite.in,http://localhost:3000,http://localhost:4173,http://127.0.0.1:3000"
+)
+ALLOWED_ORIGINS: list[str] = [o.strip() for o in _raw_origins.split(",") if o.strip()]
+
+# LibreOffice concurrency: limit concurrent soffice processes to avoid RAM exhaustion
+LIBREOFFICE_SEMAPHORE = asyncio.Semaphore(int(os.environ.get("MAX_CONCURRENT_LIBREOFFICE", "2")))
+
 # ─── Rate Limiter Setup ─────────────────────────────────────────
-# Uses client IP to track requests. Protects against bots and scrapers.
+# Uses client IP to track requests.
+# X-Forwarded-For header is used behind Render's proxy.
 limiter = Limiter(key_func=get_remote_address)
 
-app = FastAPI(title="PDF Tool Backend", version="2.0.0")
+# ─── FastAPI App ─────────────────────────────────────────────────
+docs_url = "/docs" if ENABLE_DOCS else None
+redoc_url = "/redoc" if ENABLE_DOCS else None
+openapi_url = "/openapi.json" if ENABLE_DOCS else None
+
+app = FastAPI(
+    title="PDF Tool Backend",
+    version="2.1.0",
+    docs_url=docs_url,
+    redoc_url=redoc_url,
+    openapi_url=openapi_url,
+)
 
 # Attach rate limiter to app state
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-# ─── Middleware Stack ───────────────────────────────────────────
-# Order matters: CORS → GZip → Bandwidth Logger → CORS
 
-# 1. GZip compression: shrinks JSON/text responses automatically.
-#    minimum_size=500 means responses < 500 bytes won't be compressed (not worth it).
+# ─── Middleware Stack ───────────────────────────────────────────
+
+# 1. GZip compression
 app.add_middleware(GZipMiddleware, minimum_size=500)
 
-# 2. CORS — allow all origins for the frontend
+# 2. CORS — restricted to known production origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=ALLOWED_ORIGINS,
+    allow_methods=["GET", "POST", "HEAD", "OPTIONS"],
+    allow_headers=["Content-Type", "Accept", "Authorization"],
+    expose_headers=["X-Match-Count"],
+    allow_credentials=False,
 )
 
-# 3. Bandwidth Logging Middleware — logs IP, route, method, status, and response size.
-#    This is your "who is eating my bandwidth" tracker in Render logs.
+
+# 3. Security Headers Middleware
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """Adds security response headers to every response."""
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Permissions-Policy"] = "geolocation=(), camera=(), microphone=()"
+        # HSTS: only send on HTTPS (Render always serves HTTPS in production)
+        if request.url.scheme == "https":
+            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        return response
+
+
+app.add_middleware(SecurityHeadersMiddleware)
+
+
+# 4. Bandwidth Logging Middleware — logs IP, route, method, status, response size.
 class BandwidthLoggerMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         start = time.perf_counter()
@@ -75,7 +154,12 @@ class BandwidthLoggerMiddleware(BaseHTTPMiddleware):
             finally:
                 elapsed_ms = round((time.perf_counter() - start) * 1000, 1)
                 size_kb = round(total_bytes / 1024, 2)
-                client_ip = request.headers.get("x-forwarded-for", request.client.host if request.client else "unknown")
+                # Safely extract client IP — prefer X-Forwarded-For (Render proxy)
+                forwarded = request.headers.get("x-forwarded-for", "")
+                # Only use the first IP from X-Forwarded-For to prevent IP spoofing
+                client_ip = forwarded.split(",")[0].strip() if forwarded else (
+                    request.client.host if request.client else "unknown"
+                )
                 logger.info(
                     f"[BANDWIDTH] {client_ip} | {request.method} {request.url.path} "
                     f"→ {response.status_code} | {size_kb}KB | {elapsed_ms}ms"
@@ -84,13 +168,103 @@ class BandwidthLoggerMiddleware(BaseHTTPMiddleware):
         response.body_iterator = logging_iterator()
         return response
 
+
 app.add_middleware(BandwidthLoggerMiddleware)
 
 TEMP_DIR = Path(tempfile.gettempdir()) / "pdf_tool_backend"
 TEMP_DIR.mkdir(exist_ok=True)
 
 
-# ─── Helpers ───────────────────────────────────────────────────
+# ─── Security Helpers ──────────────────────────────────────────
+
+async def safe_read_upload(file: UploadFile) -> bytes:
+    """
+    Read uploaded file into bytes with a hard size cap.
+    Raises HTTP 413 if the file exceeds MAX_UPLOAD_BYTES.
+    Avoids reading the entire file when the Content-Length header already
+    reveals the file is too large.
+    """
+    # Quick check: if Content-Length header is present and already too large, reject early
+    content_length = file.size  # FastAPI sets this from Content-Length
+    if content_length is not None and content_length > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large. Maximum allowed size is {MAX_UPLOAD_MB} MB."
+        )
+
+    # Read in chunks so we can enforce the limit even without a Content-Length header
+    chunks: list[bytes] = []
+    total = 0
+    chunk_size = 1024 * 64  # 64 KB chunks
+    while True:
+        chunk = await file.read(chunk_size)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > MAX_UPLOAD_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=f"File too large. Maximum allowed size is {MAX_UPLOAD_MB} MB."
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def safe_filename(user_filename: str | None, fallback: str = "output") -> str:
+    """
+    Sanitize a user-supplied filename for use in Content-Disposition headers.
+    - Strips path separators (../  /  \\)
+    - Keeps only alphanumeric, dash, underscore, dot
+    - Truncates to 200 characters
+    - Falls back to 'output' if result is empty
+    """
+    if not user_filename:
+        return fallback
+    # Take only the basename — no directory traversal possible
+    name = Path(user_filename).name
+    # Strip non-safe characters
+    name = re.sub(r"[^\w.\-]", "_", name)
+    # Truncate
+    name = name[:200]
+    return name if name else fallback
+
+
+def safe_error(e: Exception, endpoint: str = "") -> HTTPException:
+    """
+    Logs the real exception server-side (including stack details).
+    Returns a generic HTTP 500 that does NOT expose internal state to the user.
+    """
+    logger.error(f"[ERROR] endpoint={endpoint} type={type(e).__name__} msg={str(e)[:500]}")
+    return HTTPException(
+        status_code=500,
+        detail="Unable to process this file. Please try again. If the problem persists, try a different or smaller file."
+    )
+
+
+def check_pdf_page_count(path: Path, endpoint: str = "") -> int:
+    """
+    Open a PDF and check its page count against MAX_PDF_PAGES.
+    Raises HTTP 400 if too many pages. Returns page count on success.
+    """
+    try:
+        import fitz
+        doc = fitz.open(str(path))
+        pages = len(doc)
+        doc.close()
+        if pages > MAX_PDF_PAGES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"PDF has too many pages ({pages}). Maximum allowed is {MAX_PDF_PAGES} pages."
+            )
+        return pages
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.warning(f"[PAGE-COUNT] Could not check page count for {path.name}: {e}")
+        return 0  # If we can't read it, let the downstream handler deal with it
+
+
+# ─── General Helpers ───────────────────────────────────────────
 
 def temp_path(suffix: str) -> Path:
     return TEMP_DIR / f"{uuid.uuid4().hex}{suffix}"
@@ -121,7 +295,7 @@ def has_non_latin(text: str) -> bool:
 @app.get("/")
 def read_root():
     # Minimal root response — avoids large JSON payload draining bandwidth
-    return {"status": "ok", "version": "2.0.0"}
+    return {"status": "ok", "version": "2.1.0"}
 
 
 # Ultra-lightweight health check — supports both HEAD (Uptime Robot) and GET.
@@ -166,36 +340,52 @@ def is_pdf_scanned(inp_path: Path) -> bool:
 
 
 async def run_hybrid_ocr(inp_path: Path, out_path: Path, lang: str = "eng+hin", deskew: bool = True, rotate: bool = True, force_ocr: bool = False):
+    """
+    Hybrid OCR: tries iLovePDF API first (if keys present), falls back to local OCRmyPDF.
+    iLovePDF API key is ALWAYS read from server-side environment variables — never from frontend.
+    """
     from fastapi.concurrency import run_in_threadpool
-    import os, shutil, uuid
-    
+
     ilovepdf_pub = os.environ.get("ILOVEPDF_PUBLIC_KEY", "").strip()
     ilovepdf_sec = os.environ.get("ILOVEPDF_SECRET_KEY", "").strip()
 
     if ilovepdf_pub and ilovepdf_sec:
-        print(f"[OCR] Using iLovePDF API for OCR on {inp_path.name}")
+        logger.info(f"[OCR] Using iLovePDF API for: {inp_path.name}")
         def run_ilovepdf():
-            from ilovepdf import PdfOcrTask
-            task = PdfOcrTask(public_key=ilovepdf_pub, secret_key=ilovepdf_sec)
-            task.add_file(str(inp_path))
-            task.execute()
-            
-            out_dir = Path(tempfile.gettempdir()) / uuid.uuid4().hex
-            out_dir.mkdir(exist_ok=True)
-            task.download(str(out_dir))
-            
-            downloaded_files = list(out_dir.iterdir())
-            if downloaded_files:
-                shutil.move(str(downloaded_files[0]), str(out_path))
-            shutil.rmtree(out_dir)
+            import concurrent.futures
+            import signal
+
+            def _do_ilovepdf():
+                from ilovepdf import PdfOcrTask
+                task = PdfOcrTask(public_key=ilovepdf_pub, secret_key=ilovepdf_sec)
+                task.add_file(str(inp_path))
+                task.execute()
+
+                out_dir = Path(tempfile.gettempdir()) / uuid.uuid4().hex
+                out_dir.mkdir(exist_ok=True)
+                task.download(str(out_dir))
+
+                downloaded_files = list(out_dir.iterdir())
+                if downloaded_files:
+                    shutil.move(str(downloaded_files[0]), str(out_path))
+                shutil.rmtree(out_dir, ignore_errors=True)
+
+            # Run with a timeout to prevent hung iLovePDF calls from blocking workers
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(_do_ilovepdf)
+                try:
+                    future.result(timeout=90)  # 90-second timeout for iLovePDF
+                except concurrent.futures.TimeoutError:
+                    raise RuntimeError("iLovePDF OCR timed out after 90 seconds")
 
         try:
             await run_in_threadpool(run_ilovepdf)
             return True
         except Exception as e:
-            print(f"[OCR] iLovePDF API failed: {e}. Falling back to local OCR.")
+            # Log the error without exposing the API key or internal state
+            logger.error(f"[OCR] iLovePDF API failed: {type(e).__name__}. Falling back to local OCR.")
 
-    print(f"[OCR] Using local OCRmyPDF for {inp_path.name}")
+    logger.info(f"[OCR] Using local OCRmyPDF for: {inp_path.name}")
     try:
         import ocrmypdf
     except ImportError:
@@ -212,18 +402,19 @@ async def run_hybrid_ocr(inp_path: Path, out_path: Path, lang: str = "eng+hin", 
     await run_in_threadpool(run_ocrmypdf)
     return True
 
+
 async def ensure_auto_ocr(inp_path: Path, force: bool = False) -> Path:
     """If PDF is scanned, or if forced, run hybrid OCR to make it searchable first."""
     if not force and not is_pdf_scanned(inp_path):
         return inp_path
 
-    print(f"[Auto-OCR] Hybrid OCR triggered for: {inp_path.name}")
+    logger.info(f"[Auto-OCR] Hybrid OCR triggered for: {inp_path.name}")
     out_path = inp_path.with_name(inp_path.stem + "_ocr.pdf")
     try:
         await run_hybrid_ocr(inp_path, out_path, force_ocr=force)
         shutil.move(str(out_path), str(inp_path))
     except Exception as e:
-        print(f"[Auto-OCR] Failed: {e}")
+        logger.error(f"[Auto-OCR] Failed: {type(e).__name__}: {str(e)[:200]}")
 
     return inp_path
 
@@ -231,7 +422,8 @@ async def ensure_auto_ocr(inp_path: Path, force: bool = False) -> Path:
 # ─── 1. PDF → Word ─────────────────────────────────────────────
 
 @app.post("/convert/pdf-to-word")
-async def pdf_to_word(file: UploadFile = File(...), force_ocr: bool = Form(False)):
+@limiter.limit("10/minute")
+async def pdf_to_word(request: Request, file: UploadFile = File(...), force_ocr: bool = Form(False)):
     try:
         from pdf2docx import Converter
     except ImportError:
@@ -240,22 +432,23 @@ async def pdf_to_word(file: UploadFile = File(...), force_ocr: bool = Form(False
     inp = temp_path(".pdf")
     out = temp_path(".docx")
     try:
-        inp.write_bytes(await file.read())
-        
+        inp.write_bytes(await safe_read_upload(file))
+        check_pdf_page_count(inp, "pdf-to-word")
+
         # 1. Check if it's scanned (images) before OCR
         scanned = force_ocr or is_pdf_scanned(inp)
-        
+
         # 2. Run OCR if needed
         inp = await ensure_auto_ocr(inp, force=force_ocr)
 
         if scanned:
             # 3A. SCANNED PDF -> Extract clean text to drop the giant background image
-            print(f"[PDF2Word] Scanned PDF detected. Extracting clean OCR text to Word for {inp.name}")
+            logger.info(f"[PDF2Word] Scanned PDF detected. Extracting clean OCR text for: {inp.name}")
             import fitz
             from docx import Document
             docx_doc = Document()
             pdf = fitz.open(inp)
-            
+
             for i, page in enumerate(pdf):
                 text = page.get_text("text").strip()
                 if text:
@@ -268,28 +461,34 @@ async def pdf_to_word(file: UploadFile = File(...), force_ocr: bool = Form(False
             docx_doc.save(str(out))
         else:
             # 3B. NATIVE PDF -> Use pdf2docx to preserve exact layout
-            print(f"[PDF2Word] Native PDF detected. Using pdf2docx for exact layout for {inp.name}")
+            logger.info(f"[PDF2Word] Native PDF detected. Using pdf2docx for: {inp.name}")
             cv = Converter(str(inp))
             cv.convert(str(out), multi_processing=False,
                        line_overlap_threshold=0.9,
                        min_svg_gap_dx=15.0)
             cv.close()
 
+        stem = safe_filename(file.filename, "document")
+        out_name = Path(stem).stem + ".docx"
         return FileResponse(
             str(out),
             media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            filename=Path(file.filename).stem + ".docx",
+            filename=out_name,
             background=BackgroundTask(cleanup, inp, out)
         )
+    except HTTPException:
+        cleanup(inp, out)
+        raise
     except Exception as e:
         cleanup(inp, out)
-        raise HTTPException(500, str(e))
+        raise safe_error(e, "pdf-to-word")
 
 
 # ─── 2. PDF → Excel ────────────────────────────────────────────
 
 @app.post("/convert/pdf-to-excel")
-async def pdf_to_excel(file: UploadFile = File(...), method: str = Form("auto"), force_ocr: bool = Form(False)):
+@limiter.limit("10/minute")
+async def pdf_to_excel(request: Request, file: UploadFile = File(...), method: str = Form("auto"), force_ocr: bool = Form(False)):
     try:
         import pdfplumber, openpyxl
         from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -299,7 +498,8 @@ async def pdf_to_excel(file: UploadFile = File(...), method: str = Form("auto"),
     inp = temp_path(".pdf")
     out = temp_path(".xlsx")
     try:
-        inp.write_bytes(await file.read())
+        inp.write_bytes(await safe_read_upload(file))
+        check_pdf_page_count(inp, "pdf-to-excel")
         inp = await ensure_auto_ocr(inp, force=force_ocr)
 
         wb = openpyxl.Workbook()
@@ -329,7 +529,7 @@ async def pdf_to_excel(file: UploadFile = File(...), method: str = Form("auto"),
                                 cell.alignment = Alignment(wrap_text=True)
                     break
         except Exception as camelot_err:
-            print(f"Camelot failed: {camelot_err}")
+            logger.warning(f"[PDF2Excel] Camelot failed, using pdfplumber fallback: {type(camelot_err).__name__}")
 
         # Fallback: pdfplumber
         if not tables_found:
@@ -356,21 +556,27 @@ async def pdf_to_excel(file: UploadFile = File(...), method: str = Form("auto"),
             wb.create_sheet("Sheet1")
         wb.save(str(out))
 
+        stem = safe_filename(file.filename, "document")
+        out_name = Path(stem).stem + ".xlsx"
         return FileResponse(
             str(out),
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            filename=Path(file.filename).stem + ".xlsx",
+            filename=out_name,
             background=BackgroundTask(cleanup, inp, out)
         )
+    except HTTPException:
+        cleanup(inp, out)
+        raise
     except Exception as e:
         cleanup(inp, out)
-        raise HTTPException(500, str(e))
+        raise safe_error(e, "pdf-to-excel")
 
 
 # ─── 3. PDF → PPT ──────────────────────────────────────────────
 
 @app.post("/convert/pdf-to-ppt")
-async def pdf_to_ppt(file: UploadFile = File(...), dpi: int = Form(150), force_ocr: bool = Form(False)):
+@limiter.limit("10/minute")
+async def pdf_to_ppt(request: Request, file: UploadFile = File(...), dpi: int = Form(150), force_ocr: bool = Form(False)):
     try:
         import fitz
         from pptx import Presentation
@@ -380,10 +586,14 @@ async def pdf_to_ppt(file: UploadFile = File(...), dpi: int = Form(150), force_o
     except ImportError:
         raise HTTPException(500, "Run: pip install PyMuPDF python-pptx")
 
+    # Clamp DPI to safe range to prevent memory exhaustion
+    dpi = max(MIN_DPI, min(dpi, MAX_DPI))
+
     inp = temp_path(".pdf")
     out = temp_path(".pptx")
     try:
-        inp.write_bytes(await file.read())
+        inp.write_bytes(await safe_read_upload(file))
+        check_pdf_page_count(inp, "pdf-to-ppt")
         inp = await ensure_auto_ocr(inp, force=force_ocr)
 
         doc = fitz.open(str(inp))
@@ -420,63 +630,97 @@ async def pdf_to_ppt(file: UploadFile = File(...), dpi: int = Form(150), force_o
         doc.close()
         prs.save(str(out))
 
+        stem = safe_filename(file.filename, "presentation")
+        out_name = Path(stem).stem + ".pptx"
         return FileResponse(
             str(out),
             media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
-            filename=Path(file.filename).stem + ".pptx",
+            filename=out_name,
             background=BackgroundTask(cleanup, inp, out)
         )
+    except HTTPException:
+        cleanup(inp, out)
+        raise
     except Exception as e:
         cleanup(inp, out)
-        raise HTTPException(500, str(e))
+        raise safe_error(e, "pdf-to-ppt")
 
 
 # ─── 4. Office → PDF (LibreOffice) ────────────────────────────
 
-def libreoffice_convert(inp: Path, out_dir: Path) -> Path:
-    lo = next((c for c in [
+def _find_libreoffice() -> str:
+    """Find LibreOffice executable. Returns path or raises RuntimeError."""
+    candidates = [
         "soffice", "libreoffice",
         "/Applications/LibreOffice.app/Contents/MacOS/soffice",
         "/usr/bin/soffice",
-    ] if shutil.which(c) or Path(c).exists()), None)
-    if not lo:
-        raise RuntimeError("LibreOffice not found.")
+    ]
+    for c in candidates:
+        if shutil.which(c) or Path(c).exists():
+            return c
+    raise RuntimeError("LibreOffice not found.")
+
+
+def libreoffice_convert(inp: Path, out_dir: Path) -> Path:
+    """
+    Convert a file to PDF using LibreOffice.
+    Arguments are passed as a list (no shell=True) to prevent injection.
+    """
+    lo = _find_libreoffice()
     r = subprocess.run(
         [lo, "--headless", "--convert-to", "pdf", "--outdir", str(out_dir), str(inp)],
-        capture_output=True, text=True, timeout=120
+        capture_output=True, text=True, timeout=MAX_PROCESSING_SECONDS
     )
     if r.returncode != 0:
-        raise RuntimeError(r.stderr[:500])
+        # Log stderr internally but only expose a generic message
+        logger.error(f"[LibreOffice] Conversion failed: {r.stderr[:300]}")
+        raise RuntimeError("LibreOffice conversion failed.")
     out_pdf = out_dir / (inp.stem + ".pdf")
     if not out_pdf.exists():
-        raise RuntimeError("LibreOffice output PDF not found")
+        raise RuntimeError("LibreOffice output PDF not found.")
     return out_pdf
 
 
+ALLOWED_OFFICE_EXTENSIONS = {".docx", ".doc", ".pptx", ".ppt", ".xlsx", ".xls", ".odt", ".odp"}
+
+
 @app.post("/convert/office-to-pdf")
-async def office_to_pdf(file: UploadFile = File(...)):
-    ext = Path(file.filename).suffix.lower()
-    if ext not in {".docx", ".doc", ".pptx", ".ppt", ".xlsx", ".xls", ".odt", ".odp"}:
-        raise HTTPException(400, f"Unsupported format: {ext}")
+@limiter.limit("10/minute")
+async def office_to_pdf(request: Request, file: UploadFile = File(...)):
+    ext = Path(safe_filename(file.filename or "")).suffix.lower()
+    if ext not in ALLOWED_OFFICE_EXTENSIONS:
+        raise HTTPException(400, f"Unsupported format. Allowed: {', '.join(ALLOWED_OFFICE_EXTENSIONS)}")
 
     inp = temp_path(ext)
     out_dir = TEMP_DIR / uuid.uuid4().hex
     out_dir.mkdir(exist_ok=True)
     try:
-        inp.write_bytes(await file.read())
-        out_pdf = libreoffice_convert(inp, out_dir)
+        inp.write_bytes(await safe_read_upload(file))
+
+        # Acquire semaphore to limit concurrent LibreOffice processes
+        async with LIBREOFFICE_SEMAPHORE:
+            from fastapi.concurrency import run_in_threadpool
+            out_pdf = await run_in_threadpool(libreoffice_convert, inp, out_dir)
+
+        stem = safe_filename(file.filename, "document")
+        out_name = Path(stem).stem + ".pdf"
         return FileResponse(
             str(out_pdf), media_type="application/pdf",
-            filename=Path(file.filename).stem + ".pdf",
+            filename=out_name,
             background=BackgroundTask(cleanup, inp, out_dir)
         )
+    except HTTPException:
+        cleanup(inp, out_dir)
+        raise
     except Exception as e:
         cleanup(inp, out_dir)
-        raise HTTPException(500, str(e))
+        raise safe_error(e, "office-to-pdf")
 
 
 @app.post("/convert/make-searchable")
+@limiter.limit("5/minute")
 async def make_searchable(
+    request: Request,
     file: UploadFile = File(...),
     lang: str = Form("hin+eng"),
     deskew: bool = Form(True),
@@ -485,34 +729,43 @@ async def make_searchable(
 ):
     inp = temp_path(".pdf")
     out = temp_path("_searchable.pdf")
-    inp.write_bytes(await file.read())
-
-    # Smart Check: If it's not scanned and user didn't force OCR, skip to save credits!
-    if not force_ocr and not is_pdf_scanned(inp):
-        print(f"[OCR] Skipping OCR for {inp.name} because it already has text! (Credit Saver)")
-        # Just return the original file
-        return FileResponse(
-            str(inp), media_type="application/pdf",
-            filename=Path(file.filename).stem + "_searchable.pdf",
-            background=BackgroundTask(cleanup, inp)
-        )
-
     try:
+        inp.write_bytes(await safe_read_upload(file))
+        check_pdf_page_count(inp, "make-searchable")
+
+        # Smart Check: If it's not scanned and user didn't force OCR, skip to save credits!
+        if not force_ocr and not is_pdf_scanned(inp):
+            logger.info(f"[OCR] Skipping OCR — PDF already has text. (Credit Saver)")
+            # Just return the original file
+            stem = safe_filename(file.filename, "document")
+            out_name = Path(stem).stem + "_searchable.pdf"
+            return FileResponse(
+                str(inp), media_type="application/pdf",
+                filename=out_name,
+                background=BackgroundTask(cleanup, inp)
+            )
+
         await run_hybrid_ocr(inp, out, lang=lang, deskew=deskew, rotate=rotate, force_ocr=force_ocr)
+        stem = safe_filename(file.filename, "document")
+        out_name = Path(stem).stem + "_searchable.pdf"
         return FileResponse(
             str(out), media_type="application/pdf",
-            filename=Path(file.filename).stem + "_searchable.pdf",
+            filename=out_name,
             background=BackgroundTask(cleanup, inp, out)
         )
+    except HTTPException:
+        cleanup(inp, out)
+        raise
     except Exception as e:
         cleanup(inp, out)
-        raise HTTPException(500, str(e))
+        raise safe_error(e, "make-searchable")
 
 
 # ─── 6. PPT → Word ────────────────────────────────────────────
 
 @app.post("/convert/ppt-to-word")
-async def ppt_to_word(file: UploadFile = File(...)):
+@limiter.limit("10/minute")
+async def ppt_to_word(request: Request, file: UploadFile = File(...)):
     try:
         from pptx import Presentation as Pptx
         from docx import Document
@@ -523,7 +776,7 @@ async def ppt_to_word(file: UploadFile = File(...)):
     inp = temp_path(".pptx")
     out = temp_path(".docx")
     try:
-        inp.write_bytes(await file.read())
+        inp.write_bytes(await safe_read_upload(file))
         prs = Pptx(str(inp))
         doc = Document()
         doc.add_heading("Presentation Content", 0)
@@ -540,21 +793,27 @@ async def ppt_to_word(file: UploadFile = File(...)):
                                 p.runs[0].font.size = para.runs[0].font.size
 
         doc.save(str(out))
+        stem = safe_filename(file.filename, "document")
+        out_name = Path(stem).stem + ".docx"
         return FileResponse(
             str(out),
             media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            filename=Path(file.filename).stem + ".docx",
+            filename=out_name,
             background=BackgroundTask(cleanup, inp, out)
         )
+    except HTTPException:
+        cleanup(inp, out)
+        raise
     except Exception as e:
         cleanup(inp, out)
-        raise HTTPException(500, str(e))
+        raise safe_error(e, "ppt-to-word")
 
 
 # ─── 7. Word → PPT ────────────────────────────────────────────
 
 @app.post("/convert/word-to-ppt")
-async def word_to_ppt(file: UploadFile = File(...)):
+@limiter.limit("10/minute")
+async def word_to_ppt(request: Request, file: UploadFile = File(...)):
     try:
         from docx import Document
         from pptx import Presentation
@@ -565,7 +824,7 @@ async def word_to_ppt(file: UploadFile = File(...)):
     inp = temp_path(".docx")
     out = temp_path(".pptx")
     try:
-        inp.write_bytes(await file.read())
+        inp.write_bytes(await safe_read_upload(file))
         doc = Document(str(inp))
         prs = Presentation()
         prs.slide_width = Inches(13.33)
@@ -598,27 +857,41 @@ async def word_to_ppt(file: UploadFile = File(...)):
             prs.slides.add_slide(prs.slide_layouts[6])
         prs.save(str(out))
 
+        stem = safe_filename(file.filename, "presentation")
+        out_name = Path(stem).stem + ".pptx"
         return FileResponse(
             str(out),
             media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
-            filename=Path(file.filename).stem + ".pptx",
+            filename=out_name,
             background=BackgroundTask(cleanup, inp, out)
         )
+    except HTTPException:
+        cleanup(inp, out)
+        raise
     except Exception as e:
         cleanup(inp, out)
-        raise HTTPException(500, str(e))
+        raise safe_error(e, "word-to-ppt")
 
 
 # ─── 8. Edit PDF (PyMuPDF redact + rewrite) ────────────────────
 
 @app.post("/edit-pdf")
-async def edit_pdf_endpoint(file: UploadFile = File(...), edits: str = Form(...)):
+@limiter.limit("15/minute")
+async def edit_pdf_endpoint(request: Request, file: UploadFile = File(...), edits: str = Form(...)):
     import fitz
     inp = temp_path(".pdf")
     out = temp_path(".pdf")
     try:
-        inp.write_bytes(await file.read())
+        inp.write_bytes(await safe_read_upload(file))
+        check_pdf_page_count(inp, "edit-pdf")
+
+        # Validate edits JSON — cap payload size to prevent memory abuse
+        if len(edits) > 512_000:  # 512 KB max for edits JSON
+            raise HTTPException(400, "Edit data is too large.")
         edit_actions = json.loads(edits)
+        if not isinstance(edit_actions, list):
+            raise HTTPException(400, "Invalid edit format.")
+
         doc = fitz.open(str(inp))
 
         for action in edit_actions:
@@ -673,29 +946,41 @@ async def edit_pdf_endpoint(file: UploadFile = File(...), edits: str = Form(...)
 
         doc.save(str(out), garbage=3, deflate=True)
         doc.close()
+
+        stem = safe_filename(file.filename, "document")
+        out_name = "edited_" + stem
         return FileResponse(str(out), media_type="application/pdf",
-                            filename="edited_" + file.filename,
+                            filename=out_name,
                             background=BackgroundTask(cleanup, inp, out))
+    except HTTPException:
+        cleanup(inp, out)
+        raise
     except Exception as e:
         cleanup(inp, out)
-        raise HTTPException(500, str(e))
+        raise safe_error(e, "edit-pdf")
 
 
 # ─── 9. Compress PDF ───────────────────────────────────────────
 # quality: screen (max), ebook (good), printer (high quality), prepress (best)
 
+ALLOWED_QUALITY_VALUES = {"screen", "ebook", "printer", "prepress"}
+
 @app.post("/compress-pdf")
+@limiter.limit("15/minute")
 async def compress_pdf(
+    request: Request,
     file: UploadFile = File(...),
     quality: str = Form("ebook")   # screen | ebook | printer | prepress
 ):
-    if quality not in {"screen", "ebook", "printer", "prepress"}:
+    if quality not in ALLOWED_QUALITY_VALUES:
         quality = "ebook"
 
     inp = temp_path(".pdf")
     out = temp_path("_compressed.pdf")
     try:
-        inp.write_bytes(await file.read())
+        inp.write_bytes(await safe_read_upload(file))
+        check_pdf_page_count(inp, "compress-pdf")
+
         gs_cmd = [
             "gs", "-sDEVICE=pdfwrite", "-dCompatibilityLevel=1.4",
             f"-dPDFSETTINGS=/{quality}", "-dNOPAUSE", "-dQUIET",
@@ -710,18 +995,24 @@ async def compress_pdf(
             doc.save(str(out), garbage=4, deflate=True, clean=True)
             doc.close()
 
+        stem = safe_filename(file.filename, "document")
+        out_name = "compressed_" + stem
         return FileResponse(str(out), media_type="application/pdf",
-                            filename=f"compressed_{file.filename}",
+                            filename=out_name,
                             background=BackgroundTask(cleanup, inp, out))
+    except HTTPException:
+        cleanup(inp, out)
+        raise
     except Exception as e:
         cleanup(inp, out)
-        raise HTTPException(500, str(e))
+        raise safe_error(e, "compress-pdf")
 
 
 # ─── 10. Extract Tables ────────────────────────────────────────
 
 @app.post("/extract-tables")
-async def extract_tables(file: UploadFile = File(...)):
+@limiter.limit("10/minute")
+async def extract_tables(request: Request, file: UploadFile = File(...)):
     try:
         import camelot, pandas as pd
     except ImportError:
@@ -730,7 +1021,8 @@ async def extract_tables(file: UploadFile = File(...)):
     inp = temp_path(".pdf")
     out = temp_path(".xlsx")
     try:
-        inp.write_bytes(await file.read())
+        inp.write_bytes(await safe_read_upload(file))
+        check_pdf_page_count(inp, "extract-tables")
 
         tables = None
         for flavor in ["lattice", "stream"]:
@@ -752,23 +1044,27 @@ async def extract_tables(file: UploadFile = File(...)):
                 # Use first row as header if it looks like one
                 df.to_excel(writer, sheet_name=sheet_name, index=False, header=False)
 
+        stem = safe_filename(file.filename, "document")
+        out_name = "tables_" + Path(stem).stem + ".xlsx"
         return FileResponse(
             str(out),
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            filename=f"tables_{Path(file.filename).stem}.xlsx",
+            filename=out_name,
             background=BackgroundTask(cleanup, inp, out)
         )
     except HTTPException:
+        cleanup(inp, out)
         raise
     except Exception as e:
         cleanup(inp, out)
-        raise HTTPException(500, str(e))
+        raise safe_error(e, "extract-tables")
 
 
 # ─── 11. Extract Images ────────────────────────────────────────
 
 @app.post("/extract-images")
-async def extract_images(file: UploadFile = File(...)):
+@limiter.limit("10/minute")
+async def extract_images(request: Request, file: UploadFile = File(...)):
     import zipfile
     inp = temp_path(".pdf")
     out_zip = temp_path(".zip")
@@ -776,7 +1072,9 @@ async def extract_images(file: UploadFile = File(...)):
     img_dir.mkdir(exist_ok=True)
 
     try:
-        inp.write_bytes(await file.read())
+        inp.write_bytes(await safe_read_upload(file))
+        check_pdf_page_count(inp, "extract-images")
+
         import fitz
         doc = fitz.open(inp)
         count = 0
@@ -811,21 +1109,26 @@ async def extract_images(file: UploadFile = File(...)):
             for f in img_dir.iterdir():
                 zipf.write(f, f.name)
 
+        stem = safe_filename(file.filename, "document")
+        out_name = "images_" + Path(stem).stem + ".zip"
         return FileResponse(str(out_zip), media_type="application/zip",
-                            filename=f"images_{Path(file.filename).stem}.zip",
+                            filename=out_name,
                             background=BackgroundTask(cleanup, inp, out_zip, img_dir))
     except HTTPException:
+        cleanup(inp, out_zip, img_dir)
         raise
     except Exception as e:
         cleanup(inp, out_zip, img_dir)
-        raise HTTPException(500, str(e))
+        raise safe_error(e, "extract-images")
 
 
 # ─── 12. Search & Replace ──────────────────────────────────────
 # Matches the original font size so replaced text looks correct.
 
 @app.post("/search-replace")
+@limiter.limit("15/minute")
 async def search_replace(
+    request: Request,
     file: UploadFile = File(...),
     search_term: str = Form(...),
     replace_term: str = Form(...)
@@ -833,7 +1136,9 @@ async def search_replace(
     inp = temp_path(".pdf")
     out = temp_path("_replaced.pdf")
     try:
-        inp.write_bytes(await file.read())
+        inp.write_bytes(await safe_read_upload(file))
+        check_pdf_page_count(inp, "search-replace")
+
         import fitz
         doc = fitz.open(inp)
         match_count = 0
@@ -884,31 +1189,39 @@ async def search_replace(
         doc.save(str(out))
         doc.close()
 
+        stem = safe_filename(file.filename, "document")
+        out_name = "replaced_" + stem
         return FileResponse(
             str(out), media_type="application/pdf",
-            filename=f"replaced_{file.filename}",
+            filename=out_name,
             headers={
                 "X-Match-Count": str(match_count),
                 "Access-Control-Expose-Headers": "X-Match-Count"
             },
             background=BackgroundTask(cleanup, inp, out)
         )
+    except HTTPException:
+        cleanup(inp, out)
+        raise
     except Exception as e:
         cleanup(inp, out)
-        raise HTTPException(500, str(e))
+        raise safe_error(e, "search-replace")
 
 
 # ─── 13. OCR Analyze (Detect Scan + Return Text) ──────────────
 
 @app.post("/ocr/analyze")
-async def ocr_analyze(file: UploadFile = File(...)):
+@limiter.limit("10/minute")
+async def ocr_analyze(request: Request, file: UploadFile = File(...)):
     """
     Analyze a PDF: detect if it's scanned, extract text per page.
     Returns JSON with is_scanned flag and text for each page.
     """
     inp = temp_path(".pdf")
     try:
-        inp.write_bytes(await file.read())
+        inp.write_bytes(await safe_read_upload(file))
+        check_pdf_page_count(inp, "ocr-analyze")
+
         import fitz
         doc = fitz.open(inp)
         pages_data = []
@@ -926,7 +1239,9 @@ async def ocr_analyze(file: UploadFile = File(...)):
             "total_chars": total_chars,
             "pages": pages_data
         })
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(500, str(e))
+        raise safe_error(e, "ocr-analyze")
     finally:
         cleanup(inp)
