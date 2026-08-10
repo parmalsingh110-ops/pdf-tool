@@ -120,8 +120,24 @@ app.add_middleware(
 # 3. Security Headers Middleware
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     """Adds security response headers to every response."""
+
+    # CSP for the FastAPI backend responses.
+    # The backend only serves JSON / binary file downloads (no HTML pages),
+    # so we lock it down very tightly.  The permissive CSP for the React SPA
+    # lives in index.html (served by Vite/Render static hosting).
+    _CSP = (
+        "default-src 'none'; "
+        "script-src  'none'; "
+        "style-src   'none'; "
+        "img-src     'none'; "
+        "connect-src 'self'; "
+        "frame-ancestors 'none'; "
+        "form-action 'self';"
+    )
+
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
+        response.headers["Content-Security-Policy"] = self._CSP
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
