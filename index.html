@@ -4,6 +4,43 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
+    <!-- ===== CONTENT SECURITY POLICY ===== -->
+    <!--
+      Sources allowed:
+        'self'                          – same origin (pdfmediasuite.in)
+        blob:                           – PDF.js, canvas exports, object URLs
+        data:                           – base64 images, inline SVGs
+        *.onrender.com                  – FastAPI backend (Render hosting)
+        generativelanguage.googleapis.com – Gemini AI API
+        fonts.googleapis.com            – Google Fonts CSS
+        fonts.gstatic.com               – Google Fonts files
+        'unsafe-inline' (style-src)     – Tailwind / inline styles (React runtime)
+        'wasm-unsafe-eval' (script-src) – WebAssembly (PDF.js, pdfjs-dist)
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="
+        default-src 'self';
+        script-src  'self' 'unsafe-inline' 'wasm-unsafe-eval' blob:;
+        style-src   'self' 'unsafe-inline' https://fonts.googleapis.com;
+        font-src    'self' https://fonts.gstatic.com data:;
+        img-src     'self' data: blob: https:;
+        media-src   'self' blob:;
+        connect-src 'self'
+                    https://*.onrender.com
+                    https://pdfmediasuite.in
+                    https://www.pdfmediasuite.in
+                    https://generativelanguage.googleapis.com
+                    http://localhost:8000
+                    http://127.0.0.1:8000;
+        worker-src  'self' blob:;
+        object-src  'none';
+        frame-src   'none';
+        base-uri    'self';
+        form-action 'self';
+      "
+    />
+
     <!-- ===== PRIMARY SEO META TAGS ===== -->
     <title>PDF Media Suite | Free Online PDF & Image Tools — Merge, Split, Compress, Convert, Edit</title>
     <meta
