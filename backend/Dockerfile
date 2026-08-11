@@ -28,6 +28,9 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
+# ── Playwright Chromium (Webpage to PDF) ─────────────────────────
+RUN playwright install --with-deps chromium
+
 # ── App code ─────────────────────────────────────────────────────
 COPY . .
 
