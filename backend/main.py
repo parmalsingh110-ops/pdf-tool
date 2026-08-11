@@ -1249,26 +1249,53 @@ async def replace_font(
         font_name = "helv"
 
     import fitz
+    import subprocess
+    import shutil
+    
     inp = temp_path(".pdf")
     out = temp_path("_font_replaced.pdf")
+    no_text = temp_path("_notext.pdf")
+    
     try:
         inp.write_bytes(await safe_read_upload(file))
         check_pdf_page_count(inp, "replace-font")
 
+        # 1. Use Ghostscript to strip all existing text (preserves vectors/images)
+        gs_exe = "gs" if shutil.which("gs") else "gswin64c" if shutil.which("gswin64c") else "gswin32c"
+        try:
+            subprocess.run([
+                gs_exe, "-q", "-dNOPAUSE", "-dBATCH", 
+                "-sDEVICE=pdfwrite", "-dFILTERTEXT", 
+                f"-sOutputFile={no_text}", str(inp)
+            ], check=True, capture_output=True)
+            has_gs = True
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            has_gs = False
+
         src_doc = fitz.open(str(inp))
-        out_doc = fitz.open()
+        if has_gs and no_text.exists():
+            out_doc = fitz.open(str(no_text))
+        else:
+            out_doc = fitz.open()
 
-        for src_page in src_doc:
-            w, h = src_page.rect.width, src_page.rect.height
-            new_page = out_doc.new_page(width=w, height=h)
+        for page_num in range(len(src_doc)):
+            src_page = src_doc[page_num]
+            
+            if has_gs and no_text.exists():
+                new_page = out_doc[page_num]
+            else:
+                w, h = src_page.rect.width, src_page.rect.height
+                new_page = out_doc.new_page(width=w, height=h)
+                # Fallback: Redact old text (will leave white boxes, but better than double text)
+                new_page.show_pdf_page(new_page.rect, src_doc, page_num)
+                for block in src_page.get_text("dict")["blocks"]:
+                    if block.get("type") == 0:
+                        for line in block.get("lines", []):
+                            for span in line.get("spans", []):
+                                new_page.add_redact_annot(span["bbox"])
+                new_page.apply_redactions()
 
-            # Copy page images/graphics (render as background)
-            mat = fitz.Matrix(1, 1)
-            clip = src_page.rect
-            pix = src_page.get_pixmap(matrix=mat, clip=clip, alpha=False)
-            new_page.insert_image(new_page.rect, pixmap=pix)
-
-            # Re-insert text spans with new font
+            # 2. Re-insert text spans with new font
             for block in src_page.get_text("dict")["blocks"]:
                 if block.get("type") != 0:
                     continue
@@ -1279,6 +1306,7 @@ async def replace_font(
                             continue
                         x0, y0, _, y1 = span["bbox"]
                         size = max(4, span.get("size", 11))
+                        
                         raw_color = span.get("color", 0)
                         if isinstance(raw_color, int):
                             r = ((raw_color >> 16) & 0xFF) / 255.0
@@ -1287,6 +1315,7 @@ async def replace_font(
                             color = (r, g, b)
                         else:
                             color = (0, 0, 0)
+                            
                         new_page.insert_text(
                             fitz.Point(x0, y1 - 1),
                             txt,
