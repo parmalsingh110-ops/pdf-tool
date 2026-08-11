@@ -10,6 +10,8 @@ import {
   FormInput, BarChart3, BookOpen, Copy, RotateCw, ShieldOff, RefreshCw,
   MonitorSmartphone, Stamp, FileX, Images, Code, Presentation, Layers2,
   Info, Zap, ScanSearch,
+  // New icons for 13 new tools
+  Shield, Wrench, Globe, FileCode2, Type, Accessibility, Volume2, Link as LinkIcon, BookMarked,
 } from 'lucide-react';
 
 function categoryAnchor(title: string): string {
@@ -50,6 +52,12 @@ const categories = [
       { title: 'Flatten PDF', path: '/flatten-pdf', icon: Layers, color: 'text-rose-500', bg: 'bg-rose-50' },
       { title: 'Reverse PDF', path: '/reverse', icon: ArrowUpDown, color: 'text-indigo-500', bg: 'bg-indigo-50' },
       { title: 'Add Margins', path: '/add-margins', icon: Maximize, color: 'text-teal-500', bg: 'bg-teal-50' },
+      // New Tools
+      { title: 'PDF Deep Sanitizer', path: '/pdf-sanitizer', icon: Shield, color: 'text-emerald-600', bg: 'bg-emerald-50' },
+      { title: 'PDF Repair Tool', path: '/pdf-repair', icon: Wrench, color: 'text-amber-600', bg: 'bg-amber-50' },
+      { title: 'Auto-Crop White Margins', path: '/auto-crop-margins', icon: Crop, color: 'text-rose-600', bg: 'bg-rose-50' },
+      { title: 'Long Image to PDF', path: '/long-image-to-pdf', icon: ImageIcon, color: 'text-sky-600', bg: 'bg-sky-50' },
+      { title: 'N-Up Page Layout', path: '/n-up-layout', icon: LayoutGrid, color: 'text-teal-600', bg: 'bg-teal-50' },
     ]
   },
   {
@@ -66,6 +74,10 @@ const categories = [
       { title: 'Add Headers & Footers', path: '/headers-footers', icon: Layers, color: 'text-teal-600', bg: 'bg-teal-50' },
       { title: 'Remove Text', path: '/remove-text', icon: Scissors, color: 'text-red-500', bg: 'bg-red-50' },
       { title: 'Highlight Search Terms', path: '/highlight-text', icon: Search, color: 'text-yellow-500', bg: 'bg-yellow-50' },
+      // New Tools
+      { title: 'PDF to Markdown', path: '/pdf-to-markdown', icon: FileCode2, color: 'text-indigo-600', bg: 'bg-indigo-50' },
+      { title: 'PDF Font Replacer', path: '/font-replacer', icon: Type, color: 'text-fuchsia-600', bg: 'bg-fuchsia-50' },
+      { title: 'PDF Link Extractor', path: '/link-extractor', icon: LinkIcon, color: 'text-cyan-600', bg: 'bg-cyan-50' },
     ]
   },
   {
@@ -88,6 +100,10 @@ const categories = [
       { title: 'Ink Saver PDF', path: '/ink-saver', icon: Contrast, color: 'text-emerald-600', bg: 'bg-emerald-50' },
       { title: 'Image Color Correction', path: '/image-color-correction', icon: Palette, color: 'text-pink-600', bg: 'bg-pink-50' },
       { title: 'Image Noise Reduction', path: '/image-noise-reduction', icon: Sparkles, color: 'text-violet-500', bg: 'bg-violet-50' },
+      // New Tools
+      { title: 'RGB to CMYK Converter', path: '/cmyk-converter', icon: Palette, color: 'text-violet-700', bg: 'bg-violet-50' },
+      { title: 'Webpage to PDF', path: '/webpage-to-pdf', icon: Globe, color: 'text-blue-600', bg: 'bg-blue-50' },
+      { title: 'PDF Read Aloud', path: '/pdf-to-audio', icon: Volume2, color: 'text-purple-600', bg: 'bg-purple-50' },
     ]
   },
   {
@@ -102,6 +118,8 @@ const categories = [
       { title: 'PDF Form Filler', path: '/pdf-form-filler', icon: FormInput, color: 'text-blue-700', bg: 'bg-blue-50' },
       { title: 'PDF Page Cropper', path: '/pdf-page-cropper', icon: Crop, color: 'text-orange-500', bg: 'bg-orange-50' },
       { title: 'Image Insert & Overlay', path: '/image-insert', icon: ImageIcon, color: 'text-cyan-600', bg: 'bg-cyan-50' },
+      // New Tools
+      { title: 'Reading Progress Tracker', path: '/reading-tracker', icon: BookMarked, color: 'text-orange-600', bg: 'bg-orange-50' },
     ]
   },
   {
@@ -117,6 +135,8 @@ const categories = [
       { title: 'Certify Document', path: '/certify-document', icon: CheckCircle, color: 'text-teal-500', bg: 'bg-teal-50' },
       { title: 'Password Strength Checker', path: '/password-strength', icon: Lock, color: 'text-purple-600', bg: 'bg-purple-100' },
       { title: 'Batch Protect', path: '/batch-protect', icon: Lock, color: 'text-purple-500', bg: 'bg-purple-50' },
+      // New Tools
+      { title: 'PDF Accessibility Checker', path: '/accessibility-checker', icon: Accessibility, color: 'text-green-600', bg: 'bg-green-50' },
     ]
   },
   {
