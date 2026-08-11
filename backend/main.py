@@ -976,7 +976,461 @@ async def edit_pdf_endpoint(request: Request, file: UploadFile = File(...), edit
         raise safe_error(e, "edit-pdf")
 
 
-# ─── 9. Compress PDF ───────────────────────────────────────────
+# ─── 9. CMYK Color Converter ───────────────────────────────────
+# Converts RGB PDF to CMYK color space for professional printing.
+# Uses Ghostscript (already required for compress-pdf).
+
+@app.post("/convert/cmyk")
+@limiter.limit("10/minute")
+async def convert_to_cmyk(request: Request, file: UploadFile = File(...)):
+    """
+    Convert an RGB PDF to CMYK color space using Ghostscript.
+    Required for professional offset printing (ISO Coated v2 compatible).
+    """
+    inp = temp_path(".pdf")
+    out = temp_path("_cmyk.pdf")
+    try:
+        inp.write_bytes(await safe_read_upload(file))
+        check_pdf_page_count(inp, "convert-cmyk")
+
+        gs_cmd = [
+            "gs",
+            "-dBATCH", "-dNOPAUSE", "-dQUIET",
+            "-dSAFER",
+            "-sDEVICE=pdfwrite",
+            "-dCompatibilityLevel=1.4",
+            "-sColorConversionStrategy=CMYK",
+            "-dProcessColorModel=/DeviceCMYK",
+            "-dOverrideICC=true",
+            f"-sOutputFile={out}",
+            str(inp)
+        ]
+
+        try:
+            result = subprocess.run(
+                gs_cmd, check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                timeout=120
+            )
+        except subprocess.CalledProcessError as e:
+            logger.error(f"[CMYK] Ghostscript failed: {e.stderr[:300] if e.stderr else 'no stderr'}")
+            raise RuntimeError("Ghostscript CMYK conversion failed.")
+        except FileNotFoundError:
+            raise HTTPException(500, "Ghostscript is not installed on this server. Cannot perform CMYK conversion.")
+
+        if not out.exists() or out.stat().st_size == 0:
+            raise RuntimeError("CMYK output PDF not generated.")
+
+        stem = safe_filename(file.filename, "document")
+        out_name = Path(stem).stem + "_CMYK.pdf"
+        return FileResponse(
+            str(out), media_type="application/pdf",
+            filename=out_name,
+            background=BackgroundTask(cleanup, inp, out)
+        )
+    except HTTPException:
+        cleanup(inp, out)
+        raise
+    except Exception as e:
+        cleanup(inp, out)
+        raise safe_error(e, "convert-cmyk")
+
+
+# ─── 10. PDF Repair (Corrupt PDF Recovery) ─────────────────────
+# Multi-strategy: Ghostscript → mutool → PyMuPDF open(repair=True)
+
+@app.post("/repair-pdf")
+@limiter.limit("10/minute")
+async def repair_pdf(request: Request, file: UploadFile = File(...)):
+    """
+    Attempt to repair a corrupted or partially downloaded PDF.
+    Tries 3 fallback strategies in order:
+      1. Ghostscript (best for structural XREF/stream errors)
+      2. mutool clean (MuPDF CLI — good for linearization errors)
+      3. PyMuPDF open with garbage collection (last resort)
+    """
+    inp = temp_path(".pdf")
+    out = temp_path("_repaired.pdf")
+    try:
+        raw_data = await safe_read_upload(file)
+        inp.write_bytes(raw_data)
+
+        repaired = False
+        strategy_used = "unknown"
+
+        # Strategy 1: Ghostscript rebuild
+        try:
+            gs_cmd = [
+                "gs",
+                "-dBATCH", "-dNOPAUSE", "-dQUIET",
+                "-dSAFER",
+                "-sDEVICE=pdfwrite",
+                "-dCompatibilityLevel=1.4",
+                f"-sOutputFile={out}",
+                str(inp)
+            ]
+            r = subprocess.run(gs_cmd, capture_output=True, timeout=120)
+            if r.returncode == 0 and out.exists() and out.stat().st_size > 0:
+                repaired = True
+                strategy_used = "Ghostscript (XREF rebuild)"
+        except Exception as e:
+            logger.warning(f"[REPAIR] Ghostscript failed: {type(e).__name__}")
+
+        # Strategy 2: mutool clean
+        if not repaired:
+            try:
+                mutool_path = shutil.which("mutool")
+                if mutool_path:
+                    r2 = subprocess.run(
+                        [mutool_path, "clean", "-g", str(inp), str(out)],
+                        capture_output=True, timeout=60
+                    )
+                    if r2.returncode == 0 and out.exists() and out.stat().st_size > 0:
+                        repaired = True
+                        strategy_used = "mutool (MuPDF clean)"
+            except Exception as e:
+                logger.warning(f"[REPAIR] mutool failed: {type(e).__name__}")
+
+        # Strategy 3: PyMuPDF garbage collection
+        if not repaired:
+            try:
+                import fitz
+                doc = fitz.open(str(inp))
+                doc.save(str(out), garbage=4, deflate=True, clean=True)
+                doc.close()
+                if out.exists() and out.stat().st_size > 0:
+                    repaired = True
+                    strategy_used = "PyMuPDF (garbage collection)"
+            except Exception as e:
+                logger.warning(f"[REPAIR] PyMuPDF failed: {type(e).__name__}")
+
+        if not repaired:
+            raise HTTPException(
+                400,
+                "This PDF is too severely damaged to recover. None of our repair strategies could reconstruct it."
+            )
+
+        stem = safe_filename(file.filename, "document")
+        out_name = "repaired_" + stem
+        response = FileResponse(
+            str(out), media_type="application/pdf",
+            filename=out_name,
+            background=BackgroundTask(cleanup, inp, out)
+        )
+        response.headers["X-Repair-Strategy"] = strategy_used
+        response.headers["Access-Control-Expose-Headers"] = "X-Repair-Strategy"
+        return response
+    except HTTPException:
+        cleanup(inp, out)
+        raise
+    except Exception as e:
+        cleanup(inp, out)
+        raise safe_error(e, "repair-pdf")
+
+
+# ─── 11. Webpage to PDF (Playwright) ───────────────────────────
+# Converts any public URL to a high-quality paginated PDF.
+# Requires: pip install playwright && playwright install chromium
+
+WEBPAGE_TO_PDF_SEMAPHORE = asyncio.Semaphore(int(os.environ.get("MAX_CONCURRENT_PLAYWRIGHT", "2")))
+ALLOWED_URL_SCHEMES = {"http", "https"}
+
+
+def _validate_url(url: str) -> str:
+    """Basic URL validation — only allow http/https, reject localhost/private IPs."""
+    from urllib.parse import urlparse
+    import ipaddress
+    parsed = urlparse(url)
+    if parsed.scheme not in ALLOWED_URL_SCHEMES:
+        raise HTTPException(400, "Only http:// and https:// URLs are allowed.")
+    hostname = parsed.hostname or ""
+    # Block SSRF targets
+    try:
+        ip = ipaddress.ip_address(hostname)
+        if ip.is_private or ip.is_loopback or ip.is_link_local:
+            raise HTTPException(400, "Private/internal IP addresses are not allowed.")
+    except ValueError:
+        pass  # Not an IP — that's fine
+    if hostname in ("localhost", "127.0.0.1", "::1"):
+        raise HTTPException(400, "localhost is not allowed.")
+    return url
+
+
+@app.post("/convert/webpage-to-pdf")
+@limiter.limit("5/minute")
+async def webpage_to_pdf(
+    request: Request,
+    url: str = Form(...),
+    paper_format: str = Form("A4"),
+    landscape: bool = Form(False),
+    margin: str = Form("1cm"),
+    background: bool = Form(True),
+):
+    """
+    Convert a public webpage URL to a paginated PDF using Playwright (Headless Chromium).
+    """
+    _validate_url(url)
+
+    ALLOWED_FORMATS = {"A4", "A3", "Letter", "Legal", "Tabloid"}
+    if paper_format not in ALLOWED_FORMATS:
+        paper_format = "A4"
+
+    out = temp_path(".pdf")
+    try:
+        try:
+            from playwright.async_api import async_playwright
+        except ImportError:
+            raise HTTPException(
+                500,
+                "Playwright is not installed. Run: pip install playwright && playwright install chromium"
+            )
+
+        async with WEBPAGE_TO_PDF_SEMAPHORE:
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(
+                    headless=True,
+                    args=["--no-sandbox", "--disable-dev-shm-usage"]
+                )
+                page = await browser.new_page()
+                await page.goto(url, wait_until="networkidle", timeout=30000)
+                await page.pdf(
+                    path=str(out),
+                    format=paper_format,
+                    landscape=landscape,
+                    print_background=background,
+                    margin={
+                        "top": margin, "right": margin,
+                        "bottom": margin, "left": margin
+                    }
+                )
+                await browser.close()
+
+        if not out.exists() or out.stat().st_size == 0:
+            raise RuntimeError("Playwright did not generate a PDF.")
+
+        from urllib.parse import urlparse
+        domain = urlparse(url).netloc.replace(".", "_")[:50]
+        out_name = f"webpage_{domain}.pdf"
+        return FileResponse(
+            str(out), media_type="application/pdf",
+            filename=out_name,
+            background=BackgroundTask(cleanup, out)
+        )
+    except HTTPException:
+        cleanup(out)
+        raise
+    except Exception as e:
+        cleanup(out)
+        raise safe_error(e, "webpage-to-pdf")
+
+
+# ─── 12. PDF Font Replacer ─────────────────────────────────────
+# Extracts text from PDF pages and re-renders with chosen standard font.
+
+ALLOWED_REPLACE_FONTS = {
+    "helv": "Helvetica", "tiro": "Times-Roman",
+    "cour": "Courier", "zadb": "ZapfDingbats"
+}
+
+
+@app.post("/convert/replace-font")
+@limiter.limit("8/minute")
+async def replace_font(
+    request: Request,
+    file: UploadFile = File(...),
+    font_name: str = Form("helv"),
+):
+    """
+    Replace all text in a PDF with a chosen standard font (Helvetica, Times, Courier).
+    Text content and positions are preserved; only the font face changes.
+    """
+    if font_name not in ALLOWED_REPLACE_FONTS:
+        font_name = "helv"
+
+    import fitz
+    inp = temp_path(".pdf")
+    out = temp_path("_font_replaced.pdf")
+    try:
+        inp.write_bytes(await safe_read_upload(file))
+        check_pdf_page_count(inp, "replace-font")
+
+        src_doc = fitz.open(str(inp))
+        out_doc = fitz.open()
+
+        for src_page in src_doc:
+            w, h = src_page.rect.width, src_page.rect.height
+            new_page = out_doc.new_page(width=w, height=h)
+
+            # Copy page images/graphics (render as background)
+            mat = fitz.Matrix(1, 1)
+            clip = src_page.rect
+            pix = src_page.get_pixmap(matrix=mat, clip=clip, alpha=False)
+            new_page.insert_image(new_page.rect, pixmap=pix)
+
+            # Re-insert text spans with new font
+            for block in src_page.get_text("dict")["blocks"]:
+                if block.get("type") != 0:
+                    continue
+                for line in block.get("lines", []):
+                    for span in line.get("spans", []):
+                        txt = span.get("text", "").strip()
+                        if not txt:
+                            continue
+                        x0, y0, _, y1 = span["bbox"]
+                        size = max(4, span.get("size", 11))
+                        raw_color = span.get("color", 0)
+                        if isinstance(raw_color, int):
+                            r = ((raw_color >> 16) & 0xFF) / 255.0
+                            g = ((raw_color >> 8) & 0xFF) / 255.0
+                            b = (raw_color & 0xFF) / 255.0
+                            color = (r, g, b)
+                        else:
+                            color = (0, 0, 0)
+                        new_page.insert_text(
+                            fitz.Point(x0, y1 - 1),
+                            txt,
+                            fontname=font_name,
+                            fontsize=size,
+                            color=color,
+                        )
+
+        out_doc.save(str(out), garbage=3, deflate=True)
+        src_doc.close()
+        out_doc.close()
+
+        font_label = ALLOWED_REPLACE_FONTS[font_name]
+        stem = safe_filename(file.filename, "document")
+        out_name = f"{Path(stem).stem}_{font_label}.pdf"
+        return FileResponse(
+            str(out), media_type="application/pdf",
+            filename=out_name,
+            background=BackgroundTask(cleanup, inp, out)
+        )
+    except HTTPException:
+        cleanup(inp, out)
+        raise
+    except Exception as e:
+        cleanup(inp, out)
+        raise safe_error(e, "replace-font")
+
+
+# ─── 13. Auto-Crop White Margins ───────────────────────────────
+# Detects content bounding box per page and sets CropBox accordingly.
+
+@app.post("/convert/auto-crop")
+@limiter.limit("10/minute")
+async def auto_crop_margins(
+    request: Request,
+    file: UploadFile = File(...),
+    padding_pt: int = Form(10),
+):
+    """
+    Automatically detect and remove white margins from every PDF page.
+    Sets the CropBox to the content bounding box + optional padding.
+    """
+    import fitz
+    padding_pt = max(0, min(padding_pt, 72))  # clamp 0–72pt
+
+    inp = temp_path(".pdf")
+    out = temp_path("_autocropped.pdf")
+    try:
+        inp.write_bytes(await safe_read_upload(file))
+        check_pdf_page_count(inp, "auto-crop")
+
+        doc = fitz.open(str(inp))
+        for page in doc:
+            # get_text("blocks") returns (x0, y0, x1, y1, text, ...) per block
+            blocks = page.get_text("blocks")
+            # Also include drawings/images
+            paths = page.get_drawings()
+            images = page.get_image_rects(full=True)  # Returns list of (Rect, transform, ...)
+
+            all_rects = []
+            for b in blocks:
+                if b[4].strip():  # has text
+                    all_rects.append(fitz.Rect(b[:4]))
+            for path in paths:
+                if path.get("rect"):
+                    all_rects.append(path["rect"])
+            for img_info in images:
+                if isinstance(img_info, (list, tuple)) and len(img_info) >= 1:
+                    rect = img_info[0] if isinstance(img_info[0], fitz.Rect) else None
+                    if rect:
+                        all_rects.append(rect)
+
+            if all_rects:
+                content_bbox = all_rects[0]
+                for r in all_rects[1:]:
+                    content_bbox = content_bbox | r  # union
+                # Add padding
+                padded = fitz.Rect(
+                    max(0, content_bbox.x0 - padding_pt),
+                    max(0, content_bbox.y0 - padding_pt),
+                    min(page.rect.width, content_bbox.x1 + padding_pt),
+                    min(page.rect.height, content_bbox.y1 + padding_pt),
+                )
+                page.set_cropbox(padded)
+
+        doc.save(str(out), garbage=3, deflate=True)
+        doc.close()
+
+        stem = safe_filename(file.filename, "document")
+        out_name = "autocropped_" + stem
+        return FileResponse(
+            str(out), media_type="application/pdf",
+            filename=out_name,
+            background=BackgroundTask(cleanup, inp, out)
+        )
+    except HTTPException:
+        cleanup(inp, out)
+        raise
+    except Exception as e:
+        cleanup(inp, out)
+        raise safe_error(e, "auto-crop")
+
+
+# ─── 14. PDF Link Extractor ─────────────────────────────────────
+
+@app.post("/analyze/links")
+@limiter.limit("15/minute")
+async def extract_links(request: Request, file: UploadFile = File(...)):
+    """
+    Extract all hyperlinks from a PDF and return them as JSON.
+    """
+    import fitz
+    inp = temp_path(".pdf")
+    try:
+        inp.write_bytes(await safe_read_upload(file))
+        check_pdf_page_count(inp, "extract-links")
+
+        doc = fitz.open(str(inp))
+        links_found = []
+        for i, page in enumerate(doc):
+            for link in page.get_links():
+                uri = link.get("uri", "")
+                if uri:
+                    links_found.append({
+                        "page": i + 1,
+                        "url": uri,
+                        "rect": [round(v, 1) for v in link.get("from", fitz.Rect())]
+                    })
+        doc.close()
+
+        return JSONResponse({
+            "success": True,
+            "total_links": len(links_found),
+            "links": links_found
+        })
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise safe_error(e, "extract-links")
+    finally:
+        cleanup(inp)
+
+
+# ─── 15. Compress PDF ───────────────────────────────────────────
 # quality: screen (max), ebook (good), printer (high quality), prepress (best)
 
 ALLOWED_QUALITY_VALUES = {"screen", "ebook", "printer", "prepress"}

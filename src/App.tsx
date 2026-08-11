@@ -58,6 +58,21 @@ import InkSaverPDF from './pages/InkSaverPDF';
 import UniversalConverter from './pages/UniversalConverter';
 import CodeToPdf from './pages/CodeToPdf';
 
+// 13 New Features
+import PdfSanitizer from './pages/PdfSanitizer';
+import CmykConverter from './pages/CmykConverter';
+import PdfRepair from './pages/PdfRepair';
+import WebpageToPdf from './pages/WebpageToPdf';
+import PdfToMarkdown from './pages/PdfToMarkdown';
+import NUpLayout from './pages/NUpLayout';
+import AutoCropMargins from './pages/AutoCropMargins';
+import LongImageToPdf from './pages/LongImageToPdf';
+import PdfFontReplacer from './pages/PdfFontReplacer';
+import AccessibilityChecker from './pages/AccessibilityChecker';
+import PdfToAudio from './pages/PdfToAudio';
+import LinkExtractor from './pages/LinkExtractor';
+import ReadingTracker from './pages/ReadingTracker';
+
 // New Advanced Tools
 import ImageCollage from './pages/ImageCollage';
 import QrCodeGenerator from './pages/QrCodeGenerator';
@@ -221,6 +236,21 @@ export default function App() {
         <Route path="present" element={<PdfPresenter />} />
         <Route path="file-hash" element={<FileHash />} />
         <Route path="increase-size" element={<IncreasePdfSize />} />
+
+        {/* 13 New Features */}
+        <Route path="pdf-sanitizer" element={<PdfSanitizer />} />
+        <Route path="cmyk-converter" element={<CmykConverter />} />
+        <Route path="pdf-repair" element={<PdfRepair />} />
+        <Route path="webpage-to-pdf" element={<WebpageToPdf />} />
+        <Route path="pdf-to-markdown" element={<PdfToMarkdown />} />
+        <Route path="n-up-layout" element={<NUpLayout />} />
+        <Route path="auto-crop-margins" element={<AutoCropMargins />} />
+        <Route path="long-image-to-pdf" element={<LongImageToPdf />} />
+        <Route path="font-replacer" element={<PdfFontReplacer />} />
+        <Route path="accessibility-checker" element={<AccessibilityChecker />} />
+        <Route path="pdf-to-audio" element={<PdfToAudio />} />
+        <Route path="link-extractor" element={<LinkExtractor />} />
+        <Route path="reading-tracker" element={<ReadingTracker />} />
       </Route>
     </Routes>
     </Suspense>

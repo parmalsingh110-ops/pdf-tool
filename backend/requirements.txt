@@ -40,3 +40,7 @@ ilovepdf>=1.0.0
 # ── Environment & Rate Limiting ──────────────────────────────────
 python-dotenv>=1.0.0
 slowapi>=0.1.9
+
+# ── Webpage to PDF (Headless Browser) ────────────────────────────
+# Run after pip install: playwright install chromium
+playwright>=1.44.0
