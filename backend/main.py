@@ -437,95 +437,14 @@ async def ensure_auto_ocr(inp_path: Path, force: bool = False) -> Path:
 
 # ─── 1. PDF → Word ─────────────────────────────────────────────
 
-def _contains_devanagari(text: str) -> bool:
-    """Check if text contains Hindi/Devanagari Unicode characters (U+0900–U+097F)."""
-    return any('\u0900' <= ch <= '\u097F' for ch in text)
-
-
-def _pdf_to_word_pymupdf(inp: Path, out: Path):
-    """
-    Convert a native (non-scanned) PDF to DOCX using PyMuPDF for Unicode-correct
-    text extraction. This properly handles Hindi/Devanagari scripts that pdf2docx
-    cannot render correctly due to embedded font glyph mapping issues.
-
-    Strategy:
-    - Extract text blocks with font metadata using fitz 'dict' mode
-    - Build DOCX paragraphs preserving bold, font size
-    - Auto-assign 'Mangal' font for Devanagari runs, 'Times New Roman' for others
-    - Preserve page breaks between pages
-    """
-    import fitz
-    from docx import Document
-    from docx.shared import Pt, RGBColor
-    from docx.oxml.ns import qn
-    from docx.oxml import OxmlElement
-    import lxml.etree as etree
-
-    def _set_run_font(run, font_name: str):
-        """Set both ascii and eastAsia/complex script font on a run."""
-        rPr = run._r.get_or_add_rPr()
-        # rFonts element
-        rFonts = rPr.find(qn('w:rFonts'))
-        if rFonts is None:
-            rFonts = OxmlElement('w:rFonts')
-            rPr.insert(0, rFonts)
-        rFonts.set(qn('w:ascii'), font_name)
-        rFonts.set(qn('w:hAnsi'), font_name)
-        rFonts.set(qn('w:cs'), font_name)   # complex script (Hindi/Arabic etc.)
-        rFonts.set(qn('w:eastAsia'), font_name)
-
-    doc = Document()
-
-    # Remove default paragraph spacing for cleaner output
-    style = doc.styles['Normal']
-    style.paragraph_format.space_before = Pt(0)
-    style.paragraph_format.space_after = Pt(2)
-
-    pdf = fitz.open(str(inp))
-
-    for page_idx, page in enumerate(pdf):
-        if page_idx > 0:
-            doc.add_page_break()
-
-        blocks = page.get_text("dict", flags=fitz.TEXT_PRESERVE_WHITESPACE)["blocks"]
-
-        for block in blocks:
-            if block.get("type") != 0:  # type 0 = text block
-                continue
-
-            for line in block.get("lines", []):
-                # Build a single paragraph per line
-                para = doc.add_paragraph()
-                para.paragraph_format.space_after = Pt(1)
-
-                for span in line.get("spans", []):
-                    raw_text = span.get("text", "")
-                    if not raw_text:
-                        continue
-
-                    # Determine font properties from the span
-                    font_size = span.get("size", 12)
-                    flags = span.get("flags", 0)
-                    is_bold = bool(flags & 2**4)  # bit 4 = bold in PyMuPDF
-
-                    # Choose font: Mangal for Devanagari, else Times New Roman
-                    if _contains_devanagari(raw_text):
-                        chosen_font = "Mangal"
-                    else:
-                        chosen_font = "Times New Roman"
-
-                    run = para.add_run(raw_text)
-                    run.bold = is_bold
-                    run.font.size = Pt(max(6, round(font_size)))
-                    _set_run_font(run, chosen_font)
-
-    pdf.close()
-    doc.save(str(out))
-
-
 @app.post("/convert/pdf-to-word")
 @limiter.limit("10/minute")
 async def pdf_to_word(request: Request, file: UploadFile = File(...), force_ocr: bool = Form(False)):
+    try:
+        from pdf2docx import Converter
+    except ImportError:
+        raise HTTPException(500, "Run: pip install pdf2docx PyMuPDF")
+
     inp = temp_path(".pdf")
     out = temp_path(".docx")
     try:
@@ -539,47 +458,31 @@ async def pdf_to_word(request: Request, file: UploadFile = File(...), force_ocr:
         inp = await ensure_auto_ocr(inp, force=force_ocr)
 
         if scanned:
-            # 3A. SCANNED PDF -> Extract clean text (OCR already done above)
+            # 3A. SCANNED PDF -> Extract clean text to drop the giant background image
             logger.info(f"[PDF2Word] Scanned PDF detected. Extracting clean OCR text for: {inp.name}")
             import fitz
             from docx import Document
-            from docx.shared import Pt
-            from docx.oxml.ns import qn
-            from docx.oxml import OxmlElement
-
-            def _set_run_font_scanned(run, font_name: str):
-                rPr = run._r.get_or_add_rPr()
-                rFonts = rPr.find(qn('w:rFonts'))
-                if rFonts is None:
-                    rFonts = OxmlElement('w:rFonts')
-                    rPr.insert(0, rFonts)
-                rFonts.set(qn('w:ascii'), font_name)
-                rFonts.set(qn('w:hAnsi'), font_name)
-                rFonts.set(qn('w:cs'), font_name)
-                rFonts.set(qn('w:eastAsia'), font_name)
-
             docx_doc = Document()
             pdf = fitz.open(inp)
 
             for i, page in enumerate(pdf):
-                if i > 0:
-                    docx_doc.add_page_break()
                 text = page.get_text("text").strip()
                 if text:
                     for line in text.split('\n'):
                         if line.strip():
-                            para = docx_doc.add_paragraph()
-                            run = para.add_run(line.strip())
-                            # Pick correct font for Hindi vs English
-                            font_name = "Mangal" if _contains_devanagari(line) else "Times New Roman"
-                            _set_run_font_scanned(run, font_name)
+                            docx_doc.add_paragraph(line)
+                if i < len(pdf) - 1:
+                    docx_doc.add_page_break()
             pdf.close()
             docx_doc.save(str(out))
         else:
-            # 3B. NATIVE PDF -> PyMuPDF + python-docx for proper Unicode/Hindi font handling
-            logger.info(f"[PDF2Word] Native PDF detected. Using PyMuPDF+python-docx for: {inp.name}")
-            from fastapi.concurrency import run_in_threadpool
-            await run_in_threadpool(_pdf_to_word_pymupdf, inp, out)
+            # 3B. NATIVE PDF -> Use pdf2docx to preserve exact layout
+            logger.info(f"[PDF2Word] Native PDF detected. Using pdf2docx for: {inp.name}")
+            cv = Converter(str(inp))
+            cv.convert(str(out), multi_processing=False,
+                       line_overlap_threshold=0.9,
+                       min_svg_gap_dx=15.0)
+            cv.close()
 
         stem = safe_filename(file.filename, "document")
         out_name = Path(stem).stem + ".docx"
@@ -1008,26 +911,19 @@ async def edit_pdf_endpoint(request: Request, file: UploadFile = File(...), edit
         doc = fitz.open(str(inp))
 
         # ── Font path resolver for Devanagari/Hindi ──────────────────────────
-        # Fonts live in public/fonts/ (project root), NOT in backend/fonts/.
-        # __file__ = .../pdf-tool/backend/main.py
-        # parent   = .../pdf-tool/backend/
-        # parent.parent = .../pdf-tool/          ← project root
         _fonts_dir = Path(__file__).parent.parent / "public" / "fonts"
 
         def _resolve_font_path(bold: bool) -> Path | None:
             """Return the correct NotoSansDevanagari font path, or None if not found."""
             key = "NotoSansDevanagari-Bold.ttf" if bold else "NotoSansDevanagari-Regular.ttf"
-            # Primary: public/fonts/ (project root)
             candidate = _fonts_dir / key
             if candidate.exists():
                 return candidate
-            # Secondary: backend/fonts/ (for standalone deployment)
             candidate2 = Path(__file__).parent / "fonts" / key
             if candidate2.exists():
                 return candidate2
             return None
 
-        # Track which font names have been registered per page to avoid re-register errors
         _registered_fonts: dict[int, set] = {}
 
         for action in edit_actions:
@@ -1066,7 +962,6 @@ async def edit_pdf_endpoint(request: Request, file: UploadFile = File(...), edit
                 deva_path = _resolve_font_path(is_bold)
                 if deva_path is not None:
                     fontname = "NotoDevaB" if is_bold else "NotoDeva"
-                    # Register font only once per page to avoid duplicate-name errors
                     page_fonts = _registered_fonts.setdefault(page_idx, set())
                     if fontname not in page_fonts:
                         try:
@@ -1084,7 +979,7 @@ async def edit_pdf_endpoint(request: Request, file: UploadFile = File(...), edit
             try:
                 text_len = fitz.get_text_length(new_text, fontname=fontname, fontsize=orig_size)
             except Exception:
-                # Fallback estimation: ~0.6× font size per character for Devanagari
+                # Fallback estimation for Devanagari
                 text_len = len(new_text) * orig_size * 0.6
 
             final_size = orig_size
