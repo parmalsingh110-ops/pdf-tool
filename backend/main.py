@@ -910,6 +910,22 @@ async def edit_pdf_endpoint(request: Request, file: UploadFile = File(...), edit
 
         doc = fitz.open(str(inp))
 
+        # ── Font path resolver for Devanagari/Hindi ──────────────────────────
+        _fonts_dir = Path(__file__).parent.parent / "public" / "fonts"
+
+        def _resolve_font_path(bold: bool) -> Path | None:
+            """Return the correct NotoSansDevanagari font path, or None if not found."""
+            key = "NotoSansDevanagari-Bold.ttf" if bold else "NotoSansDevanagari-Regular.ttf"
+            candidate = _fonts_dir / key
+            if candidate.exists():
+                return candidate
+            candidate2 = Path(__file__).parent / "fonts" / key
+            if candidate2.exists():
+                return candidate2
+            return None
+
+        _registered_fonts: dict[int, set] = {}
+
         for action in edit_actions:
             page_idx = action.get("page", 0)
             if page_idx >= len(doc):
@@ -928,27 +944,43 @@ async def edit_pdf_endpoint(request: Request, file: UploadFile = File(...), edit
 
             fg_color = hex_to_rgb(action.get("color", "#000000"))
             orig_size = action.get("fontSize", 12)
-            fontname = "helv"
-            if action.get("bold") and action.get("italic"):
-                fontname = "hebi"
-            elif action.get("bold"):
-                fontname = "hebo"
-            elif action.get("italic"):
-                fontname = "hebi"
+            is_bold = bool(action.get("bold"))
+            is_italic = bool(action.get("italic"))
 
+            # Default Latin font
+            if is_bold and is_italic:
+                fontname = "hebi"
+            elif is_bold:
+                fontname = "hebo"
+            elif is_italic:
+                fontname = "heit"
+            else:
+                fontname = "helv"
+
+            # ── Hindi/Devanagari font handling ────────────────────────────────
             if has_non_latin(new_text):
-                font_key = "NotoSansDevanagari-Bold.ttf" if action.get("bold") else "NotoSansDevanagari-Regular.ttf"
-                font_path = Path(__file__).parent / "fonts" / font_key
-                if not font_path.exists():
-                    font_path = Path(__file__).parent.parent / "pdf-tool" / "public" / "fonts" / font_key
-                if font_path.exists():
-                    fontname = "deva"
-                    page.insert_font(fontname=fontname, fontfile=str(font_path))
+                deva_path = _resolve_font_path(is_bold)
+                if deva_path is not None:
+                    fontname = "NotoDevaB" if is_bold else "NotoDeva"
+                    page_fonts = _registered_fonts.setdefault(page_idx, set())
+                    if fontname not in page_fonts:
+                        try:
+                            font_bytes = deva_path.read_bytes()
+                            page.insert_font(fontname=fontname, fontbuffer=font_bytes)
+                            page_fonts.add(fontname)
+                            logger.info(f"[EditPDF] Registered Devanagari font '{fontname}' on page {page_idx}")
+                        except Exception as fe:
+                            logger.warning(f"[EditPDF] Could not register Devanagari font: {fe}. Falling back to helv.")
+                            fontname = "hebo" if is_bold else "helv"
+                else:
+                    logger.warning(f"[EditPDF] Devanagari font file not found at {_fonts_dir}. Hindi text may render incorrectly.")
+            # ─────────────────────────────────────────────────────────────────
 
             try:
                 text_len = fitz.get_text_length(new_text, fontname=fontname, fontsize=orig_size)
             except Exception:
-                text_len = len(new_text) * orig_size * 0.5
+                # Fallback estimation for Devanagari
+                text_len = len(new_text) * orig_size * 0.6
 
             final_size = orig_size
             if text_len > w and w > 10:
@@ -1677,10 +1709,25 @@ async def search_replace(
             else:
                 text_color = (0, 0, 0)
 
+            # Determine font for replacement text
+            _sr_fonts_dir = Path(__file__).parent.parent / "public" / "fonts"
+            _sr_fontname = "helv"
+            if has_non_latin(replace_term):
+                _sr_font_file = _sr_fonts_dir / "NotoSansDevanagari-Regular.ttf"
+                if not _sr_font_file.exists():
+                    _sr_font_file = Path(__file__).parent / "fonts" / "NotoSansDevanagari-Regular.ttf"
+                if _sr_font_file.exists():
+                    _sr_fontname = "NotoDevaRep"
+                    try:
+                        page.insert_font(fontname=_sr_fontname, fontbuffer=_sr_font_file.read_bytes())
+                    except Exception:
+                        pass  # Already registered on this page
+
             for inst in instances:
                 page.insert_text(
                     fitz.Point(inst.x0, inst.y1 - 1),
                     replace_term,
+                    fontname=_sr_fontname,
                     fontsize=font_size,
                     color=text_color
                 )
