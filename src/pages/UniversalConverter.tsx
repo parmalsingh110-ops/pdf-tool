@@ -299,7 +299,7 @@ async function pdfFromParagraphs(paragraphs: string[], title?: string): Promise<
 
 /**
  * Build a rich PDF from structured DOCX elements (paragraphs with styles + tables).
- * Renders headings at larger font sizes, preserves bold/italic per-run,
+ * Renders headings at larger font sizes, preserves bold/italic/color per-run,
  * draws tables with borders, header row background, and alternating row colors.
  */
 async function pdfFromDocxContent(
@@ -307,10 +307,21 @@ async function pdfFromDocxContent(
   title?: string,
 ): Promise<Blob> {
   const doc = await PDFDocument.create();
-  const fontReg = await doc.embedFont(StandardFonts.Helvetica);
+  const fontReg  = await doc.embedFont(StandardFonts.Helvetica);
   const fontBold = await doc.embedFont(StandardFonts.HelveticaBold);
   const fontItalic = await doc.embedFont(StandardFonts.HelveticaOblique);
-  const fontBI = await doc.embedFont(StandardFonts.HelveticaBoldOblique);
+  const fontBI   = await doc.embedFont(StandardFonts.HelveticaBoldOblique);
+
+  /** Parse a '#rrggbb' hex string to pdf-lib rgb() */
+  const hexToRgbPdf = (hex: string) => {
+    const h = hex.replace('#', '');
+    if (h.length !== 6) return rgb(0.07, 0.07, 0.07);
+    return rgb(
+      parseInt(h.slice(0,2),16)/255,
+      parseInt(h.slice(2,4),16)/255,
+      parseInt(h.slice(4,6),16)/255,
+    );
+  };
 
   const W = 595, H = 842, MARGIN = 50;
   const AW = W - MARGIN * 2;
@@ -379,43 +390,102 @@ async function pdfFromDocxContent(
 
       const isHeading = p.heading > 0;
       const sz = isHeading ? (headingSizes[p.heading] ?? BASE_SZ) : BASE_SZ;
-      const isBold = isHeading || p.runs.some(r => r.bold);
-      const isItalic = p.runs.some(r => r.italic);
-      const f = pickFont(isBold, isItalic);
-
       // Add space before headings
       if (isHeading) {
         y -= Math.min(sz * 0.8, 16);
-      }
-
-      // Word wrap
-      const lines = wrapText(text, AW, f, sz);
-      const neededH = lines.length * sz * 1.45 + 4;
-      ensureSpace(neededH);
-
-      // Alignment
-      for (const line of lines) {
-        let x = MARGIN;
-        if (p.alignment === 'center') {
-          let lw = 0;
-          try { lw = f.widthOfTextAtSize(line, sz); } catch { lw = line.length * sz * 0.5; }
-          x = MARGIN + (AW - lw) / 2;
-        } else if (p.alignment === 'right') {
-          let lw = 0;
-          try { lw = f.widthOfTextAtSize(line, sz); } catch { lw = line.length * sz * 0.5; }
-          x = MARGIN + AW - lw;
-        } else if (p.indentLeft > 0) {
-          x = MARGIN + Math.min(p.indentLeft / 20, 100); // twips to points
+        ensureSpace(sz * 2);
+        // Draw heading as one block using its text
+        const headingColor = rgb(0.1, 0.12, 0.5);
+        const hFont = pickFont(true, false);
+        const hLines = wrapText(text, AW, hFont, sz);
+        for (const line of hLines) {
+          let x = MARGIN;
+          if (p.alignment === 'center') {
+            let lw = 0; try { lw = hFont.widthOfTextAtSize(line, sz); } catch { lw = line.length * sz * 0.5; }
+            x = MARGIN + (AW - lw) / 2;
+          }
+          try { page.drawText(line, { x, y, size: sz, font: hFont, color: headingColor }); } catch {}
+          y -= sz * 1.45;
         }
+        y -= 4;
+      } else if (p.runs && p.runs.length > 0) {
+        // Per-run rendering: preserves bold/italic/color/size from each run
+        // We render runs inline, breaking at the available width
+        let cursorX = MARGIN + (p.indentLeft > 0 ? Math.min(p.indentLeft / 20, 100) : 0);
+        const lineStartX = cursorX;
+        const lineAvailW = MARGIN + AW - lineStartX;
+        let lineBuffer: { text: string; font: any; sz: number; color: any }[] = [];
+        let lineW = 0;
 
-        const color = isHeading ? rgb(0.1, 0.12, 0.5) : rgb(0.07, 0.07, 0.07);
-        try { page.drawText(line, { x, y, size: sz, font: f, color }); } catch {}
-        y -= sz * 1.45;
+        const flushLine = (extraGap = 0) => {
+          if (lineBuffer.length === 0) return;
+          // Alignment adjustment
+          let startX = lineStartX;
+          if (p.alignment === 'center') {
+            let totalW = 0;
+            for (const seg of lineBuffer) { try { totalW += seg.font.widthOfTextAtSize(seg.text, seg.sz); } catch { totalW += seg.text.length * seg.sz * 0.5; } }
+            startX = MARGIN + (AW - totalW) / 2;
+          } else if (p.alignment === 'right') {
+            let totalW = 0;
+            for (const seg of lineBuffer) { try { totalW += seg.font.widthOfTextAtSize(seg.text, seg.sz); } catch { totalW += seg.text.length * seg.sz * 0.5; } }
+            startX = MARGIN + AW - totalW;
+          }
+          let drawX = startX;
+          const maxSz = Math.max(...lineBuffer.map(s => s.sz));
+          ensureSpace(maxSz * 1.5);
+          for (const seg of lineBuffer) {
+            try { page.drawText(seg.text, { x: drawX, y, size: seg.sz, font: seg.font, color: seg.color }); } catch {}
+            try { drawX += seg.font.widthOfTextAtSize(seg.text, seg.sz); } catch { drawX += seg.text.length * seg.sz * 0.5; }
+          }
+          y -= maxSz * 1.45 + extraGap;
+          lineBuffer = [];
+          lineW = 0;
+        };
+
+        for (const run of p.runs) {
+          if (!run.text) continue;
+          const runSz = run.fontSize ? Math.max(6, Math.min(run.fontSize * 0.75, 24)) : BASE_SZ;
+          const runFont = pickFont(!!run.bold, !!run.italic);
+          const runColor = (run.color && run.color !== 'auto') ? hexToRgbPdf(run.color) : rgb(0.07, 0.07, 0.07);
+          const words = run.text.split(' ');
+          for (let wi = 0; wi < words.length; wi++) {
+            const word = words[wi];
+            const piece = wi < words.length - 1 ? word + ' ' : word;
+            let pieceW = 0;
+            try { pieceW = runFont.widthOfTextAtSize(piece, runSz); } catch { pieceW = piece.length * runSz * 0.5; }
+            if (lineW + pieceW > lineAvailW && lineBuffer.length > 0) {
+              flushLine();
+              cursorX = lineStartX;
+            }
+            lineBuffer.push({ text: piece, font: runFont, sz: runSz, color: runColor });
+            lineW += pieceW;
+          }
+        }
+        flushLine(3);
+      } else {
+        // Fallback: plain text rendering
+        const isBold2 = p.runs.some(r => r.bold);
+        const isItalic2 = p.runs.some(r => r.italic);
+        const f = pickFont(isBold2, isItalic2);
+        const lines = wrapText(text, AW, f, sz);
+        const neededH = lines.length * sz * 1.45 + 4;
+        ensureSpace(neededH);
+        for (const line of lines) {
+          let x = MARGIN;
+          if (p.alignment === 'center') {
+            let lw = 0; try { lw = f.widthOfTextAtSize(line, sz); } catch { lw = line.length * sz * 0.5; }
+            x = MARGIN + (AW - lw) / 2;
+          } else if (p.alignment === 'right') {
+            let lw = 0; try { lw = f.widthOfTextAtSize(line, sz); } catch { lw = line.length * sz * 0.5; }
+            x = MARGIN + AW - lw;
+          } else if (p.indentLeft > 0) {
+            x = MARGIN + Math.min(p.indentLeft / 20, 100);
+          }
+          try { page.drawText(line, { x, y, size: sz, font: f, color: rgb(0.07, 0.07, 0.07) }); } catch {}
+          y -= sz * 1.45;
+        }
+        y -= 3;
       }
-      y -= 3;
-
-      // Extra space after heading
-      if (isHeading) y -= 4;
 
     } else if (el.type === 'table') {
       const t = el as DTable;
@@ -879,33 +949,60 @@ async function pdfFromXlsxSheets(sheets: XlsxSheet[]): Promise<Blob> {
 }
 
 async function pdfFromSlides(slides: string[], title?: string): Promise<Blob> {
-  const doc = await PDFDocument.create();
+  const doc  = await PDFDocument.create();
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const bold = await doc.embedFont(StandardFonts.HelveticaBold);
   const W = 792, H = 612;
+  const MARGIN = 36;
 
   for (let i = 0; i < slides.length; i++) {
     const page = doc.addPage([W, H]);
-    page.drawRectangle({ x: 0, y: 0, width: W, height: H, color: rgb(0.97, 0.97, 1) });
-    page.drawRectangle({ x: 0, y: H - 52, width: W, height: 52, color: rgb(0.14, 0.28, 0.68) });
+    // Background
+    page.drawRectangle({ x: 0, y: 0, width: W, height: H, color: rgb(0.97, 0.97, 1.0) });
+    // Header strip
+    page.drawRectangle({ x: 0, y: H - 56, width: W, height: 56, color: rgb(0.10, 0.20, 0.60) });
     const heading = `${title ? title + '  ·  ' : ''}Slide ${i + 1} / ${slides.length}`;
-    page.drawText(heading.slice(0, 70), { x: 30, y: H - 34, size: 14, font: bold, color: rgb(1, 1, 1) });
+    try { page.drawText(heading.slice(0, 80), { x: MARGIN, y: H - 38, size: 15, font: bold, color: rgb(1, 1, 1) }); } catch {}
 
-    const text = slides[i] || '(No text on this slide)';
-    let y = H - 80;
-    const words = text.split(' ');
-    let line = '';
-    const lh = 22, sz = 14;
-    for (const w of words) {
-      const test = line ? `${line} ${w}` : w;
-      if (font.widthOfTextAtSize(test, sz) > W - 60 && line) {
-        if (y >= 40) page.drawText(line, { x: 30, y, size: sz, font, color: rgb(0.1, 0.1, 0.1) });
-        y -= lh;
-        line = w;
-        if (y < 40) break;
-      } else line = test;
+    const text   = slides[i] || '(No text on this slide)';
+    const lines  = text.split('\n').map(l => l.trim()).filter(Boolean);
+    let y = H - 72;
+    const bodyW = W - MARGIN * 2;
+
+    for (const rawLine of lines) {
+      if (y < MARGIN + 20) break;
+      // Detect if it's a heading line (all caps, short, or starts with '•')
+      const isTitle   = rawLine.length < 60 && rawLine === rawLine.toUpperCase() && rawLine.length > 3;
+      const isBullet  = rawLine.startsWith('•') || rawLine.startsWith('-') || rawLine.startsWith('*');
+      const sz        = isTitle ? 16 : 13;
+      const drawFont  = isTitle ? bold : font;
+      const color     = isTitle ? rgb(0.1, 0.2, 0.6) : rgb(0.1, 0.1, 0.1);
+      const x0        = isBullet ? MARGIN + 14 : MARGIN;
+
+      if (isBullet) {
+        try { page.drawText('•', { x: MARGIN, y, size: sz, font, color: rgb(0.2, 0.4, 0.8) }); } catch {}
+      }
+
+      // Word-wrap
+      const words2 = rawLine.replace(/^[•\-\*]\s*/, '').split(' ');
+      let cur = '';
+      for (const w of words2) {
+        const test = cur ? `${cur} ${w}` : w;
+        let tw = 0; try { tw = drawFont.widthOfTextAtSize(test, sz); } catch { tw = test.length * sz * 0.55; }
+        if (tw > bodyW - (isBullet ? 14 : 0) && cur) {
+          if (y >= MARGIN) { try { page.drawText(cur, { x: x0, y, size: sz, font: drawFont, color }); } catch {} }
+          y -= sz * 1.45;
+          cur = w;
+          if (y < MARGIN) break;
+        } else cur = test;
+      }
+      if (cur && y >= MARGIN) { try { page.drawText(cur, { x: x0, y, size: sz, font: drawFont, color }); } catch {} }
+      y -= sz * 1.6;
     }
-    if (line && y >= 40) page.drawText(line, { x: 30, y, size: sz, font, color: rgb(0.1, 0.1, 0.1) });
+
+    // Slide number footer
+    const footer = `${i + 1} / ${slides.length}`;
+    try { page.drawText(footer, { x: W - 50, y: 14, size: 9, font, color: rgb(0.5, 0.5, 0.6) }); } catch {}
   }
   return new Blob([await doc.save()], { type: 'application/pdf' });
 }
@@ -1819,10 +1916,18 @@ export default function UniversalConverter() {
             const arr = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
             blob = new Blob([arr], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
           } else if (target === 'pptx') {
-            blob = await pptxFromParagraphs(docxContent.flatText, name);
+            // ── DOCX → PPT: Backend ──
+            setProgress('Converting Word to PowerPoint (server-side)…');
+            const backendBlob = await tryBackend('/convert/word-to-ppt');
+            if (backendBlob) {
+              blob = backendBlob;
+            } else {
+              setProgress('Server unavailable, converting in browser…');
+              blob = await pptxFromParagraphs(docxContent.flatText, name);
+            }
           } else {
-            const doc = buildDocxFromStructured(docxContent.elements, name);
-            if (target === 'docx') blob = await Packer.toBlob(doc);
+            const doc2 = buildDocxFromStructured(docxContent.elements, name);
+            if (target === 'docx') blob = await Packer.toBlob(doc2);
             else blob = txtFromParagraphs(docxContent.flatText);
           }
         }
@@ -1838,47 +1943,34 @@ export default function UniversalConverter() {
             setProgress('Server unavailable, converting in browser…');
             blob = await xlsxFileToPdf(file);
           }
+        } else if (target === 'docx') {
+          // ── XLSX → Word: Backend ──
+          setProgress('Converting Excel to Word (server-side)…');
+          const backendBlob = await tryBackend('/convert/excel-to-word');
+          if (backendBlob) {
+            blob = backendBlob;
+          } else {
+            setProgress('Server unavailable, converting in browser…');
+            const sheets = await extractXlsxSheets(file);
+            blob = await docxFromXlsxSheets(sheets);
+          }
+        } else if (target === 'pptx') {
+          // ── XLSX → PPT: Backend ──
+          setProgress('Converting Excel to PowerPoint (server-side)…');
+          const backendBlob = await tryBackend('/convert/excel-to-ppt');
+          if (backendBlob) {
+            blob = backendBlob;
+          } else {
+            setProgress('Server unavailable, converting in browser…');
+            const sheets = await extractXlsxSheets(file);
+            blob = await pptxFromXlsxSheets(sheets);
+          }
         } else {
           setProgress('Reading Excel sheets…');
           const sheets = await extractXlsxSheets(file);
-          let aiRows: string[][] | null = null;
-          try {
-            if (import.meta.env.VITE_GEMINI_API_KEY && (target === 'docx' || target === 'pptx' || target === 'txt')) {
-              const { extractTableData } = await import('../lib/advancedVisionEngine');
-              const firstSheet = sheets[0];
-              if (firstSheet && firstSheet.rows.length > 0) {
-                const canvas = document.createElement('canvas');
-                const W = 800, H = Math.min(1200, firstSheet.rows.length * 20 + 60);
-                canvas.width = W; canvas.height = H;
-                const ctx = canvas.getContext('2d')!;
-                ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H);
-                ctx.font = '12px sans-serif'; ctx.fillStyle = '#000';
-                let cy = 30;
-                ctx.fillStyle = '#1a3a8f'; ctx.fillRect(0, 0, W, 28);
-                ctx.fillStyle = '#fff'; ctx.fillText(firstSheet.name, 8, 18);
-                ctx.fillStyle = '#000';
-                for (const row of firstSheet.rows.slice(0, 50)) {
-                  const cellW = Math.floor(W / Math.max(1, row.length));
-                  row.forEach((cell, ci) => ctx.fillText(String(cell ?? '').slice(0, 20), ci * cellW + 4, cy));
-                  cy += 20;
-                }
-                const b64 = canvas.toDataURL('image/jpeg', 0.85);
-                canvas.width = 0; canvas.height = 0;
-                aiRows = await extractTableData(b64);
-              }
-            }
-          } catch { /* fallback */ }
           setProgress('Building output…');
-          if (target === 'docx') blob = await docxFromXlsxSheets(sheets);
-          else if (target === 'pptx') blob = await pptxFromXlsxSheets(sheets);
-          else if (target === 'csv') blob = csvFromXlsxSheets(sheets);
-          else {
-            if (aiRows && aiRows.length > 0) {
-              blob = new Blob([aiRows.map(r => r.join('\t')).join('\n')], { type: 'text/plain;charset=utf-8' });
-            } else {
-              blob = txtFromXlsxSheets(sheets);
-            }
-          }
+          if (target === 'csv') blob = csvFromXlsxSheets(sheets);
+          else blob = txtFromXlsxSheets(sheets);
         }
 
       } else if (kind === 'pptx') {
@@ -1894,13 +1986,33 @@ export default function UniversalConverter() {
             const flatSlides = slides.map(s => [s.title, s.body].filter(Boolean).join('\n'));
             blob = await pdfFromSlides(flatSlides, name);
           }
+        } else if (target === 'docx') {
+          // ── PPTX → Word: Backend ──
+          setProgress('Converting PowerPoint to Word (server-side)…');
+          const backendBlob = await tryBackend('/convert/ppt-to-word');
+          if (backendBlob) {
+            blob = backendBlob;
+          } else {
+            setProgress('Server unavailable, converting in browser…');
+            const slides = await extractPptxSlides(file);
+            blob = await docxFromSlides(slides, name);
+          }
+        } else if (target === 'xlsx') {
+          // ── PPTX → Excel: Backend ──
+          setProgress('Converting PowerPoint to Excel (server-side)…');
+          const backendBlob = await tryBackend('/convert/ppt-to-excel');
+          if (backendBlob) {
+            blob = backendBlob;
+          } else {
+            setProgress('Server unavailable, converting in browser…');
+            const slides = await extractPptxSlides(file);
+            blob = xlsxFromSlides(slides);
+          }
         } else {
           setProgress('Extracting slides (titles, body, tables)…');
           const slides = await extractPptxSlides(file);
           setProgress('Building output…');
-          if (target === 'docx') blob = await docxFromSlides(slides, name);
-          else if (target === 'xlsx') blob = xlsxFromSlides(slides);
-          else /* txt */             blob = txtFromSlides(slides);
+          blob = txtFromSlides(slides);
         }
 
       } else {
