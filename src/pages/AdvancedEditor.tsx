@@ -351,27 +351,49 @@ export default function AdvancedEditor() {
       const items: DetectedTextBlock[] = rawItems.map(block => {
         if (!ctx) return block;
         try {
-          // Background: sample corner of bounding box (less likely to be text pixel)
-          const bx = Math.max(0, Math.min(block.x + 2, canvas.width - 1));
-          const by = Math.max(0, Math.min(block.y + 2, canvas.height - 1));
-          const bgPx = ctx.getImageData(bx, by, 1, 1).data;
-          const bgColor = `#${bgPx[0].toString(16).padStart(2, '0')}${bgPx[1].toString(16).padStart(2, '0')}${bgPx[2].toString(16).padStart(2, '0')}`;
+          // ── Robust background color: sample from OUTSIDE the text box (ring around it)
+          let bgSumR = 0, bgSumG = 0, bgSumB = 0, bgCount = 0;
+          const ringPad = Math.max(3, Math.round(block.h * 0.25));
+          const corners = [
+            [block.x - ringPad, block.y - ringPad],
+            [block.x + block.w + ringPad, block.y - ringPad],
+            [block.x - ringPad, block.y + block.h + ringPad],
+            [block.x + block.w + ringPad, block.y + block.h + ringPad],
+            [block.x + Math.round(block.w * 0.5), block.y - ringPad],
+            [block.x + Math.round(block.w * 0.5), block.y + block.h + ringPad],
+          ];
+          for (const [cx2, cy2] of corners) {
+            const sx = Math.max(0, Math.min(Math.round(cx2), canvas.width - 1));
+            const sy = Math.max(0, Math.min(Math.round(cy2), canvas.height - 1));
+            const px = ctx.getImageData(sx, sy, 1, 1).data;
+            bgSumR += px[0]; bgSumG += px[1]; bgSumB += px[2];
+            bgCount++;
+          }
+          const bgR = bgCount > 0 ? Math.round(bgSumR / bgCount) : 255;
+          const bgG = bgCount > 0 ? Math.round(bgSumG / bgCount) : 255;
+          const bgB = bgCount > 0 ? Math.round(bgSumB / bgCount) : 255;
+          const bgColor = `#${bgR.toString(16).padStart(2,'0')}${bgG.toString(16).padStart(2,'0')}${bgB.toString(16).padStart(2,'0')}`;
 
-          // Text color: sample center of bounding box (where text pixels dominate)
-          const cx = Math.max(0, Math.min(Math.round(block.x + block.w * 0.3), canvas.width - 1));
-          const cy = Math.max(0, Math.min(Math.round(block.y + block.h * 0.55), canvas.height - 1));
-          const fgPx = ctx.getImageData(cx, cy, 1, 1).data;
-          const fgColor = `#${fgPx[0].toString(16).padStart(2, '0')}${fgPx[1].toString(16).padStart(2, '0')}${fgPx[2].toString(16).padStart(2, '0')}`;
+          // ── Foreground color: prefer exactColor from pdf.js (100% accurate)
+          // Fall back to canvas scan only if exactColor is missing.
+          let fgColor = block.exactColor;
+          if (!fgColor) {
+            // Scan middle row of text bounding box, find darkest pixel (= text color)
+            const midY = Math.max(0, Math.min(Math.round(block.y + block.h * 0.52), canvas.height - 1));
+            let minL = 999, fR = 0, fG = 0, fB = 0;
+            for (let sx = Math.max(0, block.x + 2); sx < Math.min(block.x + block.w - 2, canvas.width); sx += 2) {
+              const px = ctx.getImageData(sx, midY, 1, 1).data;
+              const l = 0.299 * px[0] + 0.587 * px[1] + 0.114 * px[2];
+              if (l < minL) { minL = l; fR = px[0]; fG = px[1]; fB = px[2]; }
+            }
+            fgColor = minL < 200
+              ? `#${fR.toString(16).padStart(2,'0')}${fG.toString(16).padStart(2,'0')}${fB.toString(16).padStart(2,'0')}`
+              : '#000000';
+          }
 
-          // If bg and fg are same (text not at sample point), default fg to black
-          const isSameColor = bgColor === fgColor;
-          return {
-            ...block,
-            bgColor,
-            fgColor: block.exactColor || (isSameColor ? '#000000' : fgColor),
-          };
+          return { ...block, bgColor, fgColor };
         } catch {
-          return block;
+          return { ...block, fgColor: block.exactColor || '#000000', bgColor: '#ffffff' };
         }
       });
 
@@ -801,25 +823,21 @@ export default function AdvancedEditor() {
       const target = prev.find(a => a.id === id);
       if (!target || target.type !== 'text') return prev;
 
+      // ── Keep original font size: NEVER auto-resize while user is typing.
+      // User can manually change size via the toolbar. This prevents the
+      // "text gets big/small as I type" problem.
+      const preservedFont = target.fontSize || 14;
+
+      // Width: expand to fit new text but never shrink below original source width
       const sourceW = target.sourceWidth || target.width || 120;
-      const sourceH = target.sourceHeight || target.height || 24;
-      const currentW = target.width || sourceW;
-      const currentH = target.height || sourceH;
-      const desiredFont = fitFontSizeToBounds(text, currentW, currentH, target.fontSize || 14, target.bold, target.italic);
-      const measuredTextW = estimateTextWidth(text, desiredFont, target.bold, target.italic);
-      const contentW = Math.max(36, currentW, measuredTextW + 8);
-      const contentH = Math.max(currentH, sourceH, Math.round(desiredFont * 1.28));
+      const measuredW = estimateTextWidth(text, preservedFont, target.bold, target.italic);
+      const contentW  = Math.max(sourceW, measuredW + 12);
+      const contentH  = target.height || target.sourceHeight || Math.round(preservedFont * 1.3);
       const pad = getWhiteoutPad(contentH);
 
       return prev.map(a => {
         if (a.id === id) {
-          return {
-            ...a,
-            text,
-            fontSize: desiredFont,
-            width: contentW,
-            height: contentH,
-          };
+          return { ...a, text, fontSize: preservedFont, width: contentW, height: contentH };
         }
         if (target.linkedId && a.id === target.linkedId && a.type === 'whiteout') {
           return {
@@ -950,27 +968,22 @@ export default function AdvancedEditor() {
 
       // ── Load Noto Sans Devanagari in BROWSER for Canvas-based text rendering ──
       const loadBrowserFonts = async () => {
-        try {
-          if (!document.fonts.check('12px NotoSansDevanagari')) {
-            const regular = new FontFace(
-              'NotoSansDevanagari',
-              'url(/fonts/NotoSansDevanagari-Regular.ttf)'
-            );
-            await regular.load();
-            document.fonts.add(regular);
+        // Always try to load — document.fonts.check is unreliable across browsers
+        const fontsToLoad: Array<[string, string, object]> = [
+          ['NotoSansDevanagari', '/fonts/NotoSansDevanagari-Regular.ttf', { weight: '400' }],
+          ['NotoSansDevanagari', '/fonts/NotoSansDevanagari-Bold.ttf',    { weight: '700' }],
+        ];
+        for (const [name, url, desc] of fontsToLoad) {
+          try {
+            const face = new FontFace(name, `url(${url})`, desc as FontFaceDescriptors);
+            const loaded = await face.load();
+            document.fonts.add(loaded);
+          } catch (e) {
+            console.warn(`[PDF Editor] Failed to load ${name} from ${url}:`, e);
           }
-        } catch (e) { console.warn('Failed to load Devanagari font in browser:', e); }
-        try {
-          if (!document.fonts.check('bold 12px NotoSansDevanagari')) {
-            const bold = new FontFace(
-              'NotoSansDevanagari',
-              'url(/fonts/NotoSansDevanagari-Bold.ttf)',
-              { weight: 'bold' }
-            );
-            await bold.load();
-            document.fonts.add(bold);
-          }
-        } catch { /* bold variant optional */ }
+        }
+        // Wait for all fonts to be ready
+        try { await document.fonts.ready; } catch { /* ignore */ }
       };
 
       const renderTextViaCanvas = async (
@@ -981,31 +994,34 @@ export default function AdvancedEditor() {
         italic?: boolean,
       ) => {
         const RENDER_SCALE = 4;
-        const canvasFontPx = pdfFontSize * RENDER_SCALE;
+        const canvasFontPx = Math.max(8, pdfFontSize * RENDER_SCALE);
 
         const canvas = document.createElement('canvas');
         const ctx = canvas.getContext('2d')!;
 
-        const weight = bold ? 'bold ' : '';
-        const style = italic ? 'italic ' : '';
-        const fontStr = `${weight}${style}${canvasFontPx}px NotoSansDevanagari, 'Noto Sans Devanagari', sans-serif`;
+        const weight = bold ? 'bold' : '400';
+        const fontStyle = italic ? 'italic' : 'normal';
+        // Use NotoSansDevanagari first (loaded above), fallback to system fonts
+        const fontStr = `${fontStyle} ${weight} ${canvasFontPx}px NotoSansDevanagari, 'Noto Sans Devanagari', 'Mangal', Arial Unicode MS, sans-serif`;
 
         ctx.font = fontStr;
         const metrics = ctx.measureText(text);
-        const actualLeft = metrics.actualBoundingBoxLeft || 0;
-        const actualRight = metrics.actualBoundingBoxRight || metrics.width;
-        const actualAscent = metrics.actualBoundingBoxAscent || canvasFontPx * 0.85;
-        const actualDescent = metrics.actualBoundingBoxDescent || canvasFontPx * 0.25;
+        const actualLeft   = Math.max(0, metrics.actualBoundingBoxLeft   || 0);
+        const actualRight  = Math.max(1, metrics.actualBoundingBoxRight  || metrics.width);
+        const actualAscent = Math.max(1, metrics.actualBoundingBoxAscent || canvasFontPx * 0.85);
+        const actualDescent= Math.max(0, metrics.actualBoundingBoxDescent|| canvasFontPx * 0.25);
 
-        const pad = Math.ceil(canvasFontPx * 0.1);
+        const pad = Math.ceil(canvasFontPx * 0.1) + 2;
         const textW = Math.ceil(actualLeft + actualRight);
         const textH = Math.ceil(actualAscent + actualDescent);
-        canvas.width = textW + pad * 2;
-        canvas.height = textH + pad * 2;
+
+        // Safety: ensure canvas is at least 1×1
+        canvas.width  = Math.max(4, textW + pad * 2);
+        canvas.height = Math.max(4, textH + pad * 2);
 
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         ctx.font = fontStr;
-        ctx.fillStyle = colorHex;
+        ctx.fillStyle = colorHex || '#000000';
         ctx.textBaseline = 'alphabetic';
         ctx.fillText(text, pad + actualLeft, pad + actualAscent);
 
@@ -1019,6 +1035,7 @@ export default function AdvancedEditor() {
         canvas.width = 0; canvas.height = 0;
         return { imgBytes, imgPdfW, imgPdfH, baselineFromTop };
       };
+
 
       const allTexts = otherAnnotations
         .filter(a => a.type === 'text' && a.text)
@@ -1721,9 +1738,11 @@ export default function AdvancedEditor() {
                             color: ann.color || '#000000',
                             fontWeight: ann.bold ? 700 : 400,
                             fontStyle: ann.italic ? 'italic' : 'normal',
-                            lineHeight: `${ann.height || 20}px`,
+                            lineHeight: `${(ann.height || Math.round((ann.fontSize || 14) * 1.3))}px`,
                             whiteSpace: 'nowrap',
                             fontFamily: 'Helvetica, Arial, sans-serif',
+                            padding: 0,
+                            margin: 0,
                           }}
                           autoFocus
                           onClick={(e) => e.stopPropagation()}
