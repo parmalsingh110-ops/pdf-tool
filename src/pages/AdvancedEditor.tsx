@@ -81,6 +81,7 @@ interface DetectedTextBlock {
   fontName?: string;  // pdfjs internal font name
   bold?: boolean;     // detected from fontName
   italic?: boolean;   // detected from fontName
+  exactColor?: string; // exact color from pdfjs
   fgColor?: string;   // sampled text color from canvas
   bgColor?: string;   // sampled background color from canvas
 }
@@ -319,6 +320,11 @@ export default function AdvancedEditor() {
           const isBold = /bold/i.test(fontName);
           const isItalic = /italic|oblique/i.test(fontName);
 
+          let exactColor: string | undefined;
+          if (item.color && item.color.length >= 3) {
+            exactColor = `#${item.color[0].toString(16).padStart(2, '0')}${item.color[1].toString(16).padStart(2, '0')}${item.color[2].toString(16).padStart(2, '0')}`;
+          }
+
           return {
             text: item.str,
             x: Math.round(tx[4]),
@@ -329,6 +335,7 @@ export default function AdvancedEditor() {
             fontName,
             bold: isBold,
             italic: isItalic,
+            exactColor,
           };
         })
         .filter(i =>
@@ -361,7 +368,7 @@ export default function AdvancedEditor() {
           return {
             ...block,
             bgColor,
-            fgColor: isSameColor ? '#000000' : fgColor,
+            fgColor: block.exactColor || (isSameColor ? '#000000' : fgColor),
           };
         } catch {
           return block;
@@ -877,15 +884,34 @@ export default function AdvancedEditor() {
 
     setIsProcessing(true);
     try {
+      // Helper: check if text contains non-ASCII / non-WinAnsi characters (Hindi, Devanagari, etc.)
+      const hasNonLatinChars = (text: string) => {
+        for (let i = 0; i < text.length; i++) {
+          if (text.charCodeAt(i) > 0x00FF) return true;
+        }
+        return false;
+      };
+
       // 1. Separate native text replacements (from selection) vs other annotations
-      const nativeEdits = annotations.filter(a => a.type === 'text' && a.sourceWidth && a.sourceWidth > 0);
+      const nativeEditsAll = annotations.filter(a => a.type === 'text' && a.sourceWidth && a.sourceWidth > 0);
+      const nativeEdits = nativeEditsAll.filter(a => !hasNonLatinChars(a.text || ''));
+      const nativeEditsHindi = nativeEditsAll.filter(a => hasNonLatinChars(a.text || ''));
+
       const otherAnnotations = annotations.filter(a => !(a.type === 'text' && a.sourceWidth && a.sourceWidth > 0));
+      // Add Hindi edits to otherAnnotations so they are drawn by pdf-lib via Canvas
+      otherAnnotations.push(...nativeEditsHindi);
 
       let currentFileBuffer = await file.arrayBuffer();
 
       // 2. If there are native text edits, send to Python backend first
-      if (nativeEdits.length > 0) {
-        const editPayload = nativeEdits.map(ann => ({
+      // We also send nativeEditsHindi to backend but with empty text to just redact the original area.
+      const editsToSendToBackend = [
+        ...nativeEdits,
+        ...nativeEditsHindi.map(ann => ({ ...ann, text: '' }))
+      ];
+
+      if (editsToSendToBackend.length > 0) {
+        const editPayload = editsToSendToBackend.map(ann => ({
           page: ann.pageIndex,
           x: ann.x / pageViewport.scale,
           // Convert from top-left (frontend) to standard coords expected by backend
@@ -921,14 +947,6 @@ export default function AdvancedEditor() {
 
       // 3. Apply the rest of the annotations (drawings, signatures, highlights, NEW text) using pdf-lib
       const pdf = await PDFDocument.load(currentFileBuffer);
-
-      // Helper: check if text contains non-ASCII / non-WinAnsi characters (Hindi, Devanagari, etc.)
-      const hasNonLatinChars = (text: string) => {
-        for (let i = 0; i < text.length; i++) {
-          if (text.charCodeAt(i) > 0x00FF) return true;
-        }
-        return false;
-      };
 
       // ── Load Noto Sans Devanagari in BROWSER for Canvas-based text rendering ──
       const loadBrowserFonts = async () => {
