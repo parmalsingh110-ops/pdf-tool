@@ -1389,10 +1389,18 @@ async def edit_pdf_endpoint(request: Request, file: UploadFile = File(...), edit
             if page_idx >= len(doc):
                 continue
             page = doc[page_idx]
-            x, y, w, h = action["x"], action["y"], action["w"], action["h"]
+
+            # PyMuPDF uses TOP-LEFT origin (same as browser canvas).
+            # Frontend divides canvas coords by viewport.scale before sending,
+            # so x,y,w,h are already in PDF points with y measured from top.
+            x   = float(action["x"])
+            y   = float(action["y"])   # top of text bounding box, from top of page
+            w   = float(action["w"])
+            h   = float(action["h"])
             new_text = action.get("newText", "")
 
             bg_color = hex_to_rgb(action.get("bgColor", "#ffffff"))
+            # Redact: add small padding around box to fully cover existing text
             rect = fitz.Rect(x - 2, y - 2, x + w + 2, y + h + 2)
             page.add_redact_annot(rect, fill=bg_color)
             page.apply_redactions()
@@ -1400,12 +1408,14 @@ async def edit_pdf_endpoint(request: Request, file: UploadFile = File(...), edit
             if not new_text:
                 continue
 
-            fg_color = hex_to_rgb(action.get("color", "#000000"))
-            orig_size = action.get("fontSize", 12)
-            is_bold = bool(action.get("bold"))
+            fg_color  = hex_to_rgb(action.get("color", "#000000"))
+            orig_size = float(action.get("fontSize", 12))
+            if orig_size < 4:
+                orig_size = 12
+            is_bold   = bool(action.get("bold"))
             is_italic = bool(action.get("italic"))
 
-            # Default Latin font
+            # Latin font selection
             if is_bold and is_italic:
                 fontname = "hebi"
             elif is_bold:
@@ -1428,23 +1438,24 @@ async def edit_pdf_endpoint(request: Request, file: UploadFile = File(...), edit
                             page_fonts.add(fontname)
                             logger.info(f"[EditPDF] Registered Devanagari font '{fontname}' on page {page_idx}")
                         except Exception as fe:
-                            logger.warning(f"[EditPDF] Could not register Devanagari font: {fe}. Falling back to helv.")
+                            logger.warning(f"[EditPDF] Devanagari font register failed: {fe}. Using helv.")
                             fontname = "hebo" if is_bold else "helv"
                 else:
-                    logger.warning(f"[EditPDF] Devanagari font file not found at {_fonts_dir}. Hindi text may render incorrectly.")
+                    logger.warning(f"[EditPDF] Devanagari font not found at {_fonts_dir}.")
             # ─────────────────────────────────────────────────────────────────
 
             try:
                 text_len = fitz.get_text_length(new_text, fontname=fontname, fontsize=orig_size)
             except Exception:
-                # Fallback estimation for Devanagari
                 text_len = len(new_text) * orig_size * 0.6
 
             final_size = orig_size
             if text_len > w and w > 10:
-                final_size = max(orig_size * 0.6, orig_size * (w / text_len))
+                final_size = max(orig_size * 0.5, orig_size * (w / text_len))
 
-            baseline_y = y + (h * 0.78)
+            # In PyMuPDF: insert_text point = (x, baseline_y) where baseline_y is from TOP.
+            # The text baseline sits approx 78% down within the bounding box.
+            baseline_y = y + h * 0.78
             page.insert_text(
                 fitz.Point(x, baseline_y), new_text,
                 fontname=fontname, fontsize=final_size, color=fg_color
@@ -1463,6 +1474,7 @@ async def edit_pdf_endpoint(request: Request, file: UploadFile = File(...), edit
         raise
     except Exception as e:
         cleanup(inp, out)
+
         raise safe_error(e, "edit-pdf")
 
 
