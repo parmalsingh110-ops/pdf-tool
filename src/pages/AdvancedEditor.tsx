@@ -986,6 +986,15 @@ export default function AdvancedEditor() {
         try { await document.fonts.ready; } catch { /* ignore */ }
       };
 
+      /** Convert a data: URL to ArrayBuffer without fetch() (avoids CSP block on data: scheme) */
+      const dataUrlToArrayBuffer = (dataUrl: string): ArrayBuffer => {
+        const base64 = dataUrl.split(',')[1];
+        const binary = atob(base64);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+        return bytes.buffer;
+      };
+
       const renderTextViaCanvas = async (
         text: string,
         pdfFontSize: number,
@@ -1026,7 +1035,8 @@ export default function AdvancedEditor() {
         ctx.fillText(text, pad + actualLeft, pad + actualAscent);
 
         const dataUrl = canvas.toDataURL('image/png');
-        const imgBytes = await fetch(dataUrl).then(r => r.arrayBuffer());
+        // Use direct base64 decode to avoid CSP blocking fetch() on data: URLs
+        const imgBytes = dataUrlToArrayBuffer(dataUrl);
 
         const imgPdfW = canvas.width / RENDER_SCALE;
         const imgPdfH = canvas.height / RENDER_SCALE;
@@ -1188,7 +1198,8 @@ export default function AdvancedEditor() {
             opacity: 0.4,
           });
         } else if (ann.type === 'signature' && ann.signatureDataUrl) {
-          const imgBytes = await fetch(ann.signatureDataUrl).then(res => res.arrayBuffer());
+          // Use direct base64 decode to avoid CSP blocking fetch() on data: URLs
+          const imgBytes = dataUrlToArrayBuffer(ann.signatureDataUrl);
           const pdfImage = await pdf.embedPng(imgBytes);
           page.drawImage(pdfImage, {
             x: pdfX,
@@ -1197,7 +1208,7 @@ export default function AdvancedEditor() {
             height: pdfH,
           });
         } else if (ann.type === 'image' && ann.imageDataUrl) {
-          const imgBytes = await fetch(ann.imageDataUrl).then(res => res.arrayBuffer());
+          const imgBytes = dataUrlToArrayBuffer(ann.imageDataUrl);
           let pdfImage;
           if (ann.imageDataUrl.includes('image/png')) {
             pdfImage = await pdf.embedPng(imgBytes);
