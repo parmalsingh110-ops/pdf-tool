@@ -1874,92 +1874,9 @@ export default function UniversalConverter() {
           if (backendBlob) {
             blob = backendBlob;
           } else {
-            setProgress('Server unavailable â€” rendering Word document as PDFâ€¦');
-          // Use canvas-based approach: render each DOCX page via browser canvas for pixel-accurate output
-          try {
-            const docxContent = await extractDocxContent(file);
-            // Build a canvas-rendered PDF: render content page-by-page via offscreen canvas
-            const canvasPdf = await PDFDocument.create();
-            const W = 595, H = 842, MARGIN = 50;
-            // Render all elements onto canvas pages, then embed as images in PDF
-            const tempCanvas = document.createElement('canvas');
-            tempCanvas.width = W * 2;  // 2x for sharpness
-            tempCanvas.height = H * 2;
-            const tCtx = tempCanvas.getContext('2d')!;
-
-            // Simple in-browser renderer using canvas 2D
-            const renderDocxToCanvasPdf = async () => {
-              const lines: { text: string; x: number; size: number; bold: boolean; color: string }[] = [];
-              for (const el of docxContent.elements) {
-                if (el.type === 'paragraph') {
-                  const p = el as any;
-                  const sz = p.heading > 0 ? Math.max(14, 22 - p.heading * 2) : 11;
-                  const isBold = p.heading > 0 || p.runs?.some((r: any) => r.bold);
-                  const text = p.runs?.map((r: any) => r.text || '').join('') || p.text || '';
-                  if (!text.trim()) { lines.push({ text: '', x: MARGIN, size: sz, bold: isBold, color: '#000' }); continue; }
-                  // Word wrap
-                  const words = text.split(/\s+/);
-                  let line = '';
-                  const maxW = W - MARGIN * 2;
-                  for (const word of words) {
-                    const test = line ? `${line} ${word}` : word;
-                    const mc = document.createElement('canvas');
-                    const mctx = mc.getContext('2d')!;
-                    mctx.font = `${isBold ? 'bold ' : ''}${sz * 2}px Helvetica, Arial, sans-serif`;
-                    const tw = mctx.measureText(test).width / 2;
-                    if (tw > maxW && line) { lines.push({ text: line, x: MARGIN, size: sz, bold: isBold, color: '#111' }); line = word; }
-                    else line = test;
-                  }
-                  if (line) lines.push({ text: line, x: MARGIN, size: sz, bold: isBold, color: '#111' });
-                  lines.push({ text: '', x: 0, size: sz * 0.3, bold: false, color: '' }); // spacing
-                }
-              }
-
-              let pageLines: typeof lines[] = [];
-              let curPage: typeof lines = [];
-              let curH = MARGIN;
-              for (const l of lines) {
-                const lh = (l.size * 1.5) * 2;
-                if (curH + lh > (H - MARGIN) * 2 && curPage.length > 0) {
-                  pageLines.push(curPage);
-                  curPage = [];
-                  curH = MARGIN * 2;
-                }
-                curPage.push(l);
-                curH += lh;
-              }
-              if (curPage.length > 0) pageLines.push(curPage);
-              if (pageLines.length === 0) pageLines = [[]];
-
-              for (const pg of pageLines) {
-                tCtx.fillStyle = '#ffffff';
-                tCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
-                let cy = MARGIN * 2;
-                for (const l of pg) {
-                  if (!l.text) { cy += l.size * 2; continue; }
-                  tCtx.font = `${l.bold ? 'bold ' : ''}${l.size * 2}px Helvetica, Arial, sans-serif`;
-                  tCtx.fillStyle = l.color || '#111111';
-                  tCtx.fillText(l.text, l.x * 2, cy + l.size * 2 * 0.8);
-                  cy += l.size * 2 * 1.5;
-                }
-                const imgData = tempCanvas.toDataURL('image/jpeg', 0.92);
-                const b64 = imgData.split(',')[1];
-                const bin = atob(b64);
-                const arr = new Uint8Array(bin.length);
-                for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
-                const emb = await canvasPdf.embedJpg(arr.buffer);
-                const pg2 = canvasPdf.addPage([W, H]);
-                pg2.drawImage(emb, { x: 0, y: 0, width: W, height: H });
-              }
-              tempCanvas.width = 0; tempCanvas.height = 0;
-              return new Blob([await canvasPdf.save()], { type: 'application/pdf' });
-            };
-            blob = await renderDocxToCanvasPdf();
-          } catch {
-            // Last fallback: structured PDF
+            setProgress('Server unavailable — converting Word document in browser…');
             const docxContent = await extractDocxContent(file);
             blob = await pdfFromDocxContent(docxContent.elements);
-          }
           } // end else (backendBlob not available)
         } else {
           setProgress('Extracting Word content (tables, headings, formatting)â€¦');
