@@ -416,7 +416,9 @@ export default function AdvancedEditor() {
       const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(b => resolve(b), 'image/png'));
       if (!blob) throw new Error('Canvas export failed');
 
-      const worker = await createWorker(ocrLanguage);
+      const worker = await createWorker(ocrLanguage, 1, {
+        workerPath: '/tesseract-worker.min.js',
+      });
       const { data } = await worker.recognize(blob, {}, { blocks: true });
       await worker.terminate();
 
