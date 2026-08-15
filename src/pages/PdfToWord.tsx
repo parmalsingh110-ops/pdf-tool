@@ -16,7 +16,7 @@ export default function PdfToWord() {
   const [stage, setStage] = useState<Stage>('idle');
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState('');
-  const [forceOcr, setForceOcr] = useState(false);
+  const [forceOcr, setForceOcr] = useState(true);
 
   const handleDrop = async (files: File[]) => {
     if (!files.length) return;
