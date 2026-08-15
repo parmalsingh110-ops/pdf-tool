@@ -435,6 +435,68 @@ async def ensure_auto_ocr(inp_path: Path, force: bool = False) -> Path:
     return inp_path
 
 
+def remove_images_from_docx(docx_path: str):
+    try:
+        import zipfile
+        import tempfile
+        import os
+        import shutil
+        import xml.etree.ElementTree as ET
+
+        temp_dir = tempfile.mkdtemp()
+        with zipfile.ZipFile(docx_path, 'r') as zip_ref:
+            zip_ref.extractall(temp_dir)
+        
+        # 1. Delete media folder to reduce file size
+        media_dir = os.path.join(temp_dir, 'word', 'media')
+        if os.path.exists(media_dir):
+            shutil.rmtree(media_dir, ignore_errors=True)
+            
+        # 2. Modify XML to remove shapes and fix text color
+        doc_xml_path = os.path.join(temp_dir, 'word', 'document.xml')
+        if os.path.exists(doc_xml_path):
+            ET.register_namespace('w', 'http://schemas.openxmlformats.org/wordprocessingml/2006/main')
+            ET.register_namespace('v', 'urn:schemas-microsoft-com:vml')
+            ET.register_namespace('wp', 'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing')
+            
+            tree = ET.parse(doc_xml_path)
+            root = tree.getroot()
+            namespaces = {'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main',
+                          'v': 'urn:schemas-microsoft-com:vml',
+                          'wp': 'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing'}
+            
+            changed = False
+            
+            # Remove images
+            for tag in ['w:drawing', 'w:pict', 'wp:inline']:
+                for parent in root.findall(f'.//{tag}/..', namespaces):
+                    for elem in parent.findall(tag, namespaces):
+                        parent.remove(elem)
+                        changed = True
+            
+            # Make text visible (remove color, vanish, background shading)
+            for tag in ['w:color', 'w:vanish', 'w:shd']:
+                for parent in root.findall(f'.//{tag}/..', namespaces):
+                    for elem in parent.findall(tag, namespaces):
+                        parent.remove(elem)
+                        changed = True
+                        
+            if changed:
+                tree.write(doc_xml_path, xml_declaration=True, encoding='UTF-8')
+                
+        # Re-zip
+        with zipfile.ZipFile(docx_path, 'w', zipfile.ZIP_DEFLATED) as zip_out:
+            for root_dir, dirs, files in os.walk(temp_dir):
+                for file in files:
+                    file_path = os.path.join(root_dir, file)
+                    arcname = os.path.relpath(file_path, temp_dir)
+                    zip_out.write(file_path, arcname)
+                    
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        logger.info(f"[RemoveImages] Successfully processed {docx_path}")
+    except Exception as e:
+        logger.error(f"[RemoveImages] Failed: {e}")
+
 # ─── 1. PDF → Word ─────────────────────────────────────────────
 
 @app.post("/convert/pdf-to-word")
@@ -469,6 +531,11 @@ async def pdf_to_word(request: Request, file: UploadFile = File(...), force_ocr:
                    min_svg_gap_dx=15.0)
         cv.close()
 
+        # If scanned, strip background images so text/layout remains without overlapping images
+        if scanned:
+            logger.info(f"[PDF2Word] Scanned document detected. Removing images from docx: {inp.name}")
+            remove_images_from_docx(str(out))
+
         stem = safe_filename(file.filename, "document")
         out_name = Path(stem).stem + ".docx"
         return FileResponse(
@@ -483,6 +550,55 @@ async def pdf_to_word(request: Request, file: UploadFile = File(...), force_ocr:
     except Exception as e:
         cleanup(inp, out)
         raise safe_error(e, "pdf-to-word")
+
+@app.post("/convert/pdf-to-word-plaintext")
+@limiter.limit("10/minute")
+async def pdf_to_word_plaintext(request: Request, file: UploadFile = File(...), force_ocr: bool = Form(False)):
+    try:
+        import fitz
+        from docx import Document
+    except ImportError:
+        raise HTTPException(500, "Run: pip install PyMuPDF python-docx")
+
+    inp = temp_path(".pdf")
+    out = temp_path(".docx")
+    try:
+        inp.write_bytes(await safe_read_upload(file))
+        check_pdf_page_count(inp, "pdf-to-word-plaintext")
+
+        # 1. OCR if necessary
+        inp = await ensure_auto_ocr(inp, force=force_ocr)
+
+        # 2. Extract plain text using fitz
+        logger.info(f"[PDF2Word-Plaintext] Extracting text from {inp.name}")
+        doc = fitz.open(str(inp))
+        
+        # 3. Write to a fresh Word file
+        docx_doc = Document()
+        for page in doc:
+            text = page.get_text("text")
+            if text.strip():
+                docx_doc.add_paragraph(text.strip())
+                docx_doc.add_page_break()
+                
+        doc.close()
+        docx_doc.save(str(out))
+
+        stem = safe_filename(file.filename, "document")
+        out_name = Path(stem).stem + "_plaintext.docx"
+        return FileResponse(
+            str(out),
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            filename=out_name,
+            background=BackgroundTask(cleanup, inp, out)
+        )
+    except HTTPException:
+        cleanup(inp, out)
+        raise
+    except Exception as e:
+        cleanup(inp, out)
+        raise safe_error(e, "pdf-to-word-plaintext")
+
 
 
 # ─── 2. PDF → Excel ────────────────────────────────────────────
