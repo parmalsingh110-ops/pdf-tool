@@ -1830,8 +1830,7 @@ export default function UniversalConverter() {
           if (backendBlob) {
             blob = backendBlob;
           } else {
-            setProgress('Server unavailable, converting in browser…');
-            blob = await convertPdfFile(file, target, quality);
+              throw new Error('Server conversion failed. Please try again later.');
           }
 
         // ── PDF → xlsx: try Backend first (Camelot tables), fallback to browser ──
@@ -1841,8 +1840,7 @@ export default function UniversalConverter() {
           if (backendBlob) {
             blob = backendBlob;
           } else {
-            setProgress('Server unavailable, extracting in browser…');
-            blob = await convertPdfFile(file, target, quality);
+              throw new Error('Server conversion failed. Please try again later.');
           }
 
         // ── PDF → pptx: try Backend first (page images + text), fallback to browser ──
@@ -1852,8 +1850,7 @@ export default function UniversalConverter() {
           if (backendBlob) {
             blob = backendBlob;
           } else {
-            setProgress('Server unavailable, converting in browser…');
-            blob = await convertPdfFile(file, target, quality);
+              throw new Error('Server conversion failed. Please try again later.');
           }
 
         // ── All other PDF conversions (txt, png, jpg, zip) stay browser-side ──
@@ -1874,10 +1871,8 @@ export default function UniversalConverter() {
           if (backendBlob) {
             blob = backendBlob;
           } else {
-            setProgress('Server unavailable � converting Word document in browser�');
-            const docxContent = await extractDocxContent(file);
-            blob = await pdfFromDocxContent(docxContent.elements);
-          } // end else (backendBlob not available)
+              throw new Error('Server conversion failed. Please try again later.');
+          }
         } else {
           setProgress('Extracting Word content (tables, headings, formatting)…');
           const docxContent = await extractDocxContent(file);
@@ -1917,8 +1912,7 @@ export default function UniversalConverter() {
             if (backendBlob) {
               blob = backendBlob;
             } else {
-              setProgress('Server unavailable, converting in browser…');
-              blob = await pptxFromParagraphs(docxContent.flatText, name);
+              throw new Error('Server conversion failed. Please try again later.');
             }
           } else {
             const doc2 = buildDocxFromStructured(docxContent.elements, name);
@@ -1935,8 +1929,7 @@ export default function UniversalConverter() {
           if (backendBlob) {
             blob = backendBlob;
           } else {
-            setProgress('Server unavailable, converting in browser…');
-            blob = await xlsxFileToPdf(file);
+              throw new Error('Server conversion failed. Please try again later.');
           }
         } else if (target === 'docx') {
           // ── XLSX → Word: Backend ──
@@ -1945,9 +1938,7 @@ export default function UniversalConverter() {
           if (backendBlob) {
             blob = backendBlob;
           } else {
-            setProgress('Server unavailable, converting in browser…');
-            const sheets = await extractXlsxSheets(file);
-            blob = await docxFromXlsxSheets(sheets);
+              throw new Error('Server conversion failed. Please try again later.');
           }
         } else if (target === 'pptx') {
           // ── XLSX → PPT: Backend ──
@@ -1956,9 +1947,7 @@ export default function UniversalConverter() {
           if (backendBlob) {
             blob = backendBlob;
           } else {
-            setProgress('Server unavailable, converting in browser…');
-            const sheets = await extractXlsxSheets(file);
-            blob = await pptxFromXlsxSheets(sheets);
+              throw new Error('Server conversion failed. Please try again later.');
           }
         } else {
           setProgress('Reading Excel sheets…');
@@ -1976,10 +1965,7 @@ export default function UniversalConverter() {
           if (backendBlob) {
             blob = backendBlob;
           } else {
-            setProgress('Server unavailable, converting in browser…');
-            const slides = await extractPptxSlides(file);
-            const flatSlides = slides.map(s => [s.title, s.body].filter(Boolean).join('\n'));
-            blob = await pdfFromSlides(flatSlides, name);
+              throw new Error('Server conversion failed. Please try again later.');
           }
         } else if (target === 'docx') {
           // ── PPTX → Word: Backend ──
@@ -1988,9 +1974,7 @@ export default function UniversalConverter() {
           if (backendBlob) {
             blob = backendBlob;
           } else {
-            setProgress('Server unavailable, converting in browser…');
-            const slides = await extractPptxSlides(file);
-            blob = await docxFromSlides(slides, name);
+              throw new Error('Server conversion failed. Please try again later.');
           }
         } else if (target === 'xlsx') {
           // ── PPTX → Excel: Backend ──
@@ -1999,9 +1983,7 @@ export default function UniversalConverter() {
           if (backendBlob) {
             blob = backendBlob;
           } else {
-            setProgress('Server unavailable, converting in browser…');
-            const slides = await extractPptxSlides(file);
-            blob = xlsxFromSlides(slides);
+              throw new Error('Server conversion failed. Please try again later.');
           }
         } else {
           setProgress('Extracting slides (titles, body, tables)…');

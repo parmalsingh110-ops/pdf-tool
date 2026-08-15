@@ -457,32 +457,17 @@ async def pdf_to_word(request: Request, file: UploadFile = File(...), force_ocr:
         # 2. Run OCR if needed
         inp = await ensure_auto_ocr(inp, force=force_ocr)
 
-        if scanned:
-            # 3A. SCANNED PDF -> Extract clean text to drop the giant background image
-            logger.info(f"[PDF2Word] Scanned PDF detected. Extracting clean OCR text for: {inp.name}")
-            import fitz
-            from docx import Document
-            docx_doc = Document()
-            pdf = fitz.open(inp)
-
-            for i, page in enumerate(pdf):
-                text = page.get_text("text").strip()
-                if text:
-                    for line in text.split('\n'):
-                        if line.strip():
-                            docx_doc.add_paragraph(line)
-                if i < len(pdf) - 1:
-                    docx_doc.add_page_break()
-            pdf.close()
-            docx_doc.save(str(out))
-        else:
-            # 3B. NATIVE PDF -> Use pdf2docx to preserve exact layout
-            logger.info(f"[PDF2Word] Native PDF detected. Using pdf2docx for: {inp.name}")
-            cv = Converter(str(inp))
-            cv.convert(str(out), multi_processing=False,
-                       line_overlap_threshold=0.9,
-                       min_svg_gap_dx=15.0)
-            cv.close()
+        # 3. Always use pdf2docx for layout reconstruction (works for native AND OCR'd text)
+        logger.info(f"[PDF2Word] Using pdf2docx for layout reconstruction: {inp.name}")
+        cv = Converter(str(inp))
+        
+        # If scanned, the OCR layer might be slightly messy, adjusting overlap helps
+        line_overlap = 0.9 if not scanned else 0.5
+        
+        cv.convert(str(out), multi_processing=False,
+                   line_overlap_threshold=line_overlap,
+                   min_svg_gap_dx=15.0)
+        cv.close()
 
         stem = safe_filename(file.filename, "document")
         out_name = Path(stem).stem + ".docx"
@@ -553,19 +538,35 @@ async def pdf_to_excel(request: Request, file: UploadFile = File(...), method: s
                 for pg_num, pg in enumerate(pdf.pages, 1):
                     ws = wb.create_sheet(f"Page_{pg_num}")
                     row_idx = 1
-                    pg_tables = pg.extract_tables()
+                    # Use text-based geometry for borderless tables
+                    pg_tables = pg.extract_tables(table_settings={
+                        "vertical_strategy": "text",
+                        "horizontal_strategy": "text",
+                        "intersection_y_tolerance": 15
+                    })
                     if pg_tables:
                         for tbl in pg_tables:
                             for row in tbl:
                                 for c_idx, v in enumerate(row, 1):
-                                    ws.cell(row_idx, c_idx, v or "")
+                                    ws.cell(row_idx, c_idx, str(v).strip() if v else "")
                                 row_idx += 1
-                            row_idx += 1
+                            row_idx += 2  # gap between tables
                     else:
-                        # Write raw text as single column
-                        for line in (pg.extract_text() or "").splitlines():
-                            if line.strip():
-                                ws.cell(row_idx, 1, line)
+                        # Fallback for completely unstructured text: try to align by X-coordinates
+                        words = pg.extract_words()
+                        if words:
+                            # Group words into lines based on Y coordinate
+                            lines = {}
+                            for w in words:
+                                y = round(w['top'] / 5) * 5  # group within 5pts
+                                lines.setdefault(y, []).append(w)
+                            
+                            for y in sorted(lines.keys()):
+                                line_words = sorted(lines[y], key=lambda w: w['x0'])
+                                # simple column mapping: roughly every 50pts is a column
+                                for w in line_words:
+                                    col_idx = max(1, int(w['x0'] / 50) + 1)
+                                    ws.cell(row_idx, col_idx, w['text'])
                                 row_idx += 1
 
         if not wb.sheetnames:
@@ -616,32 +617,56 @@ async def pdf_to_ppt(request: Request, file: UploadFile = File(...), dpi: int = 
         prs = Presentation()
 
         for page in doc:
-            pix = page.get_pixmap(matrix=fitz.Matrix(dpi / 72, dpi / 72))
             w_in = page.rect.width / 72
             h_in = page.rect.height / 72
             prs.slide_width = Inches(w_in)
             prs.slide_height = Inches(h_in)
             slide = prs.slides.add_slide(prs.slide_layouts[6])
-            slide.shapes.add_picture(io.BytesIO(pix.tobytes("png")), 0, 0, Inches(w_in), Inches(h_in))
 
-            # Add invisible text layer for searchability
-            for block in page.get_text("dict").get("blocks", []):
-                for line in block.get("lines", []):
-                    for span in line.get("spans", []):
-                        txt = span.get("text", "").strip()
-                        if not txt:
-                            continue
-                        x0, y0, x1, y1 = span["bbox"]
-                        tb = slide.shapes.add_textbox(
-                            Inches(x0 / 72), Inches(y0 / 72),
-                            Inches(max((x1 - x0) / 72, 0.1)), Inches(max((y1 - y0) / 72, 0.1))
-                        )
-                        run = tb.text_frame.paragraphs[0].add_run()
-                        run.text = txt
-                        run.font.size = Pt(max(6, span.get("size", 12)))
-                        run.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)  # invisible
-                        tb.fill.background()
-                        tb.line.fill.background()
+            # Extract element by element
+            blocks = page.get_text("dict").get("blocks", [])
+            for block in blocks:
+                if block["type"] == 0:  # Text
+                    x0, y0, x1, y1 = block["bbox"]
+                    tb = slide.shapes.add_textbox(
+                        Inches(x0 / 72), Inches(y0 / 72),
+                        Inches(max((x1 - x0) / 72, 0.5)), Inches(max((y1 - y0) / 72, 0.5))
+                    )
+                    tf = tb.text_frame
+                    tf.word_wrap = True
+                    for line_idx, line in enumerate(block.get("lines", [])):
+                        if line_idx > 0:
+                            p = tf.add_paragraph()
+                        else:
+                            p = tf.paragraphs[0]
+                        
+                        for span in line.get("spans", []):
+                            txt = span.get("text", "")
+                            if not txt: continue
+                            run = p.add_run()
+                            run.text = txt
+                            run.font.size = Pt(max(6, span.get("size", 12)))
+                            
+                            color = span.get("color", 0)
+                            r, g, b = (color >> 16) & 255, (color >> 8) & 255, color & 255
+                            run.font.color.rgb = RGBColor(r, g, b)
+                            
+                            flags = span.get("flags", 0)
+                            if flags & 2 ** 4: run.font.bold = True
+                            if flags & 2 ** 1: run.font.italic = True
+                
+                elif block["type"] == 1:  # Image
+                    x0, y0, x1, y1 = block["bbox"]
+                    img_bytes = block.get("image")
+                    if img_bytes:
+                        try:
+                            slide.shapes.add_picture(
+                                io.BytesIO(img_bytes), 
+                                Inches(x0 / 72), Inches(y0 / 72),
+                                Inches(max((x1 - x0) / 72, 0.1)), Inches(max((y1 - y0) / 72, 0.1))
+                            )
+                        except Exception:
+                            pass
 
         doc.close()
         prs.save(str(out))
@@ -1399,11 +1424,43 @@ async def edit_pdf_endpoint(request: Request, file: UploadFile = File(...), edit
             h   = float(action["h"])
             new_text = action.get("newText", "")
 
-            bg_color = hex_to_rgb(action.get("bgColor", "#ffffff"))
             # Redact: add small padding around box to fully cover existing text
             rect = fitz.Rect(x - 2, y - 2, x + w + 2, y + h + 2)
-            page.add_redact_annot(rect, fill=bg_color)
-            page.apply_redactions()
+            
+            # Smart Background Reconstruction
+            has_native_text = False
+            for b in page.get_text("blocks", clip=rect):
+                if b[6] == 0 and b[4].strip():
+                    has_native_text = True
+                    break
+                    
+            if has_native_text:
+                # Native PDF: remove text objects, preserve images underneath
+                page.add_redact_annot(rect, cross_out=False)
+                page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE)
+            else:
+                # Scanned PDF: sample edge pixels to get dominant background color
+                try:
+                    pm = page.get_pixmap(clip=rect)
+                    from collections import Counter
+                    edges = []
+                    for px in range(pm.width):
+                        edges.append(pm.pixel(px, 0))
+                        edges.append(pm.pixel(px, pm.height - 1))
+                    for py in range(pm.height):
+                        edges.append(pm.pixel(0, py))
+                        edges.append(pm.pixel(pm.width - 1, py))
+                    if edges:
+                        mc = Counter(edges).most_common(1)[0][0]
+                        # Handling RGB or RGBA tuples
+                        bg_color = (mc[0]/255.0, mc[1]/255.0, mc[2]/255.0)
+                    else:
+                        bg_color = (1, 1, 1)
+                except Exception:
+                    bg_color = (1, 1, 1)
+                
+                page.add_redact_annot(rect, fill=bg_color)
+                page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_PIXELS)
 
             if not new_text:
                 continue
@@ -1444,22 +1501,37 @@ async def edit_pdf_endpoint(request: Request, file: UploadFile = File(...), edit
                     logger.warning(f"[EditPDF] Devanagari font not found at {_fonts_dir}.")
             # ─────────────────────────────────────────────────────────────────
 
-            try:
-                text_len = fitz.get_text_length(new_text, fontname=fontname, fontsize=orig_size)
-            except Exception:
-                text_len = len(new_text) * orig_size * 0.6
-
+            # Use insert_textbox for multiline wrapping and proper baseline handling
+            text_rect = fitz.Rect(x, y, x + w, y + h)
+            align = fitz.TEXT_ALIGN_LEFT
+            
+            rc = -1
             final_size = orig_size
-            if text_len > w and w > 10:
-                final_size = max(orig_size * 0.5, orig_size * (w / text_len))
-
-            # In PyMuPDF: insert_text point = (x, baseline_y) where baseline_y is from TOP.
-            # The text baseline sits approx 78% down within the bounding box.
-            baseline_y = y + h * 0.78
-            page.insert_text(
-                fitz.Point(x, baseline_y), new_text,
-                fontname=fontname, fontsize=final_size, color=fg_color
-            )
+            
+            # Try to fit the text box, reducing font size if it doesn't fit
+            while final_size >= 4:
+                rc = page.insert_textbox(
+                    text_rect,
+                    new_text,
+                    fontsize=final_size,
+                    fontname=fontname,
+                    color=fg_color,
+                    align=align
+                )
+                if rc >= 0:
+                    break
+                final_size -= 0.5
+                
+            # If it still didn't fit, force it at the minimum size
+            if rc < 0:
+                page.insert_textbox(
+                    text_rect,
+                    new_text,
+                    fontsize=final_size,
+                    fontname=fontname,
+                    color=fg_color,
+                    align=align
+                )
 
         doc.save(str(out), garbage=3, deflate=True)
         doc.close()
