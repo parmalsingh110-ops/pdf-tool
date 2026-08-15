@@ -519,22 +519,26 @@ async def pdf_to_word(request: Request, file: UploadFile = File(...), force_ocr:
         # 2. Run OCR if needed
         inp = await ensure_auto_ocr(inp, force=force_ocr)
 
-        # 3. Always use pdf2docx for layout reconstruction (works for native AND OCR'd text)
-        logger.info(f"[PDF2Word] Using pdf2docx for layout reconstruction: {inp.name}")
-        cv = Converter(str(inp))
-        
-        # If scanned, the OCR layer might be slightly messy, adjusting overlap helps
-        line_overlap = 0.9 if not scanned else 0.5
-        
-        cv.convert(str(out), multi_processing=False,
-                   line_overlap_threshold=line_overlap,
-                   min_svg_gap_dx=15.0)
-        cv.close()
-
-        # If scanned, strip background images so text/layout remains without overlapping images
         if scanned:
-            logger.info(f"[PDF2Word] Scanned document detected. Removing images from docx: {inp.name}")
-            remove_images_from_docx(str(out))
+            logger.info(f"[PDF2Word] Scanned document detected. Extracting plaintext directly to avoid massive image files: {inp.name}")
+            import fitz
+            from docx import Document
+            doc = fitz.open(str(inp))
+            docx_doc = Document()
+            for page in doc:
+                text = page.get_text("text")
+                if text.strip():
+                    docx_doc.add_paragraph(text.strip())
+                    docx_doc.add_page_break()
+            doc.close()
+            docx_doc.save(str(out))
+        else:
+            logger.info(f"[PDF2Word] Using pdf2docx for layout reconstruction: {inp.name}")
+            cv = Converter(str(inp))
+            cv.convert(str(out), multi_processing=False,
+                       line_overlap_threshold=0.9,
+                       min_svg_gap_dx=15.0)
+            cv.close()
 
         stem = safe_filename(file.filename, "document")
         out_name = Path(stem).stem + ".docx"
