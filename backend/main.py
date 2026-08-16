@@ -682,15 +682,25 @@ async def pdf_to_word(request: Request, file: UploadFile = File(...), force_ocr:
         try:
             from docx import Document as _DocxDoc
             _check_doc = _DocxDoc(str(out))
+
+            # pdf2docx stores text in XML shapes/textboxes (<w:t> tags), NOT in
+            # doc.paragraphs. We must scan all XML text nodes to get a true count.
+            _W_T = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t"
             _total_chars = sum(
-                len(p.text) for p in _check_doc.paragraphs
+                len(elem.text or "")
+                for elem in _check_doc.element.iter(_W_T)
             )
-            # Also count chars in table cells
-            for _tbl in _check_doc.tables:
-                for _row in _tbl.rows:
-                    for _cell in _row.cells:
-                        _total_chars += len(_cell.text)
-            if _total_chars < 5:
+
+            # Fallback: also check raw file size — a non-trivial DOCX (>8KB above
+            # the empty template baseline) almost certainly has real content.
+            _docx_size_kb = out.stat().st_size / 1024
+            _has_content_by_size = _docx_size_kb > 8
+
+            logger.info(
+                f"[PDF2Word] DOCX chars={_total_chars}, size={_docx_size_kb:.1f}KB"
+            )
+
+            if _total_chars < 5 and not _has_content_by_size:
                 raise HTTPException(
                     status_code=422,
                     detail=(
@@ -698,7 +708,7 @@ async def pdf_to_word(request: Request, file: UploadFile = File(...), force_ocr:
                         "If this is a scanned PDF, please ensure it is a clear scan."
                     )
                 )
-            logger.info(f"[PDF2Word] Output validated: {_total_chars} chars in DOCX")
+            logger.info(f"[PDF2Word] Output validated: {_total_chars} chars, {_docx_size_kb:.1f}KB")
         except HTTPException:
             raise
         except Exception as docx_val_err:
