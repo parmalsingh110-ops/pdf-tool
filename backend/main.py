@@ -664,6 +664,7 @@ async def pdf_to_word(request: Request, file: UploadFile = File(...), force_ocr:
         check_pdf_page_count(inp, "pdf-to-word")
 
         # 1. Run OCR if needed — raises HTTP 422 on failure, never silently continues
+        was_scanned = force_ocr or is_pdf_scanned(inp)
         inp = await ensure_auto_ocr(inp, force=force_ocr)
 
         logger.info(f"[PDF2Word] Using pdf2docx for layout reconstruction: {inp.name}")
@@ -672,6 +673,10 @@ async def pdf_to_word(request: Request, file: UploadFile = File(...), force_ocr:
                    line_overlap_threshold=0.9,
                    min_svg_gap_dx=15.0)
         cv.close()
+
+        if was_scanned:
+            logger.info(f"[PDF2Word] Scanned/OCR PDF detected. Removing background images from DOCX.")
+            remove_images_from_docx(str(out))
 
         # 2. Validate DOCX output has meaningful content
         if not out.exists() or out.stat().st_size == 0:
