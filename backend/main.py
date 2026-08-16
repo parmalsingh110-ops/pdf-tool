@@ -749,6 +749,12 @@ def remove_scanned_page_backgrounds_from_docx(docx_path: str, pdf_path: str):
                     for rs in regions_by_page.values():
                         all_regions.extend(rs)
                         
+                    max_docpr_id = 1000
+                    for d in root.findall('.//wp:docPr', namespaces):
+                        try:
+                            max_docpr_id = max(max_docpr_id, int(d.get('id', '0')))
+                        except: pass
+                        
                     for r in all_regions:
                         # PyMuPDF Rect normalizes to x0 <= x1, y0 <= y1
                         x_pt, y_pt, x1_pt, y1_pt = r.x0, r.y0, r.x1, r.y1
@@ -757,10 +763,18 @@ def remove_scanned_page_backgrounds_from_docx(docx_path: str, pdf_path: str):
                         
                         fallback = copy.deepcopy(drawing)
                         
+                        # UNIQUE ID fix for MS Word rendering bug
+                        max_docpr_id += 1
+                        docPr = fallback.find('.//wp:docPr', namespaces)
+                        if docPr is not None:
+                            docPr.set('id', str(max_docpr_id))
+                            docPr.set('name', f'Fallback_{max_docpr_id}')
+                        
                         # Adjust extent
                         ext = fallback.find('.//wp:extent', namespaces)
-                        ext.set('cx', str(int(w_pt * 12700)))
-                        ext.set('cy', str(int(h_pt * 12700)))
+                        if ext is not None:
+                            ext.set('cx', str(int(w_pt * 12700)))
+                            ext.set('cy', str(int(h_pt * 12700)))
                         
                         spPr = fallback.find('.//pic:spPr', namespaces)
                         if spPr is not None:
@@ -781,10 +795,10 @@ def remove_scanned_page_backgrounds_from_docx(docx_path: str, pdf_path: str):
                         blipFill = fallback.find('.//pic:blipFill', namespaces)
                         if blipFill is not None:
                             srcRect = ET.Element('{http://schemas.openxmlformats.org/drawingml/2006/main}srcRect')
-                            srcRect.set('l', str(int(x_pt / W_pt * 100000)))
-                            srcRect.set('t', str(int(y_pt / H_pt * 100000)))
-                            srcRect.set('r', str(int((W_pt - x1_pt) / W_pt * 100000)))
-                            srcRect.set('b', str(int((H_pt - y1_pt) / H_pt * 100000)))
+                            srcRect.set('l', str(max(0, int(x_pt / W_pt * 100000))))
+                            srcRect.set('t', str(max(0, int(y_pt / H_pt * 100000))))
+                            srcRect.set('r', str(max(0, int((W_pt - x1_pt) / W_pt * 100000))))
+                            srcRect.set('b', str(max(0, int((H_pt - y1_pt) / H_pt * 100000))))
                             blipFill.insert(1, srcRect)
                         
                         parent.append(fallback)
@@ -794,14 +808,15 @@ def remove_scanned_page_backgrounds_from_docx(docx_path: str, pdf_path: str):
                         
         if removed_image_rIds:
             for p in root.findall('.//w:p', namespaces):
+                # 1. Remove paragraph level shading because pdf2docx uses it to mimic scan background
                 pPr = p.find('w:pPr', namespaces)
-                p_shd = pPr.find('w:shd', namespaces) if pPr is not None else None
-                has_dark_bg = False
-                if p_shd is not None:
-                    fill = p_shd.get('{' + namespaces['w'] + '}fill')
-                    if fill and fill != 'auto' and fill != 'FFFFFF':
-                        has_dark_bg = True
+                if pPr is not None:
+                    p_shd = pPr.find('w:shd', namespaces)
+                    if p_shd is not None:
+                        pPr.remove(p_shd)
+                        changed = True
                         
+                # 2. Force text visibility unconditionally
                 for r in p.findall('.//w:r', namespaces):
                     rPr = r.find('w:rPr', namespaces)
                     if rPr is not None:
@@ -809,26 +824,22 @@ def remove_scanned_page_backgrounds_from_docx(docx_path: str, pdf_path: str):
                         color = rPr.find('w:color', namespaces)
                         shd = rPr.find('w:shd', namespaces)
                         
-                        if shd is not None:
-                            fill = shd.get('{' + namespaces['w'] + '}fill')
-                            if fill and fill != 'auto' and fill != 'FFFFFF':
-                                has_dark_bg = True
-                        
-                        is_ocr_text = False
                         if vanish is not None:
-                            is_ocr_text = True
-                        if color is not None and not has_dark_bg:
+                            rPr.remove(vanish)
+                            changed = True
+                            
+                        # If color is white/hidden, force to auto
+                        if color is not None:
                             val = color.get('{' + namespaces['w'] + '}val')
-                            if val in ('FFFFFF', 'white'):
-                                is_ocr_text = True
-                                
-                        if is_ocr_text:
-                            if vanish is not None:
-                                rPr.remove(vanish)
-                            if color is not None:
+                            if val in ('FFFFFF', 'white', 'F2F2F2', 'f2f2f2'):
                                 color.set('{' + namespaces['w'] + '}val', 'auto')
-                            if shd is not None:
-                                rPr.remove(shd)
+                                changed = True
+                        else:
+                            # If no color tag, sometimes it defaults to hidden if inherited. Ensure auto.
+                            pass
+                            
+                        if shd is not None:
+                            rPr.remove(shd)
                             changed = True
 
         if changed:
