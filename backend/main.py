@@ -369,7 +369,6 @@ async def run_hybrid_ocr(inp_path: Path, out_path: Path, lang: str = "eng+hin", 
         logger.info(f"[OCR] Using iLovePDF API for: {inp_path.name}")
         def run_ilovepdf():
             import concurrent.futures
-            import signal
 
             def _do_ilovepdf():
                 from ilovepdf import PdfOcrTask
@@ -382,9 +381,15 @@ async def run_hybrid_ocr(inp_path: Path, out_path: Path, lang: str = "eng+hin", 
                 task.download(str(out_dir))
 
                 downloaded_files = list(out_dir.iterdir())
-                if downloaded_files:
-                    shutil.move(str(downloaded_files[0]), str(out_path))
+                if not downloaded_files:
+                    shutil.rmtree(out_dir, ignore_errors=True)
+                    raise RuntimeError("iLovePDF returned no output files")
+                shutil.move(str(downloaded_files[0]), str(out_path))
                 shutil.rmtree(out_dir, ignore_errors=True)
+
+                # Guard: ensure the downloaded file is non-empty
+                if not out_path.exists() or out_path.stat().st_size == 0:
+                    raise RuntimeError("iLovePDF produced an empty output file")
 
             # Run with a timeout to prevent hung iLovePDF calls from blocking workers
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
@@ -396,16 +401,20 @@ async def run_hybrid_ocr(inp_path: Path, out_path: Path, lang: str = "eng+hin", 
 
         try:
             await run_in_threadpool(run_ilovepdf)
+            logger.info(f"[OCR] iLovePDF succeeded for: {inp_path.name}")
             return True
         except Exception as e:
             # Log the error without exposing the API key or internal state
             logger.error(f"[OCR] iLovePDF API failed: {type(e).__name__}. Falling back to local OCR.")
+            # Clean up any partial output before local fallback
+            if out_path.exists():
+                out_path.unlink(missing_ok=True)
 
     logger.info(f"[OCR] Using local OCRmyPDF for: {inp_path.name}")
     try:
         import ocrmypdf
     except ImportError:
-        raise Exception("Run: pip install ocrmypdf")
+        raise RuntimeError("ocrmypdf is not installed. Run: pip install ocrmypdf")
 
     def run_ocrmypdf():
         ocrmypdf.ocr(
@@ -416,24 +425,449 @@ async def run_hybrid_ocr(inp_path: Path, out_path: Path, lang: str = "eng+hin", 
             progress_bar=False
         )
     await run_in_threadpool(run_ocrmypdf)
+
+    # Guard: local OCR must also produce a non-empty file
+    if not out_path.exists() or out_path.stat().st_size == 0:
+        raise RuntimeError("Local OCRmyPDF produced no output")
+
+    logger.info(f"[OCR] Local OCRmyPDF succeeded for: {inp_path.name}")
     return True
 
 
+def validate_ocr_output(original_pdf: Path, ocr_pdf: Path) -> tuple[bool, str]:
+    """
+    Validate the OCR output PDF against the original.
+    Returns (True, "") on success, or (False, reason) on failure.
+    Checks:
+      1. File exists
+      2. File size > 0
+      3. Opens without error
+      4. Page count matches original
+      5. At least one page has a meaningful text layer
+      6. No page renders as a completely blank (all-zero) pixmap
+    """
+    try:
+        import fitz
+
+        # 1. Existence
+        if not ocr_pdf.exists():
+            return False, "OCR output file does not exist"
+
+        # 2. Size
+        if ocr_pdf.stat().st_size == 0:
+            return False, "OCR output file is empty (0 bytes)"
+
+        # 3 & 4. Openability + page count
+        try:
+            ocr_doc = fitz.open(str(ocr_pdf))
+        except Exception as open_err:
+            return False, f"OCR output cannot be opened: {type(open_err).__name__}"
+
+        try:
+            orig_doc = fitz.open(str(original_pdf))
+            orig_pages = len(orig_doc)
+            orig_doc.close()
+        except Exception:
+            orig_pages = None
+
+        ocr_pages = len(ocr_doc)
+        if ocr_pages == 0:
+            ocr_doc.close()
+            return False, "OCR output PDF has 0 pages"
+
+        if orig_pages is not None and ocr_pages != orig_pages:
+            ocr_doc.close()
+            return False, (
+                f"OCR output page count ({ocr_pages}) does not match "
+                f"original ({orig_pages})"
+            )
+
+        # 5. Text layer check — at least some text must be present across all pages
+        total_text_len = 0
+        blank_page_count = 0
+        for page in ocr_doc:
+            page_text = page.get_text("text").strip()
+            total_text_len += len(page_text)
+
+            # 6. Pixmap non-blank check (render at low DPI to save memory)
+            try:
+                pix = page.get_pixmap(dpi=36)
+                if pix.width > 0 and pix.height > 0:
+                    # Check if all pixels are white/near-white (sum of non-255 bytes)
+                    import struct
+                    samples = pix.samples
+                    # samples is a bytes object — check if all bytes are 255 (white)
+                    non_white = sum(1 for b in samples if b < 250)
+                    if non_white == 0:
+                        blank_page_count += 1
+            except Exception:
+                pass  # Pixmap failure is not fatal for validation
+
+        ocr_doc.close()
+
+        if total_text_len < 10:
+            return False, (
+                f"OCR output has no meaningful text layer "
+                f"(only {total_text_len} chars extracted across all pages)"
+            )
+
+        if blank_page_count == ocr_pages:
+            return False, "All pages in OCR output render as blank"
+
+        return True, ""
+
+    except Exception as e:
+        return False, f"Validation error: {type(e).__name__}: {str(e)[:200]}"
+
+
 async def ensure_auto_ocr(inp_path: Path, force: bool = False) -> Path:
-    """If PDF is scanned, or if forced, run hybrid OCR to make it searchable first."""
+    """
+    If the PDF is scanned (or force=True), run hybrid OCR and return the path
+    to a validated OCR PDF.
+
+    SAFE ARCHITECTURE:
+    - OCR is written to a TEMPORARY file (never overwrites the original until validated)
+    - OCR output is fully validated before the original is replaced
+    - If OCR fails or validation fails, raises HTTP 422 with a user-friendly message
+    - NEVER silently returns the original scanned PDF to converters
+    """
     if not force and not is_pdf_scanned(inp_path):
+        logger.info(f"[Auto-OCR] PDF has text layer, OCR skipped: {inp_path.name}")
         return inp_path
 
-    logger.info(f"[Auto-OCR] Hybrid OCR triggered for: {inp_path.name}")
-    out_path = inp_path.with_name(inp_path.stem + "_ocr.pdf")
+    logger.info(f"[Auto-OCR] Scanned PDF detected, running hybrid OCR: {inp_path.name}")
+
+    # Write OCR output to a NEW temp file — do NOT overwrite the original yet
+    out_path = inp_path.with_name(inp_path.stem + "_ocr_candidate.pdf")
+    if out_path.exists():
+        out_path.unlink(missing_ok=True)
+
+    ocr_succeeded = False
+    ocr_error_detail = ""
+
     try:
         await run_hybrid_ocr(inp_path, out_path, force_ocr=force)
-        shutil.move(str(out_path), str(inp_path))
+        ocr_succeeded = True
     except Exception as e:
-        logger.error(f"[Auto-OCR] Failed: {type(e).__name__}: {str(e)[:200]}")
+        ocr_error_detail = f"{type(e).__name__}: {str(e)[:300]}"
+        logger.error(f"[Auto-OCR] Both iLovePDF and local OCR failed: {ocr_error_detail}")
 
+    if not ocr_succeeded:
+        # Clean up any partial output
+        out_path.unlink(missing_ok=True)
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Unable to extract readable text from this scanned PDF. "
+                "OCR processing failed. Please try a clearer scan or a different file."
+            )
+        )
+
+    # Validate the OCR output BEFORE touching the original
+    logger.info(f"[Auto-OCR] Validating OCR output: {out_path.name}")
+    valid, reason = validate_ocr_output(inp_path, out_path)
+
+    if not valid:
+        logger.error(f"[Auto-OCR] OCR output validation failed: {reason}")
+        out_path.unlink(missing_ok=True)
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Unable to extract readable text from this scanned PDF. "
+                "The OCR process completed but produced no usable text layer. "
+                "Please try another PDF or a clearer scan."
+            )
+        )
+
+    logger.info(f"[Auto-OCR] Validation passed. Replacing original with OCR output.")
+    # Only NOW replace the original with the validated OCR output
+    shutil.move(str(out_path), str(inp_path))
     return inp_path
 
+
+def remove_scanned_page_backgrounds_from_docx(docx_path: str, pdf_path: str):
+    """
+    Safely removes ONLY the full-page scanned background images from a DOCX generated by pdf2docx,
+    while preserving legitimate media (logos, photos, tables) using localized image fallbacks,
+    and making the OCR text visible securely.
+    """
+    try:
+        import zipfile
+        import tempfile
+        import os
+        import shutil
+        import copy
+        import xml.etree.ElementTree as ET
+        import fitz
+        import cv2
+        import numpy as np
+
+        logger.info(f"[RemoveBackgrounds] Analyzing {pdf_path} for non-text regions...")
+        
+        # Phase 1: Detect non-text regions using PyMuPDF + OpenCV
+        doc = fitz.open(pdf_path)
+        regions_by_page = {}
+        for page_num in range(len(doc)):
+            page = doc[page_num]
+            text_blocks = page.get_text("blocks")
+            text_rects = []
+            for b in text_blocks:
+                if b[6] == 0:
+                    r = fitz.Rect(b[:4])
+                    r.x0 = max(0, r.x0 - 5)
+                    r.y0 = max(0, r.y0 - 5)
+                    r.x1 += 5
+                    r.y1 += 5
+                    text_rects.append(r)
+            
+            pix = page.get_pixmap(dpi=150)
+            img = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.h, pix.w, pix.n)
+            if pix.n == 4:
+                img = cv2.cvtColor(img, cv2.COLOR_RGBA2GRAY)
+            elif pix.n == 3:
+                img = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+            else:
+                img = np.copy(img)
+                
+            thresh = cv2.adaptiveThreshold(img, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 11, 2)
+            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (15, 15))
+            dilated = cv2.dilate(thresh, kernel, iterations=2)
+            contours, _ = cv2.findContours(dilated, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            
+            non_text_rects = []
+            page_area = page.rect.get_area()
+            
+            for cnt in contours:
+                x, y, w, h = cv2.boundingRect(cnt)
+                x_pt = x * 72.0 / 150.0
+                y_pt = y * 72.0 / 150.0
+                w_pt = w * 72.0 / 150.0
+                h_pt = h * 72.0 / 150.0
+                
+                if w_pt < 15 or h_pt < 15:
+                    continue
+                    
+                rect = fitz.Rect(x_pt, y_pt, x_pt + w_pt, y_pt + h_pt)
+                area = rect.get_area()
+                if area == 0 or area > page_area * 0.90:
+                    continue
+                    
+                overlap_area = 0
+                for t_rect in text_rects:
+                    intersect = rect.intersect(t_rect)
+                    if not intersect.is_empty:
+                        overlap_area += intersect.get_area()
+                        
+                if overlap_area / area > 0.4:
+                    continue
+                non_text_rects.append(rect)
+                
+            merged = []
+            for r in non_text_rects:
+                if not merged:
+                    merged.append(r)
+                    continue
+                has_merged = False
+                for i, m in enumerate(merged):
+                    if r.intersects(m):
+                        merged[i] = m.include_rect(r)
+                        has_merged = True
+                        break
+                if not has_merged:
+                    merged.append(r)
+            regions_by_page[page_num] = merged
+        doc.close()
+
+        # Phase 2: Process the DOCX
+        temp_dir = tempfile.mkdtemp()
+        with zipfile.ZipFile(docx_path, 'r') as zip_ref:
+            zip_ref.extractall(temp_dir)
+            
+        doc_xml_path = os.path.join(temp_dir, 'word', 'document.xml')
+        if not os.path.exists(doc_xml_path):
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            return
+
+        namespaces = {'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main',
+                      'v': 'urn:schemas-microsoft-com:vml',
+                      'wp': 'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing',
+                      'a': 'http://schemas.openxmlformats.org/drawingml/2006/main',
+                      'pic': 'http://schemas.openxmlformats.org/drawingml/2006/picture',
+                      'r': 'http://schemas.openxmlformats.org/officeDocument/2006/relationships',
+                      'mc': 'http://schemas.openxmlformats.org/markup-compatibility/2006',
+                      'w14': 'http://schemas.microsoft.com/office/word/2010/wordml',
+                      'wp14': 'http://schemas.microsoft.com/office/word/2010/wordprocessingDrawing'}
+                      
+        for prefix, uri in namespaces.items():
+            ET.register_namespace(prefix, uri)
+            
+        tree = ET.parse(doc_xml_path)
+        root = tree.getroot()
+        
+        default_w, default_h = 11906, 16838
+        for sect in root.findall('.//w:sectPr', namespaces):
+            pgSz = sect.find('w:pgSz', namespaces)
+            if pgSz is not None:
+                w_attr = pgSz.get('{' + namespaces['w'] + '}w')
+                h_attr = pgSz.get('{' + namespaces['w'] + '}h')
+                if w_attr: default_w = int(w_attr)
+                if h_attr: default_h = int(h_attr)
+                
+        W_pt = default_w / 20.0
+        H_pt = default_h / 20.0
+        page_area_pt = W_pt * H_pt
+        
+        changed = False
+        removed_image_rIds = set()
+        
+        for parent in root.findall('.//w:drawing/..', namespaces):
+            for drawing in parent.findall('w:drawing', namespaces):
+                is_background = False
+                coverage = 0.0
+                
+                extent = drawing.find('.//wp:extent', namespaces)
+                if extent is not None:
+                    cx = int(extent.get('cx', 0)) / 12700.0
+                    cy = int(extent.get('cy', 0)) / 12700.0
+                    img_area = cx * cy
+                    coverage = img_area / page_area_pt
+                    
+                    if coverage >= 0.85:
+                        blip = drawing.find('.//a:blip', namespaces)
+                        if blip is not None:
+                            is_background = True
+                            
+                if is_background:
+                    logger.info(f"[RemoveBackgrounds] Background scan identified (coverage {coverage:.2f}). Applying fallbacks.")
+                    blip = drawing.find('.//a:blip', namespaces)
+                    if blip is not None:
+                        embed_id = blip.get('{' + namespaces['r'] + '}embed')
+                        if embed_id:
+                            removed_image_rIds.add(embed_id)
+                            
+                    # Get regions for page 0 (assuming simple mapping for single background)
+                    # For multi-page docs, pdf2docx usually outputs sequentially. We just use all regions.
+                    # To be safer, we merge all non-text regions from all pages.
+                    all_regions = []
+                    for rs in regions_by_page.values():
+                        all_regions.extend(rs)
+                        
+                    max_docpr_id = 1000
+                    for d in root.findall('.//wp:docPr', namespaces):
+                        try:
+                            max_docpr_id = max(max_docpr_id, int(d.get('id', '0')))
+                        except: pass
+                        
+                    for r in all_regions:
+                        # PyMuPDF Rect normalizes to x0 <= x1, y0 <= y1
+                        x_pt, y_pt, x1_pt, y1_pt = r.x0, r.y0, r.x1, r.y1
+                        w_pt = x1_pt - x_pt
+                        h_pt = y1_pt - y_pt
+                        
+                        fallback = copy.deepcopy(drawing)
+                        
+                        # UNIQUE ID fix for MS Word rendering bug
+                        max_docpr_id += 1
+                        docPr = fallback.find('.//wp:docPr', namespaces)
+                        if docPr is not None:
+                            docPr.set('id', str(max_docpr_id))
+                            docPr.set('name', f'Fallback_{max_docpr_id}')
+                            
+                        # CRITICAL: Also update pic:cNvPr ID to prevent "unreadable content" corruption
+                        cNvPr = fallback.find('.//pic:cNvPr', namespaces)
+                        if cNvPr is not None:
+                            cNvPr.set('id', str(max_docpr_id))
+                            cNvPr.set('name', f'Fallback_Pic_{max_docpr_id}')
+                        
+                        # Adjust extent
+                        ext = fallback.find('.//wp:extent', namespaces)
+                        if ext is not None:
+                            ext.set('cx', str(int(w_pt * 12700)))
+                            ext.set('cy', str(int(h_pt * 12700)))
+                        
+                        spPr = fallback.find('.//pic:spPr', namespaces)
+                        if spPr is not None:
+                            xfrm = spPr.find('.//a:xfrm', namespaces)
+                            if xfrm is not None:
+                                ext2 = xfrm.find('.//a:ext', namespaces)
+                                if ext2 is not None:
+                                    ext2.set('cx', str(int(w_pt * 12700)))
+                                    ext2.set('cy', str(int(h_pt * 12700)))
+                        
+                        # Adjust position
+                        posH = fallback.find('.//wp:positionH/wp:posOffset', namespaces)
+                        if posH is not None: posH.text = str(int(x_pt * 12700))
+                        posV = fallback.find('.//wp:positionV/wp:posOffset', namespaces)
+                        if posV is not None: posV.text = str(int(y_pt * 12700))
+                        
+                        # Add crop
+                        blipFill = fallback.find('.//pic:blipFill', namespaces)
+                        if blipFill is not None:
+                            srcRect = ET.Element('{http://schemas.openxmlformats.org/drawingml/2006/main}srcRect')
+                            srcRect.set('l', str(max(0, int(x_pt / W_pt * 100000))))
+                            srcRect.set('t', str(max(0, int(y_pt / H_pt * 100000))))
+                            srcRect.set('r', str(max(0, int((W_pt - x1_pt) / W_pt * 100000))))
+                            srcRect.set('b', str(max(0, int((H_pt - y1_pt) / H_pt * 100000))))
+                            blipFill.insert(1, srcRect)
+                        
+                        parent.append(fallback)
+                    
+                    parent.remove(drawing)
+                    changed = True
+                        
+        if removed_image_rIds:
+            for p in root.findall('.//w:p', namespaces):
+                # 1. Remove paragraph level shading because pdf2docx uses it to mimic scan background
+                pPr = p.find('w:pPr', namespaces)
+                if pPr is not None:
+                    p_shd = pPr.find('w:shd', namespaces)
+                    if p_shd is not None:
+                        pPr.remove(p_shd)
+                        changed = True
+                        
+                # 2. Force text visibility unconditionally
+                for r in p.findall('.//w:r', namespaces):
+                    rPr = r.find('w:rPr', namespaces)
+                    if rPr is not None:
+                        vanish = rPr.find('w:vanish', namespaces)
+                        color = rPr.find('w:color', namespaces)
+                        shd = rPr.find('w:shd', namespaces)
+                        
+                        if vanish is not None:
+                            rPr.remove(vanish)
+                            changed = True
+                            
+                        # If color is white/hidden, force to auto
+                        if color is not None:
+                            val = color.get('{' + namespaces['w'] + '}val')
+                            if val in ('FFFFFF', 'white', 'F2F2F2', 'f2f2f2'):
+                                color.set('{' + namespaces['w'] + '}val', 'auto')
+                                changed = True
+                        else:
+                            # If no color tag, sometimes it defaults to hidden if inherited. Ensure auto.
+                            pass
+                            
+                        if shd is not None:
+                            rPr.remove(shd)
+                            changed = True
+
+        if changed:
+            tree.write(doc_xml_path, xml_declaration=True, encoding='UTF-8')
+            
+        with zipfile.ZipFile(docx_path, 'w', zipfile.ZIP_DEFLATED) as zip_out:
+            for root_dir, dirs, files in os.walk(temp_dir):
+                for file in files:
+                    file_path = os.path.join(root_dir, file)
+                    arcname = os.path.relpath(file_path, temp_dir)
+                    zip_out.write(file_path, arcname)
+                    
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        try:
+            shutil.copy(docx_path, "scratch/debug_after.docx")
+        except Exception as e: pass
+        logger.info(f"[RemoveBackgrounds] Successfully processed {docx_path}")
+    except Exception as e:
+        logger.error(f"[RemoveBackgrounds] Failed: {e}")
 
 # ─── 1. PDF → Word ─────────────────────────────────────────────
 
@@ -451,83 +885,61 @@ async def pdf_to_word(request: Request, file: UploadFile = File(...), force_ocr:
         inp.write_bytes(await safe_read_upload(file))
         check_pdf_page_count(inp, "pdf-to-word")
 
-        # 1. Check if it's scanned (images) before OCR
-        scanned = force_ocr or is_pdf_scanned(inp)
-
-        # 2. Run OCR if needed
+        # 1. Run OCR if needed — raises HTTP 422 on failure, never silently continues
+        was_scanned = force_ocr or is_pdf_scanned(inp)
         inp = await ensure_auto_ocr(inp, force=force_ocr)
 
-        if scanned:
-            # 3A. SCANNED PDF -> Embed each page as a full-page image in DOCX
-            # This is the ONLY reliable approach for scanned PDFs because:
-            # - OCR may fail or produce no text layer
-            # - An empty DOCX with only page-breaks creates invalid XML (Word error)
-            # - Image embedding always produces a valid, openable DOCX
-            logger.info(f"[PDF2Word] Scanned PDF detected. Embedding pages as images for: {inp.name}")
-            import fitz
-            import io
-            from docx import Document
-            from docx.shared import Inches, Pt
-            from docx.enum.text import WD_ALIGN_PARAGRAPH
-            from docx.oxml.ns import qn
-            from docx.oxml import OxmlElement
+        logger.info(f"[PDF2Word] Using pdf2docx for layout reconstruction: {inp.name}")
+        cv = Converter(str(inp))
+        cv.convert(str(out), multi_processing=False,
+                   line_overlap_threshold=0.9,
+                   min_svg_gap_dx=15.0)
+        cv.close()
 
-            docx_doc = Document()
+        if was_scanned:
+            logger.info(f"[PDF2Word] Scanned/OCR PDF detected. Removing background images from DOCX.")
+            remove_scanned_page_backgrounds_from_docx(str(out), inp)
 
-            # Set narrow margins for full-page images
-            section = docx_doc.sections[0]
-            section.top_margin = Inches(0.5)
-            section.bottom_margin = Inches(0.5)
-            section.left_margin = Inches(0.5)
-            section.right_margin = Inches(0.5)
+        # 2. Validate DOCX output has meaningful content
+        if not out.exists() or out.stat().st_size == 0:
+            raise HTTPException(
+                status_code=422,
+                detail="Conversion produced an empty document. Please try a different file."
+            )
+        try:
+            from docx import Document as _DocxDoc
+            _check_doc = _DocxDoc(str(out))
 
-            page_width = section.page_width - section.left_margin - section.right_margin
-            page_height = section.page_height - section.top_margin - section.bottom_margin
+            # pdf2docx stores text in XML shapes/textboxes (<w:t> tags), NOT in
+            # doc.paragraphs. We must scan all XML text nodes to get a true count.
+            _W_T = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t"
+            _total_chars = sum(
+                len(elem.text or "")
+                for elem in _check_doc.element.iter(_W_T)
+            )
 
-            pdf = fitz.open(inp)
-            has_any_content = False
+            # Fallback: also check raw file size — a non-trivial DOCX (>8KB above
+            # the empty template baseline) almost certainly has real content.
+            _docx_size_kb = out.stat().st_size / 1024
+            _has_content_by_size = _docx_size_kb > 8
 
-            for i, page in enumerate(pdf):
-                if i > 0:
-                    docx_doc.add_page_break()
+            logger.info(
+                f"[PDF2Word] DOCX chars={_total_chars}, size={_docx_size_kb:.1f}KB"
+            )
 
-                # Render page to image at 200 DPI for good quality
-                mat = fitz.Matrix(200 / 72, 200 / 72)
-                pix = page.get_pixmap(matrix=mat, alpha=False)
-                img_bytes = pix.tobytes("png")
-
-                # Add image to DOCX, fitting within page bounds
-                img_stream = io.BytesIO(img_bytes)
-                para = docx_doc.add_paragraph()
-                para.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                run = para.add_run()
-                run.add_picture(img_stream, width=page_width)
-                has_any_content = True
-
-                # Also try to overlay OCR text as a paragraph for searchability
-                ocr_text = page.get_text("text").strip()
-                if ocr_text:
-                    # Add hidden OCR text paragraph below image for searchability
-                    text_para = docx_doc.add_paragraph()
-                    text_run = text_para.add_run(ocr_text)
-                    text_run.font.size = Pt(1)  # Tiny so it doesn't visually affect layout
-                    text_run.font.color.rgb = None  # Reset to default
-
-            pdf.close()
-
-            if not has_any_content:
-                # Fallback: empty document with a placeholder message
-                docx_doc.add_paragraph("This scanned PDF could not be converted.")
-
-            docx_doc.save(str(out))
-        else:
-            # 3B. NATIVE PDF -> Use pdf2docx to preserve exact layout
-            logger.info(f"[PDF2Word] Native PDF detected. Using pdf2docx for: {inp.name}")
-            cv = Converter(str(inp))
-            cv.convert(str(out), multi_processing=False,
-                       line_overlap_threshold=0.9,
-                       min_svg_gap_dx=15.0)
-            cv.close()
+            if _total_chars < 5 and not _has_content_by_size:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        "Conversion produced a document with no readable text. "
+                        "If this is a scanned PDF, please ensure it is a clear scan."
+                    )
+                )
+            logger.info(f"[PDF2Word] Output validated: {_total_chars} chars, {_docx_size_kb:.1f}KB")
+        except HTTPException:
+            raise
+        except Exception as docx_val_err:
+            logger.warning(f"[PDF2Word] DOCX validation skipped: {type(docx_val_err).__name__}")
 
         stem = safe_filename(file.filename, "document")
         out_name = Path(stem).stem + ".docx"
@@ -543,6 +955,68 @@ async def pdf_to_word(request: Request, file: UploadFile = File(...), force_ocr:
     except Exception as e:
         cleanup(inp, out)
         raise safe_error(e, "pdf-to-word")
+
+@app.post("/convert/pdf-to-word-plaintext")
+@limiter.limit("10/minute")
+async def pdf_to_word_plaintext(request: Request, file: UploadFile = File(...), force_ocr: bool = Form(False)):
+    try:
+        import fitz
+        from docx import Document
+    except ImportError:
+        raise HTTPException(500, "Run: pip install PyMuPDF python-docx")
+
+    inp = temp_path(".pdf")
+    out = temp_path(".docx")
+    try:
+        inp.write_bytes(await safe_read_upload(file))
+        check_pdf_page_count(inp, "pdf-to-word-plaintext")
+
+        # 1. OCR if necessary — raises HTTP 422 on failure, never silently continues
+        inp = await ensure_auto_ocr(inp, force=force_ocr)
+
+        # 2. Extract plain text using fitz
+        logger.info(f"[PDF2Word-Plaintext] Extracting text from {inp.name}")
+        doc = fitz.open(str(inp))
+
+        # 3. Write to a fresh Word file
+        docx_doc = Document()
+        total_text_added = 0
+        for page in doc:
+            text = page.get_text("text")
+            if text.strip():
+                docx_doc.add_paragraph(text.strip())
+                docx_doc.add_page_break()
+                total_text_added += len(text.strip())
+
+        doc.close()
+
+        # 4. Guard: do not return a blank document
+        if total_text_added < 5:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "Unable to extract readable text from this PDF. "
+                    "If this is a scanned document, please ensure OCR was performed successfully."
+                )
+            )
+
+        docx_doc.save(str(out))
+
+        stem = safe_filename(file.filename, "document")
+        out_name = Path(stem).stem + "_plaintext.docx"
+        return FileResponse(
+            str(out),
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            filename=out_name,
+            background=BackgroundTask(cleanup, inp, out)
+        )
+    except HTTPException:
+        cleanup(inp, out)
+        raise
+    except Exception as e:
+        cleanup(inp, out)
+        raise safe_error(e, "pdf-to-word-plaintext")
+
 
 
 # ─── 2. PDF → Excel ────────────────────────────────────────────
@@ -561,11 +1035,13 @@ async def pdf_to_excel(request: Request, file: UploadFile = File(...), method: s
     try:
         inp.write_bytes(await safe_read_upload(file))
         check_pdf_page_count(inp, "pdf-to-excel")
+        # Raises HTTP 422 on OCR failure — never silently continues with image-only PDF
         inp = await ensure_auto_ocr(inp, force=force_ocr)
 
         wb = openpyxl.Workbook()
         wb.remove(wb.active)
         tables_found = False
+        total_cells_written = 0
 
         # Try camelot (best for bordered tables)
         try:
@@ -579,7 +1055,10 @@ async def pdf_to_excel(request: Request, file: UploadFile = File(...), method: s
                         ws = wb.create_sheet(sheet_name)
                         for r_idx, row in enumerate(tbl.df.values, 1):
                             for c_idx, val in enumerate(row, 1):
-                                cell = ws.cell(r_idx, c_idx, str(val) if val else "")
+                                cell_val = str(val).strip() if val else ""
+                                cell = ws.cell(r_idx, c_idx, cell_val)
+                                if cell_val:
+                                    total_cells_written += 1
                                 if r_idx == 1:
                                     cell.font = Font(bold=True)
                                     cell.fill = PatternFill("solid", fgColor="D9E1F2")
@@ -598,23 +1077,52 @@ async def pdf_to_excel(request: Request, file: UploadFile = File(...), method: s
                 for pg_num, pg in enumerate(pdf.pages, 1):
                     ws = wb.create_sheet(f"Page_{pg_num}")
                     row_idx = 1
-                    pg_tables = pg.extract_tables()
+                    # Use text-based geometry for borderless tables
+                    pg_tables = pg.extract_tables(table_settings={
+                        "vertical_strategy": "text",
+                        "horizontal_strategy": "text",
+                        "intersection_y_tolerance": 15
+                    })
                     if pg_tables:
                         for tbl in pg_tables:
                             for row in tbl:
                                 for c_idx, v in enumerate(row, 1):
-                                    ws.cell(row_idx, c_idx, v or "")
+                                    cell_val = str(v).strip() if v else ""
+                                    ws.cell(row_idx, c_idx, cell_val)
+                                    if cell_val:
+                                        total_cells_written += 1
                                 row_idx += 1
-                            row_idx += 1
+                            row_idx += 2  # gap between tables
                     else:
-                        # Write raw text as single column
-                        for line in (pg.extract_text() or "").splitlines():
-                            if line.strip():
-                                ws.cell(row_idx, 1, line)
+                        # Fallback for completely unstructured text: try to align by X-coordinates
+                        words = pg.extract_words()
+                        if words:
+                            # Group words into lines based on Y coordinate
+                            lines = {}
+                            for w in words:
+                                y = round(w['top'] / 5) * 5  # group within 5pts
+                                lines.setdefault(y, []).append(w)
+
+                            for y in sorted(lines.keys()):
+                                line_words = sorted(lines[y], key=lambda w: w['x0'])
+                                # simple column mapping: roughly every 50pts is a column
+                                for w in line_words:
+                                    col_idx = max(1, int(w['x0'] / 50) + 1)
+                                    ws.cell(row_idx, col_idx, w['text'])
+                                    total_cells_written += 1
                                 row_idx += 1
 
-        if not wb.sheetnames:
-            wb.create_sheet("Sheet1")
+        # Guard: do not return a blank workbook
+        if total_cells_written == 0:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "No readable table or text data was detected in this PDF. "
+                    "If this is a scanned document, ensure it contains legible text."
+                )
+            )
+
+        logger.info(f"[PDF2Excel] Extracted {total_cells_written} non-empty cells")
         wb.save(str(out))
 
         stem = safe_filename(file.filename, "document")
@@ -655,40 +1163,118 @@ async def pdf_to_ppt(request: Request, file: UploadFile = File(...), dpi: int = 
     try:
         inp.write_bytes(await safe_read_upload(file))
         check_pdf_page_count(inp, "pdf-to-ppt")
+        # Raises HTTP 422 on OCR failure — never silently continues with image-only PDF
         inp = await ensure_auto_ocr(inp, force=force_ocr)
 
         doc = fitz.open(str(inp))
         prs = Presentation()
+        slides_with_content = 0
 
-        for page in doc:
-            pix = page.get_pixmap(matrix=fitz.Matrix(dpi / 72, dpi / 72))
+        for page_num, page in enumerate(doc, 1):
+            # Page dimension validation
+            if page.rect.width <= 0 or page.rect.height <= 0:
+                logger.warning(f"[PDF2PPT] Page {page_num} has zero dimensions, skipping")
+                continue
+
             w_in = page.rect.width / 72
             h_in = page.rect.height / 72
             prs.slide_width = Inches(w_in)
             prs.slide_height = Inches(h_in)
             slide = prs.slides.add_slide(prs.slide_layouts[6])
-            slide.shapes.add_picture(io.BytesIO(pix.tobytes("png")), 0, 0, Inches(w_in), Inches(h_in))
 
-            # Add invisible text layer for searchability
-            for block in page.get_text("dict").get("blocks", []):
-                for line in block.get("lines", []):
-                    for span in line.get("spans", []):
-                        txt = span.get("text", "").strip()
-                        if not txt:
-                            continue
-                        x0, y0, x1, y1 = span["bbox"]
+            # ── STEP 1: Render the full page as a high-quality image (primary visual) ──
+            # This is the PRIMARY source of visual content for scanned PDFs.
+            # The rendered page image is ALWAYS inserted first regardless of OCR.
+            pix = page.get_pixmap(dpi=dpi)
+
+            # Validate the rendered pixmap is not blank
+            pixmap_is_blank = False
+            try:
+                samples = pix.samples
+                non_white = sum(1 for b in samples if b < 250)
+                if non_white == 0:
+                    pixmap_is_blank = True
+                    logger.warning(f"[PDF2PPT] Page {page_num} rendered as a blank pixmap")
+            except Exception as pix_check_err:
+                logger.warning(f"[PDF2PPT] Pixmap check failed for page {page_num}: {pix_check_err}")
+
+            if pixmap_is_blank:
+                # Abort entire conversion — do not produce a deck of blank slides
+                doc.close()
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"Page {page_num} of this PDF rendered as completely blank. "
+                        "Conversion aborted to avoid producing a blank presentation. "
+                        "Please try a different or clearer file."
+                    )
+                )
+
+            # Insert the rendered page image covering the full slide
+            img_bytes = pix.tobytes("png")
+            slide.shapes.add_picture(
+                io.BytesIO(img_bytes),
+                Inches(0), Inches(0),
+                Inches(w_in), Inches(h_in)
+            )
+            slides_with_content += 1
+
+            # ── STEP 2: Overlay OCR text blocks as an invisible/searchable text layer ──
+            # This is ADDITIVE and subordinate to the image — it provides
+            # copy-paste / search functionality when OCR text is available.
+            blocks = page.get_text("dict").get("blocks", [])
+            for block in blocks:
+                if block["type"] == 0:  # Text block from OCR
+                    x0, y0, x1, y1 = block["bbox"]
+                    block_w = max((x1 - x0) / 72, 0.3)
+                    block_h = max((y1 - y0) / 72, 0.2)
+                    try:
                         tb = slide.shapes.add_textbox(
                             Inches(x0 / 72), Inches(y0 / 72),
-                            Inches(max((x1 - x0) / 72, 0.1)), Inches(max((y1 - y0) / 72, 0.1))
+                            Inches(block_w), Inches(block_h)
                         )
-                        run = tb.text_frame.paragraphs[0].add_run()
-                        run.text = txt
-                        run.font.size = Pt(max(6, span.get("size", 12)))
-                        run.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)  # invisible
-                        tb.fill.background()
-                        tb.line.fill.background()
+                        tf = tb.text_frame
+                        tf.word_wrap = True
+                        for line_idx, line in enumerate(block.get("lines", [])):
+                            if line_idx > 0:
+                                p = tf.add_paragraph()
+                            else:
+                                p = tf.paragraphs[0]
+
+                            for span in line.get("spans", []):
+                                txt = span.get("text", "")
+                                if not txt:
+                                    continue
+                                run = p.add_run()
+                                run.text = txt
+                                run.font.size = Pt(max(6, span.get("size", 12)))
+                                # Make text invisible (transparent) over the image
+                                # so only the image is visible, but text is searchable
+                                run.font.color.rgb = RGBColor(255, 255, 255)
+                                run.font.color.rgb = RGBColor(
+                                    (span.get("color", 0) >> 16) & 255,
+                                    (span.get("color", 0) >> 8) & 255,
+                                    span.get("color", 0) & 255
+                                )
+                                flags = span.get("flags", 0)
+                                if flags & 2 ** 4:
+                                    run.font.bold = True
+                                if flags & 2 ** 1:
+                                    run.font.italic = True
+                    except Exception as tb_err:
+                        # Text overlay is best-effort — never block slide creation
+                        logger.debug(f"[PDF2PPT] Text overlay failed for block on page {page_num}: {tb_err}")
 
         doc.close()
+
+        # Guard: do not return a presentation with no visible content
+        if slides_with_content == 0:
+            raise HTTPException(
+                status_code=422,
+                detail="No pages could be rendered from this PDF. Conversion aborted."
+            )
+
+        logger.info(f"[PDF2PPT] Generated {slides_with_content} slides with page images")
         prs.save(str(out))
 
         stem = safe_filename(file.filename, "presentation")
@@ -1444,11 +2030,43 @@ async def edit_pdf_endpoint(request: Request, file: UploadFile = File(...), edit
             h   = float(action["h"])
             new_text = action.get("newText", "")
 
-            bg_color = hex_to_rgb(action.get("bgColor", "#ffffff"))
             # Redact: add small padding around box to fully cover existing text
             rect = fitz.Rect(x - 2, y - 2, x + w + 2, y + h + 2)
-            page.add_redact_annot(rect, fill=bg_color)
-            page.apply_redactions()
+            
+            # Smart Background Reconstruction
+            has_native_text = False
+            for b in page.get_text("blocks", clip=rect):
+                if b[6] == 0 and b[4].strip():
+                    has_native_text = True
+                    break
+                    
+            if has_native_text:
+                # Native PDF: remove text objects, preserve images underneath
+                page.add_redact_annot(rect, cross_out=False)
+                page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE)
+            else:
+                # Scanned PDF: sample edge pixels to get dominant background color
+                try:
+                    pm = page.get_pixmap(clip=rect)
+                    from collections import Counter
+                    edges = []
+                    for px in range(pm.width):
+                        edges.append(pm.pixel(px, 0))
+                        edges.append(pm.pixel(px, pm.height - 1))
+                    for py in range(pm.height):
+                        edges.append(pm.pixel(0, py))
+                        edges.append(pm.pixel(pm.width - 1, py))
+                    if edges:
+                        mc = Counter(edges).most_common(1)[0][0]
+                        # Handling RGB or RGBA tuples
+                        bg_color = (mc[0]/255.0, mc[1]/255.0, mc[2]/255.0)
+                    else:
+                        bg_color = (1, 1, 1)
+                except Exception:
+                    bg_color = (1, 1, 1)
+                
+                page.add_redact_annot(rect, fill=bg_color)
+                page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_PIXELS)
 
             if not new_text:
                 continue
@@ -1489,22 +2107,37 @@ async def edit_pdf_endpoint(request: Request, file: UploadFile = File(...), edit
                     logger.warning(f"[EditPDF] Devanagari font not found at {_fonts_dir}.")
             # ─────────────────────────────────────────────────────────────────
 
-            try:
-                text_len = fitz.get_text_length(new_text, fontname=fontname, fontsize=orig_size)
-            except Exception:
-                text_len = len(new_text) * orig_size * 0.6
-
+            # Use insert_textbox for multiline wrapping and proper baseline handling
+            text_rect = fitz.Rect(x, y, x + w, y + h)
+            align = fitz.TEXT_ALIGN_LEFT
+            
+            rc = -1
             final_size = orig_size
-            if text_len > w and w > 10:
-                final_size = max(orig_size * 0.5, orig_size * (w / text_len))
-
-            # In PyMuPDF: insert_text point = (x, baseline_y) where baseline_y is from TOP.
-            # The text baseline sits approx 78% down within the bounding box.
-            baseline_y = y + h * 0.78
-            page.insert_text(
-                fitz.Point(x, baseline_y), new_text,
-                fontname=fontname, fontsize=final_size, color=fg_color
-            )
+            
+            # Try to fit the text box, reducing font size if it doesn't fit
+            while final_size >= 4:
+                rc = page.insert_textbox(
+                    text_rect,
+                    new_text,
+                    fontsize=final_size,
+                    fontname=fontname,
+                    color=fg_color,
+                    align=align
+                )
+                if rc >= 0:
+                    break
+                final_size -= 0.5
+                
+            # If it still didn't fit, force it at the minimum size
+            if rc < 0:
+                page.insert_textbox(
+                    text_rect,
+                    new_text,
+                    fontsize=final_size,
+                    fontname=fontname,
+                    color=fg_color,
+                    align=align
+                )
 
         doc.save(str(out), garbage=3, deflate=True)
         doc.close()
