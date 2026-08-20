@@ -19,7 +19,7 @@ export default function RemoveBackground() {
     () => ({
       model: 'isnet_quint8' as const,
       device: 'cpu' as const,
-      proxyToWorker: true,
+      proxyToWorker: false,   // proxyToWorker only works with WebGPU; CPU mode must be false
       rescale: true,
       fetchArgs: { cache: 'force-cache' as RequestCache },
       output: { format: 'image/png' as const, quality: 1 },
@@ -29,34 +29,39 @@ export default function RemoveBackground() {
 
   const filePreview = useMemo(() => (file ? URL.createObjectURL(file) : null), [file]);
 
-  useEffect(() => {
-    let mounted = true;
-    (async () => {
-      try {
-        setProgressText('Preparing AI model (first time only)...');
-        await preload({
-          ...removerConfig,
-          progress: (key: string, current: number, total: number) => {
-            if (!mounted) return;
-            const pct = total > 0 ? Math.round((current / total) * 100) : 0;
-            setProgressText(`${key} ${pct}%`);
-          },
-        });
-        if (mounted) {
-          setModelReady(true);
-          setProgressText('Model ready');
-        }
-      } catch (e: any) {
-        if (mounted) {
-          setError(e?.message || 'Failed to preload model');
-          setProgressText('');
-        }
+  const loadModel = async (mounted: { value: boolean }) => {
+    setError(null);
+    setModelReady(false);
+    setProgressText('Preparing AI model (first time only, ~30MB)...');
+    try {
+      await preload({
+        ...removerConfig,
+        progress: (key: string, current: number, total: number) => {
+          if (!mounted.value) return;
+          const pct = total > 0 ? Math.round((current / total) * 100) : 0;
+          setProgressText(`Loading model: ${key} ${pct}%`);
+        },
+      });
+      if (mounted.value) {
+        setModelReady(true);
+        setProgressText('Model ready ✓');
       }
-    })();
+    } catch (e: any) {
+      if (mounted.value) {
+        setError(`Failed to load AI model: ${e?.message || 'Network error'}. Check your internet connection and try again.`);
+        setProgressText('');
+      }
+    }
+  };
+
+  useEffect(() => {
+    const mounted = { value: true };
+    loadModel(mounted);
     return () => {
-      mounted = false;
+      mounted.value = false;
     };
-  }, [removerConfig]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleDrop = (acceptedFiles: File[]) => {
     if (!acceptedFiles.length) return;
@@ -201,11 +206,24 @@ Return ONLY valid JSON: {"quality": "good"|"edges_rough"|"subject_cut", "suggest
                 </select>
               </label>
 
-              {error && <div className="p-3 bg-red-50 text-red-700 text-sm rounded-lg border border-red-200">{error}</div>}
+              {error && (
+                <div className="p-3 bg-red-50 text-red-700 text-sm rounded-lg border border-red-200 space-y-2">
+                  <p>{error}</p>
+                  {!modelReady && (
+                    <button
+                      type="button"
+                      onClick={() => { const m = { value: true }; void loadModel(m); }}
+                      className="px-3 py-1.5 bg-red-600 text-white text-xs font-semibold rounded-lg hover:bg-red-700"
+                    >
+                      Retry Loading Model
+                    </button>
+                  )}
+                </div>
+              )}
               {progressText && <div className="p-3 bg-blue-50 text-blue-700 text-sm rounded-lg border border-blue-200">{progressText}</div>}
               {!modelReady && !error && (
                 <div className="p-3 bg-amber-50 text-amber-800 text-sm rounded-lg border border-amber-200">
-                  First run may take time while model downloads. Next runs are much faster.
+                  First run may take ~30 seconds while AI model downloads (~30MB). Next runs are instant.
                 </div>
               )}
 

@@ -458,22 +458,67 @@ async def pdf_to_word(request: Request, file: UploadFile = File(...), force_ocr:
         inp = await ensure_auto_ocr(inp, force=force_ocr)
 
         if scanned:
-            # 3A. SCANNED PDF -> Extract clean text to drop the giant background image
-            logger.info(f"[PDF2Word] Scanned PDF detected. Extracting clean OCR text for: {inp.name}")
+            # 3A. SCANNED PDF -> Embed each page as a full-page image in DOCX
+            # This is the ONLY reliable approach for scanned PDFs because:
+            # - OCR may fail or produce no text layer
+            # - An empty DOCX with only page-breaks creates invalid XML (Word error)
+            # - Image embedding always produces a valid, openable DOCX
+            logger.info(f"[PDF2Word] Scanned PDF detected. Embedding pages as images for: {inp.name}")
             import fitz
+            import io
             from docx import Document
+            from docx.shared import Inches, Pt
+            from docx.enum.text import WD_ALIGN_PARAGRAPH
+            from docx.oxml.ns import qn
+            from docx.oxml import OxmlElement
+
             docx_doc = Document()
+
+            # Set narrow margins for full-page images
+            section = docx_doc.sections[0]
+            section.top_margin = Inches(0.5)
+            section.bottom_margin = Inches(0.5)
+            section.left_margin = Inches(0.5)
+            section.right_margin = Inches(0.5)
+
+            page_width = section.page_width - section.left_margin - section.right_margin
+            page_height = section.page_height - section.top_margin - section.bottom_margin
+
             pdf = fitz.open(inp)
+            has_any_content = False
 
             for i, page in enumerate(pdf):
-                text = page.get_text("text").strip()
-                if text:
-                    for line in text.split('\n'):
-                        if line.strip():
-                            docx_doc.add_paragraph(line)
-                if i < len(pdf) - 1:
+                if i > 0:
                     docx_doc.add_page_break()
+
+                # Render page to image at 200 DPI for good quality
+                mat = fitz.Matrix(200 / 72, 200 / 72)
+                pix = page.get_pixmap(matrix=mat, alpha=False)
+                img_bytes = pix.tobytes("png")
+
+                # Add image to DOCX, fitting within page bounds
+                img_stream = io.BytesIO(img_bytes)
+                para = docx_doc.add_paragraph()
+                para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                run = para.add_run()
+                run.add_picture(img_stream, width=page_width)
+                has_any_content = True
+
+                # Also try to overlay OCR text as a paragraph for searchability
+                ocr_text = page.get_text("text").strip()
+                if ocr_text:
+                    # Add hidden OCR text paragraph below image for searchability
+                    text_para = docx_doc.add_paragraph()
+                    text_run = text_para.add_run(ocr_text)
+                    text_run.font.size = Pt(1)  # Tiny so it doesn't visually affect layout
+                    text_run.font.color.rgb = None  # Reset to default
+
             pdf.close()
+
+            if not has_any_content:
+                # Fallback: empty document with a placeholder message
+                docx_doc.add_paragraph("This scanned PDF could not be converted.")
+
             docx_doc.save(str(out))
         else:
             # 3B. NATIVE PDF -> Use pdf2docx to preserve exact layout
