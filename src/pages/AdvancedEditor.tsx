@@ -828,11 +828,19 @@ export default function AdvancedEditor() {
       // "text gets big/small as I type" problem.
       const preservedFont = target.fontSize || 14;
 
-      // Width: expand to fit new text but never shrink below original source width
-      const sourceW = target.sourceWidth || target.width || 120;
-      const measuredW = estimateTextWidth(text, preservedFont, target.bold, target.italic);
-      const contentW  = Math.max(sourceW, measuredW + 12);
-      const contentH  = target.height || target.sourceHeight || Math.round(preservedFont * 1.3);
+      // Width: use the existing width, don't automatically expand horizontally for paragraphs
+      // so that text wraps naturally.
+      const contentW = target.width || target.sourceWidth || 120;
+      
+      // Calculate how many lines we roughly have by splitting by newline
+      const lines = text.split('\n').length;
+      
+      // If we want it to auto-expand height we could, but let's stick to the user's manual resize
+      // unless the text implies more height.
+      const lineHeight = Math.round(preservedFont * 1.3);
+      const minH = lineHeight * lines;
+      const contentH = Math.max(target.height || target.sourceHeight || lineHeight, minH);
+      
       const pad = getWhiteoutPad(contentH);
 
       return prev.map(a => {
@@ -1739,34 +1747,29 @@ export default function AdvancedEditor() {
                       }}
                     >
                       {ann.type === 'text' && (
-                        <input
-                          type="text"
+                        <textarea
                           value={ann.text}
                           onChange={(e) => updateAnnotationText(ann.id, e.target.value)}
-                          className="bg-transparent border-none outline-none w-full h-full m-0 p-0 box-border"
+                          className="bg-transparent border-none outline-none w-full h-full m-0 p-0 box-border resize-none"
                           style={{
                             fontSize: `${ann.fontSize || 14}px`,
                             color: ann.color || '#000000',
                             fontWeight: ann.bold ? 700 : 400,
                             fontStyle: ann.italic ? 'italic' : 'normal',
-                            lineHeight: `${(ann.height || Math.round((ann.fontSize || 14) * 1.3))}px`,
-                            whiteSpace: 'nowrap',
+                            lineHeight: 1.3,
+                            whiteSpace: 'pre-wrap',
                             fontFamily: 'Helvetica, Arial, sans-serif',
                             padding: 0,
                             margin: 0,
+                            overflow: 'hidden'
                           }}
                           autoFocus
                           onClick={(e) => e.stopPropagation()}
                           onMouseDown={(e) => e.stopPropagation()}
                           onKeyDown={(e) => {
                             e.stopPropagation();
-                            if (e.key === 'Enter' || e.key === 'Tab') {
-                              e.preventDefault();
-                              // Finish editing — deselect
-                              setSelectedId(null);
-                            }
+                            // Only Escape cancels now. Enter inserts newline.
                             if (e.key === 'Escape') {
-                              // Cancel — revert and deselect
                               setSelectedId(null);
                             }
                           }}
