@@ -698,9 +698,25 @@ def remove_scanned_page_backgrounds_from_docx(docx_path: str, pdf_path: str):
                       'w14': 'http://schemas.microsoft.com/office/word/2010/wordml',
                       'wp14': 'http://schemas.microsoft.com/office/word/2010/wordprocessingDrawing'}
                       
+        # CRITICAL FIX: Register ALL namespaces from the raw XML before parsing.
+        # Python's xml.etree.ElementTree only knows about explicitly registered
+        # namespaces. Any unknown namespace prefix (e.g. w15, w16, wps, o, m, etc.)
+        # gets renamed to ns0:, ns1:, ... which makes Word reject the file with
+        # "XML data is invalid according to the schema".
+        import re as _re_ns
+        with open(doc_xml_path, 'rb') as _fns:
+            _raw_xml_ns = _fns.read().decode('utf-8', errors='replace')
+        # Register every xmlns:prefix="uri" found in the document
+        for _ns_pfx, _ns_uri in _re_ns.findall(r'xmlns:(\w[\w.-]*)="([^"]+)"', _raw_xml_ns):
+            ET.register_namespace(_ns_pfx, _ns_uri)
+        # Register default namespace if present
+        _dm = _re_ns.search(r'(?<![:\w])xmlns="([^"]+)"', _raw_xml_ns)
+        if _dm:
+            ET.register_namespace('', _dm.group(1))
+        # Also register the known namespaces from our dict (redundant but safe)
         for prefix, uri in namespaces.items():
             ET.register_namespace(prefix, uri)
-            
+
         tree = ET.parse(doc_xml_path)
         root = tree.getroot()
         
@@ -851,8 +867,26 @@ def remove_scanned_page_backgrounds_from_docx(docx_path: str, pdf_path: str):
                             rPr.remove(shd)
                             changed = True
 
-        if changed:
-            tree.write(doc_xml_path, xml_declaration=True, encoding='UTF-8')
+        if not changed:
+            # Nothing was modified — skip XML rewrite and ZIP rebuild entirely.
+            # The original DOCX file is perfectly valid as-is.
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            logger.info(f"[RemoveBackgrounds] No changes needed, original DOCX preserved.")
+            return
+
+        tree.write(doc_xml_path, xml_declaration=True, encoding='UTF-8')
+        # CRITICAL FIX: ET writes <?xml version='1.0' encoding='UTF-8'?> (no standalone)
+        # OOXML / Word requires: <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        # Missing standalone="yes" and single quotes can cause schema validation failure.
+        with open(doc_xml_path, 'rb') as _fw:
+            _fc = _fw.read()
+        _fc = _re_ns.sub(
+            rb"<\?xml[^?]*\?>",
+            b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
+            _fc, count=1
+        )
+        with open(doc_xml_path, 'wb') as _fw:
+            _fw.write(_fc)
             
         with zipfile.ZipFile(docx_path, 'w', zipfile.ZIP_DEFLATED) as zip_out:
             for root_dir, dirs, files in os.walk(temp_dir):
