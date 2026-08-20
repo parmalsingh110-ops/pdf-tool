@@ -41,7 +41,7 @@ export default defineConfig(() => {
           "font-src    'self' https://fonts.gstatic.com data:",
           "img-src     'self' data: blob: https:",
           "media-src   'self' blob:",
-          "connect-src 'self' https://*.onrender.com https://pdfmediasuite.in https://www.pdfmediasuite.in https://generativelanguage.googleapis.com http://localhost:8000 http://127.0.0.1:8000",
+          "connect-src 'self' https://*.onrender.com https://pdfmediasuite.in https://www.pdfmediasuite.in https://generativelanguage.googleapis.com https://staticimgly.com http://localhost:8000 http://127.0.0.1:8000",
           "worker-src  'self' blob:",
           "object-src  'none'",
           "frame-src   'none'",
