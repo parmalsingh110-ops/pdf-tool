@@ -877,7 +877,6 @@ def remove_scanned_page_backgrounds_from_docx(docx_path: str, pdf_path: str):
         tree.write(doc_xml_path, xml_declaration=True, encoding='UTF-8')
         # CRITICAL FIX: ET writes <?xml version='1.0' encoding='UTF-8'?> (no standalone)
         # OOXML / Word requires: <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-        # Missing standalone="yes" and single quotes can cause schema validation failure.
         with open(doc_xml_path, 'rb') as _fw:
             _fc = _fw.read()
         _fc = _re_ns.sub(
@@ -885,6 +884,17 @@ def remove_scanned_page_backgrounds_from_docx(docx_path: str, pdf_path: str):
             b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
             _fc, count=1
         )
+        
+        # CRITICAL FIX 2 for MS Word Line 0 Column 0 Schema Error:
+        # ElementTree strips xmlns declarations that it thinks are "unused".
+        # But 'w14', 'wp14', etc. are referenced inside the mc:Ignorable="w14 wp14" string value.
+        # Word crashes instantly if these are missing. 
+        # Fix: Overwrite the generated <w:document> tag with the exact original one!
+        _orig_root_match = _re_ns.search(r"<w:document[^>]+>", _raw_xml_ns)
+        if _orig_root_match:
+            _orig_root_bytes = _orig_root_match.group(0).encode('utf-8')
+            _fc = _re_ns.sub(rb"<w:document[^>]+>", _orig_root_bytes, _fc, count=1)
+
         with open(doc_xml_path, 'wb') as _fw:
             _fw.write(_fc)
             
