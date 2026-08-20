@@ -97,9 +97,12 @@ export default function ImageResizer() {
 
   const removerConfig = useMemo(
     () => ({
+      // publicPath MUST point to the CDN so WASM/ONNX files are fetchable in production.
+      // Without this, the library tries to load from "./" which 404s on any deployed host.
+      publicPath: 'https://staticimgly.com/@imgly/background-removal@1.7.0/dist/',
       model: 'isnet_quint8' as const,
       device: 'cpu' as const,
-      proxyToWorker: true,
+      proxyToWorker: false,   // proxyToWorker only works with WebGPU; CPU mode must be false
       rescale: true,
       fetchArgs: { cache: 'force-cache' as RequestCache },
       output: { format: 'image/png' as const, quality: 1 },
