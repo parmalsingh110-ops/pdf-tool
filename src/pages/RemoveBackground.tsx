@@ -17,9 +17,9 @@ export default function RemoveBackground() {
 
   const removerConfig = useMemo(
     () => ({
-      // publicPath MUST point to the CDN so WASM/ONNX files are fetchable in production.
-      // Without this, the library tries to load from "./" which 404s on any deployed host.
-      publicPath: 'https://staticimgly.com/@imgly/background-removal@1.7.0/dist/',
+      // publicPath points to the SEPARATE data package that hosts WASM/ONNX models on CDN.
+      // Note: it's background-removal-DATA (different npm package), not background-removal!
+      publicPath: 'https://staticimgly.com/@imgly/background-removal-data/1.7.0/dist/',
       model: 'isnet_quint8' as const,
       device: 'cpu' as const,
       proxyToWorker: false,   // proxyToWorker only works with WebGPU; CPU mode must be false
