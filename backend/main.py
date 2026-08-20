@@ -893,7 +893,10 @@ def remove_scanned_page_backgrounds_from_docx(docx_path: str, pdf_path: str):
                 for file in files:
                     file_path = os.path.join(root_dir, file)
                     arcname = os.path.relpath(file_path, temp_dir)
-                    zip_out.write(file_path, arcname)
+                    # CRITICAL FIX for Windows: OpenXML strictly requires forward slashes
+                    # for ZIP entry names. os.path.relpath uses backslashes on Windows,
+                    # which causes MS Word to completely fail reading the document structure.
+                    zip_out.write(file_path, arcname.replace('\\', '/'))
                     
         shutil.rmtree(temp_dir, ignore_errors=True)
         try:
