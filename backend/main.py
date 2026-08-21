@@ -916,63 +916,205 @@ def remove_scanned_page_backgrounds_from_docx(docx_path: str, pdf_path: str):
     except Exception as e:
         logger.error(f"[RemoveBackgrounds] Failed: {e}")
 
+# ─── Helper: Build clean DOCX from OCR'd PDF ─────────────────
+
+def _build_clean_docx_from_ocr_pdf(pdf_path: Path, out_path: Path):
+    """
+    Extracts text from an OCR'd PDF page-by-page using PyMuPDF and writes
+    a fresh, valid DOCX using python-docx.
+
+    WHY THIS EXISTS:
+    pdf2docx embeds the full scan image as a page background, resulting in:
+      - Huge file sizes (each page = full raw image)
+      - Complex XML that our namespace-fix code then corrupts
+      - "XML data is invalid according to the schema" on Line 0, Col 0
+
+    This function produces a clean, small, Word-openable DOCX with just text.
+    """
+    import fitz  # PyMuPDF
+    from docx import Document
+    from docx.shared import Pt, Inches, RGBColor
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.oxml.ns import qn
+    from docx.oxml import OxmlElement
+
+    doc = Document()
+
+    # Set standard page margins (1 inch all around)
+    for section in doc.sections:
+        section.top_margin = Inches(1)
+        section.bottom_margin = Inches(1)
+        section.left_margin = Inches(1)
+        section.right_margin = Inches(1)
+
+    # Set default font
+    style = doc.styles['Normal']
+    font = style.font
+    font.name = 'Calibri'
+    font.size = Pt(11)
+
+    pdf = fitz.open(str(pdf_path))
+    total_pages = len(pdf)
+
+    for page_num, page in enumerate(pdf):
+        if page_num > 0:
+            doc.add_page_break()
+
+        # Get text blocks sorted in reading order (top-left to bottom-right)
+        blocks = page.get_text("blocks", sort=True)
+
+        page_has_content = False
+        prev_y1 = None
+
+        for block in blocks:
+            # block = (x0, y0, x1, y1, text, block_no, block_type)
+            block_type = block[6]
+            if block_type != 0:  # Skip image blocks (type 1)
+                continue
+
+            raw_text = block[4]
+            if not raw_text or not raw_text.strip():
+                continue
+
+            # Split block into individual lines
+            lines = [ln.rstrip() for ln in raw_text.splitlines()]
+            lines = [ln for ln in lines if ln.strip()]
+
+            if not lines:
+                continue
+
+            # Detect large Y-gap between blocks → add extra spacing
+            y0 = block[1]
+            if prev_y1 is not None and (y0 - prev_y1) > 20:
+                # Add an empty paragraph for visual gap between sections
+                gap_para = doc.add_paragraph()
+                gap_para.paragraph_format.space_after = Pt(0)
+            prev_y1 = block[3]
+
+            block_width = block[2] - block[0]
+            page_width = page.rect.width
+
+            for line_text in lines:
+                stripped = line_text.strip()
+                if not stripped:
+                    continue
+
+                para = doc.add_paragraph()
+                para.paragraph_format.space_after = Pt(4)
+                para.paragraph_format.space_before = Pt(0)
+
+                # Heuristic: wide short text centered = likely a heading
+                is_heading_like = (
+                    len(stripped) < 80
+                    and block_width > page_width * 0.5
+                    and stripped == stripped.upper()
+                    and len(stripped) > 2
+                )
+                if is_heading_like:
+                    para.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    run = para.add_run(stripped)
+                    run.bold = True
+                    run.font.size = Pt(12)
+                else:
+                    run = para.add_run(stripped)
+                    run.font.size = Pt(11)
+
+                page_has_content = True
+
+        if not page_has_content:
+            # Page had no extractable text — leave a note
+            note = doc.add_paragraph(f"[Page {page_num + 1}: No text could be extracted]")
+            note.paragraph_format.space_after = Pt(6)
+            run = note.runs[0]
+            run.italic = True
+            run.font.color.rgb = RGBColor(0x80, 0x80, 0x80)
+
+    pdf.close()
+
+    if total_pages == 0:
+        doc.add_paragraph("[This PDF appears to be empty or could not be read.]")
+
+    doc.save(str(out_path))
+    logger.info(
+        f"[CleanDOCX] Built clean DOCX from {total_pages} page(s): "
+        f"{out_path.stat().st_size / 1024:.1f}KB"
+    )
+
+
 # ─── 1. PDF → Word ─────────────────────────────────────────────
 
 @app.post("/convert/pdf-to-word")
 @limiter.limit("10/minute")
 async def pdf_to_word(request: Request, file: UploadFile = File(...), force_ocr: bool = Form(False)):
-    try:
-        from pdf2docx import Converter
-    except ImportError:
-        raise HTTPException(500, "Run: pip install pdf2docx PyMuPDF")
-
     inp = temp_path(".pdf")
     out = temp_path(".docx")
     try:
         inp.write_bytes(await safe_read_upload(file))
         check_pdf_page_count(inp, "pdf-to-word")
 
-        # 1. Run OCR if needed — raises HTTP 422 on failure, never silently continues
+        # ── Path detection ────────────────────────────────────────────────────
         was_scanned = force_ocr or is_pdf_scanned(inp)
-        inp = await ensure_auto_ocr(inp, force=force_ocr)
-
-        logger.info(f"[PDF2Word] Using pdf2docx for layout reconstruction: {inp.name}")
-        cv = Converter(str(inp))
-        cv.convert(str(out), multi_processing=False,
-                   line_overlap_threshold=0.9,
-                   min_svg_gap_dx=15.0)
-        cv.close()
 
         if was_scanned:
-            logger.info(f"[PDF2Word] Scanned/OCR PDF detected. Removing background images from DOCX.")
-            remove_scanned_page_backgrounds_from_docx(str(out), inp)
+            # ══════════════════════════════════════════════════════════════════
+            # PATH A — SCANNED / IMAGE PDF  (Adobe Scan, phone camera, etc.)
+            # ══════════════════════════════════════════════════════════════════
+            # APPROACH: OCR → extract text via PyMuPDF → fresh python-docx
+            #
+            # WHY NOT pdf2docx here:
+            #   pdf2docx embeds the entire page image as a DOCX background.
+            #   This produces huge files and complex XML that our post-processing
+            #   corrupts ("XML data is invalid according to the schema", Line 0).
+            #   A fresh python-docx file is always valid and small.
+            # ══════════════════════════════════════════════════════════════════
+            logger.info(f"[PDF2Word] Scanned PDF detected → OCR + clean DOCX path")
 
-        # 2. Validate DOCX output has meaningful content
+            # Step 1: OCR the scan to add a proper text layer
+            inp = await ensure_auto_ocr(inp, force=True)
+
+            # Step 2: Build a clean, valid DOCX from the OCR text layer
+            from fastapi.concurrency import run_in_threadpool
+            await run_in_threadpool(_build_clean_docx_from_ocr_pdf, inp, out)
+
+        else:
+            # ══════════════════════════════════════════════════════════════════
+            # PATH B — TEXT-BASED PDF  (digital/born-digital documents)
+            # ══════════════════════════════════════════════════════════════════
+            # APPROACH: pdf2docx — preserves layout, fonts, tables, columns
+            # ══════════════════════════════════════════════════════════════════
+            try:
+                from pdf2docx import Converter
+            except ImportError:
+                raise HTTPException(500, "Run: pip install pdf2docx PyMuPDF")
+
+            logger.info(f"[PDF2Word] Text PDF detected → pdf2docx layout-preserve path")
+            cv = Converter(str(inp))
+            cv.convert(
+                str(out),
+                multi_processing=False,
+                line_overlap_threshold=0.9,
+                min_svg_gap_dx=15.0,
+            )
+            cv.close()
+
+        # ── Validate output ───────────────────────────────────────────────────
         if not out.exists() or out.stat().st_size == 0:
             raise HTTPException(
                 status_code=422,
                 detail="Conversion produced an empty document. Please try a different file."
             )
+
         try:
             from docx import Document as _DocxDoc
             _check_doc = _DocxDoc(str(out))
-
-            # pdf2docx stores text in XML shapes/textboxes (<w:t> tags), NOT in
-            # doc.paragraphs. We must scan all XML text nodes to get a true count.
             _W_T = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t"
             _total_chars = sum(
                 len(elem.text or "")
                 for elem in _check_doc.element.iter(_W_T)
             )
-
-            # Fallback: also check raw file size — a non-trivial DOCX (>8KB above
-            # the empty template baseline) almost certainly has real content.
             _docx_size_kb = out.stat().st_size / 1024
             _has_content_by_size = _docx_size_kb > 8
-
-            logger.info(
-                f"[PDF2Word] DOCX chars={_total_chars}, size={_docx_size_kb:.1f}KB"
-            )
+            logger.info(f"[PDF2Word] DOCX chars={_total_chars}, size={_docx_size_kb:.1f}KB")
 
             if _total_chars < 5 and not _has_content_by_size:
                 raise HTTPException(
@@ -989,7 +1131,7 @@ async def pdf_to_word(request: Request, file: UploadFile = File(...), force_ocr:
             logger.warning(f"[PDF2Word] DOCX validation skipped: {type(docx_val_err).__name__}")
 
         stem = safe_filename(file.filename, "document")
-        out_name = Path(stem).stem + ".docx"
+        out_name = Path(stem).stem + "_converted.docx"
         return FileResponse(
             str(out),
             media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
