@@ -1330,144 +1330,326 @@ async def pdf_to_excel(request: Request, file: UploadFile = File(...), method: s
         raise safe_error(e, "pdf-to-excel")
 
 
+# ─── Helper: Build structural (fully editable) PPTX from OCR'd PDF ───
+
+def _build_structural_pptx(pdf_path: Path, out_path: Path):
+    """
+    Converts a PDF (including scanned/OCR'd) into a NATIVE PowerPoint presentation.
+
+    DESIGN PHILOSOPHY:
+    The old approach was:  render page as image → overlay transparent OCR text
+    Problem:               editing text = floating text over a frozen scan image
+
+    The new approach:
+      1. Detect tables using pdfplumber → create real PPT Table shapes
+      2. Extract text blocks via PyMuPDF  → create real PPT TextBox shapes
+      3. Use a clean white background – no background image embedded
+
+    Result: A presentation that looks professional, edits cleanly, and shows
+    no signs of being a scan when content is modified.
+
+    NOTE: For scanned PDFs, OCRmyPDF must have already run before calling
+    this function so that a proper text layer exists in the PDF.
+    """
+    import fitz  # PyMuPDF
+    import pdfplumber
+    from pptx import Presentation
+    from pptx.util import Inches, Pt, Emu
+    from pptx.dml.color import RGBColor
+    from pptx.enum.text import PP_ALIGN
+
+    # ── PPT color palette ────────────────────────────────────────────
+    CLR_WHITE       = RGBColor(0xFF, 0xFF, 0xFF)
+    CLR_BG_SLIDE    = RGBColor(0xF8, 0xF9, 0xFA)   # very light gray slide bg
+    CLR_TEXT        = RGBColor(0x1A, 0x1A, 0x2E)   # near-black for body text
+    CLR_HDR_BG      = RGBColor(0x1F, 0x4E, 0x79)   # dark blue header row
+    CLR_HDR_FG      = RGBColor(0xFF, 0xFF, 0xFF)   # white header text
+    CLR_ROW_ALT     = RGBColor(0xDE, 0xEB, 0xF7)   # alternating row tint
+    CLR_BORDER      = RGBColor(0xBF, 0xBF, 0xBF)   # table cell border
+
+    prs = Presentation()
+
+    pdf_fitz = fitz.open(str(pdf_path))
+
+    with pdfplumber.open(str(pdf_path)) as pdf_plumb:
+        total_pages = len(pdf_plumb.pages)
+        slides_built = 0
+
+        for page_idx in range(total_pages):
+            page_fitz  = pdf_fitz[page_idx]
+            page_plumb = pdf_plumb.pages[page_idx]
+
+            if page_fitz.rect.width <= 0 or page_fitz.rect.height <= 0:
+                logger.warning(f"[PDF2PPT] Page {page_idx+1} zero dimensions, skipping")
+                continue
+
+            # Convert PDF points → inches (1 pt = 1/72 inch)
+            w_pt = page_fitz.rect.width
+            h_pt = page_fitz.rect.height
+            w_in = w_pt / 72.0
+            h_in = h_pt / 72.0
+
+            prs.slide_width  = Inches(w_in)
+            prs.slide_height = Inches(h_in)
+
+            slide = prs.slides.add_slide(prs.slide_layouts[6])  # blank layout
+
+            # Clean light-gray background (no image)
+            bg = slide.background
+            bg.fill.solid()
+            bg.fill.fore_color.rgb = CLR_BG_SLIDE
+
+            # ───────────────────────────────────────────────────────
+            # PHASE 1 — Table detection and rendering
+            # Strategy A: line-based (works for digital PDFs with vector borders)
+            # Strategy B: text-based (works for OCR'd text-aligned tables)
+            # ───────────────────────────────────────────────────────
+            table_rects = []  # (x0, top, x1, bottom) in PDF points of each placed table
+
+            for strategy in ("lines", "text"):
+                if strategy == "lines":
+                    ts = {
+                        "vertical_strategy": "lines",
+                        "horizontal_strategy": "lines",
+                        "snap_tolerance": 5,
+                        "join_tolerance": 5,
+                    }
+                else:
+                    ts = {
+                        "vertical_strategy": "text",
+                        "horizontal_strategy": "text",
+                        "intersection_y_tolerance": 12,
+                        "intersection_x_tolerance": 12,
+                    }
+
+                try:
+                    found_tables = page_plumb.find_tables(table_settings=ts)
+                except Exception:
+                    found_tables = []
+
+                if not found_tables:
+                    continue  # try next strategy
+
+                for tbl_obj in found_tables:
+                    try:
+                        tbl_data = tbl_obj.extract()
+                    except Exception:
+                        continue
+
+                    if not tbl_data:
+                        continue
+
+                    # Filter empty rows/cols
+                    tbl_data = [
+                        [str(c).strip() if c else "" for c in row]
+                        for row in tbl_data
+                        if any(c for c in row)
+                    ]
+                    if not tbl_data:
+                        continue
+
+                    rows = len(tbl_data)
+                    cols = max(len(r) for r in tbl_data)
+                    if rows == 0 or cols == 0:
+                        continue
+
+                    # pdfplumber bbox: (x0, top, x1, bottom) measured from page top
+                    x0, top, x1, bottom = tbl_obj.bbox
+
+                    tbl_x = Inches(x0   / 72.0)
+                    tbl_y = Inches(top  / 72.0)
+                    tbl_w = Inches(max((x1 - x0), 0.5) / 72.0)
+                    tbl_h = Inches(max((bottom - top), 0.2) / 72.0)
+
+                    try:
+                        tbl_shape = slide.shapes.add_table(
+                            rows, cols, tbl_x, tbl_y, tbl_w, tbl_h
+                        )
+                        tbl = tbl_shape.table
+
+                        # Normalize column widths proportionally
+                        for ci in range(cols):
+                            tbl.columns[ci].width = Emu(tbl_w.twips * 914400 // (cols * 914400 // Emu(tbl_w)))
+
+                        for r_idx, row in enumerate(tbl_data):
+                            # Pad short rows
+                            row_padded = row + [""] * (cols - len(row))
+                            for c_idx, cell_text in enumerate(row_padded[:cols]):
+                                cell = tbl.cell(r_idx, c_idx)
+                                cell.text = cell_text
+
+                                # Fill colors
+                                fill = cell.fill
+                                fill.solid()
+                                if r_idx == 0:
+                                    fill.fore_color.rgb = CLR_HDR_BG
+                                elif r_idx % 2 == 0:
+                                    fill.fore_color.rgb = CLR_ROW_ALT
+                                else:
+                                    fill.fore_color.rgb = CLR_WHITE
+
+                                # Text styling
+                                for para in cell.text_frame.paragraphs:
+                                    for run in para.runs:
+                                        run.font.size = Pt(9)
+                                        run.font.bold = (r_idx == 0)
+                                        run.font.color.rgb = CLR_HDR_FG if r_idx == 0 else CLR_TEXT
+
+                        table_rects.append((x0, top, x1, bottom))
+                        logger.info(
+                            f"[PDF2PPT] Table {rows}×{cols} placed on slide {page_idx+1} "
+                            f"[strategy={strategy}]"
+                        )
+
+                    except Exception as tbl_err:
+                        logger.warning(
+                            f"[PDF2PPT] Table shape failed (p{page_idx+1}): {type(tbl_err).__name__}: {tbl_err}"
+                        )
+
+                if table_rects:  # if line-strategy worked, don't try text strategy
+                    break
+
+            # ───────────────────────────────────────────────────────
+            # PHASE 2 — Text block extraction (non-table regions only)
+            # ───────────────────────────────────────────────────────
+            def _overlaps_table(bx0, by0, bx1, by1):
+                for (tx0, ttop, tx1, tbot) in table_rects:
+                    if bx0 < tx1 and bx1 > tx0 and by0 < tbot and by1 > ttop:
+                        return True
+                return False
+
+            fitz_blocks = page_fitz.get_text("dict", sort=True).get("blocks", [])
+
+            for block in fitz_blocks:
+                if block["type"] != 0:   # skip embedded image blocks
+                    continue
+
+                bx0, by0, bx1, by1 = block["bbox"]
+
+                # Skip if block sits inside a table we already rendered
+                if _overlaps_table(bx0, by0, bx1, by1):
+                    continue
+
+                # Gather text + style from spans
+                lines_data   = block.get("lines", [])
+                text_lines   = []
+                max_size     = 11.0
+                has_bold     = False
+                all_caps     = False
+
+                for line in lines_data:
+                    line_parts = []
+                    for span in line.get("spans", []):
+                        t = span.get("text", "").rstrip()
+                        if t:
+                            line_parts.append(t)
+                            sz = span.get("size", 11.0)
+                            if sz > max_size:
+                                max_size = sz
+                            if span.get("flags", 0) & (1 << 4):
+                                has_bold = True
+                    joined = " ".join(line_parts).strip()
+                    if joined:
+                        text_lines.append(joined)
+
+                if not text_lines:
+                    continue
+
+                combined = "\n".join(text_lines)
+
+                # Detect heading heuristic: short, large, bold, or ALL CAPS
+                is_heading = (
+                    max_size >= 13
+                    or has_bold
+                    or (len(combined) < 80 and combined == combined.upper() and len(combined) > 2)
+                )
+
+                # Padding around text block
+                pad = 1.5  # points
+                tb_x = Inches(max(0.0, bx0 - pad) / 72.0)
+                tb_y = Inches(max(0.0, by0 - pad) / 72.0)
+                tb_w = Inches(max(0.4, bx1 - bx0 + pad * 2) / 72.0)
+                tb_h = Inches(max(0.18, by1 - by0 + pad * 2) / 72.0)
+
+                try:
+                    txb = slide.shapes.add_textbox(tb_x, tb_y, tb_w, tb_h)
+                    tf  = txb.text_frame
+                    tf.word_wrap = True
+
+                    for li, line_text in enumerate(text_lines):
+                        p = tf.paragraphs[0] if li == 0 else tf.add_paragraph()
+                        p.space_after = Pt(2)
+
+                        run = p.add_run()
+                        run.text = line_text
+
+                        font_pt = max(7.0, min(max_size, 32.0))
+                        run.font.size  = Pt(font_pt)
+                        run.font.bold  = has_bold or is_heading
+                        run.font.color.rgb = CLR_TEXT
+
+                        if is_heading:
+                            p.alignment = PP_ALIGN.CENTER if len(line_text) < 60 else PP_ALIGN.LEFT
+
+                except Exception as txb_err:
+                    logger.debug(
+                        f"[PDF2PPT] TextBox failed p{page_idx+1}: {type(txb_err).__name__}"
+                    )
+
+            slides_built += 1
+            logger.info(
+                f"[PDF2PPT] Slide {page_idx+1} built: {len(table_rects)} table(s), "
+                f"{len([b for b in fitz_blocks if b['type']==0])} text block(s)"
+            )
+
+    pdf_fitz.close()
+
+    if slides_built == 0:
+        raise ValueError("No slides could be built from this PDF.")
+
+    prs.save(str(out_path))
+    logger.info(
+        f"[PDF2PPT] Structural PPTX complete: {slides_built} slide(s), "
+        f"{out_path.stat().st_size / 1024:.1f}KB"
+    )
+
+
 # ─── 3. PDF → PPT ──────────────────────────────────────────────
 
 @app.post("/convert/pdf-to-ppt")
 @limiter.limit("10/minute")
-async def pdf_to_ppt(request: Request, file: UploadFile = File(...), dpi: int = Form(150), force_ocr: bool = Form(False)):
-    try:
-        import fitz
-        from pptx import Presentation
-        from pptx.util import Inches, Pt
-        from pptx.dml.color import RGBColor
-        import io
-    except ImportError:
-        raise HTTPException(500, "Run: pip install PyMuPDF python-pptx")
+async def pdf_to_ppt(
+    request: Request,
+    file: UploadFile = File(...),
+    force_ocr: bool = Form(False),
+):
+    """
+    Scanned PDF → Structural PowerPoint (tables + text boxes, no background image).
 
-    # Clamp DPI to safe range to prevent memory exhaustion
-    dpi = max(MIN_DPI, min(dpi, MAX_DPI))
-
+    The result is fully editable: editing text does NOT reveal a scan underneath
+    because there is no background image — only native PPT shapes.
+    """
     inp = temp_path(".pdf")
     out = temp_path(".pptx")
     try:
         inp.write_bytes(await safe_read_upload(file))
         check_pdf_page_count(inp, "pdf-to-ppt")
-        # Raises HTTP 422 on OCR failure — never silently continues with image-only PDF
+
+        # OCR step: adds a text layer to scanned PDFs
         inp = await ensure_auto_ocr(inp, force=force_ocr)
 
-        doc = fitz.open(str(inp))
-        prs = Presentation()
-        slides_with_content = 0
+        # Build structural PPTX in a threadpool (CPU-bound)
+        from fastapi.concurrency import run_in_threadpool
+        await run_in_threadpool(_build_structural_pptx, inp, out)
 
-        for page_num, page in enumerate(doc, 1):
-            # Page dimension validation
-            if page.rect.width <= 0 or page.rect.height <= 0:
-                logger.warning(f"[PDF2PPT] Page {page_num} has zero dimensions, skipping")
-                continue
-
-            w_in = page.rect.width / 72
-            h_in = page.rect.height / 72
-            prs.slide_width = Inches(w_in)
-            prs.slide_height = Inches(h_in)
-            slide = prs.slides.add_slide(prs.slide_layouts[6])
-
-            # ── STEP 1: Render the full page as a high-quality image (primary visual) ──
-            # This is the PRIMARY source of visual content for scanned PDFs.
-            # The rendered page image is ALWAYS inserted first regardless of OCR.
-            pix = page.get_pixmap(dpi=dpi)
-
-            # Validate the rendered pixmap is not blank
-            pixmap_is_blank = False
-            try:
-                samples = pix.samples
-                non_white = sum(1 for b in samples if b < 250)
-                if non_white == 0:
-                    pixmap_is_blank = True
-                    logger.warning(f"[PDF2PPT] Page {page_num} rendered as a blank pixmap")
-            except Exception as pix_check_err:
-                logger.warning(f"[PDF2PPT] Pixmap check failed for page {page_num}: {pix_check_err}")
-
-            if pixmap_is_blank:
-                # Abort entire conversion — do not produce a deck of blank slides
-                doc.close()
-                raise HTTPException(
-                    status_code=422,
-                    detail=(
-                        f"Page {page_num} of this PDF rendered as completely blank. "
-                        "Conversion aborted to avoid producing a blank presentation. "
-                        "Please try a different or clearer file."
-                    )
-                )
-
-            # Insert the rendered page image covering the full slide
-            img_bytes = pix.tobytes("png")
-            slide.shapes.add_picture(
-                io.BytesIO(img_bytes),
-                Inches(0), Inches(0),
-                Inches(w_in), Inches(h_in)
-            )
-            slides_with_content += 1
-
-            # ── STEP 2: Overlay OCR text blocks as an invisible/searchable text layer ──
-            # This is ADDITIVE and subordinate to the image — it provides
-            # copy-paste / search functionality when OCR text is available.
-            blocks = page.get_text("dict").get("blocks", [])
-            for block in blocks:
-                if block["type"] == 0:  # Text block from OCR
-                    x0, y0, x1, y1 = block["bbox"]
-                    block_w = max((x1 - x0) / 72, 0.3)
-                    block_h = max((y1 - y0) / 72, 0.2)
-                    try:
-                        tb = slide.shapes.add_textbox(
-                            Inches(x0 / 72), Inches(y0 / 72),
-                            Inches(block_w), Inches(block_h)
-                        )
-                        tf = tb.text_frame
-                        tf.word_wrap = True
-                        for line_idx, line in enumerate(block.get("lines", [])):
-                            if line_idx > 0:
-                                p = tf.add_paragraph()
-                            else:
-                                p = tf.paragraphs[0]
-
-                            for span in line.get("spans", []):
-                                txt = span.get("text", "")
-                                if not txt:
-                                    continue
-                                run = p.add_run()
-                                run.text = txt
-                                run.font.size = Pt(max(6, span.get("size", 12)))
-                                # Make text invisible (transparent) over the image
-                                # so only the image is visible, but text is searchable
-                                run.font.color.rgb = RGBColor(255, 255, 255)
-                                run.font.color.rgb = RGBColor(
-                                    (span.get("color", 0) >> 16) & 255,
-                                    (span.get("color", 0) >> 8) & 255,
-                                    span.get("color", 0) & 255
-                                )
-                                flags = span.get("flags", 0)
-                                if flags & 2 ** 4:
-                                    run.font.bold = True
-                                if flags & 2 ** 1:
-                                    run.font.italic = True
-                    except Exception as tb_err:
-                        # Text overlay is best-effort — never block slide creation
-                        logger.debug(f"[PDF2PPT] Text overlay failed for block on page {page_num}: {tb_err}")
-
-        doc.close()
-
-        # Guard: do not return a presentation with no visible content
-        if slides_with_content == 0:
+        if not out.exists() or out.stat().st_size < 1000:
             raise HTTPException(
                 status_code=422,
-                detail="No pages could be rendered from this PDF. Conversion aborted."
+                detail="Conversion produced an empty presentation. Please try a different file."
             )
 
-        logger.info(f"[PDF2PPT] Generated {slides_with_content} slides with page images")
-        prs.save(str(out))
-
-        stem = safe_filename(file.filename, "presentation")
-        out_name = Path(stem).stem + ".pptx"
+        stem    = safe_filename(file.filename, "presentation")
+        out_name = Path(stem).stem + "_converted.pptx"
         return FileResponse(
             str(out),
             media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
@@ -1480,6 +1662,7 @@ async def pdf_to_ppt(request: Request, file: UploadFile = File(...), dpi: int = 
     except Exception as e:
         cleanup(inp, out)
         raise safe_error(e, "pdf-to-ppt")
+
 
 
 # ─── 4. Office → PDF (LibreOffice) ────────────────────────────
