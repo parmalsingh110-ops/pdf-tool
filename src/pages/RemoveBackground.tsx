@@ -1,8 +1,50 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Download, Eraser, ImageIcon } from 'lucide-react';
-import { fetchGeminiWithFallback } from '../lib/advancedVisionEngine';
-import { preload, removeBackground } from '@imgly/background-removal';
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Download, Eraser, ImageIcon, RefreshCw } from 'lucide-react';
 import FileDropzone from '../components/FileDropzone';
+
+// â”€â”€â”€ CDN fallback chain â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// staticimgly.com often has CORS / availability issues.
+// We try multiple CDNs in order until one works.
+const CDN_FALLBACKS = [
+  'https://cdn.jsdelivr.net/npm/@imgly/background-removal-data@1.7.0/dist/',
+  'https://unpkg.com/@imgly/background-removal-data@1.7.0/dist/',
+  'https://staticimgly.com/@imgly/background-removal-data/1.7.0/dist/',
+];
+
+const BASE_CONFIG = {
+  model: 'isnet_quint8' as const,
+  device: 'cpu' as const,
+  proxyToWorker: false,
+  fetchArgs: { cache: 'force-cache' as RequestCache },
+  output: { format: 'image/png' as const, quality: 1 },
+};
+
+async function tryLoadWithCDN(
+  progressCb: (key: string, cur: number, tot: number) => void
+): Promise<string> {
+  const { preload } = await import('@imgly/background-removal');
+
+  for (const cdn of CDN_FALLBACKS) {
+    try {
+      await preload({ ...BASE_CONFIG, publicPath: cdn, progress: progressCb });
+      return cdn; // Return whichever CDN worked
+    } catch (err) {
+      console.warn(`[RemoveBG] CDN failed: ${cdn}`, err);
+    }
+  }
+  throw new Error(
+    'All CDN sources failed. Please check your internet connection and try again.'
+  );
+}
+
+async function removeWithCDN(
+  file: File,
+  workingCdn: string,
+  progressCb: (key: string, cur: number, tot: number) => void
+): Promise<Blob> {
+  const { removeBackground } = await import('@imgly/background-removal');
+  return removeBackground(file, { ...BASE_CONFIG, publicPath: workingCdn, progress: progressCb });
+}
 
 export default function RemoveBackground() {
   const [file, setFile] = useState<File | null>(null);
@@ -12,57 +54,41 @@ export default function RemoveBackground() {
   const [quality, setQuality] = useState(0.95);
   const [format, setFormat] = useState<'png' | 'jpg' | 'jpeg' | 'webp'>('png');
   const [progressText, setProgressText] = useState('');
+  const [loadProgress, setLoadProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [modelReady, setModelReady] = useState(false);
-
-  const removerConfig = useMemo(
-    () => ({
-      // publicPath points to the SEPARATE data package that hosts WASM/ONNX models on CDN.
-      // Note: it's background-removal-DATA (different npm package), not background-removal!
-      publicPath: 'https://staticimgly.com/@imgly/background-removal-data/1.7.0/dist/',
-      model: 'isnet_quint8' as const,
-      device: 'cpu' as const,
-      proxyToWorker: false,   // proxyToWorker only works with WebGPU; CPU mode must be false
-      rescale: true,
-      fetchArgs: { cache: 'force-cache' as RequestCache },
-      output: { format: 'image/png' as const, quality: 1 },
-    }),
-    []
-  );
+  const [loadingModel, setLoadingModel] = useState(false);
+  const workingCdnRef = useRef<string>(CDN_FALLBACKS[0]);
 
   const filePreview = useMemo(() => (file ? URL.createObjectURL(file) : null), [file]);
 
-  const loadModel = async (mounted: { value: boolean }) => {
+  const loadModel = useCallback(async () => {
     setError(null);
     setModelReady(false);
-    setProgressText('Preparing AI model (first time only, ~30MB)...');
+    setLoadingModel(true);
+    setLoadProgress(0);
+    setProgressText('Connecting to model server...');
     try {
-      await preload({
-        ...removerConfig,
-        progress: (key: string, current: number, total: number) => {
-          if (!mounted.value) return;
-          const pct = total > 0 ? Math.round((current / total) * 100) : 0;
-          setProgressText(`Loading model: ${key} ${pct}%`);
-        },
+      const cdn = await tryLoadWithCDN((key, current, total) => {
+        const pct = total > 0 ? Math.round((current / total) * 100) : 0;
+        setLoadProgress(pct);
+        setProgressText(`Downloading AI model: ${pct}%`);
       });
-      if (mounted.value) {
-        setModelReady(true);
-        setProgressText('Model ready ✓');
-      }
+      workingCdnRef.current = cdn;
+      setModelReady(true);
+      setLoadProgress(100);
+      setProgressText('Model ready âœ“');
     } catch (e: any) {
-      if (mounted.value) {
-        setError(`Failed to load AI model: ${e?.message || 'Network error'}. Check your internet connection and try again.`);
-        setProgressText('');
-      }
+      setError(e?.message || 'Failed to load AI model. Check your internet connection.');
+      setProgressText('');
+      setLoadProgress(0);
+    } finally {
+      setLoadingModel(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    const mounted = { value: true };
-    loadModel(mounted);
-    return () => {
-      mounted.value = false;
-    };
+    loadModel();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -74,18 +100,19 @@ export default function RemoveBackground() {
   };
 
   const process = async () => {
-    if (!file) return;
+    if (!file || !modelReady) return;
     setIsProcessing(true);
     setError(null);
-    setProgressText('Initializing background remover...');
+    setProgressText('Starting background removal...');
     try {
-      const cutoutBlob = await removeBackground(file, {
-        ...removerConfig,
-        progress: (key: string, current: number, total: number) => {
+      const cutoutBlob = await removeWithCDN(
+        file,
+        workingCdnRef.current,
+        (key, current, total) => {
           const pct = total > 0 ? Math.round((current / total) * 100) : 0;
-          setProgressText(`${key} ${pct}%`);
-        },
-      });
+          setProgressText(`Processing: ${pct}%`);
+        }
+      );
 
       setProgressText('Compositing final image...');
       const cutoutUrl = URL.createObjectURL(cutoutBlob);
@@ -102,47 +129,26 @@ export default function RemoveBackground() {
       const ctx = canvas.getContext('2d');
       if (!ctx) throw new Error('Canvas context unavailable');
 
-      ctx.fillStyle = bgColor;
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      if (format !== 'png') {
+        ctx.fillStyle = bgColor;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+      }
       ctx.drawImage(cutoutImg, 0, 0);
+      URL.revokeObjectURL(cutoutUrl);
 
-      // Silent AI quality check: detect if subject was properly isolated
-      try {
-        const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
-        if (apiKey) {
-          setProgressText('Verifying result quality...');
-          const b64 = canvas.toDataURL('image/jpeg', 0.8).split(',')[1];
-          const prompt = `Analyze this background-removed image. Check if the main subject (person/object) is properly isolated.
-Return ONLY valid JSON: {"quality": "good"|"edges_rough"|"subject_cut", "suggestion": "brief tip or empty string"}`;
-          const reqBody = { contents: [{ parts: [{ text: prompt }, { inline_data: { mime_type: 'image/jpeg', data: b64 } }] }] };
-          const res = await fetchGeminiWithFallback(apiKey, reqBody);
-          if (res.ok) {
-            const data = await res.json();
-            const raw = data.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
-            const parsed = JSON.parse(raw.replace(/```json|```/g, '').trim());
-            if (parsed.quality && parsed.quality !== 'good' && parsed.suggestion) {
-              setProgressText(`Done • Tip: ${parsed.suggestion}`);
-            } else {
-              setProgressText('Done ✓');
-            }
-          } else {
-            setProgressText('Done');
-          }
-        } else {
-          setProgressText('Done');
-        }
-      } catch { setProgressText('Done'); }
+      const mime =
+        format === 'png' ? 'image/png' : format === 'webp' ? 'image/webp' : 'image/jpeg';
 
-      const mime = format === 'png' ? 'image/png' : format === 'webp' ? 'image/webp' : 'image/jpeg';
       const outBlob = await new Promise<Blob | null>((resolve) => {
         canvas.toBlob(resolve, mime, quality);
       });
       if (!outBlob) throw new Error('Failed to export output image');
 
       setResultUrl(URL.createObjectURL(outBlob));
+      setProgressText('Done âœ“');
     } catch (e: any) {
       console.error(e);
-      setError(e?.message || 'Background removal failed.');
+      setError(e?.message || 'Background removal failed. Please try again.');
       setProgressText('');
     } finally {
       setIsProcessing(false);
@@ -152,9 +158,49 @@ Return ONLY valid JSON: {"quality": "good"|"edges_rough"|"subject_cut", "suggest
   return (
     <div className="flex-1 flex flex-col items-center justify-center p-8">
       <div className="text-center mb-8">
-        <h1 className="text-4xl font-bold text-gray-900 mb-4">Passport-Style Background Remover</h1>
-        <p className="text-xl text-gray-600">Keep person, replace everything else with your chosen background color.</p>
+        <h1 className="text-4xl font-bold text-gray-900 mb-4">Remove Background</h1>
+        <p className="text-xl text-gray-600">
+          AI-powered background removal â€” runs entirely in your browser.
+        </p>
       </div>
+
+      {/* Model loading banner */}
+      {!modelReady && (
+        <div className="w-full max-w-xl mb-6">
+          {loadingModel && (
+            <div className="bg-blue-50 border border-blue-200 rounded-xl p-5">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-sm font-semibold text-blue-800">Loading AI Modelâ€¦</p>
+                <span className="text-sm font-bold text-blue-700">{loadProgress}%</span>
+              </div>
+              <div className="w-full bg-blue-100 rounded-full h-2.5">
+                <div
+                  className="bg-blue-600 h-2.5 rounded-full transition-all duration-300"
+                  style={{ width: `${loadProgress}%` }}
+                />
+              </div>
+              <p className="text-xs text-blue-600 mt-2">{progressText}</p>
+              <p className="text-xs text-blue-500 mt-1">
+                First time only (~25 MB). Cached in browser for instant future use.
+              </p>
+            </div>
+          )}
+          {error && !loadingModel && (
+            <div className="bg-red-50 border border-red-200 rounded-xl p-5 space-y-3">
+              <p className="text-sm font-semibold text-red-700">âš  Model failed to load</p>
+              <p className="text-xs text-red-600">{error}</p>
+              <button
+                type="button"
+                onClick={loadModel}
+                className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white text-sm font-semibold rounded-lg hover:bg-red-700 transition-colors"
+              >
+                <RefreshCw className="w-4 h-4" />
+                Retry
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       {!file ? (
         <FileDropzone
@@ -170,9 +216,12 @@ Return ONLY valid JSON: {"quality": "good"|"edges_rough"|"subject_cut", "suggest
             <div>
               <p className="font-semibold text-gray-800 mb-3">Original</p>
               <div className="rounded-xl border border-gray-200 overflow-hidden bg-gray-50">
-                {filePreview && <img src={filePreview} alt="Original" className="w-full h-auto object-contain max-h-[420px]" />}
+                {filePreview && (
+                  <img src={filePreview} alt="Original" className="w-full h-auto object-contain max-h-[420px]" />
+                )}
               </div>
             </div>
+
             <div className="space-y-4">
               <div className="flex items-center gap-3">
                 <div className="w-12 h-12 bg-pink-50 text-pink-600 rounded-xl flex items-center justify-center">
@@ -184,25 +233,36 @@ Return ONLY valid JSON: {"quality": "good"|"edges_rough"|"subject_cut", "suggest
                 </div>
               </div>
 
-              <label className="block text-sm font-medium text-gray-700">
-                Background Color
-                <input type="color" value={bgColor} onChange={(e) => setBgColor(e.target.value)} className="mt-2 w-full h-11 p-1 border border-gray-300 rounded-lg" />
-              </label>
+              {format !== 'png' && (
+                <>
+                  <label className="block text-sm font-medium text-gray-700">
+                    Background Color
+                    <input
+                      type="color"
+                      value={bgColor}
+                      onChange={(e) => setBgColor(e.target.value)}
+                      className="mt-2 w-full h-11 p-1 border border-gray-300 rounded-lg"
+                    />
+                  </label>
+                  <div className="flex gap-2">
+                    <button type="button" onClick={() => setBgColor('#ffffff')} className="px-3 py-2 bg-gray-100 rounded-lg text-sm font-medium">Passport White</button>
+                    <button type="button" onClick={() => setBgColor('#d6e7ff')} className="px-3 py-2 bg-gray-100 rounded-lg text-sm font-medium">Light Blue</button>
+                  </div>
+                </>
+              )}
 
               <label className="block text-sm font-medium text-gray-700">
                 Quality ({Math.round(quality * 100)}%)
-                <input type="range" min={0.6} max={1} step={0.01} value={quality} onChange={(e) => setQuality(Number(e.target.value))} className="mt-2 w-full" />
+                <input type="range" min={0.6} max={1} step={0.01} value={quality}
+                  onChange={(e) => setQuality(Number(e.target.value))}
+                  className="mt-2 w-full" />
               </label>
-
-              <div className="flex gap-2">
-                <button type="button" onClick={() => setBgColor('#ffffff')} className="px-3 py-2 bg-gray-100 rounded-lg text-sm font-medium">Passport White</button>
-                <button type="button" onClick={() => setBgColor('#d6e7ff')} className="px-3 py-2 bg-gray-100 rounded-lg text-sm font-medium">Light Blue</button>
-              </div>
 
               <label className="block text-sm font-medium text-gray-700">
                 Output Format
-                <select value={format} onChange={(e) => setFormat(e.target.value as any)} className="mt-2 w-full px-3 py-2 border border-gray-300 rounded-lg">
-                  <option value="png">PNG</option>
+                <select value={format} onChange={(e) => setFormat(e.target.value as any)}
+                  className="mt-2 w-full px-3 py-2 border border-gray-300 rounded-lg">
+                  <option value="png">PNG (transparent background)</option>
                   <option value="jpg">JPG</option>
                   <option value="jpeg">JPEG</option>
                   <option value="webp">WEBP</option>
@@ -213,20 +273,21 @@ Return ONLY valid JSON: {"quality": "good"|"edges_rough"|"subject_cut", "suggest
                 <div className="p-3 bg-red-50 text-red-700 text-sm rounded-lg border border-red-200 space-y-2">
                   <p>{error}</p>
                   {!modelReady && (
-                    <button
-                      type="button"
-                      onClick={() => { const m = { value: true }; void loadModel(m); }}
-                      className="px-3 py-1.5 bg-red-600 text-white text-xs font-semibold rounded-lg hover:bg-red-700"
-                    >
-                      Retry Loading Model
+                    <button type="button" onClick={loadModel}
+                      className="flex items-center gap-2 px-3 py-1.5 bg-red-600 text-white text-xs font-semibold rounded-lg hover:bg-red-700">
+                      <RefreshCw className="w-3 h-3" /> Retry
                     </button>
                   )}
                 </div>
               )}
-              {progressText && <div className="p-3 bg-blue-50 text-blue-700 text-sm rounded-lg border border-blue-200">{progressText}</div>}
-              {!modelReady && !error && (
+              {progressText && (
+                <div className="p-3 bg-blue-50 text-blue-700 text-sm rounded-lg border border-blue-200">
+                  {progressText}
+                </div>
+              )}
+              {!modelReady && !error && loadingModel && (
                 <div className="p-3 bg-amber-50 text-amber-800 text-sm rounded-lg border border-amber-200">
-                  First run may take ~30 seconds while AI model downloads (~30MB). Next runs are instant.
+                  â³ Waiting for AI model to finish loadingâ€¦
                 </div>
               )}
 
@@ -234,14 +295,14 @@ Return ONLY valid JSON: {"quality": "good"|"edges_rough"|"subject_cut", "suggest
                 <button
                   onClick={process}
                   disabled={isProcessing || !modelReady}
-                  className="flex-1 py-3 bg-pink-600 text-white font-bold rounded-xl hover:bg-pink-700 disabled:opacity-50 flex items-center justify-center gap-2"
+                  className="flex-1 py-3 bg-pink-600 text-white font-bold rounded-xl hover:bg-pink-700 disabled:opacity-50 flex items-center justify-center gap-2 transition-colors"
                 >
                   <Eraser className="w-5 h-5" />
                   {isProcessing ? 'Removing...' : 'Remove Background'}
                 </button>
                 <button
-                  onClick={() => { setFile(null); setResultUrl(null); setError(null); }}
-                  className="px-5 py-3 bg-gray-100 text-gray-700 font-semibold rounded-xl hover:bg-gray-200"
+                  onClick={() => { setFile(null); setResultUrl(null); setError(null); setProgressText(''); }}
+                  className="px-5 py-3 bg-gray-100 text-gray-700 font-semibold rounded-xl hover:bg-gray-200 transition-colors"
                 >
                   Reset
                 </button>
@@ -249,16 +310,21 @@ Return ONLY valid JSON: {"quality": "good"|"edges_rough"|"subject_cut", "suggest
 
               {resultUrl && (
                 <div className="mt-2 space-y-3">
-                  <div>
-                    <p className="text-sm font-semibold text-gray-800 mb-2">Preview (Before Download)</p>
-                    <div className="rounded-xl border border-gray-200 overflow-hidden bg-gray-50">
-                      <img src={resultUrl} alt="Processed preview" className="w-full h-auto object-contain max-h-[280px]" />
-                    </div>
+                  <p className="text-sm font-semibold text-gray-800">Result Preview</p>
+                  <div
+                    className="rounded-xl border border-gray-200 overflow-hidden"
+                    style={{
+                      background: format === 'png'
+                        ? 'repeating-conic-gradient(#e5e7eb 0% 25%, white 0% 50%) 0 0 / 16px 16px'
+                        : bgColor,
+                    }}
+                  >
+                    <img src={resultUrl} alt="Result" className="w-full h-auto object-contain max-h-[280px]" />
                   </div>
                   <a
                     href={resultUrl}
-                    download={`${file.name.replace(/\.[^/.]+$/, '')}_passport_bg.${format}`}
-                    className="w-full inline-flex items-center justify-center gap-2 py-3 bg-green-600 text-white font-bold rounded-xl hover:bg-green-700"
+                    download={`${file.name.replace(/\.[^/.]+$/, '')}_no_bg.${format}`}
+                    className="w-full inline-flex items-center justify-center gap-2 py-3 bg-green-600 text-white font-bold rounded-xl hover:bg-green-700 transition-colors"
                   >
                     <Download className="w-5 h-5" />
                     Download Result
