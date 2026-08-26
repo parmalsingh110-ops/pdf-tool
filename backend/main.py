@@ -1094,14 +1094,19 @@ async def pdf_to_word(request: Request, file: UploadFile = File(...), force_ocr:
                 raise HTTPException(500, "Run: pip install pdf2docx PyMuPDF")
 
             logger.info(f"[PDF2Word] Text PDF detected → pdf2docx layout-preserve path")
-            cv = Converter(str(inp))
-            cv.convert(
-                str(out),
-                multi_processing=False,
-                line_overlap_threshold=0.9,
-                min_svg_gap_dx=15.0,
-            )
-            cv.close()
+            from fastapi.concurrency import run_in_threadpool
+
+            def _run_pdf2docx():
+                _cv = Converter(str(inp))
+                _cv.convert(
+                    str(out),
+                    multi_processing=False,
+                    line_overlap_threshold=0.9,
+                    min_svg_gap_dx=15.0,
+                )
+                _cv.close()
+
+            await run_in_threadpool(_run_pdf2docx)
 
         # ── Validate output ───────────────────────────────────────────────────
         if not out.exists() or out.stat().st_size == 0:
