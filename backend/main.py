@@ -365,7 +365,9 @@ async def run_hybrid_ocr(inp_path: Path, out_path: Path, lang: str = "eng+hin", 
     ilovepdf_pub = os.environ.get("ILOVEPDF_PUBLIC_KEY", "").strip()
     ilovepdf_sec = os.environ.get("ILOVEPDF_SECRET_KEY", "").strip()
 
-    if ilovepdf_pub and ilovepdf_sec:
+    if "hin" in lang.lower():
+        logger.info(f"[OCR] Hindi language requested. Bypassing iLovePDF and using local OCRmyPDF directly.")
+    elif ilovepdf_pub and ilovepdf_sec:
         logger.info(f"[OCR] Using iLovePDF API for: {inp_path.name}")
         def run_ilovepdf():
             import concurrent.futures
@@ -1055,47 +1057,30 @@ async def pdf_to_word(request: Request, file: UploadFile = File(...), force_ocr:
         # ── Path detection ────────────────────────────────────────────────────
         was_scanned = force_ocr or is_pdf_scanned(inp)
 
+        try:
+            from pdf2docx import Converter
+        except ImportError:
+            raise HTTPException(500, "Run: pip install pdf2docx PyMuPDF")
+
         if was_scanned:
-            # ══════════════════════════════════════════════════════════════════
-            # PATH A — SCANNED / IMAGE PDF  (Adobe Scan, phone camera, etc.)
-            # ══════════════════════════════════════════════════════════════════
-            # APPROACH: OCR → extract text via PyMuPDF → fresh python-docx
-            #
-            # WHY NOT pdf2docx here:
-            #   pdf2docx embeds the entire page image as a DOCX background.
-            #   This produces huge files and complex XML that our post-processing
-            #   corrupts ("XML data is invalid according to the schema", Line 0).
-            #   A fresh python-docx file is always valid and small.
-            # ══════════════════════════════════════════════════════════════════
-            logger.info(f"[PDF2Word] Scanned PDF detected → OCR + clean DOCX path")
-
-            # Step 1: OCR the scan to add a proper text layer
+            logger.info(f"[PDF2Word] Scanned PDF detected → OCR + pdf2docx + remove backgrounds")
             inp = await ensure_auto_ocr(inp, force=True)
-
-            # Step 2: Build a clean, valid DOCX from the OCR text layer
-            from fastapi.concurrency import run_in_threadpool
-            await run_in_threadpool(_build_clean_docx_from_ocr_pdf, inp, out)
-
         else:
-            # ══════════════════════════════════════════════════════════════════
-            # PATH B — TEXT-BASED PDF  (digital/born-digital documents)
-            # ══════════════════════════════════════════════════════════════════
-            # APPROACH: pdf2docx — preserves layout, fonts, tables, columns
-            # ══════════════════════════════════════════════════════════════════
-            try:
-                from pdf2docx import Converter
-            except ImportError:
-                raise HTTPException(500, "Run: pip install pdf2docx PyMuPDF")
-
             logger.info(f"[PDF2Word] Text PDF detected → pdf2docx layout-preserve path")
-            cv = Converter(str(inp))
-            cv.convert(
-                str(out),
-                multi_processing=False,
-                line_overlap_threshold=0.9,
-                min_svg_gap_dx=15.0,
-            )
-            cv.close()
+
+        cv = Converter(str(inp))
+        cv.convert(
+            str(out),
+            multi_processing=False,
+            line_overlap_threshold=0.9,
+            min_svg_gap_dx=15.0,
+        )
+        cv.close()
+
+        if was_scanned:
+            from fastapi.concurrency import run_in_threadpool
+            # Remove the heavy scanned backgrounds from the docx so it's clean text/tables
+            await run_in_threadpool(remove_scanned_page_backgrounds_from_docx, str(out), str(inp))
 
         # ── Validate output ───────────────────────────────────────────────────
         if not out.exists() or out.stat().st_size == 0:
@@ -3074,6 +3059,9 @@ async def extract_tables(request: Request, file: UploadFile = File(...)):
     try:
         inp.write_bytes(await safe_read_upload(file))
         check_pdf_page_count(inp, "extract-tables")
+
+        if is_pdf_scanned(inp):
+            inp = await ensure_auto_ocr(inp, force=True)
 
         tables = None
         for flavor in ["lattice", "stream"]:
