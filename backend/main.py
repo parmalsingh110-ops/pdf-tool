@@ -974,9 +974,13 @@ def _build_clean_docx_from_ocr_pdf(pdf_path: Path, out_path: Path):
             if block_type != 0:  # Skip image blocks (type 1)
                 continue
 
+            import re
             raw_text = block[4]
             if not raw_text or not raw_text.strip():
                 continue
+            
+            # Sanitize raw_text to remove XML-incompatible control characters
+            raw_text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]', '', raw_text)
 
             # Split block into individual lines
             lines = [ln.rstrip() for ln in raw_text.splitlines()]
