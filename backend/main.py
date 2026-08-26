@@ -1057,30 +1057,47 @@ async def pdf_to_word(request: Request, file: UploadFile = File(...), force_ocr:
         # ── Path detection ────────────────────────────────────────────────────
         was_scanned = force_ocr or is_pdf_scanned(inp)
 
-        try:
-            from pdf2docx import Converter
-        except ImportError:
-            raise HTTPException(500, "Run: pip install pdf2docx PyMuPDF")
-
         if was_scanned:
-            logger.info(f"[PDF2Word] Scanned PDF detected → OCR + pdf2docx + remove backgrounds")
+            # ══════════════════════════════════════════════════════════════════
+            # PATH A — SCANNED / IMAGE PDF  (Adobe Scan, phone camera, etc.)
+            # ══════════════════════════════════════════════════════════════════
+            # APPROACH: OCR → extract text via PyMuPDF → fresh python-docx
+            #
+            # WHY NOT pdf2docx here:
+            #   pdf2docx embeds the entire page image as a DOCX background.
+            #   This produces huge files and complex XML that our post-processing
+            #   corrupts ("XML data is invalid according to the schema", Line 0).
+            #   A fresh python-docx file is always valid and small.
+            # ══════════════════════════════════════════════════════════════════
+            logger.info(f"[PDF2Word] Scanned PDF detected → OCR + clean DOCX path")
+
+            # Step 1: OCR the scan to add a proper text layer
             inp = await ensure_auto_ocr(inp, force=True)
-        else:
-            logger.info(f"[PDF2Word] Text PDF detected → pdf2docx layout-preserve path")
 
-        cv = Converter(str(inp))
-        cv.convert(
-            str(out),
-            multi_processing=False,
-            line_overlap_threshold=0.9,
-            min_svg_gap_dx=15.0,
-        )
-        cv.close()
-
-        if was_scanned:
+            # Step 2: Build a clean, valid DOCX from the OCR text layer
             from fastapi.concurrency import run_in_threadpool
-            # Remove the heavy scanned backgrounds from the docx so it's clean text/tables
-            await run_in_threadpool(remove_scanned_page_backgrounds_from_docx, str(out), str(inp))
+            await run_in_threadpool(_build_clean_docx_from_ocr_pdf, inp, out)
+
+        else:
+            # ══════════════════════════════════════════════════════════════════
+            # PATH B — TEXT-BASED PDF  (digital/born-digital documents)
+            # ══════════════════════════════════════════════════════════════════
+            # APPROACH: pdf2docx — preserves layout, fonts, tables, columns
+            # ══════════════════════════════════════════════════════════════════
+            try:
+                from pdf2docx import Converter
+            except ImportError:
+                raise HTTPException(500, "Run: pip install pdf2docx PyMuPDF")
+
+            logger.info(f"[PDF2Word] Text PDF detected → pdf2docx layout-preserve path")
+            cv = Converter(str(inp))
+            cv.convert(
+                str(out),
+                multi_processing=False,
+                line_overlap_threshold=0.9,
+                min_svg_gap_dx=15.0,
+            )
+            cv.close()
 
         # ── Validate output ───────────────────────────────────────────────────
         if not out.exists() or out.stat().st_size == 0:
