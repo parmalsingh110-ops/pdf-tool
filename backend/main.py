@@ -918,12 +918,74 @@ def remove_scanned_page_backgrounds_from_docx(docx_path: str, pdf_path: str):
     except Exception as e:
         logger.error(f"[RemoveBackgrounds] Failed: {e}")
 
+# ─── Helper: Table detection for scanned PDFs ─────────────────
+
+
+def _is_pipe_table_line(text: str) -> bool:
+    """Return True if this OCR line looks like a pipe-separated table row (≥2 pipes)."""
+    return text.strip().count('|') >= 2
+
+
+def _parse_pipe_row(text: str) -> list:
+    """Split a pipe-table line into a list of trimmed cell strings."""
+    s = text.strip()
+    if s.startswith('|'):
+        s = s[1:]
+    if s.endswith('|'):
+        s = s[:-1]
+    return [c.strip() for c in s.split('|')]
+
+
+def _try_build_word_table(doc, rows_of_cells) -> bool:
+    """
+    Write a Word table to *doc* from a 2-D list of cell strings.
+    First row is treated as the header (bold).
+    Returns True on success, False if data is too sparse to render as a table.
+    """
+    from docx.shared import Pt
+
+    # Drop completely empty rows
+    rows_of_cells = [r for r in rows_of_cells if any(c.strip() for c in r)]
+    if not rows_of_cells:
+        return False
+    max_cols = max(len(r) for r in rows_of_cells)
+    if max_cols < 2:
+        return False
+
+    # Pad every row to the same column count
+    normalized = [list(r) + [''] * (max_cols - len(r)) for r in rows_of_cells]
+
+    table = doc.add_table(rows=len(normalized), cols=max_cols)
+    try:
+        table.style = 'Table Grid'
+    except Exception:
+        pass  # If style missing, fall back to default
+
+    for r_idx, row_cells in enumerate(normalized):
+        for c_idx, cell_text in enumerate(row_cells):
+            cell = table.cell(r_idx, c_idx)
+            para = cell.paragraphs[0]
+            run = para.add_run(cell_text[:500])   # cap runaway cell length
+            run.font.name = 'Calibri'
+            run.font.size = Pt(10)
+            if r_idx == 0:                         # header row → bold
+                run.bold = True
+
+    return True
+
+
 # ─── Helper: Build clean DOCX from OCR'd PDF ─────────────────
+
 
 def _build_clean_docx_from_ocr_pdf(pdf_path: Path, out_path: Path):
     """
     Extracts text from an OCR'd PDF page-by-page using PyMuPDF and writes
     a fresh, valid DOCX using python-docx.
+
+    Tables are detected via pipe-character heuristics (≥2 pipes per line)
+    and rendered as actual Word tables with 'Table Grid' style.
+    Non-table content (headings, paragraphs, Devanagari text) is rendered
+    exactly as before.
 
     WHY THIS EXISTS:
     pdf2docx embeds the full scan image as a page background, resulting in:
@@ -933,12 +995,11 @@ def _build_clean_docx_from_ocr_pdf(pdf_path: Path, out_path: Path):
 
     This function produces a clean, small, Word-openable DOCX with just text.
     """
+    import re
     import fitz  # PyMuPDF
     from docx import Document
     from docx.shared import Pt, Inches, RGBColor
     from docx.enum.text import WD_ALIGN_PARAGRAPH
-    from docx.oxml.ns import qn
-    from docx.oxml import OxmlElement
 
     doc = Document()
 
@@ -951,9 +1012,8 @@ def _build_clean_docx_from_ocr_pdf(pdf_path: Path, out_path: Path):
 
     # Set default font
     style = doc.styles['Normal']
-    font = style.font
-    font.name = 'Calibri'
-    font.size = Pt(11)
+    style.font.name = 'Calibri'
+    style.font.size = Pt(11)
 
     pdf = fitz.open(str(pdf_path))
     total_pages = len(pdf)
@@ -962,73 +1022,100 @@ def _build_clean_docx_from_ocr_pdf(pdf_path: Path, out_path: Path):
         if page_num > 0:
             doc.add_page_break()
 
-        # Get text blocks sorted in reading order (top-left to bottom-right)
         blocks = page.get_text("blocks", sort=True)
-
+        page_width = page.rect.width
         page_has_content = False
         prev_y1 = None
 
+        # ── Pass 1: Flatten all text lines, preserving Y position ──────────
+        # Each entry: (y0, y1, block_x0, block_x1, line_text, block_width)
+        all_lines = []
         for block in blocks:
-            # block = (x0, y0, x1, y1, text, block_no, block_type)
-            block_type = block[6]
-            if block_type != 0:  # Skip image blocks (type 1)
+            if block[6] != 0:          # skip image blocks
                 continue
-
-            import re
-            raw_text = block[4]
-            if not raw_text or not raw_text.strip():
+            raw = block[4]
+            if not raw or not raw.strip():
                 continue
-            
-            # Sanitize raw_text to remove XML-incompatible control characters
-            raw_text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]', '', raw_text)
-
-            # Split block into individual lines
-            lines = [ln.rstrip() for ln in raw_text.splitlines()]
-            lines = [ln for ln in lines if ln.strip()]
-
-            if not lines:
+            raw = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]', '', raw)
+            bx0, by0, bx1, by1 = block[0], block[1], block[2], block[3]
+            bw = bx1 - bx0
+            bh = max(by1 - by0, 1)
+            raw_lines = [ln.rstrip() for ln in raw.splitlines() if ln.strip()]
+            if not raw_lines:
                 continue
+            line_h = bh / len(raw_lines)
+            for i, ln in enumerate(raw_lines):
+                ly0 = by0 + i * line_h
+                all_lines.append((ly0, ly0 + line_h, bx0, bx1, ln, bw))
 
-            # Detect large Y-gap between blocks → add extra spacing
-            y0 = block[1]
-            if prev_y1 is not None and (y0 - prev_y1) > 20:
-                # Add an empty paragraph for visual gap between sections
-                gap_para = doc.add_paragraph()
-                gap_para.paragraph_format.space_after = Pt(0)
-            prev_y1 = block[3]
-
-            block_width = block[2] - block[0]
-            page_width = page.rect.width
-
-            for line_text in lines:
-                stripped = line_text.strip()
-                if not stripped:
-                    continue
-
-                para = doc.add_paragraph()
-                para.paragraph_format.space_after = Pt(4)
-                para.paragraph_format.space_before = Pt(0)
-
-                # Heuristic: wide short text centered = likely a heading
-                is_heading_like = (
-                    len(stripped) < 80
-                    and block_width > page_width * 0.5
-                    and stripped == stripped.upper()
-                    and len(stripped) > 2
-                )
-                if is_heading_like:
-                    para.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                    run = para.add_run(stripped)
-                    run.bold = True
-                    run.font.size = Pt(12)
+        # ── Pass 2: Group lines into 'table' zones and 'text' zones ────────
+        # Consecutive pipe-table lines → one table group
+        # Everything else → text group (rendered as paragraphs)
+        groups = []  # [('table', [[cell,...], ...]) | ('text', [line_tuple,...])]
+        for line_tuple in all_lines:
+            line_text = line_tuple[4]
+            if _is_pipe_table_line(line_text):
+                if groups and groups[-1][0] == 'table':
+                    groups[-1][1].append(_parse_pipe_row(line_text))
                 else:
-                    run = para.add_run(stripped)
-                    run.font.size = Pt(11)
+                    groups.append(('table', [_parse_pipe_row(line_text)]))
+            else:
+                if groups and groups[-1][0] == 'text':
+                    groups[-1][1].append(line_tuple)
+                else:
+                    groups.append(('text', [line_tuple]))
 
+        # ── Pass 3: Render each group ───────────────────────────────────────
+        for group_type, group_data in groups:
+
+            if group_type == 'table':
+                built = _try_build_word_table(doc, group_data)
+                if not built:
+                    # Fallback: render pipe rows as plain text
+                    for row_cells in group_data:
+                        joined = ' | '.join(c for c in row_cells if c)
+                        if not joined.strip():
+                            continue
+                        para = doc.add_paragraph(joined)
+                        para.paragraph_format.space_after = Pt(4)
                 page_has_content = True
+                prev_y1 = None   # reset Y-gap tracking after a table
+
+            else:  # 'text'
+                for (ly0, ly1, bx0, bx1, line_text, bw) in group_data:
+                    stripped = line_text.strip()
+                    if not stripped:
+                        continue
+
+                    # Large Y-gap → add visual breathing room
+                    if prev_y1 is not None and (ly0 - prev_y1) > 20:
+                        gap = doc.add_paragraph()
+                        gap.paragraph_format.space_after = Pt(0)
+                    prev_y1 = ly1
+
+                    para = doc.add_paragraph()
+                    para.paragraph_format.space_after = Pt(4)
+                    para.paragraph_format.space_before = Pt(0)
+
+                    # Heuristic: wide short ALL-CAPS block = heading
+                    is_heading_like = (
+                        len(stripped) < 80
+                        and bw > page_width * 0.5
+                        and stripped == stripped.upper()
+                        and len(stripped) > 2
+                    )
+                    if is_heading_like:
+                        para.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                        run = para.add_run(stripped)
+                        run.bold = True
+                        run.font.size = Pt(12)
+                    else:
+                        run = para.add_run(stripped)
+                        run.font.size = Pt(11)
+
+                    page_has_content = True
 
         if not page_has_content:
-            # Page had no extractable text — leave a note
             note = doc.add_paragraph(f"[Page {page_num + 1}: No text could be extracted]")
             note.paragraph_format.space_after = Pt(6)
             run = note.runs[0]
