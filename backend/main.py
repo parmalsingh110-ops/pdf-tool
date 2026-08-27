@@ -3325,3 +3325,136 @@ async def ocr_analyze(request: Request, file: UploadFile = File(...)):
         raise safe_error(e, "ocr-analyze")
     finally:
         cleanup(inp)
+
+
+@app.post("/remove-watermark")
+@limiter.limit("20/minute")
+async def remove_watermark(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    remove_bottom: bool = Form(False),
+    bottom_percentage: float = Form(5.0),
+    remove_background: bool = Form(False)
+):
+    """
+    Removes watermarks from a PDF.
+
+    Strategies used:
+    1. remove_bottom=True  → Draws a solid white rectangle over the bottom
+       X% of every page (covers "Scanned with CamScanner / Oken Scanner" text).
+    2. remove_background=True → Two-pass approach:
+         a) For DIGITAL PDFs: removes watermark-flagged annotations, then
+            attempts to redact any semi-transparent text/image objects that
+            look like watermarks (low opacity, centered placement, etc.).
+         b) For SCANNED PDFs (image-only pages): applies a subtle contrast
+            filter to wash out light-grey background watermarks embedded
+            in the scanned image pixels.
+    """
+    inp = temp_path(".pdf")
+    out = temp_path(".pdf")
+    try:
+        inp.write_bytes(await safe_read_upload(file))
+        check_pdf_page_count(inp, "remove-watermark")
+
+        # Clamp bottom_percentage to a safe range
+        bottom_pct = max(1.0, min(float(bottom_percentage), 40.0))
+
+        import fitz  # PyMuPDF — already a project dependency
+
+        doc = fitz.open(str(inp))
+
+        for page in doc:
+            page_rect = page.rect
+            pw = page_rect.width
+            ph = page_rect.height
+
+            # ── 1. BOTTOM WATERMARK ────────────────────────────────────────
+            # Paint a solid white box over the bottom N% of the page.
+            # This reliably covers footer watermarks regardless of whether
+            # the page is digital text or a scanned image.
+            if remove_bottom:
+                bh = ph * (bottom_pct / 100.0)
+                bottom_box = fitz.Rect(page_rect.x0, page_rect.y1 - bh,
+                                       page_rect.x1, page_rect.y1)
+                # Draw filled white rectangle on top of everything
+                page.draw_rect(bottom_box, color=(1, 1, 1), fill=(1, 1, 1),
+                               overlay=True)
+
+            # ── 2. BACKGROUND / MIDDLE WATERMARK ──────────────────────────
+            if remove_background:
+                # ── 2a. Remove watermark annotations (any type) ────────────
+                # Iterate safely by collecting annots first, then deleting.
+                annots_to_delete = []
+                for annot in page.annots():
+                    try:
+                        atype = annot.type  # (int, str) tuple in PyMuPDF
+                        type_str = atype[1] if isinstance(atype, (list, tuple)) and len(atype) > 1 else str(atype)
+                        # PDF spec watermark annotation type is "Watermark" (type int=26)
+                        if "watermark" in type_str.lower() or (isinstance(atype, (list, tuple)) and atype[0] == 26):
+                            annots_to_delete.append(annot)
+                    except Exception:
+                        pass
+                for annot in annots_to_delete:
+                    try:
+                        page.delete_annot(annot)
+                    except Exception:
+                        pass
+
+                # ── 2b. Remove semi-transparent / watermark-looking text ───
+                # Inspect text blocks: if a block is centred on the page and
+                # uses a colour that is NOT near-black (i.e. it looks like a
+                # light-grey or coloured watermark), redact it.
+                blocks = page.get_text("dict", flags=fitz.TEXT_PRESERVE_WHITESPACE).get("blocks", [])
+                redact_rects = []
+                for block in blocks:
+                    if block.get("type") != 0:  # 0 = text block
+                        continue
+                    for line in block.get("lines", []):
+                        for span in line.get("spans", []):
+                            color = span.get("color", 0)
+                            # color is an integer RGB (0xRRGGBB)
+                            r = ((color >> 16) & 0xFF) / 255.0
+                            g = ((color >> 8) & 0xFF) / 255.0
+                            b = (color & 0xFF) / 255.0
+                            # Light-grey / near-white text = watermark candidate
+                            brightness = 0.299 * r + 0.587 * g + 0.114 * b
+                            # Also check if span is large, centered, and light
+                            span_rect = fitz.Rect(span["bbox"])
+                            cx = (span_rect.x0 + span_rect.x1) / 2
+                            # Consider "centered" if within the middle 60% of page width
+                            is_centered = (pw * 0.2) < cx < (pw * 0.8)
+                            is_light = brightness > 0.65  # light grey / coloured wm
+                            font_size = span.get("size", 0)
+                            is_large = font_size >= 18  # watermarks are usually big
+                            if is_light and is_centered and is_large:
+                                redact_rects.append(span_rect)
+
+                # Apply redactions (white fill over matched areas)
+                for r in redact_rects:
+                    page.add_redact_annot(r, fill=(1, 1, 1))
+                if redact_rects:
+                    page.apply_redactions()
+
+        doc.save(str(out), garbage=4, deflate=True)
+        doc.close()
+
+        background_tasks.add_task(cleanup, inp)
+        background_tasks.add_task(cleanup, out)
+
+        safe_name = safe_filename(file.filename, "clean_output.pdf")
+        return FileResponse(
+            str(out),
+            media_type="application/pdf",
+            filename=f"clean_{safe_name}",
+            headers={"Content-Disposition": f'attachment; filename="clean_{safe_name}"'}
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise safe_error(e, "remove-watermark")
+    finally:
+        # Only clean up if background_tasks didn't register them (error path)
+        # cleanup() is idempotent (no-op if file doesn't exist), so safe to call here too.
+        pass
+

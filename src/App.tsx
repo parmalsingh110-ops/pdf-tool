@@ -12,6 +12,7 @@ import OrganizePDF from './pages/OrganizePDF';
 import ProtectPDF from './pages/ProtectPDF';
 import UnlockPDF from './pages/UnlockPDF';
 import WatermarkPDF from './pages/WatermarkPDF';
+import RemoveWatermark from './pages/RemoveWatermark';
 import PageNumbersPDF from './pages/PageNumbersPDF';
 import ExtractText from './pages/ExtractText';
 import EditMetadata from './pages/EditMetadata';
@@ -147,6 +148,7 @@ export default function App() {
         <Route path="protect" element={<ProtectPDF />} />
         <Route path="unlock" element={<UnlockPDF />} />
         <Route path="watermark" element={<WatermarkPDF />} />
+        <Route path="remove-watermark" element={<RemoveWatermark />} />
         <Route path="page-numbers" element={<PageNumbersPDF />} />
         <Route path="edit" element={<AdvancedEditor />} />
         <Route path="target-compress" element={<TargetPDFCompress />} />

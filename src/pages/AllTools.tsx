@@ -11,7 +11,7 @@ import {
   MonitorSmartphone, Stamp, FileX, Images, Code, Presentation, Layers2,
   Info, Zap, ScanSearch,
   // New icons for 13 new tools
-  Shield, Wrench, Globe, FileCode2, Type, Accessibility, Volume2, Link as LinkIcon, BookMarked,
+  Shield, Wrench, Globe, FileCode2, Type, Accessibility, Volume2, Link as LinkIcon, BookMarked, Eraser,
 } from 'lucide-react';
 
 function categoryAnchor(title: string): string {
@@ -130,6 +130,7 @@ const categories = [
       { title: 'PDF/A Conversion', path: '/pdf-a-conversion', icon: FileCode, color: 'text-blue-500', bg: 'bg-blue-50' },
       { title: 'Remove All Metadata', path: '/remove-metadata', icon: Trash2, color: 'text-red-500', bg: 'bg-red-50' },
       { title: 'Add DRM', path: '/add-drm', icon: Lock, color: 'text-red-500', bg: 'bg-red-50' },
+      { title: 'Remove Watermark', path: '/remove-watermark', icon: Eraser, color: 'text-red-500', bg: 'bg-red-50' },
       { title: 'Invisible Watermarks', path: '/invisible-watermark', icon: Droplet, color: 'text-indigo-500', bg: 'bg-indigo-50' },
       { title: 'Self-Destructing PDF', path: '/self-destruct', icon: ShieldCheck, color: 'text-orange-500', bg: 'bg-orange-50' },
       { title: 'Certify Document', path: '/certify-document', icon: CheckCircle, color: 'text-teal-500', bg: 'bg-teal-50' },

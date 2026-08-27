@@ -105,6 +105,7 @@ const TOOL_GROUPS = [
     tools: [
       { title: 'Protect PDF', desc: 'Password protection.', path: '/protect', icon: Lock },
       { title: 'Unlock PDF', desc: 'Remove passwords.', path: '/unlock', icon: Unlock },
+      { title: 'Remove Watermark', desc: 'Clean background and CamScanner tags.', path: '/remove-watermark', icon: FileX },
       { title: 'PDF Redaction', desc: 'Permanent data removal.', path: '/redact', icon: ShieldOff },
       { title: 'Remove Metadata', desc: 'Strip hidden data.', path: '/remove-metadata', icon: FileText },
       { title: 'File Hash', desc: 'SHA verification.', path: '/file-hash', icon: ShieldCheck },
