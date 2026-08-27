@@ -921,19 +921,66 @@ def remove_scanned_page_backgrounds_from_docx(docx_path: str, pdf_path: str):
 # ─── Helper: Table detection for scanned PDFs ─────────────────
 
 
-def _is_pipe_table_line(text: str) -> bool:
-    """Return True if this OCR line looks like a pipe-separated table row (≥2 pipes)."""
-    return text.strip().count('|') >= 2
+def _cluster_blocks_into_visual_rows(blocks):
+    """
+    Group PyMuPDF text blocks into visual rows based on Y-coordinate overlap.
 
+    For scanned PDFs, OCR (Tesseract) often reads one wide table row as
+    2–3 horizontal blocks that share the same Y position. This function
+    clusters those blocks so all blocks in the same physical row are merged
+    before cell-splitting.
 
-def _parse_pipe_row(text: str) -> list:
-    """Split a pipe-table line into a list of trimmed cell strings."""
-    s = text.strip()
-    if s.startswith('|'):
-        s = s[1:]
-    if s.endswith('|'):
-        s = s[:-1]
-    return [c.strip() for c in s.split('|')]
+    Returns: list of (row_y0, row_y1, [(x0, text), ...]) sorted top→bottom.
+    Each inner list is already sorted left→right by x0.
+    """
+    import re
+
+    text_blocks = []
+    for b in blocks:
+        if b[6] != 0:
+            continue
+        raw = b[4]
+        if not raw or not raw.strip():
+            continue
+        raw = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]', '', raw)
+        text = raw.strip()
+        if text:
+            text_blocks.append((b[0], b[1], b[2], b[3], text))  # x0,y0,x1,y1,text
+
+    if not text_blocks:
+        return []
+
+    text_blocks.sort(key=lambda b: b[1])   # top → bottom
+
+    used = [False] * len(text_blocks)
+    rows = []
+
+    for i, (x0, y0, x1, y1, text) in enumerate(text_blocks):
+        if used[i]:
+            continue
+
+        row_cells = [(x0, text)]
+        row_y0, row_y1 = y0, y1
+        used[i] = True
+
+        for j, (ox0, oy0, ox1, oy1, otext) in enumerate(text_blocks):
+            if used[j]:
+                continue
+            # Two blocks share a visual row if their Y ranges overlap
+            # by ≥40% of the shorter block's height.
+            y_overlap = min(y1, oy1) - max(y0, oy0)
+            short_h = min(max(y1 - y0, 1), max(oy1 - oy0, 1))
+            if y_overlap / short_h >= 0.4:
+                row_cells.append((ox0, otext))
+                row_y0 = min(row_y0, oy0)
+                row_y1 = max(row_y1, oy1)
+                used[j] = True
+
+        row_cells.sort(key=lambda c: c[0])          # left → right
+        rows.append((row_y0, row_y1, row_cells))
+
+    rows.sort(key=lambda r: r[0])                    # top → bottom
+    return rows
 
 
 def _try_build_word_table(doc, rows_of_cells) -> bool:
@@ -944,7 +991,6 @@ def _try_build_word_table(doc, rows_of_cells) -> bool:
     """
     from docx.shared import Pt
 
-    # Drop completely empty rows
     rows_of_cells = [r for r in rows_of_cells if any(c.strip() for c in r)]
     if not rows_of_cells:
         return False
@@ -952,23 +998,22 @@ def _try_build_word_table(doc, rows_of_cells) -> bool:
     if max_cols < 2:
         return False
 
-    # Pad every row to the same column count
     normalized = [list(r) + [''] * (max_cols - len(r)) for r in rows_of_cells]
 
     table = doc.add_table(rows=len(normalized), cols=max_cols)
     try:
         table.style = 'Table Grid'
     except Exception:
-        pass  # If style missing, fall back to default
+        pass
 
     for r_idx, row_cells in enumerate(normalized):
         for c_idx, cell_text in enumerate(row_cells):
             cell = table.cell(r_idx, c_idx)
             para = cell.paragraphs[0]
-            run = para.add_run(cell_text[:500])   # cap runaway cell length
+            run = para.add_run(cell_text[:500])
             run.font.name = 'Calibri'
             run.font.size = Pt(10)
-            if r_idx == 0:                         # header row → bold
+            if r_idx == 0:
                 run.bold = True
 
     return True
@@ -982,10 +1027,15 @@ def _build_clean_docx_from_ocr_pdf(pdf_path: Path, out_path: Path):
     Extracts text from an OCR'd PDF page-by-page using PyMuPDF and writes
     a fresh, valid DOCX using python-docx.
 
-    Tables are detected via pipe-character heuristics (≥2 pipes per line)
-    and rendered as actual Word tables with 'Table Grid' style.
-    Non-table content (headings, paragraphs, Devanagari text) is rendered
-    exactly as before.
+    Table detection uses block-level Y-overlap spatial clustering:
+      1. All OCR blocks on a page are clustered into visual rows by checking
+         whether their Y ranges overlap by ≥40% of the shorter block height.
+         This correctly handles the common Tesseract behaviour of reading one
+         wide table row as 2-3 horizontal blocks.
+      2. Within each visual row, block texts are merged left→right by X pos.
+      3. Merged text with ≥2 pipe characters → table row (split by '|').
+         Merged text with <2 pipe characters → plain paragraph.
+      4. Consecutive table rows are written as a single Word 'Table Grid'.
 
     WHY THIS EXISTS:
     pdf2docx embeds the full scan image as a page background, resulting in:
@@ -1003,14 +1053,12 @@ def _build_clean_docx_from_ocr_pdf(pdf_path: Path, out_path: Path):
 
     doc = Document()
 
-    # Set standard page margins (1 inch all around)
     for section in doc.sections:
         section.top_margin = Inches(1)
         section.bottom_margin = Inches(1)
         section.left_margin = Inches(1)
         section.right_margin = Inches(1)
 
-    # Set default font
     style = doc.styles['Normal']
     style.font.name = 'Calibri'
     style.font.size = Pt(11)
@@ -1027,57 +1075,54 @@ def _build_clean_docx_from_ocr_pdf(pdf_path: Path, out_path: Path):
         page_has_content = False
         prev_y1 = None
 
-        # ── Pass 1: Flatten all text lines, preserving Y position ──────────
-        # Each entry: (y0, y1, block_x0, block_x1, line_text, block_width)
-        all_lines = []
-        for block in blocks:
-            if block[6] != 0:          # skip image blocks
-                continue
-            raw = block[4]
-            if not raw or not raw.strip():
-                continue
-            raw = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]', '', raw)
-            bx0, by0, bx1, by1 = block[0], block[1], block[2], block[3]
-            bw = bx1 - bx0
-            bh = max(by1 - by0, 1)
-            raw_lines = [ln.rstrip() for ln in raw.splitlines() if ln.strip()]
-            if not raw_lines:
-                continue
-            line_h = bh / len(raw_lines)
-            for i, ln in enumerate(raw_lines):
-                ly0 = by0 + i * line_h
-                all_lines.append((ly0, ly0 + line_h, bx0, bx1, ln, bw))
+        # ── Step 1: Cluster OCR blocks into visual rows by Y overlap ────────
+        visual_rows = _cluster_blocks_into_visual_rows(blocks)
 
-        # ── Pass 2: Group lines into 'table' zones and 'text' zones ────────
-        # Consecutive pipe-table lines → one table group
-        # Everything else → text group (rendered as paragraphs)
-        groups = []  # [('table', [[cell,...], ...]) | ('text', [line_tuple,...])]
-        for line_tuple in all_lines:
-            line_text = line_tuple[4]
-            if _is_pipe_table_line(line_text):
+        # ── Step 2: Classify each visual row as 'table' or 'text' ───────────
+        groups = []  # [('table', [[cell,...], ...]) | ('text', [row_tuple,...])]
+
+        for (row_y0, row_y1, row_cells) in visual_rows:
+            # Merge all block texts in reading order (left→right)
+            merged = ' '.join(text for _, text in row_cells)
+            pipe_count = merged.count('|')
+
+            if pipe_count >= 2:
+                # ── Table row: strip outer pipes, split by '|' ────────────
+                s = merged.strip()
+                if s.startswith('|'):
+                    s = s[1:]
+                if s.endswith('|'):
+                    s = s[:-1]
+                cells = [c.strip() for c in s.split('|') if c.strip()]
+
                 if groups and groups[-1][0] == 'table':
-                    groups[-1][1].append(_parse_pipe_row(line_text))
+                    groups[-1][1].append(cells)
                 else:
-                    groups.append(('table', [_parse_pipe_row(line_text)]))
-            else:
-                if groups and groups[-1][0] == 'text':
-                    groups[-1][1].append(line_tuple)
-                else:
-                    groups.append(('text', [line_tuple]))
+                    groups.append(('table', [cells]))
 
-        # ── Pass 3: Render each group ───────────────────────────────────────
+            else:
+                # ── Text row: treat as a paragraph ────────────────────────
+                first_x0 = row_cells[0][0] if row_cells else 0
+                last_x1  = max(x for x, _ in row_cells) if row_cells else page_width
+                bw = last_x1 - first_x0
+                row_tuple = (row_y0, row_y1, first_x0, last_x1, merged, bw)
+
+                if groups and groups[-1][0] == 'text':
+                    groups[-1][1].append(row_tuple)
+                else:
+                    groups.append(('text', [row_tuple]))
+
+        # ── Step 3: Render each group ────────────────────────────────────────
         for group_type, group_data in groups:
 
             if group_type == 'table':
                 built = _try_build_word_table(doc, group_data)
                 if not built:
-                    # Fallback: render pipe rows as plain text
                     for row_cells in group_data:
                         joined = ' | '.join(c for c in row_cells if c)
-                        if not joined.strip():
-                            continue
-                        para = doc.add_paragraph(joined)
-                        para.paragraph_format.space_after = Pt(4)
+                        if joined.strip():
+                            para = doc.add_paragraph(joined)
+                            para.paragraph_format.space_after = Pt(4)
                 page_has_content = True
                 prev_y1 = None   # reset Y-gap tracking after a table
 
@@ -1087,7 +1132,6 @@ def _build_clean_docx_from_ocr_pdf(pdf_path: Path, out_path: Path):
                     if not stripped:
                         continue
 
-                    # Large Y-gap → add visual breathing room
                     if prev_y1 is not None and (ly0 - prev_y1) > 20:
                         gap = doc.add_paragraph()
                         gap.paragraph_format.space_after = Pt(0)
@@ -1097,7 +1141,7 @@ def _build_clean_docx_from_ocr_pdf(pdf_path: Path, out_path: Path):
                     para.paragraph_format.space_after = Pt(4)
                     para.paragraph_format.space_before = Pt(0)
 
-                    # Heuristic: wide short ALL-CAPS block = heading
+                    # Wide short ALL-CAPS text = heading heuristic
                     is_heading_like = (
                         len(stripped) < 80
                         and bw > page_width * 0.5
@@ -1133,8 +1177,6 @@ def _build_clean_docx_from_ocr_pdf(pdf_path: Path, out_path: Path):
         f"{out_path.stat().st_size / 1024:.1f}KB"
     )
 
-
-# ─── 1. PDF → Word ─────────────────────────────────────────────
 
 @app.post("/convert/pdf-to-word")
 @limiter.limit("10/minute")
