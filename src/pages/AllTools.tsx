@@ -184,8 +184,8 @@ const categories = [
 
 export default function AllTools() {
   usePageSEO(
-    'All PDF & Image Tools — 90+ Free Online Tools',
-    'Browse all 90+ free PDF and image tools on PDF Media Suite. Merge PDF, split PDF, compress PDF, convert PDF to Word/Excel/JPG, image resizer, remove background, OCR, digital signature, redact PDF, watermark, QR code generator, and many more — all free, browser-based, private.',
+    'All Tools | PDF Media Suite',
+    'Search and explore all 90+ free PDF and image processing tools on PDF Media Suite. Merge PDF, split PDF, compress PDF, convert PDF to Word/Excel/JPG, image resizer, remove background, OCR, digital signature, redact PDF, watermark, QR code generator, and many more — all free, browser-based, private.',
     'all pdf tools, free pdf tools list, online pdf converter, pdf editor online, image editor online, pdf to word, pdf to excel, merge pdf free, compress pdf free, pdf media suite tools'
   );
   const [sortMode, setSortMode] = useState<'most-used' | 'newest' | 'a-z'>('most-used');

@@ -19,7 +19,7 @@ export default function Privacy() {
       </div>
       <div className="space-y-6 text-sm leading-relaxed">
         <p>
-          Most tools in MediaSuite run <strong>in your browser</strong> (client-side). Files you select are
+          Most tools in PDF Media Suite run <strong>in your browser</strong> (client-side). Files you select are
           processed locally where possible and are not uploaded to our servers by default.
         </p>
         <p>

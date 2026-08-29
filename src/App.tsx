@@ -21,6 +21,10 @@ import ReversePDF from './pages/ReversePDF';
 import AddMargins from './pages/AddMargins';
 import AllTools from './pages/AllTools';
 import Privacy from './pages/Privacy';
+import TermsOfService from './pages/TermsOfService';
+import About from './pages/About';
+import Pricing from './pages/Pricing';
+import Contact from './pages/Contact';
 
 // Native Tools
 import GrayscalePDF from './pages/GrayscalePDF';
@@ -164,6 +168,10 @@ export default function App() {
         <Route path="add-margins" element={<AddMargins />} />
         <Route path="all-tools" element={<AllTools />} />
         <Route path="privacy" element={<Privacy />} />
+        <Route path="terms" element={<TermsOfService />} />
+        <Route path="about" element={<About />} />
+        <Route path="pricing" element={<Pricing />} />
+        <Route path="contact" element={<Contact />} />
 
         {/* New 29 Native & Simulated Tools */}
         <Route path="grayscale-pdf" element={<GrayscalePDF />} />

@@ -134,9 +134,9 @@ export default function Home() {
   );
   // Dynamic SEO
   useEffect(() => {
-    document.title = 'MediaSuite — Free Online PDF & Image Tools | Merge, Split, Compress, Convert';
+    document.title = 'PDF Media Suite | Free Online PDF & Document Tools';
     const metaDesc = document.querySelector('meta[name="description"]');
-    if (metaDesc) metaDesc.setAttribute('content', 'Free online PDF editor, merger, splitter, compressor, image resizer, background remover, and 80+ tools. Fast, private, browser-based. No uploads required.');
+    if (metaDesc) metaDesc.setAttribute('content', 'PDF Media Suite is a browser-based document productivity platform providing PDF editing, conversion, OCR and image tools.');
     // Add JSON-LD structured data
     const existing = document.querySelector('#mediasuite-jsonld');
     if (!existing) {
@@ -146,9 +146,9 @@ export default function Home() {
       script.textContent = JSON.stringify({
         '@context': 'https://schema.org',
         '@type': 'WebApplication',
-        name: 'MediaSuite',
+        name: 'PDF Media Suite',
         url: window.location.origin,
-        description: 'Free online PDF and image processing tools — merge, split, compress, convert, edit, resize, crop, and more.',
+        description: 'PDF Media Suite is a browser-based document productivity platform providing PDF editing, conversion, OCR and image tools.',
         applicationCategory: 'UtilitiesApplication',
         operatingSystem: 'Any',
         offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
@@ -175,11 +175,13 @@ export default function Home() {
             85+ Free Online Tools
           </span>
           <h1 className="mt-6 text-5xl md:text-7xl font-extrabold tracking-tight leading-[0.95] text-slate-900 dark:text-white">
-            Every PDF & Image Tool <br className="hidden md:block" />
-            <span className="text-rose-600 dark:text-rose-400">You'll Ever Need.</span>
+            PDF Media Suite
           </h1>
-          <p className="mt-6 text-lg md:text-xl text-slate-600 dark:text-slate-300 max-w-3xl mx-auto leading-relaxed">
-            Merge, split, compress, convert, edit, resize, crop, protect — all free, all private, all in your browser. No uploads. No sign-ups.
+          <p className="mt-6 text-xl text-rose-600 dark:text-rose-400 font-bold max-w-3xl mx-auto">
+            Free Online PDF, Document & Image Tools
+          </p>
+          <p className="mt-4 text-lg md:text-xl text-slate-600 dark:text-slate-300 max-w-3xl mx-auto leading-relaxed">
+            PDF Media Suite is a digital-first document productivity platform providing browser-based tools for PDF editing, document conversion, OCR and image/document processing.
           </p>
           <div className="mt-10 flex flex-col sm:flex-row gap-4 justify-center">
             <Link to="/all-tools" className="inline-flex items-center justify-center gap-2 px-8 py-4 rounded-full bg-gradient-to-br from-rose-700 to-rose-500 text-white font-bold hover:shadow-lg transition-all">
@@ -216,7 +218,58 @@ export default function Home() {
         </section>
       )}
 
-      {/* =============== TOOL GROUPS =============== */}
+      {/* =============== WHAT IS IT? / PROBLEM & SOLUTION =============== */}
+      <section className="max-w-7xl mx-auto px-6 pb-16 pt-8">
+        <div className="grid md:grid-cols-2 gap-12">
+          <div className="p-8 rounded-3xl bg-slate-100 dark:bg-slate-900/50">
+            <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-4">The Problem</h2>
+            <p className="text-slate-600 dark:text-slate-400">
+              Working with PDF and digital documents often requires multiple separate tools for editing, conversion, OCR, compression and document processing. Finding a reliable, privacy-respecting tool for each task is frustrating and inefficient.
+            </p>
+          </div>
+          <div className="p-8 rounded-3xl bg-rose-50 dark:bg-rose-900/20 border border-rose-100 dark:border-rose-900/50">
+            <h2 className="text-2xl font-bold text-rose-700 dark:text-rose-300 mb-4">Our Solution</h2>
+            <p className="text-rose-900/80 dark:text-rose-200">
+              PDF Media Suite brings common PDF, document and image workflows together in a single browser-based software platform. Everything you need is accessible in one place without requiring local software installation.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      {/* =============== HOW IT WORKS =============== */}
+      <section className="max-w-7xl mx-auto px-6 pb-20">
+        <h2 className="text-3xl font-extrabold text-slate-900 dark:text-white text-center mb-10">How it works</h2>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+          <div className="text-center">
+            <div className="w-12 h-12 mx-auto rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center font-bold text-lg mb-4">1</div>
+            <p className="font-semibold text-slate-900 dark:text-white">Choose a tool</p>
+            <p className="text-sm text-slate-500 dark:text-slate-400 mt-2">Select a document or image tool from our suite.</p>
+          </div>
+          <div className="text-center">
+            <div className="w-12 h-12 mx-auto rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center font-bold text-lg mb-4">2</div>
+            <p className="font-semibold text-slate-900 dark:text-white">Select your file</p>
+            <p className="text-sm text-slate-500 dark:text-slate-400 mt-2">Upload or drop your document into the web application.</p>
+          </div>
+          <div className="text-center">
+            <div className="w-12 h-12 mx-auto rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center font-bold text-lg mb-4">3</div>
+            <p className="font-semibold text-slate-900 dark:text-white">Process</p>
+            <p className="text-sm text-slate-500 dark:text-slate-400 mt-2">Process the document directly in the browser.</p>
+          </div>
+          <div className="text-center">
+            <div className="w-12 h-12 mx-auto rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center font-bold text-lg mb-4">4</div>
+            <p className="font-semibold text-slate-900 dark:text-white">Download</p>
+            <p className="text-sm text-slate-500 dark:text-slate-400 mt-2">Download or continue working with the result.</p>
+          </div>
+        </div>
+      </section>
+
+      {/* =============== WORKING PRODUCT / FEATURES =============== */}
+      <div className="max-w-7xl mx-auto px-6 mb-12">
+        <h2 className="text-3xl font-extrabold text-slate-900 dark:text-white text-center">Product Features</h2>
+        <p className="mt-4 text-center text-slate-600 dark:text-slate-400 max-w-2xl mx-auto">
+          PDF Media Suite is a working browser-based document productivity application with tools for PDF editing, conversion, OCR and image processing. Users can access the available tools directly through the web application below.
+        </p>
+      </div>
       {TOOL_GROUPS.map((group) => {
         const c = COLOR_MAP[group.color] || COLOR_MAP.rose;
         return (
@@ -244,14 +297,97 @@ export default function Home() {
         );
       })}
 
+      <section className="max-w-7xl mx-auto px-6 py-20 border-t border-slate-200 dark:border-slate-800">
+        <div className="grid md:grid-cols-2 gap-16">
+          <div>
+            <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-6">Target Users</h2>
+            <p className="text-slate-600 dark:text-slate-400 mb-4">
+              PDF Media Suite is designed for people who regularly need to edit, convert, process or extract information from digital documents. Our primary users include:
+            </p>
+            <ul className="list-disc list-inside space-y-2 text-slate-600 dark:text-slate-400">
+              <li>Students</li>
+              <li>Educators</li>
+              <li>Professionals</li>
+              <li>Freelancers</li>
+              <li>Small businesses</li>
+              <li>Document-heavy teams</li>
+              <li>Individuals working with PDFs and digital documents</li>
+            </ul>
+          </div>
+          <div>
+            <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-6">Technology</h2>
+            <p className="text-slate-600 dark:text-slate-400">
+              PDF Media Suite is built as a web-based software platform with a modern web frontend and Python-based backend document processing. Technologies include React, TypeScript, Python, FastAPI, and browser-based processing to ensure speed and privacy where possible.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      {/* =============== BUSINESS MODEL & PRICING =============== */}
+      <section className="max-w-7xl mx-auto px-6 pb-20">
+        <div className="p-10 rounded-3xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+          <div className="grid md:grid-cols-2 gap-12">
+            <div>
+              <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-4">Business Model</h2>
+              <p className="text-slate-600 dark:text-slate-400 mb-4">
+                PDF Media Suite is a digital-first software product delivered through the web. The platform is designed to provide document and PDF processing capabilities directly through a browser rather than through consulting or custom development services.
+              </p>
+              <p className="text-slate-600 dark:text-slate-400">
+                As the product grows, the platform may introduce optional premium capabilities or usage-based features to support continued development and infrastructure costs.
+              </p>
+            </div>
+            <div>
+              <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-4">Pricing</h2>
+              <p className="text-slate-600 dark:text-slate-400 mb-4">
+                PDF Media Suite currently provides its core PDF, document and image tools <strong>free of charge</strong>.
+              </p>
+              <p className="text-slate-600 dark:text-slate-400">
+                Reasonable usage limits may apply to certain tools to protect service availability.
+              </p>
+              <div className="mt-6">
+                <Link to="/pricing" className="text-rose-600 dark:text-rose-400 font-semibold hover:underline">Read more about pricing &rarr;</Link>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* =============== ABOUT & CONTACT =============== */}
+      <section className="max-w-7xl mx-auto px-6 pb-24">
+        <div className="grid md:grid-cols-2 gap-12">
+          <div>
+            <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-4">About PDF Media Suite</h2>
+            <p className="text-slate-600 dark:text-slate-400 mb-6">
+              PDF Media Suite is an independent, founder-led software project focused on making practical PDF and document productivity tools accessible through the web.
+            </p>
+            <div className="p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 mb-6">
+              <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-2">Founder & Developer</h3>
+              <p className="text-xl font-bold text-slate-900 dark:text-white">Parmal Singh Gurjar</p>
+            </div>
+            <Link to="/about" className="text-rose-600 dark:text-rose-400 font-semibold hover:underline">View Vision & Roadmap &rarr;</Link>
+          </div>
+          <div>
+            <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-4">Contact & Support</h2>
+            <p className="text-slate-600 dark:text-slate-400 mb-6">
+              For product support, feedback, bug reports or business enquiries, contact:
+            </p>
+            <div className="p-6 rounded-2xl bg-rose-50 dark:bg-rose-900/20 border border-rose-100 dark:border-rose-900/50">
+              <a href="mailto:parmalsingh26@gmail.com" className="text-lg font-bold text-rose-700 dark:text-rose-300 hover:underline">
+                parmalsingh26@gmail.com
+              </a>
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* =============== CTA =============== */}
       <section className="max-w-7xl mx-auto px-6 pb-24">
         <div className="rounded-3xl overflow-hidden border border-slate-200 dark:border-slate-700 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-700 dark:from-slate-950 dark:via-slate-900 dark:to-slate-800 p-10 md:p-14 text-white">
           <h2 className="text-4xl font-extrabold max-w-2xl leading-tight">
-            Ready to transform your workflow?
+            Ready to try the product?
           </h2>
           <p className="mt-4 text-slate-200 max-w-xl">
-            Merge PDFs, resize images, extract text, remove backgrounds, add watermarks, and 80+ more tools — all free, forever.
+            Access our free browser-based suite of document productivity tools right now.
           </p>
           <div className="mt-8 flex flex-wrap gap-4">
             <Link to="/all-tools" className="px-6 py-3 rounded-full bg-white text-slate-900 font-bold">View All 85+ Tools</Link>

@@ -3,7 +3,6 @@ import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
 import {
   FileText,
   Search,
-  UserCircle2,
   Moon,
   Sun,
   ChevronDown,
@@ -30,6 +29,8 @@ import {
   Presentation,
   BookOpen,
   Images,
+  Menu,
+  X,
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 import { readRecentTools, recordToolVisit, type RecentEntry } from '../lib/recentFiles';
@@ -57,7 +58,6 @@ const ROUTE_TITLES: Record<string, string> = {
   '/code-to-pdf': 'Code to PDF',
 };
 
-// Navigation mega-menu data  — hover to open
 interface NavGroup { label: string; items: { to: string; label: string; icon: any }[]; }
 
 const NAV_GROUPS: NavGroup[] = [
@@ -74,7 +74,6 @@ const NAV_GROUPS: NavGroup[] = [
       { to: '/searchable-pdf', label: 'Searchable PDF (OCR)', icon: ScanSearch },
       { to: '/page-numbers', label: 'Page Numbers', icon: Hash },
       { to: '/rotate-pages', label: 'Rotate Pages', icon: RotateCw },
-      { to: '/reverse', label: 'Reverse PDF', icon: Layers },
     ],
   },
   {
@@ -86,7 +85,6 @@ const NAV_GROUPS: NavGroup[] = [
       { to: '/pdf-to-jpg', label: 'PDF to JPG', icon: ImageIcon },
       { to: '/jpg-to-pdf', label: 'JPG to PDF', icon: ImageIcon },
       { to: '/pdf-to-images', label: 'PDF to Images (ZIP)', icon: Images },
-      { to: '/searchable-pdf', label: 'Searchable PDF (OCR)', icon: ScanSearch },
       { to: '/universal-converter', label: 'Universal Converter', icon: RefreshCw },
       { to: '/screenshot-to-pdf', label: 'Screenshot to PDF', icon: FileText },
       { to: '/code-to-pdf', label: 'Code / HTML to PDF', icon: Code },
@@ -104,7 +102,6 @@ const NAV_GROUPS: NavGroup[] = [
       { to: '/color-extractor', label: 'Color Extractor', icon: Palette },
       { to: '/image-to-base64', label: 'Image to Base64', icon: Code },
       { to: '/image-text-editor', label: 'Image Text (OCR)', icon: Edit3 },
-      { to: '/searchable-pdf', label: 'Searchable PDF (OCR)', icon: ScanSearch },
     ],
   },
   {
@@ -123,29 +120,64 @@ const NAV_GROUPS: NavGroup[] = [
   },
 ];
 
-function NavDropdown({ group }: { group: NavGroup }) {
-  const [open, setOpen] = useState(false);
+// Hover-based dropdown (opens on mouse enter, closes on mouse leave with small delay)
+function NavDropdown({
+  group,
+  isOpen,
+  onOpen,
+  onClose,
+  onNavigate,
+}: {
+  group: NavGroup;
+  isOpen: boolean;
+  onOpen: () => void;
+  onClose: () => void;
+  onNavigate: () => void;
+}) {
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const onEnter = () => { if (timerRef.current) clearTimeout(timerRef.current); setOpen(true); };
-  const onLeave = () => { timerRef.current = setTimeout(() => setOpen(false), 150); };
+
+  const handleEnter = () => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    onOpen();
+  };
+
+  const handleLeave = () => {
+    timerRef.current = setTimeout(() => onClose(), 120);
+  };
 
   return (
-    <div className="relative" onMouseEnter={onEnter} onMouseLeave={onLeave}>
-      <button type="button" className="inline-flex items-center gap-1 hover:text-rose-600 dark:hover:text-rose-400 transition-colors">
+    <div
+      className="relative"
+      onMouseEnter={handleEnter}
+      onMouseLeave={handleLeave}
+    >
+      <button
+        type="button"
+        className={`inline-flex items-center gap-1.5 py-1.5 px-3 rounded-lg font-semibold text-sm transition-all duration-150 select-none ${
+          isOpen
+            ? 'text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/40'
+            : 'text-slate-700 dark:text-slate-200 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+        }`}
+      >
         {group.label}
-        <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${open ? 'rotate-180' : ''}`} />
+        <ChevronDown
+          className={`w-3.5 h-3.5 transition-transform duration-200 ${isOpen ? 'rotate-180 text-rose-500' : ''}`}
+        />
       </button>
-      {open && (
-        <div className="absolute left-1/2 -translate-x-1/2 top-full pt-2 z-[60]">
-          <div className="w-64 rounded-xl border border-slate-200/80 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-2xl py-2 animate-in fade-in slide-in-from-top-1 duration-200">
+
+      {isOpen && (
+        <div className="absolute left-0 top-[calc(100%+4px)] z-[60]">
+          <div className="w-64 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-2xl py-2 overflow-hidden">
             {group.items.map((item) => (
               <Link
                 key={item.to}
                 to={item.to}
-                onClick={() => setOpen(false)}
-                className="flex items-center gap-3 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-rose-50 dark:hover:bg-slate-800 transition-colors"
+                onClick={() => { onClose(); onNavigate(); }}
+                className="flex items-center gap-3 px-4 py-2.5 text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-rose-50 dark:hover:bg-slate-800 hover:text-rose-600 dark:hover:text-rose-400 transition-colors"
               >
-                <item.icon className="w-4 h-4 text-rose-500 dark:text-rose-400 shrink-0" />
+                <span className="flex items-center justify-center w-7 h-7 rounded-lg bg-slate-100 dark:bg-slate-800 shrink-0">
+                  <item.icon className="w-3.5 h-3.5 text-rose-500 dark:text-rose-400" />
+                </span>
                 {item.label}
               </Link>
             ))}
@@ -163,7 +195,15 @@ export default function Layout() {
   const [recentOpen, setRecentOpen] = useState(false);
   const [recent, setRecent] = useState<RecentEntry[]>([]);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [openDropdown, setOpenDropdown] = useState<string | null>(null);
   const recentRef = useRef<HTMLDivElement>(null);
+
+  // Close mobile menu & dropdowns on route change
+  useEffect(() => {
+    setMobileOpen(false);
+    setOpenDropdown(null);
+  }, [location.pathname]);
 
   useEffect(() => {
     const path = location.pathname.replace(/\/$/, '') || '/';
@@ -195,25 +235,60 @@ export default function Layout() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [onKeyDown]);
 
+  const toggleDropdown = (label: string) =>
+    setOpenDropdown((prev) => (prev === label ? null : label));
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100 flex flex-col transition-colors">
       <KeyboardShortcutsModal open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
-      <header className="fixed top-0 w-full z-50 bg-white/80 dark:bg-slate-900/85 backdrop-blur-xl border-b border-slate-200/60 dark:border-slate-700/80 shadow-[0px_20px_40px_rgba(0,0,0,0.06)]">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-2">
-          <Link to="/" className="flex items-center gap-2 text-rose-600 hover:text-rose-700 dark:text-rose-400 shrink-0 transition-colors">
-            <FileText className="w-7 h-7" />
-            <span className="text-xl font-extrabold tracking-tight">MediaSuite</span>
+
+      {/* ── HEADER ── */}
+      <header className="fixed top-0 w-full z-50 bg-white/90 dark:bg-slate-900/90 backdrop-blur-xl border-b border-slate-200/60 dark:border-slate-700/80 shadow-sm">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-3">
+
+          {/* Logo */}
+          <Link to="/" className="flex items-center gap-2.5 shrink-0 group">
+            <div className="w-8 h-8 rounded-lg bg-rose-600 flex items-center justify-center shrink-0 group-hover:bg-rose-700 transition-colors">
+              <FileText className="w-4 h-4 text-white" />
+            </div>
+            <span className="font-extrabold tracking-tight text-slate-900 dark:text-white text-[15px] hidden sm:block">
+              PDF Media Suite
+            </span>
+            <span className="font-extrabold tracking-tight text-slate-900 dark:text-white text-[15px] sm:hidden">
+              PMS
+            </span>
           </Link>
-          <nav className="hidden md:flex items-center gap-5 lg:gap-6 text-sm font-semibold text-slate-600 dark:text-slate-300">
+
+          {/* Desktop nav */}
+          <nav className="hidden md:flex items-center gap-0.5 text-sm flex-1 ml-2">
             {NAV_GROUPS.map((g) => (
-              <NavDropdown key={g.label} group={g} />
+              <NavDropdown
+                key={g.label}
+                group={g}
+                isOpen={openDropdown === g.label}
+                onOpen={() => setOpenDropdown(g.label)}
+                onClose={() => setOpenDropdown(null)}
+                onNavigate={() => setOpenDropdown(null)}
+              />
             ))}
-            <Link to="/all-tools" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">
+            <Link
+              to="/all-tools"
+              className="inline-flex items-center py-1.5 px-3 rounded-lg font-semibold text-sm text-slate-700 dark:text-slate-200 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-all"
+            >
               All Tools
             </Link>
+            <Link
+              to="/pricing"
+              className="inline-flex items-center py-1.5 px-3 rounded-lg font-semibold text-sm text-slate-700 dark:text-slate-200 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-all"
+            >
+              Pricing
+            </Link>
           </nav>
-          <div className="flex items-center gap-1 sm:gap-2 shrink-0">
-            <div className="relative hidden sm:block" ref={recentRef}>
+
+          {/* Right actions */}
+          <div className="flex items-center gap-1 shrink-0">
+            {/* Recent */}
+            <div className="relative hidden md:block" ref={recentRef}>
               <button
                 type="button"
                 onClick={(e) => {
@@ -221,7 +296,7 @@ export default function Layout() {
                   setRecentOpen((o) => !o);
                   setRecent(readRecentTools());
                 }}
-                className="px-2 py-1.5 rounded-lg text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+                className="px-2.5 py-1.5 rounded-lg text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
               >
                 Recent
               </button>
@@ -245,11 +320,12 @@ export default function Layout() {
                 </div>
               )}
             </div>
+
             <button
               type="button"
               onClick={() => setShortcutsOpen(true)}
-              title="Shortcuts (?)"
-              className="p-2 rounded-full text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+              title="Keyboard shortcuts (?)"
+              className="p-2 rounded-full text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
             >
               <Keyboard className="w-4 h-4" />
             </button>
@@ -257,7 +333,7 @@ export default function Layout() {
               type="button"
               onClick={toggleTheme}
               title={theme === 'dark' ? 'Light mode' : 'Dark mode'}
-              className="p-2 rounded-full text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+              className="p-2 rounded-full text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
             >
               {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
             </button>
@@ -265,21 +341,76 @@ export default function Layout() {
               type="button"
               onClick={() => navigate('/all-tools')}
               title="Search tools"
-              className="p-2 rounded-full text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+              className="p-2 rounded-full text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
             >
               <Search className="w-4 h-4" />
             </button>
+
+            {/* Mobile hamburger */}
             <button
               type="button"
-              onClick={() => navigate('/')}
-              title="Go to home"
-              className="p-2 rounded-full text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+              onClick={() => setMobileOpen((o) => !o)}
+              aria-label="Toggle menu"
+              className="md:hidden p-2 rounded-full text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
             >
-              <UserCircle2 className="w-5 h-5" />
+              {mobileOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
             </button>
           </div>
         </div>
+
+        {/* ── MOBILE MENU ── */}
+        {mobileOpen && (
+          <div className="md:hidden border-t border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 max-h-[80vh] overflow-y-auto shadow-xl">
+            {NAV_GROUPS.map((group) => (
+              <div key={group.label} className="border-b border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => toggleDropdown(group.label)}
+                  className="w-full flex items-center justify-between px-5 py-3.5 text-sm font-bold text-slate-800 dark:text-white hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+                >
+                  {group.label}
+                  <ChevronDown
+                    className={`w-4 h-4 text-slate-400 transition-transform duration-200 ${openDropdown === group.label ? 'rotate-180' : ''}`}
+                  />
+                </button>
+                {openDropdown === group.label && (
+                  <div className="bg-slate-50 dark:bg-slate-950/50 pb-2">
+                    {group.items.map((item) => (
+                      <Link
+                        key={item.to}
+                        to={item.to}
+                        onClick={() => { setMobileOpen(false); setOpenDropdown(null); }}
+                        className="flex items-center gap-3 px-7 py-2.5 text-sm font-medium text-slate-600 dark:text-slate-300 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-slate-800 transition-colors"
+                      >
+                        <item.icon className="w-4 h-4 text-rose-500 shrink-0" />
+                        {item.label}
+                      </Link>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+            <div className="p-4 grid grid-cols-2 gap-2">
+              {[
+                { to: '/all-tools', label: 'All Tools' },
+                { to: '/pricing', label: 'Pricing' },
+                { to: '/about', label: 'About' },
+                { to: '/contact', label: 'Contact' },
+              ].map((link) => (
+                <Link
+                  key={link.to}
+                  to={link.to}
+                  onClick={() => setMobileOpen(false)}
+                  className="flex items-center justify-center py-2.5 px-3 rounded-xl bg-slate-100 dark:bg-slate-800 font-semibold text-sm text-slate-700 dark:text-slate-200 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-950/40 dark:hover:text-rose-400 transition-colors"
+                >
+                  {link.label}
+                </Link>
+              ))}
+            </div>
+          </div>
+        )}
       </header>
+
       <main className="flex-1 flex flex-col pt-16">
         <ErrorBoundary locationKey={location.pathname}>
           <Suspense
@@ -293,81 +424,90 @@ export default function Layout() {
           </Suspense>
         </ErrorBoundary>
       </main>
-      <footer className="bg-slate-50 dark:bg-slate-900 py-12 border-t border-slate-200/70 dark:border-slate-800">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 grid grid-cols-2 md:grid-cols-5 gap-8">
+
+      {/* ── FOOTER ── */}
+      <footer className="bg-slate-50 dark:bg-slate-900 py-14 border-t border-slate-200/70 dark:border-slate-800">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 grid grid-cols-2 md:grid-cols-5 gap-10">
           <div className="col-span-2 md:col-span-1">
-            <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-3">MediaSuite</h3>
+            <div className="flex items-center gap-2 mb-3">
+              <div className="w-7 h-7 rounded-lg bg-rose-600 flex items-center justify-center">
+                <FileText className="w-3.5 h-3.5 text-white" />
+              </div>
+              <h3 className="text-base font-bold text-slate-900 dark:text-white">PDF Media Suite</h3>
+            </div>
             <p className="text-sm text-slate-500 dark:text-slate-400">
-              Free online PDF & image tools. Fast, private, browser-based.
+              Free online PDF & document tools. Fast, private, browser-based.
             </p>
           </div>
           <div>
-            <h4 className="font-bold mb-3 text-slate-900 dark:text-white">PDF Tools</h4>
-            <ul className="space-y-2 text-sm text-slate-500 dark:text-slate-400">
-              <li><Link to="/merge" className="hover:text-rose-600 dark:hover:text-rose-400">Merge PDF</Link></li>
-              <li><Link to="/split" className="hover:text-rose-600 dark:hover:text-rose-400">Split PDF</Link></li>
-              <li><Link to="/compress" className="hover:text-rose-600 dark:hover:text-rose-400">Compress PDF</Link></li>
-              <li><Link to="/edit" className="hover:text-rose-600 dark:hover:text-rose-400">Edit PDF</Link></li>
-              <li><Link to="/protect" className="hover:text-rose-600 dark:hover:text-rose-400">Protect PDF</Link></li>
-              <li><Link to="/rotate-pages" className="hover:text-rose-600 dark:hover:text-rose-400">Rotate PDF</Link></li>
+            <h4 className="font-bold mb-4 text-slate-900 dark:text-white text-sm">PDF Tools</h4>
+            <ul className="space-y-2.5 text-sm text-slate-500 dark:text-slate-400">
+              <li><Link to="/merge" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Merge PDF</Link></li>
+              <li><Link to="/split" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Split PDF</Link></li>
+              <li><Link to="/compress" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Compress PDF</Link></li>
+              <li><Link to="/edit" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Edit PDF</Link></li>
+              <li><Link to="/protect" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Protect PDF</Link></li>
+              <li><Link to="/rotate-pages" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Rotate PDF</Link></li>
             </ul>
           </div>
           <div>
-            <h4 className="font-bold mb-3 text-slate-900 dark:text-white">Convert</h4>
-            <ul className="space-y-2 text-sm text-slate-500 dark:text-slate-400">
-              <li><Link to="/pdf-to-word" className="hover:text-rose-600 dark:hover:text-rose-400">PDF to Word</Link></li>
-              <li><Link to="/pdf-to-excel" className="hover:text-rose-600 dark:hover:text-rose-400">PDF to Excel</Link></li>
-              <li><Link to="/pdf-to-jpg" className="hover:text-rose-600 dark:hover:text-rose-400">PDF to JPG</Link></li>
-              <li><Link to="/jpg-to-pdf" className="hover:text-rose-600 dark:hover:text-rose-400">JPG to PDF</Link></li>
-              <li><Link to="/pdf-to-images" className="hover:text-rose-600 dark:hover:text-rose-400">PDF to Images</Link></li>
+            <h4 className="font-bold mb-4 text-slate-900 dark:text-white text-sm">Convert</h4>
+            <ul className="space-y-2.5 text-sm text-slate-500 dark:text-slate-400">
+              <li><Link to="/pdf-to-word" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">PDF to Word</Link></li>
+              <li><Link to="/pdf-to-excel" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">PDF to Excel</Link></li>
+              <li><Link to="/pdf-to-jpg" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">PDF to JPG</Link></li>
+              <li><Link to="/jpg-to-pdf" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">JPG to PDF</Link></li>
+              <li><Link to="/pdf-to-images" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">PDF to Images</Link></li>
             </ul>
           </div>
           <div>
-            <h4 className="font-bold mb-3 text-slate-900 dark:text-white">Image Tools</h4>
-            <ul className="space-y-2 text-sm text-slate-500 dark:text-slate-400">
-              <li><Link to="/image-resizer" className="hover:text-rose-600 dark:hover:text-rose-400">Image Resizer</Link></li>
-              <li><Link to="/image-crop" className="hover:text-rose-600 dark:hover:text-rose-400">Image Cropper</Link></li>
-              <li><Link to="/image-converter" className="hover:text-rose-600 dark:hover:text-rose-400">Format Converter</Link></li>
-              <li><Link to="/remove-background" className="hover:text-rose-600 dark:hover:text-rose-400">Remove Background</Link></li>
-              <li><Link to="/color-extractor" className="hover:text-rose-600 dark:hover:text-rose-400">Color Extractor</Link></li>
+            <h4 className="font-bold mb-4 text-slate-900 dark:text-white text-sm">Image Tools</h4>
+            <ul className="space-y-2.5 text-sm text-slate-500 dark:text-slate-400">
+              <li><Link to="/image-resizer" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Image Resizer</Link></li>
+              <li><Link to="/image-crop" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Image Cropper</Link></li>
+              <li><Link to="/image-converter" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Format Converter</Link></li>
+              <li><Link to="/remove-background" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Remove Background</Link></li>
+              <li><Link to="/color-extractor" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Color Extractor</Link></li>
             </ul>
           </div>
           <div>
-            <h4 className="font-bold mb-3 text-slate-900 dark:text-white">More</h4>
-            <ul className="space-y-2 text-sm text-slate-500 dark:text-slate-400">
-              <li><Link to="/all-tools" className="hover:text-rose-600 dark:hover:text-rose-400">All Tools</Link></li>
-              <li><Link to="/redact" className="hover:text-rose-600 dark:hover:text-rose-400">PDF Redaction</Link></li>
-              <li><Link to="/stamp" className="hover:text-rose-600 dark:hover:text-rose-400">PDF Stamp</Link></li>
-              <li><Link to="/privacy" className="hover:text-rose-600 dark:hover:text-rose-400">Privacy</Link></li>
+            <h4 className="font-bold mb-4 text-slate-900 dark:text-white text-sm">Company</h4>
+            <ul className="space-y-2.5 text-sm text-slate-500 dark:text-slate-400">
+              <li><Link to="/all-tools" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">All Tools</Link></li>
+              <li><Link to="/pricing" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Pricing</Link></li>
+              <li><Link to="/about" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">About</Link></li>
+              <li><Link to="/contact" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Contact</Link></li>
+              <li><Link to="/privacy" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Privacy Policy</Link></li>
+              <li><Link to="/terms" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Terms of Service</Link></li>
             </ul>
           </div>
         </div>
 
-        {/* Web architect — compact strip, same visual weight as footer meta / Support */}
+        {/* Founder strip */}
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-10">
-          <div className="rounded-lg border border-slate-200/70 dark:border-slate-700/80 bg-gradient-to-br from-white/90 via-slate-50/80 to-slate-50/40 dark:from-slate-900/90 dark:via-slate-900/70 dark:to-slate-950/50 px-3.5 py-2.5 sm:px-4 sm:py-3 shadow-[0_1px_0_rgba(0,0,0,0.03)] dark:shadow-none">
-            <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-              <span className="text-[10px] font-bold tracking-[0.12em] text-rose-600/85 dark:text-rose-400/90 shrink-0">
-                Web architect
-              </span>
-              <span className="hidden sm:inline text-[10px] text-slate-300 dark:text-slate-600 select-none" aria-hidden>
-                ·
-              </span>
-              <p className="text-xs leading-snug text-slate-600 dark:text-slate-400 min-w-0">
-                <span className="font-semibold tracking-tight text-slate-800 dark:text-slate-200">
-                  Parmal Singh Gurjar
-                </span>
-                <span className="text-slate-400 dark:text-slate-500 font-normal"> — </span>
-                <span className="text-slate-500 dark:text-slate-400 font-normal">
-                  product, build &amp; tooling
-                </span>
-              </p>
+          <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/50 px-6 py-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div>
+              <span className="text-[10px] font-bold tracking-widest text-rose-600 dark:text-rose-400 uppercase">Founder & Developer</span>
+              <p className="text-sm font-bold text-slate-900 dark:text-white mt-0.5">Parmal Singh Gurjar</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Founded and developed by Parmal Singh Gurjar.</p>
             </div>
+            <a
+              href="mailto:parmalsingh26@gmail.com"
+              className="inline-flex items-center gap-2 text-sm font-semibold text-rose-600 dark:text-rose-400 hover:underline shrink-0"
+            >
+              parmalsingh26@gmail.com
+            </a>
           </div>
         </div>
 
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-6 pt-5 border-t border-slate-200 dark:border-slate-800 text-xs text-slate-400 dark:text-slate-500">
-          &copy; {new Date().getFullYear()} MediaSuite. All rights reserved.
+        {/* Bottom bar */}
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-8 pt-6 border-t border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-400 dark:text-slate-500">
+          <span>&copy; {new Date().getFullYear()} PDF Media Suite. All rights reserved.</span>
+          <div className="flex gap-5">
+            <Link to="/privacy" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Privacy Policy</Link>
+            <Link to="/terms" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Terms of Service</Link>
+            <Link to="/contact" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Contact</Link>
+          </div>
         </div>
       </footer>
     </div>
