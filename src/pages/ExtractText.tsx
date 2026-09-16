@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import { Download, FileText, FileType } from 'lucide-react';
+import { Download, FileText, FileType, Copy, Check } from 'lucide-react';
 import FileDropzone from '../components/FileDropzone';
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { usePageSEO } from '../lib/usePageSEO';
 import { extractTextRegions } from '../lib/advancedVisionEngine';
+import { useToast } from '../components/Toast';
 
 // Initialize pdf.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
@@ -14,6 +15,8 @@ export default function ExtractText() {
   const [file, setFile] = useState<File | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [extractedText, setExtractedText] = useState<string>('');
+  const [copied, setCopied] = useState(false);
+  const toast = useToast();
 
   const handleDrop = (acceptedFiles: File[]) => {
     if (acceptedFiles.length > 0) {
@@ -66,7 +69,7 @@ export default function ExtractText() {
       setExtractedText(fullText);
     } catch (error) {
       console.error("Error extracting text:", error);
-      alert("An error occurred while extracting text from the PDF.");
+      toast.error("An error occurred while extracting text from the PDF.");
     } finally {
       setIsProcessing(false);
     }
@@ -124,13 +127,25 @@ export default function ExtractText() {
             </div>
           ) : (
             <div className="space-y-6">
-              <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 h-96 overflow-y-auto">
-                <pre className="whitespace-pre-wrap font-sans text-gray-800 text-sm">
+              <div className="bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl p-4 h-96 overflow-y-auto">
+                <pre className="whitespace-pre-wrap font-sans text-gray-800 dark:text-slate-200 text-sm">
                   {extractedText}
                 </pre>
               </div>
               
-              <div className="flex gap-4">
+              <div className="flex gap-3 flex-wrap">
+                <button
+                  onClick={async () => {
+                    await navigator.clipboard.writeText(extractedText);
+                    setCopied(true);
+                    toast.success('Copied to clipboard!');
+                    setTimeout(() => setCopied(false), 2000);
+                  }}
+                  className="flex items-center gap-2 px-5 py-3 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 font-semibold rounded-xl hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+                >
+                  {copied ? <Check className="w-4 h-4 text-emerald-500" /> : <Copy className="w-4 h-4" />}
+                  {copied ? 'Copied!' : 'Copy to Clipboard'}
+                </button>
                 <button
                   onClick={downloadText}
                   className="flex-1 py-4 bg-green-600 text-white text-lg font-bold rounded-xl hover:bg-green-700 transition-colors shadow-md flex items-center justify-center gap-2"

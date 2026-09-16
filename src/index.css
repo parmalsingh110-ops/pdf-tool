@@ -1,2 +1,19 @@
 @custom-variant dark (&:where(.dark, .dark *));
 @import "tailwindcss";
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateX(110%) scale(0.95); }
+  to   { opacity: 1; transform: translateX(0)   scale(1); }
+}
+.animate-toast-in {
+  animation: toast-in 0.28s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+@keyframes search-in {
+  from { opacity: 0; transform: scale(0.96) translateY(-8px); }
+  to   { opacity: 1; transform: scale(1)    translateY(0); }
+}
+.animate-search-in {
+  animation: search-in 0.18s ease-out both;
+}
+

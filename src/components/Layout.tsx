@@ -31,11 +31,15 @@ import {
   Images,
   Menu,
   X,
+  Star,
+  Trash2,
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 import { readRecentTools, recordToolVisit, type RecentEntry } from '../lib/recentFiles';
+import { getFavorites, toggleFavorite, type FavoriteItem } from '../lib/favorites';
 import KeyboardShortcutsModal from './KeyboardShortcutsModal';
 import ErrorBoundary from './ErrorBoundary';
+import GlobalSearch from './GlobalSearch';
 
 const ROUTE_TITLES: Record<string, string> = {
   '/': 'Home',
@@ -197,7 +201,11 @@ export default function Layout() {
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [favOpen, setFavOpen] = useState(false);
+  const [favorites, setFavorites] = useState<FavoriteItem[]>([]);
   const recentRef = useRef<HTMLDivElement>(null);
+  const favRef = useRef<HTMLDivElement>(null);
 
   // Close mobile menu & dropdowns on route change
   useEffect(() => {
@@ -216,6 +224,7 @@ export default function Layout() {
     const onDoc = (e: MouseEvent) => {
       const t = e.target as Node;
       if (recentRef.current && !recentRef.current.contains(t)) setRecentOpen(false);
+      if (favRef.current && !favRef.current.contains(t)) setFavOpen(false);
     };
     document.addEventListener('click', onDoc);
     return () => document.removeEventListener('click', onDoc);
@@ -227,6 +236,11 @@ export default function Layout() {
     if (e.key === '?' || (e.key === '/' && e.shiftKey)) {
       e.preventDefault();
       setShortcutsOpen((o) => !o);
+    }
+    // Cmd+K or Ctrl+K → global search
+    if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+      e.preventDefault();
+      setSearchOpen((o) => !o);
     }
   }, []);
 
@@ -241,6 +255,7 @@ export default function Layout() {
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100 flex flex-col transition-colors">
       <KeyboardShortcutsModal open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
+      <GlobalSearch open={searchOpen} onClose={() => setSearchOpen(false)} />
 
       {/* ── HEADER ── */}
       <header className="fixed top-0 w-full z-50 bg-white/90 dark:bg-slate-900/90 backdrop-blur-xl border-b border-slate-200/60 dark:border-slate-700/80 shadow-sm">
@@ -321,6 +336,54 @@ export default function Layout() {
               )}
             </div>
 
+            {/* Favorites */}
+            <div className="relative hidden md:block" ref={favRef}>
+              <button
+                type="button"
+                title="Favorites (⭐)"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setFavorites(getFavorites());
+                  setFavOpen((o) => !o);
+                }}
+                className="p-2 rounded-full text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+              >
+                <Star className="w-4 h-4" />
+              </button>
+              {favOpen && (
+                <div className="absolute right-0 top-full mt-2 w-64 rounded-xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 shadow-xl py-2 z-[60]">
+                  <p className="px-3 pb-1 text-[10px] font-bold uppercase tracking-widest text-slate-400">Favorites</p>
+                  {favorites.length === 0 ? (
+                    <p className="px-3 py-3 text-xs text-slate-400">
+                      No favorites yet. Click ⭐ on any tool in All Tools.
+                    </p>
+                  ) : (
+                    favorites.map((f) => (
+                      <div key={f.path} className="flex items-center gap-2 px-3 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 group">
+                        <Link
+                          to={f.path}
+                          onClick={() => setFavOpen(false)}
+                          className="flex-1 text-sm text-slate-700 dark:text-slate-200 truncate"
+                        >
+                          {f.title}
+                        </Link>
+                        <button
+                          onClick={() => {
+                            toggleFavorite(f);
+                            setFavorites(getFavorites());
+                          }}
+                          className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-all"
+                          title="Remove from favorites"
+                        >
+                          <Trash2 className="w-3 h-3 text-rose-500" />
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+
             <button
               type="button"
               onClick={() => setShortcutsOpen(true)}
@@ -337,10 +400,11 @@ export default function Layout() {
             >
               {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
             </button>
+            {/* Search — opens Cmd+K modal */}
             <button
               type="button"
-              onClick={() => navigate('/all-tools')}
-              title="Search tools"
+              onClick={() => setSearchOpen(true)}
+              title="Search tools (⌘K)"
               className="p-2 rounded-full text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
             >
               <Search className="w-4 h-4" />

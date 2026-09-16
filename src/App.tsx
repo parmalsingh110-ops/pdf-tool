@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect } from 'react';
-
 import { Routes, Route } from 'react-router-dom';
+import { ToastProvider } from './components/Toast';
 import Layout from './components/Layout';
 import Home from './pages/Home';
 import MergePDF from './pages/MergePDF';
@@ -135,6 +135,7 @@ export default function App() {
   }, []);
 
   return (
+    <ToastProvider>
     <Suspense fallback={
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', background: '#0f172a' }}>
         <div style={{ width: 48, height: 48, border: '4px solid #334155', borderTopColor: '#6366f1', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
@@ -264,5 +265,6 @@ export default function App() {
       </Route>
     </Routes>
     </Suspense>
+    </ToastProvider>
   );
 }

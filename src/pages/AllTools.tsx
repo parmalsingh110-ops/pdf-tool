@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useCallback } from 'react';
 import { usePageSEO } from '../lib/usePageSEO';
 import { Link } from 'react-router-dom';
 import { 
@@ -9,10 +9,11 @@ import {
   ContactRound, LayoutGrid, QrCode, Pen, ScanLine, GitCompare, Palette, Crop,
   FormInput, BarChart3, BookOpen, Copy, RotateCw, ShieldOff, RefreshCw,
   MonitorSmartphone, Stamp, FileX, Images, Code, Presentation, Layers2,
-  Info, Zap, ScanSearch,
+  Info, Zap, ScanSearch, Star,
   // New icons for 13 new tools
   Shield, Wrench, Globe, FileCode2, Type, Accessibility, Volume2, Link as LinkIcon, BookMarked, Eraser,
 } from 'lucide-react';
+import { toggleFavorite, isFavorite } from '../lib/favorites';
 
 function categoryAnchor(title: string): string {
   if (title.includes('Currently Available')) return 'cat-available';
@@ -190,6 +191,14 @@ export default function AllTools() {
   );
   const [sortMode, setSortMode] = useState<'most-used' | 'newest' | 'a-z'>('most-used');
   const [query, setQuery] = useState('');
+  const [favTick, setFavTick] = useState(0); // force re-render on fav toggle
+
+  const handleToggleFav = useCallback((e: React.MouseEvent, path: string, title: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    toggleFavorite({ path, title });
+    setFavTick((n) => n + 1);
+  }, []);
 
   const quickSections = [
     { id: 'popular', label: 'Popular', icon: Sparkles },
@@ -209,16 +218,26 @@ export default function AllTools() {
         const q = query.toLowerCase();
         tools = tools.filter((t: any) => t.title.toLowerCase().includes(q));
       }
-
       if (sortMode === 'a-z') {
         tools.sort((a: any, b: any) => a.title.localeCompare(b.title));
       } else if (sortMode === 'newest') {
         tools = tools.reverse();
       }
-
       return { ...category, tools };
     });
-  }, [sortMode, query]);
+  }, [sortMode, query]); // favTick intentionally NOT in deps — fav state read on render
+
+  // Highlight matching text in search results
+  function hl(text: string): React.ReactNode {
+    if (!query.trim()) return text;
+    const regex = new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+    const parts = text.split(regex);
+    return parts.map((p, i) =>
+      regex.test(p) ? (
+        <mark key={i} className="bg-rose-100 dark:bg-rose-900/50 text-rose-700 dark:text-rose-300 rounded px-0.5">{p}</mark>
+      ) : p
+    );
+  }
 
   return (
     <div className="w-full min-h-screen bg-slate-50 dark:bg-slate-950">
@@ -307,15 +326,36 @@ export default function AllTools() {
                   {category.title}
                 </h2>
                 <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
-                  {category.tools.map((tool: any, idx) => {
+                  {category.tools.length === 0 ? (
+                    <div className="col-span-full py-10 text-center text-slate-400 dark:text-slate-500">
+                      <Search className="w-8 h-8 mx-auto mb-2 opacity-40" />
+                      <p className="text-sm">No tools found for "<span className="font-semibold text-slate-600 dark:text-slate-300">{query}</span>"</p>
+                    </div>
+                  ) : category.tools.map((tool: any, idx: number) => {
                     const isAvailable = !!tool.path;
+                    const faved = isAvailable && isFavorite(tool.path);
                     const cardContent = (
                       <>
-                        <div className={`w-10 h-10 rounded-xl ${tool.bg || 'bg-slate-100'} ${tool.color || 'text-slate-400'} flex items-center justify-center mb-3`}>
-                          <tool.icon className="w-5 h-5" />
+                        <div className="flex items-start justify-between mb-3">
+                          <div className={`w-10 h-10 rounded-xl ${tool.bg || 'bg-slate-100'} ${tool.color || 'text-slate-400'} flex items-center justify-center`}>
+                            <tool.icon className="w-5 h-5" />
+                          </div>
+                          {isAvailable && (
+                            <button
+                              onClick={(e) => handleToggleFav(e, tool.path, tool.title)}
+                              title={faved ? 'Remove from favorites' : 'Add to favorites'}
+                              className={`p-1 rounded-lg transition-colors ${
+                                faved
+                                  ? 'text-amber-400 hover:text-amber-500'
+                                  : 'text-slate-300 dark:text-slate-600 hover:text-amber-400'
+                              }`}
+                            >
+                              <Star className="w-3.5 h-3.5" fill={faved ? 'currentColor' : 'none'} />
+                            </button>
+                          )}
                         </div>
                         <h3 className={`font-semibold text-sm ${isAvailable ? 'text-slate-900 dark:text-slate-100 group-hover:text-rose-600 dark:group-hover:text-rose-400' : 'text-slate-500 dark:text-slate-500'}`}>
-                          {tool.title}
+                          {hl(tool.title)}
                         </h3>
                         {!isAvailable && (
                           <span className="inline-block mt-2 text-[10px] uppercase tracking-wider font-bold text-violet-700 dark:text-violet-300 bg-violet-50 dark:bg-violet-950/60 border border-violet-200 dark:border-violet-800 px-2 py-1 rounded-md">

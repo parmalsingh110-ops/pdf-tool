@@ -5,6 +5,7 @@ import { PDFDocument } from 'pdf-lib';
 import '../lib/pdfWorker';
 import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
+import { useToast } from '../components/Toast';
 
 export default function RemoveBlankPages() {
   usePageSEO('Remove Blank Pages from PDF', 'Auto-detect and remove blank pages from scanned PDFs. Free online blank page remover.');
@@ -13,6 +14,7 @@ export default function RemoveBlankPages() {
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [stats, setStats] = useState<{ total: number; blank: number } | null>(null);
   const [threshold, setThreshold] = useState(99);
+  const toast = useToast();
 
   const handleDrop = (files: File[]) => {
     if (files[0]) { setFile(files[0]); setResultUrl(null); setStats(null); }
@@ -51,7 +53,7 @@ export default function RemoveBlankPages() {
       const blankCount = pdf.numPages - keepIndices.length;
       if (keepIndices.length === 0) {
         setStats({ total: pdf.numPages, blank: blankCount });
-        alert('All pages appear blank! No output generated.');
+        toast.info('All pages appear blank! No output generated.');
         setBusy(false);
         return;
       }
@@ -63,7 +65,7 @@ export default function RemoveBlankPages() {
       const bytes = await newDoc.save();
       setResultUrl(URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' })));
       setStats({ total: pdf.numPages, blank: blankCount });
-    } catch (e: any) { alert(e?.message || 'Failed'); }
+    } catch (e: any) { toast.error(e?.message || 'Failed to process PDF'); }
     finally { setBusy(false); }
   };
 
