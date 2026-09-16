@@ -2542,19 +2542,21 @@ async def edit_pdf_endpoint(request: Request, file: UploadFile = File(...), edit
             h   = float(action["h"])
             new_text = action.get("newText", "")
 
-            # Redact: add small padding around box to fully cover existing text
-            rect = fitz.Rect(x - 2, y - 2, x + w + 2, y + h + 2)
+            # Redact: use exact bounding box (no padding) to prevent deleting adjacent words
+            rect = fitz.Rect(x, y, x + w, y + h)
             
             # Smart Background Reconstruction
             has_native_text = False
-            for b in page.get_text("blocks", clip=rect):
-                if b[6] == 0 and b[4].strip():
-                    has_native_text = True
-                    break
-                    
+            # Look for words strictly inside our replacement box (intersecting)
+            words = page.get_text("words", clip=rect)
+            if len(words) > 0:
+                has_native_text = True
+                
             if has_native_text:
-                # Native PDF: remove text objects, preserve images underneath
-                page.add_redact_annot(rect, cross_out=False)
+                # Native PDF: remove exact intersecting text objects
+                # Using a slightly expanded rect ONLY for the visual redaction annot, not the logic
+                annot_rect = fitz.Rect(x - 0.5, y - 0.5, x + w + 0.5, y + h + 0.5)
+                page.add_redact_annot(annot_rect, cross_out=False)
                 page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE)
             else:
                 # Scanned PDF: sample edge pixels to get dominant background color

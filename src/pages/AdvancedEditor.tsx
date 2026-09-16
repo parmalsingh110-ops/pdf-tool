@@ -910,6 +910,16 @@ export default function AdvancedEditor() {
 
     setIsProcessing(true);
     try {
+      // ── FAST PATH: No edits at all — download original file unchanged ──────
+      // pdf-lib load+save can slightly restructure PDF text streams, causing
+      // subtle layout shifts. If there's nothing to apply, skip entirely.
+      if (annotations.length === 0) {
+        const originalBuffer = await file.arrayBuffer();
+        const blob = new Blob([originalBuffer], { type: 'application/pdf' });
+        setEditedUrl(URL.createObjectURL(blob));
+        return;
+      }
+
       // Helper: check if text contains non-ASCII / non-WinAnsi characters (Hindi, Devanagari, etc.)
       const hasNonLatinChars = (text: string) => {
         for (let i = 0; i < text.length; i++) {
