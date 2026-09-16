@@ -2587,8 +2587,7 @@ async def edit_pdf_endpoint(request: Request, file: UploadFile = File(...), edit
 
             fg_color  = hex_to_rgb(action.get("color", "#000000"))
             orig_size = float(action.get("fontSize", 12))
-            if orig_size < 4:
-                orig_size = 12
+            # DO NOT clamp orig_size to 12. Some PDFs use scaled coordinate systems where 1.5 is a normal font size.
             is_bold   = bool(action.get("bold"))
             is_italic = bool(action.get("italic"))
 
@@ -2627,9 +2626,10 @@ async def edit_pdf_endpoint(request: Request, file: UploadFile = File(...), edit
             
             rc = -1
             final_size = orig_size
+            min_size = max(0.5, orig_size * 0.3)
             
             # Try to fit the text box, reducing font size if it doesn't fit
-            while final_size >= 4:
+            while final_size >= min_size:
                 rc = page.insert_textbox(
                     text_rect,
                     new_text,
@@ -2640,7 +2640,7 @@ async def edit_pdf_endpoint(request: Request, file: UploadFile = File(...), edit
                 )
                 if rc >= 0:
                     break
-                final_size -= 0.5
+                final_size -= max(0.2, orig_size * 0.05)
                 
             # If it still didn't fit, force it at the minimum size
             if rc < 0:
