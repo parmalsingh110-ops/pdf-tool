@@ -142,7 +142,7 @@ function NavDropdown({
   };
 
   const handleLeave = () => {
-    timerRef.current = setTimeout(() => onClose(), 120);
+    timerRef.current = setTimeout(() => onClose(), 250);
   };
 
   return (
@@ -166,7 +166,7 @@ function NavDropdown({
       </button>
 
       {isOpen && (
-        <div className="absolute left-0 top-[calc(100%+4px)] z-[60]">
+        <div className="absolute left-0 top-full pt-1 z-[60]">
           <div className="w-64 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-2xl py-2 overflow-hidden">
             {group.items.map((item) => (
               <Link

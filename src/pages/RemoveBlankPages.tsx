@@ -22,8 +22,8 @@ export default function RemoveBlankPages() {
     if (!file) return;
     setBusy(true);
     try {
-      const buf = await file.arrayBuffer();
-      const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buf) }).promise;
+      const pdfBuf = await file.arrayBuffer();
+      const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(pdfBuf) }).promise;
       const keepIndices: number[] = [];
 
       for (let i = 1; i <= pdf.numPages; i++) {
@@ -56,7 +56,7 @@ export default function RemoveBlankPages() {
         return;
       }
 
-      const srcDoc = await PDFDocument.load(buf);
+      const srcDoc = await PDFDocument.load(await file.arrayBuffer());
       const newDoc = await PDFDocument.create();
       const copied = await newDoc.copyPages(srcDoc, keepIndices);
       copied.forEach(p => newDoc.addPage(p));
