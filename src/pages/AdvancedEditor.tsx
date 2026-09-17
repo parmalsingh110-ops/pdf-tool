@@ -78,6 +78,8 @@ interface Annotation {
   sourceHeight?: number;
   /** Original font name from backend layout analysis */
   originalFontName?: string;
+  /** CSS font-family stack derived from original PDF font (for live preview) */
+  fontCssFamily?: string;
 }
 
 /** Span info returned by /analyze/text-layout (PyMuPDF backend) */
@@ -210,9 +212,7 @@ export default function AdvancedEditor() {
   const [inlineEdit, setInlineEdit] = useState<InlineEditState>({ active: false, block: null, text: '' });
   const inlineEditRef = useRef<HTMLTextAreaElement>(null);
 
-  // === NEW: Underline/Strikethrough defaults ===
-  const [defaultUnderline, setDefaultUnderline] = useState(false);
-  const [defaultStrikethrough, setDefaultStrikethrough] = useState(false);
+  // Underline/Strikethrough tool active state is tracked via activeTool, no separate defaults needed
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
@@ -1019,6 +1019,55 @@ export default function AdvancedEditor() {
     } : { r: 0, g: 0, b: 0 };
   };
 
+  /**
+   * Map a PDF/PyMuPDF font name to a CSS font-family stack.
+   * This gives a visually accurate live preview of the original font
+   * while editing (exact embedding happens in the saved PDF via pdf-lib).
+   */
+  const pdfFontToCss = (fontName: string | undefined): string => {
+    if (!fontName) return 'Helvetica, Arial, sans-serif';
+    const f = fontName.toLowerCase();
+
+    // Serif / Times family
+    if (f.includes('times') || f.includes('timesnew') || f.includes('palatino') ||
+        f.includes('garamond') || f.includes('georgia') || f.includes('bookman') ||
+        f.includes('minion') || f.includes('caslon') || f.includes('didot') ||
+        f.includes('bodoni') || f.includes('cambria') || f.includes('constantia')) {
+      return '"Times New Roman", Times, Georgia, serif';
+    }
+
+    // Monospace / Courier family
+    if (f.includes('courier') || f.includes('mono') || f.includes('consolas') ||
+        f.includes('inconsolata') || f.includes('sourcecodepro') || f.includes('jetbrains') ||
+        f.includes('menlo') || f.includes('lucidaconsole') || f.includes('anonymous')) {
+      return '"Courier New", Courier, "Lucida Console", monospace';
+    }
+
+    // Devanagari / Hindi fonts
+    if (f.includes('devanagari') || f.includes('noto') && f.includes('sans') ||
+        f.includes('mangal') || f.includes('kokila') || f.includes('utsaah') ||
+        f.includes('aparajita') || f.includes('shree') || f.includes('kruti')) {
+      return '"Noto Sans Devanagari", "Mangal", "Kokila", serif';
+    }
+
+    // Script / handwriting
+    if (f.includes('script') || f.includes('brush') || f.includes('handwriting') ||
+        f.includes('cursive') || f.includes('zapfino') || f.includes('comic') ||
+        f.includes('pacifico') || f.includes('sacramento')) {
+      return '"Comic Sans MS", cursive';
+    }
+
+    // Display / decorative
+    if (f.includes('impact') || f.includes('compres') || f.includes('condensed') ||
+        f.includes('narrow')) {
+      return 'Impact, "Arial Narrow", sans-serif';
+    }
+
+    // Helvetica / Arial / sans-serif (default catch-all)
+    // Includes: Arial, Helvetica, Calibri, Trebuchet, Verdana, Tahoma, Gill Sans, Franklin, Futura
+    return 'Helvetica, Arial, Calibri, sans-serif';
+  };
+
   const toggleBoldForText = () => {
     if (selectedTextAnn) {
       updateAnnotation(selectedTextAnn.id, { bold: !selectedTextAnn.bold });
@@ -1610,6 +1659,7 @@ export default function AdvancedEditor() {
         sourceWidth: bw,
         sourceHeight: bh,
         originalFontName: span?.fontName,
+        fontCssFamily: pdfFontToCss(span?.fontName),
       };
       setAnnotations(prev => [...prev, textAnn]);
       setSelectedId(textAnn.id);
@@ -1971,9 +2021,11 @@ export default function AdvancedEditor() {
                             color: ann.color || '#000000',
                             fontWeight: ann.bold ? 700 : 400,
                             fontStyle: ann.italic ? 'italic' : 'normal',
+                            textDecoration: [ann.underline && 'underline', ann.strikethrough && 'line-through'].filter(Boolean).join(' ') || 'none',
                             lineHeight: 1.3,
                             whiteSpace: 'pre-wrap',
-                            fontFamily: 'Helvetica, Arial, sans-serif',
+                            // Use detected CSS font family for live WYSIWYG preview
+                            fontFamily: ann.fontCssFamily || pdfFontToCss(ann.originalFontName),
                             padding: 0,
                             margin: 0,
                             overflow: 'hidden'
@@ -2163,6 +2215,7 @@ export default function AdvancedEditor() {
                                 sourceWidth: bw,
                                 sourceHeight: bh,
                                 originalFontName: span?.fontName,
+                                fontCssFamily: pdfFontToCss(span?.fontName),
                               };
                               setAnnotations(prev => [...prev, textAnn]);
                               setSelectedId(textAnn.id);
@@ -2268,12 +2321,14 @@ export default function AdvancedEditor() {
                           onBlur={() => commitInlineEdit()}
                           style={{
                             width: '100%',
-                            minHeight: block.h,
-                            fontSize: `${fs}px`,
+                            // Use exact span height from backend (converted to canvas px via scale)
+                            minHeight: span ? (span.h * (pageViewport?.scale ?? 1)) : block.h,
+                            fontSize: `${fs * (pageViewport?.scale ?? 1)}px`,
                             color: fgColor,
                             fontWeight: isBold ? 700 : 400,
                             fontStyle: isItalic ? 'italic' : 'normal',
-                            fontFamily: 'Helvetica, Arial, sans-serif',
+                            // Use CSS font-family mapped from original PDF font name
+                            fontFamily: pdfFontToCss(span?.fontName),
                             lineHeight: 1.3,
                             background: 'transparent',
                             border: 'none',
