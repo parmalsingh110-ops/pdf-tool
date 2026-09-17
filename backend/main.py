@@ -2670,6 +2670,192 @@ async def edit_pdf_endpoint(request: Request, file: UploadFile = File(...), edit
         raise safe_error(e, "edit-pdf")
 
 
+# ─── 8b. Text Layout Analyzer ─────────────────────────────────
+# Returns rich span-level text info for the Advanced Editor frontend.
+# Uses fitz get_text("dict") which gives per-span: font, size, color, bold/italic, bbox.
+# This is much richer than what pdfjs textContent provides.
+
+@app.post("/analyze/text-layout")
+@limiter.limit("30/minute")
+async def analyze_text_layout(
+    request: Request,
+    file: UploadFile = File(...),
+    page: int = Form(0)
+):
+    """
+    Analyze a single page of a PDF and return span-level text layout info.
+    Returns a JSON list of text spans with font, size, color, bold, italic, bbox.
+    Used by the Advanced Editor frontend to accurately detect and replace text.
+    """
+    import fitz
+    inp = temp_path(".pdf")
+    try:
+        inp.write_bytes(await safe_read_upload(file))
+        doc = fitz.open(str(inp))
+
+        if page < 0 or page >= len(doc):
+            raise HTTPException(400, f"Page index {page} is out of range (0 to {len(doc)-1}).")
+
+        pg = doc[page]
+        page_height = pg.rect.height
+        page_width = pg.rect.width
+
+        # get_text("dict") returns blocks > lines > spans
+        # Each span has: text, font, size, color (int RGB), bbox, flags (bold/italic)
+        blocks_data = pg.get_text("dict", flags=fitz.TEXT_PRESERVE_WHITESPACE)
+
+        spans_out = []
+        for block in blocks_data.get("blocks", []):
+            if block.get("type") != 0:  # 0 = text, 1 = image
+                continue
+            for line in block.get("lines", []):
+                for span in line.get("spans", []):
+                    text = span.get("text", "").strip()
+                    if not text:
+                        continue
+
+                    bbox = span.get("bbox", [0, 0, 0, 0])  # (x0, y0, x1, y1) in PDF points (top-left origin in fitz)
+                    x0, y0, x1, y1 = bbox
+                    w = x1 - x0
+                    h = y1 - y0
+
+                    if w <= 0 or h <= 0:
+                        continue
+
+                    font_name: str = span.get("font", "")
+                    font_size: float = round(span.get("size", 12), 2)
+
+                    # flags bit 4 = bold, bit 1 = italic (fitz PDF flags)
+                    flags = span.get("flags", 0)
+                    is_bold = bool(flags & (1 << 4))  # bold = bit 4 (16)
+                    is_italic = bool(flags & (1 << 1))  # italic = bit 1 (2)
+                    is_mono = bool(flags & (1 << 3))    # monospace = bit 3
+
+                    # Also detect from font name (some PDFs don't set flags)
+                    fname_lower = font_name.lower()
+                    if not is_bold:
+                        is_bold = "bold" in fname_lower or "heavy" in fname_lower or "black" in fname_lower
+                    if not is_italic:
+                        is_italic = "italic" in fname_lower or "oblique" in fname_lower or "slant" in fname_lower
+
+                    # Color: fitz returns as integer 0xRRGGBB or -1 for default
+                    raw_color = span.get("color", 0)
+                    if raw_color is None or raw_color < 0:
+                        raw_color = 0  # black
+                    r_comp = (raw_color >> 16) & 0xFF
+                    g_comp = (raw_color >> 8) & 0xFF
+                    b_comp = raw_color & 0xFF
+                    color_hex = f"#{r_comp:02x}{g_comp:02x}{b_comp:02x}"
+
+                    # Determine a "clean" font family name for display
+                    # Strip common prefixes like "ABCDEF+FontName" (PDF embedded subset notation)
+                    clean_font = font_name
+                    if "+" in clean_font:
+                        clean_font = clean_font.split("+", 1)[-1]
+
+                    spans_out.append({
+                        "text": text,
+                        "x": round(x0, 2),
+                        "y": round(y0, 2),          # top-left y from top of page (fitz convention)
+                        "w": round(w, 2),
+                        "h": round(h, 2),
+                        "fontSize": font_size,
+                        "fontName": clean_font,
+                        "fontNameRaw": font_name,
+                        "bold": is_bold,
+                        "italic": is_italic,
+                        "mono": is_mono,
+                        "color": color_hex,
+                    })
+
+        doc.close()
+
+        return JSONResponse({
+            "page": page,
+            "pageWidth": round(page_width, 2),
+            "pageHeight": round(page_height, 2),
+            "spans": spans_out,
+        })
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise safe_error(e, "analyze/text-layout")
+    finally:
+        cleanup(inp)
+
+
+# ─── 8c. Image Replacement ─────────────────────────────────────
+# Replace an existing image in a PDF page with a new image.
+# Uses PyMuPDF page.replace_image() for accurate in-place replacement.
+
+@app.post("/edit-pdf/replace-image")
+@limiter.limit("15/minute")
+async def replace_pdf_image(
+    request: Request,
+    file: UploadFile = File(...),
+    image: UploadFile = File(...),
+    page: int = Form(0),
+    xref: int = Form(-1),  # -1 = auto-select first image on page
+):
+    """
+    Replace an existing image in a PDF with a new uploaded image.
+    xref: the PDF object reference number of the image to replace.
+          If -1, the first image found on the page is replaced.
+    """
+    import fitz
+    inp = temp_path(".pdf")
+    out = temp_path(".pdf")
+    img_path = temp_path(".png")
+    try:
+        inp.write_bytes(await safe_read_upload(file))
+        img_bytes = await safe_read_upload(image)
+        img_path.write_bytes(img_bytes)
+
+        check_pdf_page_count(inp, "edit-pdf/replace-image")
+
+        doc = fitz.open(str(inp))
+        if page < 0 or page >= len(doc):
+            raise HTTPException(400, f"Page index {page} out of range.")
+
+        pg = doc[page]
+        image_list = pg.get_images(full=True)
+
+        if not image_list:
+            raise HTTPException(404, "No images found on the specified page.")
+
+        # Find target xref
+        target_xref = xref
+        if target_xref <= 0:
+            # Auto-select the largest image on the page
+            best = max(image_list, key=lambda img: img[2] * img[3])  # sort by w*h
+            target_xref = best[0]
+
+        # Validate xref exists in image list
+        valid_xrefs = {img[0] for img in image_list}
+        if target_xref not in valid_xrefs:
+            raise HTTPException(404, f"Image xref {target_xref} not found on page {page}.")
+
+        # Replace the image
+        doc.replace_image(target_xref, filename=str(img_path))
+
+        doc.save(str(out), garbage=3, deflate=True)
+        doc.close()
+
+        stem = safe_filename(file.filename, "document")
+        out_name = "img_replaced_" + stem
+        return FileResponse(
+            str(out), media_type="application/pdf",
+            filename=out_name,
+            background=BackgroundTask(cleanup, inp, out, img_path)
+        )
+    except HTTPException:
+        cleanup(inp, out, img_path)
+        raise
+    except Exception as e:
+        cleanup(inp, out, img_path)
+        raise safe_error(e, "edit-pdf/replace-image")
+
+
 # ─── 9. CMYK Color Converter ───────────────────────────────────
 # Converts RGB PDF to CMYK color space for professional printing.
 # Uses Ghostscript (already required for compress-pdf).

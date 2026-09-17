@@ -17,6 +17,8 @@ import {
   Table,
   Bold,
   Italic,
+  Underline,
+  Strikethrough,
   ZoomIn,
   ZoomOut,
   Undo2,
@@ -27,6 +29,9 @@ import {
   ScanText,
   ImagePlus,
   Eraser,
+  Type as TypeIcon,
+  SquarePen,
+  Layers,
 } from 'lucide-react';
 import SignatureCanvas from 'react-signature-canvas';
 import FileDropzone from '../components/FileDropzone';
@@ -34,7 +39,7 @@ import FileDropzone from '../components/FileDropzone';
 // Initialize pdf.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
-type Tool = 'select' | 'text' | 'whiteout' | 'highlight' | 'signature' | 'link' | 'table' | 'freehand' | 'image' | 'eraser' | null;
+type Tool = 'select' | 'text' | 'whiteout' | 'highlight' | 'signature' | 'link' | 'table' | 'freehand' | 'image' | 'eraser' | 'underline' | 'strikethrough' | null;
 
 interface Annotation {
   id: string;
@@ -50,6 +55,8 @@ interface Annotation {
   /** PDF output uses Standard Helvetica variants (embedded). */
   bold?: boolean;
   italic?: boolean;
+  underline?: boolean;
+  strikethrough?: boolean;
   rows?: number;
   cols?: number;
   tableData?: string[][];
@@ -69,6 +76,39 @@ interface Annotation {
   /** Keep original OCR line metrics for smart resizing */
   sourceWidth?: number;
   sourceHeight?: number;
+  /** Original font name from backend layout analysis */
+  originalFontName?: string;
+}
+
+/** Span info returned by /analyze/text-layout (PyMuPDF backend) */
+interface BackendSpan {
+  text: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  fontSize: number;
+  fontName: string;
+  fontNameRaw: string;
+  bold: boolean;
+  italic: boolean;
+  mono: boolean;
+  color: string;
+}
+
+/** Context menu state */
+interface ContextMenuState {
+  visible: boolean;
+  x: number;   // screen px
+  y: number;   // screen px
+  block: DetectedTextBlock | null;
+}
+
+/** Inline edit state — double-click to edit existing text in-place */
+interface InlineEditState {
+  active: boolean;
+  block: DetectedTextBlock | null;
+  text: string;
 }
 
 interface DetectedTextBlock {
@@ -116,41 +156,41 @@ export default function AdvancedEditor() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [editedUrl, setEditedUrl] = useState<string | null>(null);
 
-  // === NEW: Zoom ===
+  // === Zoom ===
   const [zoomLevel, setZoomLevel] = useState(1.5);
 
-  // === NEW: Undo/Redo ===
+  // === Undo/Redo ===
   const [undoStack, setUndoStack] = useState<Annotation[][]>([]);
   const [redoStack, setRedoStack] = useState<Annotation[][]>([]);
 
-  // === NEW: Select granularity (word / line / paragraph) ===
+  // === Select granularity (word / line / paragraph) ===
   const [selectionGranularity, setSelectionGranularity] = useState<'word' | 'line' | 'paragraph'>('word');
 
-  // === NEW: Drag move ===
+  // === Drag move ===
   const [isDragging, setIsDragging] = useState(false);
   const [dragTarget, setDragTarget] = useState<string | null>(null);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
 
-  // === NEW: Freehand ===
+  // === Freehand ===
   const [freehandPoints, setFreehandPoints] = useState<{ x: number, y: number }[]>([]);
   const [freehandColor, setFreehandColor] = useState('#000000');
   const [freehandWidth, setFreehandWidth] = useState(2);
 
-  // === NEW: Signature color ===
+  // === Signature color ===
   const [signatureColor, setSignatureColor] = useState('#000000');
 
-  // === NEW: Eraser ===
+  // === Eraser ===
   const [eraserSize, setEraserSize] = useState(20);
   const [eraserPos, setEraserPos] = useState<{ x: number, y: number } | null>(null);
 
-  // === NEW: Resize for image/signature annotations ===
+  // === Resize for image/signature annotations ===
   const resizeAnnRef = useRef<{ id: string; handle: string; startX: number; startY: number; startAnnX: number; startAnnY: number; startW: number; startH: number } | null>(null);
 
   // === Eraser drag state ===
   const isErasingRef = useRef(false);
   const lastErasedRef = useRef<Set<string>>(new Set());
 
-  // === NEW: OCR for scanned PDFs ===
+  // === OCR for scanned PDFs ===
   const [ocrBusy, setOcrBusy] = useState(false);
   const [ocrDone, setOcrDone] = useState(false);
   const [isScannedPdf, setIsScannedPdf] = useState(false);
@@ -158,6 +198,21 @@ export default function AdvancedEditor() {
 
   // === Signature pen width ===
   const [signaturePenWidth, setSignaturePenWidth] = useState(2);
+
+  // === NEW: Backend text layout (accurate font/color data from PyMuPDF) ===
+  const [backendSpans, setBackendSpans] = useState<BackendSpan[]>([]);
+  const [layoutFetching, setLayoutFetching] = useState(false);
+
+  // === NEW: Right-click context menu ===
+  const [contextMenu, setContextMenu] = useState<ContextMenuState>({ visible: false, x: 0, y: 0, block: null });
+
+  // === NEW: Double-click inline edit ===
+  const [inlineEdit, setInlineEdit] = useState<InlineEditState>({ active: false, block: null, text: '' });
+  const inlineEditRef = useRef<HTMLTextAreaElement>(null);
+
+  // === NEW: Underline/Strikethrough defaults ===
+  const [defaultUnderline, setDefaultUnderline] = useState(false);
+  const [defaultStrikethrough, setDefaultStrikethrough] = useState(false);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
@@ -274,9 +329,56 @@ export default function AdvancedEditor() {
   useEffect(() => {
     if (pdfDoc) {
       renderPage(currentPage);
+      // Fetch accurate backend text layout after rendering
+      if (file) {
+        fetchTextLayout(file, currentPage - 1);
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pdfDoc, currentPage, zoomLevel]);
+
+  // === Fetch accurate text layout from backend (PyMuPDF) ===
+  const fetchTextLayout = async (pdfFile: File, pageIndex: number) => {
+    setLayoutFetching(true);
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+      const formData = new FormData();
+      formData.append('file', pdfFile);
+      formData.append('page', String(pageIndex));
+      const res = await fetch(`${API_BASE_URL}/analyze/text-layout`, {
+        method: 'POST',
+        body: formData,
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setBackendSpans(data.spans || []);
+      }
+    } catch (e) {
+      // Silently ignore — pdfjs text detection is the fallback
+      console.warn('[AdvancedEditor] Backend text layout fetch failed:', e);
+    } finally {
+      setLayoutFetching(false);
+    }
+  };
+
+  // === Helper: find backend span matching a detected text block ===
+  const findBackendSpan = (block: DetectedTextBlock): BackendSpan | null => {
+    if (!backendSpans.length || !pageViewport) return null;
+    const scale = pageViewport.scale;
+    // Convert block coords (canvas px) to PDF points
+    const bx = block.x / scale;
+    const by = block.y / scale;
+    const bw = block.w / scale;
+    // Find best matching span by text content + approximate position
+    const matches = backendSpans.filter(s => {
+      const textMatch = s.text.trim() === block.text.trim() ||
+        block.text.trim().includes(s.text.trim()) ||
+        s.text.trim().includes(block.text.trim());
+      const posMatch = Math.abs(s.x - bx) < bw * 0.5 && Math.abs(s.y - by) < 20;
+      return textMatch && posMatch;
+    });
+    return matches.length > 0 ? matches[0] : null;
+  };
 
   const renderPage = async (pageNum: number) => {
     if (!pdfDoc || !canvasRef.current) return;
@@ -604,7 +706,7 @@ export default function AdvancedEditor() {
       lastErasedRef.current = new Set();
       pushUndo();
       eraseAtPoint(x, y);
-    } else if (['highlight', 'link', 'table'].includes(activeTool!)) {
+    } else if (['highlight', 'link', 'table', 'underline', 'strikethrough'].includes(activeTool!)) {
       setIsDrawing(true);
       setStartPos({ x, y });
       setCurrentRect({ x, y, w: 0, h: 0 });
@@ -731,6 +833,34 @@ export default function AdvancedEditor() {
           rows: 3,
           cols: 3,
           tableData: [['', '', ''], ['', '', ''], ['', '', '']]
+        };
+        setAnnotations(prev => [...prev, newAnnotation]);
+        setSelectedId(newAnnotation.id);
+      } else if (activeTool === 'underline') {
+        // Underline: thin rect at bottom edge of drawn area
+        const newAnnotation: Annotation = {
+          id: Date.now().toString(),
+          type: 'underline',
+          pageIndex: currentPage - 1,
+          x: currentRect.x,
+          y: currentRect.y + currentRect.h - 2,
+          width: currentRect.w,
+          height: 3,
+          color: textColor,
+        };
+        setAnnotations(prev => [...prev, newAnnotation]);
+        setSelectedId(newAnnotation.id);
+      } else if (activeTool === 'strikethrough') {
+        // Strikethrough: thin rect at middle of drawn area
+        const newAnnotation: Annotation = {
+          id: Date.now().toString(),
+          type: 'strikethrough',
+          pageIndex: currentPage - 1,
+          x: currentRect.x,
+          y: currentRect.y + currentRect.h / 2 - 1,
+          width: currentRect.w,
+          height: 2,
+          color: textColor,
         };
         setAnnotations(prev => [...prev, newAnnotation]);
         setSelectedId(newAnnotation.id);
@@ -1215,6 +1345,24 @@ export default function AdvancedEditor() {
             color: rgb(1, 1, 0),
             opacity: 0.4,
           });
+        } else if (ann.type === 'underline') {
+          const { r, g, b } = hexToRgb(ann.color || '#000000');
+          page.drawRectangle({
+            x: pdfX,
+            y: pdfY - pdfH,
+            width: pdfW,
+            height: Math.max(0.5, pdfH),
+            color: rgb(r, g, b),
+          });
+        } else if (ann.type === 'strikethrough') {
+          const { r, g, b } = hexToRgb(ann.color || '#000000');
+          page.drawRectangle({
+            x: pdfX,
+            y: pdfY - pdfH,
+            width: pdfW,
+            height: Math.max(0.5, pdfH),
+            color: rgb(r, g, b),
+          });
         } else if (ann.type === 'signature' && ann.signatureDataUrl) {
           // Use direct base64 decode to avoid CSP blocking fetch() on data: URLs
           const imgBytes = dataUrlToArrayBuffer(ann.signatureDataUrl);
@@ -1432,6 +1580,46 @@ export default function AdvancedEditor() {
     </button>
   );
 
+  // Helper: commit inline edit as annotation
+  const commitInlineEdit = useCallback(() => {
+    if (!inlineEdit.active || !inlineEdit.block) return;
+    const block = inlineEdit.block;
+    const newText = inlineEdit.text.trim();
+    if (newText && newText !== block.text.trim()) {
+      pushUndo();
+      const span = findBackendSpan(block);
+      const fs = Math.max(6, Math.min(span?.fontSize ?? block.fontSize, block.h - 1, 120));
+      const bw = Math.min(Math.max(block.w, 20), 800);
+      const bh = Math.max(block.h, fs + 2);
+      const id = Date.now().toString() + '_ie';
+      const textAnn: Annotation = {
+        id,
+        type: 'text',
+        pageIndex: currentPage - 1,
+        x: block.x,
+        y: block.y,
+        width: bw,
+        height: bh,
+        text: newText,
+        fontSize: fs,
+        color: span?.color || block.fgColor || '#000000',
+        backgroundColor: block.bgColor || '#ffffff',
+        bold: span?.bold ?? block.bold ?? false,
+        italic: span?.italic ?? block.italic ?? false,
+        lockPosition: false,
+        sourceWidth: bw,
+        sourceHeight: bh,
+        originalFontName: span?.fontName,
+      };
+      setAnnotations(prev => [...prev, textAnn]);
+      setSelectedId(textAnn.id);
+    }
+    setInlineEdit({ active: false, block: null, text: '' });
+  }, [inlineEdit, currentPage, pushUndo, findBackendSpan]);
+
+  // Helper: pages that have annotations (for multi-page indicators)
+  const pagesWithEdits = new Set(annotations.map(a => a.pageIndex + 1));
+
   return (
     <div className="flex-1 flex flex-col bg-gray-100">
       {!file ? (
@@ -1449,7 +1637,7 @@ export default function AdvancedEditor() {
           {/* Toolbar */}
           <div className="bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between shadow-sm z-10 flex-wrap gap-2">
             <div className="flex items-center gap-1 flex-wrap">
-              {toolButton('select', <MousePointer2 className="w-5 h-5" />, 'Select', 'Select & Edit Existing Text (click on text in the PDF)')}
+              {toolButton('select', <MousePointer2 className="w-5 h-5" />, 'Select', 'Select & Edit Existing Text (click on text, double-click to edit inline)')}
               {/* Granularity toggle — only visible when Select is active */}
               {activeTool === 'select' && (
                 <div className="flex items-center gap-0.5 ml-1 bg-indigo-50 rounded-lg p-0.5 border border-indigo-200">
@@ -1495,6 +1683,10 @@ export default function AdvancedEditor() {
               >
                 <Italic className="w-5 h-5" />
               </button>
+              {/* NEW: Underline tool */}
+              {toolButton('underline', <Underline className="w-5 h-5" />, 'Underline', 'Draw underline over text (drag to mark)')}
+              {/* NEW: Strikethrough tool */}
+              {toolButton('strikethrough', <Strikethrough className="w-5 h-5" />, 'Strike', 'Draw strikethrough over text (drag to mark)')}
               {toolButton('table', <Table className="w-5 h-5" />, 'Table', 'Add Table')}
               {toolButton('highlight', <Highlighter className="w-5 h-5" />, 'Highlight')}
               {/* Draw tool with color picker */}
@@ -1610,7 +1802,7 @@ export default function AdvancedEditor() {
                   <ZoomIn className="w-4 h-4" />
                 </button>
               </div>
-              {/* Page nav */}
+              {/* Page nav with multi-page edit indicators */}
               <div className="flex items-center gap-2 bg-gray-100 rounded-lg p-1">
                 <button
                   onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
@@ -1619,7 +1811,20 @@ export default function AdvancedEditor() {
                 >
                   <ChevronLeft className="w-5 h-5" />
                 </button>
-                <span className="text-sm font-medium px-2">{currentPage} / {numPages}</span>
+                <div className="flex items-center gap-1">
+                  <span className="text-sm font-medium px-1">{currentPage} / {numPages}</span>
+                  {pagesWithEdits.size > 0 && (
+                    <span
+                      className="text-[10px] bg-indigo-500 text-white rounded-full px-1.5 py-0.5 font-bold"
+                      title={`Edited pages: ${[...pagesWithEdits].sort((a, b) => a - b).join(', ')}`}
+                    >
+                      {pagesWithEdits.size} edited
+                    </span>
+                  )}
+                  {layoutFetching && (
+                    <span title="Loading font data..."><Loader2 className="w-3 h-3 animate-spin text-indigo-400" /></span>
+                  )}
+                </div>
                 <button
                   onClick={() => setCurrentPage(Math.min(numPages, currentPage + 1))}
                   disabled={currentPage === numPages}
@@ -1870,15 +2075,12 @@ export default function AdvancedEditor() {
                     // Compute grouped blocks based on granularity
                     const baseGroups: DetectedTextBlock[] =
                       selectionGranularity === 'word'
-                        // Word mode: split each pdfjs item (phrase) into individual words
                         ? detectedText.flatMap(b => splitBlockIntoWords(b))
                         : selectionGranularity === 'line'
                         ? mergeBlocksToLines(detectedText)
                         : mergeLinesToParagraphs(mergeBlocksToLines(detectedText));
 
-
                     return baseGroups.map((block, idx) => {
-                      // Skip if already covered by an annotation
                       const replaced = annotations.some(a =>
                         a.pageIndex === currentPage - 1 &&
                         a.type === 'text' &&
@@ -1887,13 +2089,12 @@ export default function AdvancedEditor() {
                       );
                       if (replaced || !block.text.trim() || block.w < 2) return null;
 
-                      // Granularity badge label
                       const badge = selectionGranularity === 'word' ? 'W' : selectionGranularity === 'line' ? 'L' : 'P';
 
                       return (
                         <div
                           key={`selblock-${selectionGranularity}-${idx}`}
-                          title={`[${badge}] ${block.text}`}
+                          title={`[${badge}] ${block.text} — Double-click to edit inline | Right-click for more options`}
                           style={{
                             position: 'absolute',
                             left: block.x,
@@ -1935,33 +2136,51 @@ export default function AdvancedEditor() {
                             el.style.borderStyle = 'dashed';
                           }}
                           onMouseDown={e => {
+                            // Single click: create text annotation (existing behavior)
+                            if (e.detail === 1) {
+                              e.stopPropagation();
+                              pushUndo();
+                              const span = findBackendSpan(block);
+                              const id = Date.now().toString() + '_tb';
+                              const fs = Math.max(6, Math.min(span?.fontSize ?? block.fontSize, block.h - 1, 120));
+                              const bw = Math.min(Math.max(block.w, 20), 800);
+                              const bh = Math.max(block.h, fs + 2);
+                              const textAnn: Annotation = {
+                                id,
+                                type: 'text',
+                                pageIndex: currentPage - 1,
+                                x: block.x,
+                                y: block.y,
+                                width: bw,
+                                height: bh,
+                                text: block.text,
+                                fontSize: fs,
+                                color: span?.color || block.fgColor || '#000000',
+                                backgroundColor: block.bgColor || '#ffffff',
+                                bold: span?.bold ?? block.bold ?? false,
+                                italic: span?.italic ?? block.italic ?? false,
+                                lockPosition: false,
+                                sourceWidth: bw,
+                                sourceHeight: bh,
+                                originalFontName: span?.fontName,
+                              };
+                              setAnnotations(prev => [...prev, textAnn]);
+                              setSelectedId(textAnn.id);
+                              setActiveTool(null);
+                            }
+                          }}
+                          onDoubleClick={e => {
+                            // Double-click: open inline editor at exact position
                             e.stopPropagation();
-                            pushUndo();
-                            const id = Date.now().toString() + '_tb';
-                            const fs = Math.max(6, Math.min(block.fontSize, block.h - 1, 120));
-                            const bw = Math.min(Math.max(block.w, 20), 800);
-                            const bh = Math.max(block.h, fs + 2);
-                            const textAnn: Annotation = {
-                              id,
-                              type: 'text',
-                              pageIndex: currentPage - 1,
-                              x: block.x,
-                              y: block.y,
-                              width: bw,
-                              height: bh,
-                              text: block.text,
-                              fontSize: fs,
-                              color: block.fgColor || '#000000',
-                              backgroundColor: block.bgColor || '#ffffff',
-                              bold: block.bold || false,
-                              italic: block.italic || false,
-                              lockPosition: false,
-                              sourceWidth: bw,
-                              sourceHeight: bh,
-                            };
-                            setAnnotations(prev => [...prev, textAnn]);
-                            setSelectedId(textAnn.id);
-                            setActiveTool(null);
+                            e.preventDefault();
+                            setInlineEdit({ active: true, block, text: block.text });
+                            setTimeout(() => inlineEditRef.current?.focus(), 30);
+                          }}
+                          onContextMenu={e => {
+                            // Right-click: show context menu
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setContextMenu({ visible: true, x: e.clientX, y: e.clientY, block });
                           }}
                         />
                       );
@@ -2010,6 +2229,86 @@ export default function AdvancedEditor() {
                     />
                   )}
                 </div>
+
+                  {/* ── INLINE EDIT OVERLAY (double-click) ── */}
+                  {inlineEdit.active && inlineEdit.block && (() => {
+                    const block = inlineEdit.block;
+                    const span = findBackendSpan(block);
+                    const fs = span?.fontSize ?? block.fontSize;
+                    const fgColor = span?.color || block.fgColor || '#000000';
+                    const isBold = span?.bold ?? block.bold ?? false;
+                    const isItalic = span?.italic ?? block.italic ?? false;
+                    return (
+                      <div
+                        style={{
+                          position: 'absolute',
+                          left: block.x - 2,
+                          top: block.y - 2,
+                          width: Math.max(block.w + 4, 120),
+                          minHeight: block.h + 4,
+                          zIndex: 100,
+                          backgroundColor: block.bgColor || '#ffffff',
+                          boxShadow: '0 0 0 2px #6366f1, 0 4px 20px rgba(99,102,241,0.3)',
+                          borderRadius: 3,
+                        }}
+                      >
+                        <textarea
+                          ref={inlineEditRef}
+                          value={inlineEdit.text}
+                          onChange={e => setInlineEdit(prev => ({ ...prev, text: e.target.value }))}
+                          onKeyDown={e => {
+                            if (e.key === 'Escape') {
+                              setInlineEdit({ active: false, block: null, text: '' });
+                            } else if (e.key === 'Enter' && !e.shiftKey) {
+                              e.preventDefault();
+                              commitInlineEdit();
+                            }
+                            e.stopPropagation();
+                          }}
+                          onBlur={() => commitInlineEdit()}
+                          style={{
+                            width: '100%',
+                            minHeight: block.h,
+                            fontSize: `${fs}px`,
+                            color: fgColor,
+                            fontWeight: isBold ? 700 : 400,
+                            fontStyle: isItalic ? 'italic' : 'normal',
+                            fontFamily: 'Helvetica, Arial, sans-serif',
+                            lineHeight: 1.3,
+                            background: 'transparent',
+                            border: 'none',
+                            outline: 'none',
+                            resize: 'none',
+                            padding: '2px 3px',
+                            margin: 0,
+                            boxSizing: 'border-box',
+                          }}
+                        />
+                        <div style={{ fontSize: 9, color: '#6366f1', padding: '1px 3px', borderTop: '1px solid #e0e7ff', background: '#f5f3ff', borderRadius: '0 0 3px 3px' }}>
+                          ↵ Enter to save &nbsp;·&nbsp; Esc to cancel &nbsp;·&nbsp; Shift+↵ for newline
+                          {span?.fontName && ` · ${span.fontName}`}
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {/* ── UNDERLINE/STRIKETHROUGH visual in overlay ── */}
+                  {annotations.filter(a => a.pageIndex === currentPage - 1 && (a.type === 'underline' || a.type === 'strikethrough')).map(ann => (
+                    <div
+                      key={ann.id + '_ul'}
+                      style={{
+                        position: 'absolute',
+                        left: ann.x,
+                        top: ann.y,
+                        width: ann.width || 10,
+                        height: Math.max(ann.height || 2, 2),
+                        backgroundColor: ann.color || '#000000',
+                        opacity: selectedId === ann.id ? 1 : 0.8,
+                        pointerEvents: 'none',
+                        zIndex: 12,
+                      }}
+                    />
+                  ))}
               </div>
             </div>
 
@@ -2024,12 +2323,24 @@ export default function AdvancedEditor() {
                     </button>
                   </div>
 
-                  {annotations.find(a => a.id === selectedId)?.type === 'text' && (
+                  {annotations.find(a => a.id === selectedId)?.type === 'text' && (() => {
+                    const selAnn = annotations.find(a => a.id === selectedId)!;
+                    return (
                     <div className="space-y-4">
+                      {/* Font info badge from backend */}
+                      {selAnn.originalFontName && (
+                        <div className="flex items-center gap-2 px-3 py-2 bg-indigo-50 border border-indigo-100 rounded-lg">
+                          <Layers className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                          <div className="min-w-0">
+                            <div className="text-[10px] text-indigo-400 font-medium">Original Font</div>
+                            <div className="text-xs text-indigo-700 font-semibold truncate" title={selAnn.originalFontName}>{selAnn.originalFontName}</div>
+                          </div>
+                        </div>
+                      )}
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">Text Content</label>
                         <textarea
-                          value={annotations.find(a => a.id === selectedId)?.text || ''}
+                          value={selAnn.text || ''}
                           onChange={(e) => updateAnnotationText(selectedId, e.target.value)}
                           className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
                           rows={3}
@@ -2040,7 +2351,7 @@ export default function AdvancedEditor() {
                           <label className="block text-sm font-medium text-gray-700 mb-2">Font Size</label>
                           <input
                             type="number"
-                            value={annotations.find(a => a.id === selectedId)?.fontSize || 14}
+                            value={selAnn.fontSize || 14}
                             onChange={(e) => updateAnnotation(selectedId, { fontSize: parseInt(e.target.value) })}
                             className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
                           />
@@ -2049,17 +2360,17 @@ export default function AdvancedEditor() {
                           <label className="block text-sm font-medium text-gray-700 mb-2">Text Color</label>
                           <input
                             type="color"
-                            value={annotations.find(a => a.id === selectedId)?.color || '#000000'}
+                            value={selAnn.color || '#000000'}
                             onChange={(e) => updateAnnotation(selectedId, { color: e.target.value })}
                             className="w-full h-10 p-1 border border-gray-300 rounded-lg cursor-pointer"
                           />
                         </div>
                       </div>
-                      <div className="flex gap-4">
+                      <div className="flex gap-4 flex-wrap">
                         <label className="inline-flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
                           <input
                             type="checkbox"
-                            checked={!!annotations.find(a => a.id === selectedId)?.bold}
+                            checked={!!selAnn.bold}
                             onChange={(e) => updateAnnotation(selectedId, { bold: e.target.checked })}
                             className="rounded border-gray-300"
                           />
@@ -2068,18 +2379,37 @@ export default function AdvancedEditor() {
                         <label className="inline-flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
                           <input
                             type="checkbox"
-                            checked={!!annotations.find(a => a.id === selectedId)?.italic}
+                            checked={!!selAnn.italic}
                             onChange={(e) => updateAnnotation(selectedId, { italic: e.target.checked })}
                             className="rounded border-gray-300"
                           />
                           Italic
                         </label>
+                        <label className="inline-flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={!!selAnn.underline}
+                            onChange={(e) => updateAnnotation(selectedId, { underline: e.target.checked })}
+                            className="rounded border-gray-300"
+                          />
+                          Underline
+                        </label>
+                        <label className="inline-flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={!!selAnn.strikethrough}
+                            onChange={(e) => updateAnnotation(selectedId, { strikethrough: e.target.checked })}
+                            className="rounded border-gray-300"
+                          />
+                          Strike
+                        </label>
                       </div>
                       <p className="text-xs text-gray-500">
-                        Exported PDF uses Helvetica / Helvetica-Bold / Oblique variants (standard embedded fonts).
+                        Exported PDF uses Helvetica variants. Original font shown above is for reference.
                       </p>
                     </div>
-                  )}
+                    );
+                  })()}
 
                   {annotations.find(a => a.id === selectedId)?.type === 'table' && (
                     <div className="space-y-4">
@@ -2345,6 +2675,126 @@ export default function AdvancedEditor() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* ── RIGHT-CLICK CONTEXT MENU ── */}
+      {contextMenu.visible && contextMenu.block && (
+        <>
+          {/* Backdrop to close menu */}
+          <div
+            className="fixed inset-0 z-[200]"
+            onClick={() => setContextMenu({ visible: false, x: 0, y: 0, block: null })}
+            onContextMenu={e => { e.preventDefault(); setContextMenu({ visible: false, x: 0, y: 0, block: null }); }}
+          />
+          <div
+            className="fixed z-[201] bg-white rounded-xl shadow-2xl border border-gray-200 py-1 min-w-[200px] overflow-hidden"
+            style={{ left: contextMenu.x, top: contextMenu.y }}
+          >
+            {/* Header */}
+            <div className="px-3 py-2 border-b border-gray-100 text-xs font-semibold text-gray-500 truncate max-w-[220px]">
+              "{contextMenu.block.text.slice(0, 40)}{contextMenu.block.text.length > 40 ? '…' : ''}"
+            </div>
+            {/* Actions */}
+            <button
+              className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-indigo-50 hover:text-indigo-700 flex items-center gap-2 transition-colors"
+              onClick={() => {
+                setContextMenu({ visible: false, x: 0, y: 0, block: null });
+                setInlineEdit({ active: true, block: contextMenu.block!, text: contextMenu.block!.text });
+                setTimeout(() => inlineEditRef.current?.focus(), 30);
+              }}
+            >
+              <SquarePen className="w-4 h-4" /> Edit Text Inline
+            </button>
+            <button
+              className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-yellow-50 hover:text-yellow-700 flex items-center gap-2 transition-colors"
+              onClick={() => {
+                const block = contextMenu.block!;
+                pushUndo();
+                setAnnotations(prev => [...prev, {
+                  id: Date.now().toString() + '_hl',
+                  type: 'highlight',
+                  pageIndex: currentPage - 1,
+                  x: block.x,
+                  y: block.y,
+                  width: block.w,
+                  height: block.h,
+                }]);
+                setContextMenu({ visible: false, x: 0, y: 0, block: null });
+              }}
+            >
+              <Highlighter className="w-4 h-4" /> Highlight
+            </button>
+            <button
+              className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2 transition-colors"
+              onClick={() => {
+                const block = contextMenu.block!;
+                pushUndo();
+                setAnnotations(prev => [...prev, {
+                  id: Date.now().toString() + '_ul',
+                  type: 'underline',
+                  pageIndex: currentPage - 1,
+                  x: block.x,
+                  y: block.y + block.h - 2,
+                  width: block.w,
+                  height: 3,
+                  color: '#000000',
+                }]);
+                setContextMenu({ visible: false, x: 0, y: 0, block: null });
+              }}
+            >
+              <Underline className="w-4 h-4" /> Underline
+            </button>
+            <button
+              className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2 transition-colors"
+              onClick={() => {
+                const block = contextMenu.block!;
+                pushUndo();
+                setAnnotations(prev => [...prev, {
+                  id: Date.now().toString() + '_st',
+                  type: 'strikethrough',
+                  pageIndex: currentPage - 1,
+                  x: block.x,
+                  y: block.y + block.h / 2 - 1,
+                  width: block.w,
+                  height: 2,
+                  color: '#000000',
+                }]);
+                setContextMenu({ visible: false, x: 0, y: 0, block: null });
+              }}
+            >
+              <Strikethrough className="w-4 h-4" /> Strikethrough
+            </button>
+            <button
+              className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-red-50 hover:text-red-600 flex items-center gap-2 transition-colors"
+              onClick={() => {
+                const block = contextMenu.block!;
+                pushUndo();
+                setAnnotations(prev => [...prev, {
+                  id: Date.now().toString() + '_wo',
+                  type: 'whiteout',
+                  pageIndex: currentPage - 1,
+                  x: block.x,
+                  y: block.y,
+                  width: block.w,
+                  height: block.h,
+                  color: block.bgColor || '#ffffff',
+                }]);
+                setContextMenu({ visible: false, x: 0, y: 0, block: null });
+              }}
+            >
+              <Eraser className="w-4 h-4" /> Redact / Whiteout
+            </button>
+            <button
+              className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-600 flex items-center gap-2 transition-colors"
+              onClick={() => {
+                navigator.clipboard?.writeText(contextMenu.block!.text).catch(() => {});
+                setContextMenu({ visible: false, x: 0, y: 0, block: null });
+              }}
+            >
+              <TypeIcon className="w-4 h-4" /> Copy Text
+            </button>
+          </div>
+        </>
       )}
     </div>
   );

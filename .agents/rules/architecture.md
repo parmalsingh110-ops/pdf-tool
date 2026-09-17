@@ -24,6 +24,7 @@ The backend exposes the following API routes found in `backend/main.py`:
 ```markdown
 - [GET] /
 - [POST] /analyze/links
+- [POST] /analyze/text-layout   ← NEW: rich span-level text info (font, color, bold, italic) from PyMuPDF
 - [POST] /compress-pdf
 - [POST] /convert/auto-crop
 - [POST] /convert/cmyk
