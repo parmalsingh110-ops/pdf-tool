@@ -1,16 +1,22 @@
 User-agent: *
 Allow: /
-
-# Block admin/private paths
 Disallow: /api/
 Disallow: /_next/
 Disallow: /node_modules/
+Disallow: /src/
 
-# Crawl delay to be respectful
-Crawl-delay: 1
+# Explicit crawl permission for key tools
+Allow: /merge
+Allow: /split
+Allow: /compress
+Allow: /edit
+Allow: /pdf-to-word
+Allow: /pdf-to-excel
+Allow: /pdf-to-ppt
+Allow: /all-tools
 
-# Primary Sitemap
+# Sitemaps
 Sitemap: https://pdfmediasuite.in/sitemap.xml
 
-# Host
+# Host directive (for Yandex)
 Host: https://pdfmediasuite.in

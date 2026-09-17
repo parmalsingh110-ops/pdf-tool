@@ -1,19 +1,57 @@
 {
   "name": "PDF Media Suite",
-  "short_name": "PDF Tool",
+  "short_name": "PDF Suite",
+  "description": "90+ free online PDF and image tools. Merge, split, compress, convert, edit PDFs. No signup, no uploads, 100% private.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "theme_color": "#e11d48",
+  "background_color": "#ffffff",
+  "lang": "en",
+  "categories": ["productivity", "utilities", "education"],
   "icons": [
     {
       "src": "/favicon.svg",
       "sizes": "192x192",
-      "type": "image/svg+xml"
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
     },
     {
       "src": "/favicon.svg",
       "sizes": "512x512",
-      "type": "image/svg+xml"
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
     }
   ],
-  "theme_color": "#ffffff",
-  "background_color": "#ffffff",
-  "display": "standalone"
+  "shortcuts": [
+    {
+      "name": "Merge PDF",
+      "short_name": "Merge",
+      "description": "Combine multiple PDF files",
+      "url": "/merge",
+      "icons": [{ "src": "/favicon.svg", "sizes": "96x96" }]
+    },
+    {
+      "name": "Compress PDF",
+      "short_name": "Compress",
+      "description": "Reduce PDF file size",
+      "url": "/compress",
+      "icons": [{ "src": "/favicon.svg", "sizes": "96x96" }]
+    },
+    {
+      "name": "PDF to Word",
+      "short_name": "PDF→Word",
+      "description": "Convert PDF to Word document",
+      "url": "/pdf-to-word",
+      "icons": [{ "src": "/favicon.svg", "sizes": "96x96" }]
+    },
+    {
+      "name": "Edit PDF",
+      "short_name": "Edit",
+      "description": "Edit and annotate PDF",
+      "url": "/edit",
+      "icons": [{ "src": "/favicon.svg", "sizes": "96x96" }]
+    }
+  ]
 }
