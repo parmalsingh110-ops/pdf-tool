@@ -1073,7 +1073,7 @@ export default function ImageResizer() {
                       <div className="w-full space-y-3 p-3">
                         <div className="relative inline-block max-w-full mx-auto select-none">
                           <img
-                            src={activePreviewUrl}
+                            src={activePreviewUrl ?? undefined}
                             alt="Before"
                             className="max-h-[min(480px,60vh)] w-auto h-auto object-contain block mx-auto"
                             decoding="async"
@@ -1104,7 +1104,7 @@ export default function ImageResizer() {
                       </div>
                     ) : (
                       <img
-                        src={activePreviewUrl}
+                        src={activePreviewUrl ?? undefined}
                         alt="Resize preview"
                         className="max-w-full max-h-[min(520px,65vh)] w-auto h-auto object-contain block"
                         decoding="async"

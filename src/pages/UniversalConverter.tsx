@@ -300,7 +300,7 @@ async function pdfFromParagraphs(paragraphs: string[], title?: string): Promise<
     if (!safe) continue;
     drawWrapped(safe);
   }
-  return new Blob([await doc.save()], { type: 'application/pdf' });
+  return new Blob([await doc.save() as unknown as Uint8Array<ArrayBuffer>], { type: 'application/pdf' });
 }
 
 /**
@@ -592,7 +592,7 @@ async function pdfFromDocxContent(
     }
   }
 
-  return new Blob([await doc.save()], { type: 'application/pdf' });
+  return new Blob([await doc.save() as unknown as Uint8Array<ArrayBuffer>], { type: 'application/pdf' });
 }
 
 // ─── Advanced XLSX → PDF (merge-aware, style-aware) ─────────────────
@@ -800,7 +800,7 @@ async function xlsxFileToPdf(file: File): Promise<Blob> {
     page.drawLine({ start: { x: MARGIN, y }, end: { x: MARGIN + AW, y }, thickness: 0.3, color: rgb(0.68, 0.70, 0.82) });
   }
 
-  return new Blob([await pdfDoc.save()], { type: 'application/pdf' });
+  return new Blob([await pdfDoc.save() as unknown as Uint8Array<ArrayBuffer>], { type: 'application/pdf' });
 }
 
 /** Render a single row onto a page */
@@ -946,7 +946,7 @@ async function pdfFromXlsxSheets(sheets: XlsxSheet[]): Promise<Blob> {
       y -= rowH;
     }
   }
-  return new Blob([await doc.save()], { type: 'application/pdf' });
+  return new Blob([await doc.save() as unknown as Uint8Array<ArrayBuffer>], { type: 'application/pdf' });
 }
 
 async function pdfFromSlides(slides: string[], title?: string): Promise<Blob> {
@@ -1005,7 +1005,7 @@ async function pdfFromSlides(slides: string[], title?: string): Promise<Blob> {
     const footer = `${i + 1} / ${slides.length}`;
     try { page.drawText(footer, { x: W - 50, y: 14, size: 9, font, color: rgb(0.5, 0.5, 0.6) }); } catch {}
   }
-  return new Blob([await doc.save()], { type: 'application/pdf' });
+  return new Blob([await doc.save() as unknown as Uint8Array<ArrayBuffer>], { type: 'application/pdf' });
 }
 
 // ─── DOCX builders ──────────────────────────────────────────────────
@@ -1357,7 +1357,7 @@ async function pptxFromParagraphs(paragraphs: string[], title?: string): Promise
   // Max 10 lines per slide; overflow creates continuation slides
   for (const group of slideGroups) {
     const lines = group.lines;
-    const chunks = lines.length === 0 ? [[]] : [];
+    const chunks: string[][] = lines.length === 0 ? [[]] : [];
     for (let i = 0; i < Math.max(lines.length, 1); i += 10) {
       chunks.push(lines.slice(i, i + 10));
     }
@@ -1541,7 +1541,7 @@ async function convertTiffToPdf(file: File): Promise<Blob> {
     canvas.height = 0;
   }
 
-  return new Blob([await pdf.save()], { type: 'application/pdf' });
+  return new Blob([await pdf.save() as unknown as Uint8Array<ArrayBuffer>], { type: 'application/pdf' });
 }
 
 /**
@@ -1590,7 +1590,7 @@ async function convertImageFile(f: File, outType: Target, quality: number): Prom
     const emb = await pdf.embedJpg(jpgBytes);
     const p = pdf.addPage([emb.width, emb.height]);
     p.drawImage(emb, { x: 0, y: 0, width: emb.width, height: emb.height });
-    return new Blob([await pdf.save()], { type: 'application/pdf' });
+    return new Blob([await pdf.save() as unknown as Uint8Array<ArrayBuffer>], { type: 'application/pdf' });
   }
   const mime = outType === 'png' ? 'image/png' : outType === 'webp' ? 'image/webp' : 'image/jpeg';
   const out = await new Promise<Blob | null>(res => canvas.toBlob(res, mime, quality));
@@ -1757,7 +1757,7 @@ async function convertTextFile(f: File): Promise<Blob> {
     page.drawText(line.slice(0, 120), { x: 36, y, size: 11, font });
     y -= 14;
   }
-  return new Blob([await pdf.save()], { type: 'application/pdf' });
+  return new Blob([await pdf.save() as unknown as Uint8Array<ArrayBuffer>], { type: 'application/pdf' });
 }
 
 // ─── AI text extractor for non-PDF files ─────────────────────────────────────

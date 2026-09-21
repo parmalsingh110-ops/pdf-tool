@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import { useDropzone } from 'react-dropzone';
+import { useDropzone, FileRejection } from 'react-dropzone';
 import { UploadCloud, AlertTriangle } from 'lucide-react';
 import { cn } from '../lib/utils';
 
@@ -54,7 +54,7 @@ export default function FileDropzone({
   );
 
   const handleRejected = useCallback(
-    (fileRejections: { file: File; errors: { code: string; message: string }[] }[]) => {
+    (fileRejections: FileRejection[]) => {
       if (!onDropRejected || fileRejections.length === 0) return;
       const codes = fileRejections.flatMap((r) => r.errors.map((e) => e.code));
       const uniq = [...new Set(codes)];

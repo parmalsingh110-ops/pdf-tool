@@ -2,7 +2,10 @@ import { useState } from 'react';
 import { Contrast, Download, Settings2, Sparkles } from 'lucide-react';
 import { PDFDocument } from 'pdf-lib';
 import * as pdfjsLib from 'pdfjs-dist';
+import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import FileDropzone from '../components/FileDropzone';
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
 type Mode = 'auto' | 'manual';
 
@@ -110,7 +113,7 @@ export default function InkSaverPDF() {
       }
 
       const bytes = await outputPdf.save();
-      const blob = new Blob([bytes], { type: 'application/pdf' });
+      const blob = new Blob([bytes as unknown as Uint8Array<ArrayBuffer>], { type: 'application/pdf' });
       const url = URL.createObjectURL(blob);
       setResultUrl(url);
     } catch (error) {
