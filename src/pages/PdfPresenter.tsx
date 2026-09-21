@@ -4,8 +4,11 @@ import * as pdfjsLib from 'pdfjs-dist';
 import '../lib/pdfWorker';
 import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
+import { useSEO } from '../hooks/useSEO';
 
 export default function PdfPresenter() {
+  useSEO('Pdf Presenter Online Free | PDF Media Suite', 'Free online Pdf Presenter tool. No signup or installation required.');
+
   usePageSEO('PDF Slide Presenter', 'Turn PDF pages into fullscreen slideshows. Free online PDF presentation tool — no PowerPoint needed.');
   const [file, setFile] = useState<File | null>(null);
   const [pages, setPages] = useState<string[]>([]);

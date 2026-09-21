@@ -5,8 +5,11 @@ import JSZip from 'jszip';
 import '../lib/pdfWorker';
 import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
+import { useSEO } from '../hooks/useSEO';
 
 export default function PdfToImages() {
+  useSEO('Pdf To Images Online Free | PDF Media Suite', 'Free online Pdf To Images tool. No signup or installation required.');
+
   usePageSEO('PDF to Images Batch Export', 'Export all PDF pages as JPG or PNG images in a ZIP file. Free online PDF to images converter.');
   const [file, setFile] = useState<File | null>(null);
   const [format, setFormat] = useState<'jpeg' | 'png'>('jpeg');

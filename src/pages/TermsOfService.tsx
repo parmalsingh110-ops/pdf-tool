@@ -1,8 +1,11 @@
 import { Link } from 'react-router-dom';
 import { ArrowLeft, Scale } from 'lucide-react';
 import { usePageSEO } from '../lib/usePageSEO';
+import { useSEO } from '../hooks/useSEO';
 
 export default function TermsOfService() {
+  useSEO('Terms Of Service Online Free | PDF Media Suite', 'Free online Terms Of Service tool. No signup or installation required.');
+
   usePageSEO(
     'Terms of Service | PDF Media Suite',
     'Terms of Service for using the PDF Media Suite document productivity platform.'

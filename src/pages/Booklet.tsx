@@ -3,8 +3,11 @@ import { BookOpen, Download, Loader2 } from 'lucide-react';
 import { PDFDocument } from 'pdf-lib';
 import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
+import { useSEO } from '../hooks/useSEO';
 
 export default function Booklet() {
+  useSEO('Booklet Online Free | PDF Media Suite', 'Free online Booklet tool. No signup or installation required.');
+
   usePageSEO('PDF to Booklet Converter', 'Convert PDF to booklet layout for saddle-stitch printing. Free online PDF booklet maker.');
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);

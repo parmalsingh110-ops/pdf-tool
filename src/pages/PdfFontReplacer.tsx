@@ -2,6 +2,7 @@
 import { Type, Download, AlertTriangle, Loader2, FileText, CheckCircle } from "lucide-react";
 import FileDropzone from "../components/FileDropzone";
 import { usePageSEO } from "../lib/usePageSEO";
+import { useSEO } from '../hooks/useSEO';
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
@@ -12,6 +13,8 @@ const FONTS = [
 ];
 
 export default function PdfFontReplacer() {
+  useSEO('Pdf Font Replacer Online Free | PDF Media Suite', 'Free online Pdf Font Replacer tool. No signup or installation required.');
+
   usePageSEO("PDF Font Replacer", "Replace all fonts in a PDF with Helvetica, Times Roman, or Courier. Global font replacement for branding consistency. Free tool.");
   const [file, setFile] = useState<File | null>(null);
   const [font, setFont] = useState("helv");

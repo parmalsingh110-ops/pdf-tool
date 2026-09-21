@@ -1,8 +1,11 @@
 import { Shield, Info, Clock, Lock, ArrowRight } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { usePageSEO } from '../lib/usePageSEO';
+import { useSEO } from '../hooks/useSEO';
 
 export default function SelfDestruct() {
+  useSEO('Self Destruct Online Free | PDF Media Suite', 'Free online Self Destruct tool. No signup or installation required.');
+
   usePageSEO('Self-Destructing PDF', 'Create PDFs that expire or become inaccessible after a set time period.');
   return (
     <div className="flex-1 flex flex-col items-center justify-center p-8">

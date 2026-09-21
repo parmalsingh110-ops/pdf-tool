@@ -2,8 +2,11 @@ import { useState, useEffect } from 'react';
 import { Download, FileText, Tag } from 'lucide-react';
 import FileDropzone from '../components/FileDropzone';
 import { PDFDocument } from 'pdf-lib';
+import { useSEO } from '../hooks/useSEO';
 
 export default function EditMetadata() {
+  useSEO('Edit Metadata Online Free | PDF Media Suite', 'Free online Edit Metadata tool. No signup or installation required.');
+
   const [file, setFile] = useState<File | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [editedUrl, setEditedUrl] = useState<string | null>(null);

@@ -3,8 +3,11 @@ import { GitCompare, Download, Loader2 } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
 import '../lib/pdfWorker';
 import FileDropzone from '../components/FileDropzone';
+import { useSEO } from '../hooks/useSEO';
 
 export default function PdfComparison() {
+  useSEO('Pdf Comparison Online Free | PDF Media Suite', 'Free online Pdf Comparison tool. No signup or installation required.');
+
   const [fileA, setFileA] = useState<File | null>(null);
   const [fileB, setFileB] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);

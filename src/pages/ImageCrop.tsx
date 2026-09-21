@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { Crop, Download, RotateCw } from 'lucide-react';
 import { usePageSEO } from '../lib/usePageSEO';
+import { useSEO } from '../hooks/useSEO';
 
 const PRESETS = [
   { label: 'Free', ratio: 0 },
@@ -14,6 +15,8 @@ const PRESETS = [
 ];
 
 export default function ImageCrop() {
+  useSEO('Image Crop Online Free | PDF Media Suite', 'Free online Image Crop tool. No signup or installation required.');
+
   usePageSEO('Crop Image Online', 'Crop images with preset aspect ratios — 1:1, 16:9, 4:3, A4, Passport. Free online image cropper.');
   const [file, setFile] = useState<File|null>(null);
   const [imgUrl, setImgUrl] = useState<string|null>(null);

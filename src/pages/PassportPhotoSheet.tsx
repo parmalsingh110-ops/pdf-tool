@@ -25,6 +25,7 @@ import {
   PRESETS,
 } from '../lib/photoAdjustments';
 import { fetchGeminiWithFallback } from '../lib/advancedVisionEngine';
+import { useSEO } from '../hooks/useSEO';
 
 const PHOTO_W_MM = 35;
 const PHOTO_H_MM = 45;
@@ -144,6 +145,8 @@ const PAGE_PT: Record<SheetPageSize, [number, number]> = {
 let _segmenter: BodySegmenter | null = null;
 
 export default function PassportPhotoSheet() {
+  useSEO('Passport Photo Sheet Online Free | PDF Media Suite', 'Free online Passport Photo Sheet tool. No signup or installation required.');
+
   const [file, setFile] = useState<File | null>(null);
   const [img, setImg] = useState<HTMLImageElement | null>(null);
   const [imgObjectUrl, setImgObjectUrl] = useState<string | null>(null);

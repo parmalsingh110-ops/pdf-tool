@@ -1,8 +1,11 @@
 import React, { useState, useMemo } from 'react';
 import { FileImage, Download, Loader2 } from 'lucide-react';
 import FileDropzone from '../components/FileDropzone';
+import { useSEO } from '../hooks/useSEO';
 
 export default function ConvertToWebP() {
+  useSEO('Convert To Web P Online Free | PDF Media Suite', 'Free online Convert To Web P tool. No signup or installation required.');
+
   const [file, setFile] = useState<File | null>(null);
   const [quality, setQuality] = useState(80);
   const [resultUrl, setResultUrl] = useState<string | null>(null);

@@ -1,7 +1,10 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Sparkles, Download, Loader2 } from 'lucide-react';
+import { useSEO } from '../hooks/useSEO';
 
 export default function ImageNoiseReduction() {
+  useSEO('Image Noise Reduction Online Free | PDF Media Suite', 'Free online Image Noise Reduction tool. No signup or installation required.');
+
   const [file, setFile] = useState<File | null>(null);
   const [imgUrl, setImgUrl] = useState<string | null>(null);
   const [resultUrl, setResultUrl] = useState<string | null>(null);

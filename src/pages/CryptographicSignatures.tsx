@@ -1,8 +1,11 @@
 import { ShieldCheck, Info, Pen, ArrowRight, Lock } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { usePageSEO } from '../lib/usePageSEO';
+import { useSEO } from '../hooks/useSEO';
 
 export default function CryptographicSignatures() {
+  useSEO('Cryptographic Signatures Online Free | PDF Media Suite', 'Free online Cryptographic Signatures tool. No signup or installation required.');
+
   usePageSEO('Cryptographic PDF Signatures', 'Sign PDFs with valid X.509 cryptographic certificates. PKI-based digital signing for legal compliance.');
   return (
     <div className="flex-1 flex flex-col items-center justify-center p-8">

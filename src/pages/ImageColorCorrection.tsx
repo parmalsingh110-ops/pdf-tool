@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Palette, Download, RotateCcw } from 'lucide-react';
+import { useSEO } from '../hooks/useSEO';
 import {
   type PhotoAdjustments,
   DEFAULT_ADJUSTMENTS,
@@ -11,6 +12,8 @@ import {
 } from '../lib/photoAdjustments';
 
 export default function ImageColorCorrection() {
+  useSEO('Image Color Correction Online Free | PDF Media Suite', 'Free online Image Color Correction tool. No signup or installation required.');
+
   const [file, setFile] = useState<File | null>(null);
   const [imgUrl, setImgUrl] = useState<string | null>(null);
   const [adjustments, setAdjustments] = useState<PhotoAdjustments>({ ...DEFAULT_ADJUSTMENTS });

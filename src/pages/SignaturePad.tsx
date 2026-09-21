@@ -1,5 +1,6 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { Pen, Download, Type, Image as ImageIcon, Trash2 } from 'lucide-react';
+import { useSEO } from '../hooks/useSEO';
 
 const CURSIVE_FONTS = [
   { name: 'Dancing Script', css: "'Dancing Script', cursive" },
@@ -13,6 +14,8 @@ const CURSIVE_FONTS = [
 type Mode = 'draw' | 'type' | 'upload';
 
 export default function SignaturePad() {
+  useSEO('Signature Pad Online Free | PDF Media Suite', 'Free online Signature Pad tool. No signup or installation required.');
+
   const [mode, setMode] = useState<Mode>('draw');
   const [signatureUrl, setSignatureUrl] = useState<string | null>(null);
   const [typedText, setTypedText] = useState('');

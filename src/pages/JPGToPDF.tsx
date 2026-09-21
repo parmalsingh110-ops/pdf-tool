@@ -3,8 +3,11 @@ import { PDFDocument } from 'pdf-lib';
 import { Download, Image as ImageIcon, Trash2, GripVertical } from 'lucide-react';
 import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
+import { useSEO } from '../hooks/useSEO';
 
 export default function JPGToPDF() {
+  useSEO('J P G To PDF Online Free | PDF Media Suite', 'Free online J P G To PDF tool. No signup or installation required.');
+
   usePageSEO('JPG to PDF Converter', 'Convert JPEG, PNG images to PDF documents. Free online image to PDF converter — drag, drop, download.');
   const [files, setFiles] = useState<File[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);

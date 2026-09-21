@@ -2,8 +2,11 @@ import { useState } from 'react';
 import { MonitorSmartphone, Download, Loader2, Trash2, Plus } from 'lucide-react';
 import { PDFDocument } from 'pdf-lib';
 import { usePageSEO } from '../lib/usePageSEO';
+import { useSEO } from '../hooks/useSEO';
 
 export default function ScreenshotToPdf() {
+  useSEO('Screenshot To Pdf Online Free | PDF Media Suite', 'Free online Screenshot To Pdf tool. No signup or installation required.');
+
   usePageSEO('Screenshot to PDF Converter', 'Convert screenshots to clean PDF reports. Free online screenshot to PDF tool with background cleaning.');
   const [files, setFiles] = useState<{file: File; url: string}[]>([]);
   const [busy, setBusy] = useState(false);

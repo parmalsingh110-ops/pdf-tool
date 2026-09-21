@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { FileCode, Download, Copy, Check, Upload, Trash2, RefreshCw } from 'lucide-react';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
+import { useSEO } from '../hooks/useSEO';
 
 // ─── Language registry ───────────────────────────────────────────────
 const LANGUAGES = [
@@ -478,6 +479,8 @@ const MAX_CODE_CHARS = 2_000_000; // ~2 MB
 const MAX_FILE_BYTES =  10 * 1024 * 1024; // 10 MB source file
 
 export default function CodeToPdf() {
+  useSEO('Code To Pdf Online Free | PDF Media Suite', 'Free online Code To Pdf tool. No signup or installation required.');
+
   const [code, setCode]             = useState('');
   const [filename, setFilename]     = useState('untitled');
   const [langId, setLangId]         = useState('auto');

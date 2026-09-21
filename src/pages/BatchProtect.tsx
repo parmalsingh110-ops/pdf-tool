@@ -3,8 +3,11 @@ import { Lock, Download, Loader2, Package } from 'lucide-react';
 import { PDFDocument } from 'pdf-lib';
 import JSZip from 'jszip';
 import FileDropzone from '../components/FileDropzone';
+import { useSEO } from '../hooks/useSEO';
 
 export default function BatchProtect() {
+  useSEO('Batch Protect Online Free | PDF Media Suite', 'Free online Batch Protect tool. No signup or installation required.');
+
   const [files, setFiles] = useState<File[]>([]);
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);

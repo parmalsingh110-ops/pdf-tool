@@ -4,6 +4,7 @@ import { PDFDocument } from 'pdf-lib';
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import FileDropzone from '../components/FileDropzone';
+import { useSEO } from '../hooks/useSEO';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
@@ -27,6 +28,8 @@ function colorDistance(
 }
 
 export default function InkSaverPDF() {
+  useSEO('Ink Saver PDF Online Free | PDF Media Suite', 'Free online Ink Saver PDF tool. No signup or installation required.');
+
   const [file, setFile] = useState<File | null>(null);
   const [mode, setMode] = useState<Mode>('auto');
   const [sourceColor, setSourceColor] = useState('#000000');

@@ -4,6 +4,7 @@ import * as pdfjsLib from 'pdfjs-dist';
 import '../lib/pdfWorker';
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 import FileDropzone from '../components/FileDropzone';
+import { useSEO } from '../hooks/useSEO';
 
 interface FormField {
   id: string;
@@ -19,6 +20,8 @@ interface FormField {
 }
 
 export default function PdfFormFiller() {
+  useSEO('Pdf Form Filler Online Free | PDF Media Suite', 'Free online Pdf Form Filler tool. No signup or installation required.');
+
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [pageImages, setPageImages] = useState<string[]>([]);

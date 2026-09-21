@@ -3,8 +3,11 @@ import { PDFDocument } from 'pdf-lib';
 import { Download, FileText, Unlock, AlertTriangle } from 'lucide-react';
 import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
+import { useSEO } from '../hooks/useSEO';
 
 export default function UnlockPDF() {
+  useSEO('Unlock PDF Online Free | PDF Media Suite', 'Free online Unlock PDF tool. No signup or installation required.');
+
   usePageSEO('Unlock PDF — Remove Password', 'Remove password protection from PDF files. Free online PDF unlocker — instant, private, no uploads.');
   const [file, setFile] = useState<File | null>(null);
   const [password, setPassword] = useState('');

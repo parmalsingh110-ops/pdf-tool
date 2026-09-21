@@ -4,8 +4,11 @@ import * as pdfjsLib from 'pdfjs-dist';
 import { PDFDocument } from 'pdf-lib';
 import '../lib/pdfWorker';
 import FileDropzone from '../components/FileDropzone';
+import { useSEO } from '../hooks/useSEO';
 
 export default function RemoveText() {
+  useSEO('Remove Text Online Free | PDF Media Suite', 'Free online Remove Text tool. No signup or installation required.');
+
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [resultUrl, setResultUrl] = useState<string | null>(null);

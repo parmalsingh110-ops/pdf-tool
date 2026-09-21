@@ -14,6 +14,7 @@ import PptxGenJS from 'pptxgenjs';
 import FileDropzone from '../components/FileDropzone';
 import { extractTextRegions, extractTableData } from '../lib/advancedVisionEngine';
 import { extractDocxContent, DocxElement, DocxParagraph, DocxTable as DTable, DocxTableRow as DRow, safeStr } from '../lib/docxExtractor';
+import { useSEO } from '../hooks/useSEO';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
@@ -1809,6 +1810,8 @@ function formatBytes(n: number): string {
 }
 
 export default function UniversalConverter() {
+  useSEO('Universal Converter Online Free | PDF Media Suite', 'Free online Universal Converter tool. No signup or installation required.');
+
   const [file, setFile]           = useState<File | null>(null);
   const [target, setTarget]       = useState<Target>('pdf');
   const [quality, setQuality]     = useState(0.9);

@@ -6,8 +6,11 @@ import '../lib/pdfWorker';
 import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useToast } from '../components/Toast';
+import { useSEO } from '../hooks/useSEO';
 
 export default function RemoveBlankPages() {
+  useSEO('Remove Blank Pages Online Free | PDF Media Suite', 'Free online Remove Blank Pages tool. No signup or installation required.');
+
   usePageSEO('Remove Blank Pages from PDF', 'Auto-detect and remove blank pages from scanned PDFs. Free online blank page remover.');
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);

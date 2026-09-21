@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { readRecentTools, type RecentEntry } from '../lib/recentFiles';
 import { usePageSEO } from '../lib/usePageSEO';
+import { useSEO } from '../hooks/useSEO';
 
 
 /* =============================================
@@ -124,6 +125,8 @@ const COLOR_MAP: Record<string, { card: string; iconBg: string; iconText: string
 };
 
 export default function Home() {
+  useSEO('Home Online Free | PDF Media Suite', 'Free online Home tool. No signup or installation required.');
+
   const [recent, setRecent] = useState<RecentEntry[]>([]);
   // Set canonical for homepage
   usePageSEO(

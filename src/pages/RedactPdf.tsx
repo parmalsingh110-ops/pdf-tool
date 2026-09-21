@@ -5,10 +5,13 @@ import { PDFDocument } from 'pdf-lib';
 import '../lib/pdfWorker';
 import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
+import { useSEO } from '../hooks/useSEO';
 
 interface RedactRect { x: number; y: number; w: number; h: number; pageIndex: number; }
 
 export default function RedactPdf() {
+  useSEO('Redact Pdf Online Free | PDF Media Suite', 'Free online Redact Pdf tool. No signup or installation required.');
+
   usePageSEO('PDF Redaction Tool', 'Permanently redact sensitive information from PDFs. Draw boxes to black out text — free online PDF redactor.');
   const [file, setFile] = useState<File | null>(null);
   const [pageImages, setPageImages] = useState<string[]>([]);

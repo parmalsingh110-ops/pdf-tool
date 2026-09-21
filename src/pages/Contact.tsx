@@ -1,8 +1,11 @@
 import { Link } from 'react-router-dom';
 import { ArrowLeft, Mail, MessageSquare } from 'lucide-react';
 import { usePageSEO } from '../lib/usePageSEO';
+import { useSEO } from '../hooks/useSEO';
 
 export default function Contact() {
+  useSEO('Contact Online Free | PDF Media Suite', 'Free online Contact tool. No signup or installation required.');
+
   usePageSEO(
     'Contact & Support | PDF Media Suite',
     'Contact PDF Media Suite for product support, feedback, bug reports or business enquiries.'

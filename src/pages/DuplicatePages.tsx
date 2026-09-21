@@ -5,6 +5,7 @@ import { PDFDocument } from 'pdf-lib';
 import '../lib/pdfWorker';
 import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
+import { useSEO } from '../hooks/useSEO';
 
 interface PageInfo { index: number; url: string; hash: string; isDuplicate: boolean; duplicateOf: number | null; }
 
@@ -17,6 +18,8 @@ function hashCanvas(canvas: HTMLCanvasElement): string {
 }
 
 export default function DuplicatePages() {
+  useSEO('Duplicate Pages Online Free | PDF Media Suite', 'Free online Duplicate Pages tool. No signup or installation required.');
+
   usePageSEO('Find Duplicate PDF Pages', 'Detect and remove duplicate pages from PDF documents. Free online duplicate page finder.');
   const [file, setFile] = useState<File | null>(null);
   const [pages, setPages] = useState<PageInfo[]>([]);

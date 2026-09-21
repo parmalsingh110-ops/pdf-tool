@@ -1,5 +1,6 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { ImagePlus, Download, Loader2, Move, RotateCw, Trash2, ZoomIn, ZoomOut, Lock, LockOpen } from 'lucide-react';
+import { useSEO } from '../hooks/useSEO';
 
 interface InsertedImage {
   id: string;
@@ -15,6 +16,8 @@ interface InsertedImage {
 }
 
 export default function ImageInsertTool() {
+  useSEO('Image Insert Tool Online Free | PDF Media Suite', 'Free online Image Insert Tool tool. No signup or installation required.');
+
   const [baseFile, setBaseFile] = useState<File | null>(null);
   const [baseUrl, setBaseUrl] = useState<string | null>(null);
   const [baseDim, setBaseDim] = useState({ w: 0, h: 0 });

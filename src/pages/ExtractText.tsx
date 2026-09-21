@@ -6,11 +6,14 @@ import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { usePageSEO } from '../lib/usePageSEO';
 import { extractTextRegions } from '../lib/advancedVisionEngine';
 import { useToast } from '../components/Toast';
+import { useSEO } from '../hooks/useSEO';
 
 // Initialize pdf.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
 export default function ExtractText() {
+  useSEO('Extract Text Online Free | PDF Media Suite', 'Free online Extract Text tool. No signup or installation required.');
+
   usePageSEO('Extract Text from PDF', 'Extract all text content from PDF documents. Free online PDF text extractor — instant copy/paste.');
   const [file, setFile] = useState<File | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);

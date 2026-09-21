@@ -14,6 +14,7 @@ import {
   Shield, Wrench, Globe, FileCode2, Type, Accessibility, Volume2, Link as LinkIcon, BookMarked, Eraser,
 } from 'lucide-react';
 import { toggleFavorite, isFavorite } from '../lib/favorites';
+import { useSEO } from '../hooks/useSEO';
 
 function categoryAnchor(title: string): string {
   if (title.includes('Currently Available')) return 'cat-available';
@@ -184,6 +185,8 @@ const categories = [
 ];
 
 export default function AllTools() {
+  useSEO('All Tools Online Free | PDF Media Suite', 'Free online All Tools tool. No signup or installation required.');
+
   usePageSEO(
     'All Tools | PDF Media Suite',
     'Search and explore all 90+ free PDF and image processing tools on PDF Media Suite. Merge PDF, split PDF, compress PDF, convert PDF to Word/Excel/JPG, image resizer, remove background, OCR, digital signature, redact PDF, watermark, QR code generator, and many more — all free, browser-based, private.',

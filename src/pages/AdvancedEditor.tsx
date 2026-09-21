@@ -35,6 +35,7 @@ import {
 } from 'lucide-react';
 import SignatureCanvas from 'react-signature-canvas';
 import FileDropzone from '../components/FileDropzone';
+import { useSEO } from '../hooks/useSEO';
 
 // Initialize pdf.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
@@ -129,6 +130,8 @@ interface DetectedTextBlock {
 }
 
 export default function AdvancedEditor() {
+  useSEO('Advanced Editor Online Free | PDF Media Suite', 'Free online Advanced Editor tool. No signup or installation required.');
+
   const [file, setFile] = useState<File | null>(null);
   const [pdfDoc, setPdfDoc] = useState<pdfjsLib.PDFDocumentProxy | null>(null);
   const [numPages, setNumPages] = useState(0);

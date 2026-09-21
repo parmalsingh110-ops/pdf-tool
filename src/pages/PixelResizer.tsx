@@ -2,8 +2,11 @@ import { useState, useRef, useEffect } from 'react';
 import { Download, Maximize, Image as ImageIcon } from 'lucide-react';
 import FileDropzone from '../components/FileDropzone';
 import { encodeCanvasUnderByteBudget } from '../lib/imageByteBudget';
+import { useSEO } from '../hooks/useSEO';
 
 export default function PixelResizer() {
+  useSEO('Pixel Resizer Online Free | PDF Media Suite', 'Free online Pixel Resizer tool. No signup or installation required.');
+
   const [file, setFile] = useState<File | null>(null);
   const [width, setWidth] = useState<number | ''>('');
   const [height, setHeight] = useState<number | ''>('');

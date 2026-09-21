@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Info, Camera, MapPin, Calendar, Aperture } from 'lucide-react';
 import { usePageSEO } from '../lib/usePageSEO';
+import { useSEO } from '../hooks/useSEO';
 
 interface ExifData { [key: string]: string; }
 
@@ -95,6 +96,8 @@ function readExif(file: File): Promise<ExifData> {
 }
 
 export default function ImageMetadata() {
+  useSEO('Image Metadata Online Free | PDF Media Suite', 'Free online Image Metadata tool. No signup or installation required.');
+
   usePageSEO('Image EXIF Metadata Viewer', 'Read EXIF data from photos — camera make, model, date taken, dimensions. Free online EXIF viewer.');
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);

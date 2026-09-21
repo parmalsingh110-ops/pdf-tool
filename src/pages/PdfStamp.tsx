@@ -3,10 +3,13 @@ import { Stamp, Download, Loader2 } from 'lucide-react';
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
+import { useSEO } from '../hooks/useSEO';
 
 const PRESETS = ['CONFIDENTIAL', 'DRAFT', 'APPROVED', 'COPY', 'FINAL', 'SAMPLE', 'VOID', 'URGENT'];
 
 export default function PdfStamp() {
+  useSEO('Pdf Stamp Online Free | PDF Media Suite', 'Free online Pdf Stamp tool. No signup or installation required.');
+
   usePageSEO('Add Stamp to PDF', 'Add CONFIDENTIAL, DRAFT, APPROVED stamps to PDF pages. Free online PDF stamp tool with date and color options.');
   const [file, setFile] = useState<File | null>(null);
   const [stampText, setStampText] = useState('DRAFT');

@@ -3,6 +3,7 @@ import { FileType, Loader2 } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
 import '../lib/pdfWorker';
 import FileDropzone from '../components/FileDropzone';
+import { useSEO } from '../hooks/useSEO';
 
 interface FontInfo {
   name: string;
@@ -12,6 +13,8 @@ interface FontInfo {
 }
 
 export default function FontExtractor() {
+  useSEO('Font Extractor Online Free | PDF Media Suite', 'Free online Font Extractor tool. No signup or installation required.');
+
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [fonts, setFonts] = useState<FontInfo[]>([]);

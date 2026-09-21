@@ -2,8 +2,11 @@ import { useState } from 'react';
 import { Download, FileText, Maximize } from 'lucide-react';
 import FileDropzone from '../components/FileDropzone';
 import { PDFDocument } from 'pdf-lib';
+import { useSEO } from '../hooks/useSEO';
 
 export default function AddMargins() {
+  useSEO('Add Margins Online Free | PDF Media Suite', 'Free online Add Margins tool. No signup or installation required.');
+
   const [file, setFile] = useState<File | null>(null);
   const [marginSize, setMarginSize] = useState<number>(36); // 36 points = 0.5 inch
   const [isProcessing, setIsProcessing] = useState(false);

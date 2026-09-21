@@ -2,8 +2,11 @@ import { useState } from 'react';
 import { Download, FileText, ArrowUpDown } from 'lucide-react';
 import FileDropzone from '../components/FileDropzone';
 import { PDFDocument } from 'pdf-lib';
+import { useSEO } from '../hooks/useSEO';
 
 export default function ReversePDF() {
+  useSEO('Reverse PDF Online Free | PDF Media Suite', 'Free online Reverse PDF tool. No signup or installation required.');
+
   const [file, setFile] = useState<File | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [reversedUrl, setReversedUrl] = useState<string | null>(null);

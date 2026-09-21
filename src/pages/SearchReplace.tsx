@@ -3,8 +3,11 @@ import { Search, Download, Loader2 } from 'lucide-react';
 import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
 import BackendLoader from '../components/BackendLoader';
+import { useSEO } from '../hooks/useSEO';
 
 export default function SearchReplace() {
+  useSEO('Search Replace Online Free | PDF Media Suite', 'Free online Search Replace tool. No signup or installation required.');
+
   usePageSEO(
     'PDF Search & Replace — Find and Replace Text in PDF',
     'Find and replace any text in your PDF files natively. Uses Python backend for perfect redaction and insertion.',

@@ -3,8 +3,11 @@ import { Link } from 'react-router-dom';
 import { Download, FileText, Maximize2, Check, Target } from 'lucide-react';
 import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
+import { useSEO } from '../hooks/useSEO';
 
 export default function IncreasePdfSize() {
+  useSEO('Increase Pdf Size Online Free | PDF Media Suite', 'Free online Increase Pdf Size tool. No signup or installation required.');
+
   usePageSEO('Increase PDF Size', 'Artificially increase the file size of your PDF document without changing its visual content or quality. Perfect for meeting minimum upload requirements.');
   const [file, setFile] = useState<File | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);

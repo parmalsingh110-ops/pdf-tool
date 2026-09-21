@@ -4,8 +4,11 @@ import * as pdfjsLib from "pdfjs-dist";
 import "../lib/pdfWorker";
 import FileDropzone from "../components/FileDropzone";
 import { usePageSEO } from "../lib/usePageSEO";
+import { useSEO } from '../hooks/useSEO';
 
 export default function PdfToAudio() {
+  useSEO('Pdf To Audio Online Free | PDF Media Suite', 'Free online Pdf To Audio tool. No signup or installation required.');
+
   usePageSEO("PDF to Audio — Read Aloud", "Listen to your PDF — converts PDF text to speech right in your browser. Adjustable speed and voice. Free, no upload needed.");
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);

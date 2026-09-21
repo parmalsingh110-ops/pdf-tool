@@ -5,6 +5,7 @@ import { PDFDocument } from 'pdf-lib';
 import '../lib/pdfWorker';
 import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
+import { useSEO } from '../hooks/useSEO';
 
 interface PageThumb {
   index: number;
@@ -13,6 +14,8 @@ interface PageThumb {
 }
 
 export default function ExtractPages() {
+  useSEO('Extract Pages Online Free | PDF Media Suite', 'Free online Extract Pages tool. No signup or installation required.');
+
   usePageSEO('Extract Pages from PDF', 'Select and extract specific pages from PDF with visual thumbnails. Free online PDF page extractor.');
   const [file, setFile] = useState<File | null>(null);
   const [pages, setPages] = useState<PageThumb[]>([]);

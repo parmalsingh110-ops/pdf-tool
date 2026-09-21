@@ -3,11 +3,14 @@ import { Image, Download, Loader2, CheckCircle, SlidersHorizontal } from "lucide
 import { PDFDocument, rgb } from "pdf-lib";
 import FileDropzone from "../components/FileDropzone";
 import { usePageSEO } from "../lib/usePageSEO";
+import { useSEO } from '../hooks/useSEO';
 
 const PAGE_W = 595, PAGE_H = 842; // A4 pts at 72dpi
 const PAGE_W_PX = PAGE_W * 2, PAGE_H_PX = PAGE_H * 2; // 144dpi render
 
 export default function LongImageToPdf() {
+  useSEO('Long Image To Pdf Online Free | PDF Media Suite', 'Free online Long Image To Pdf tool. No signup or installation required.');
+
   usePageSEO("Long Screenshot to PDF", "Convert tall/long screenshots and WhatsApp-style images to a multi-page A4 PDF. Auto-sliced cleanly — free browser tool.");
   const [file, setFile] = useState<File | null>(null);
   const [overlap, setOverlap] = useState(20);

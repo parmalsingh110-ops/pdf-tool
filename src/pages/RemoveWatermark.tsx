@@ -2,8 +2,11 @@ import { useState } from 'react';
 import { Download, FileText, Eraser, AlertCircle } from 'lucide-react';
 import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
+import { useSEO } from '../hooks/useSEO';
 
 export default function RemoveWatermark() {
+  useSEO('Remove Watermark Online Free | PDF Media Suite', 'Free online Remove Watermark tool. No signup or installation required.');
+
   usePageSEO(
     'Remove Watermark from PDF — Free Online Tool',
     'Remove bottom watermarks (e.g. Scanned with CamScanner) and background watermarks from your PDF files instantly. Free, private, no upload required.'

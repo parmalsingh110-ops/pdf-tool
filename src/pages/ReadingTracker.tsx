@@ -4,12 +4,15 @@ import * as pdfjsLib from "pdfjs-dist";
 import "../lib/pdfWorker";
 import FileDropzone from "../components/FileDropzone";
 import { usePageSEO } from "../lib/usePageSEO";
+import { useSEO } from '../hooks/useSEO';
 
 interface BookmarkItem { page: number; note: string; addedAt: string; }
 
 const STORAGE_KEY = (name: string) => `pdf_tracker_${name}`;
 
 export default function ReadingTracker() {
+  useSEO('Reading Tracker Online Free | PDF Media Suite', 'Free online Reading Tracker tool. No signup or installation required.');
+
   usePageSEO("PDF Reading Progress Tracker", "Track your reading progress in any PDF. Add bookmarks and notes per page, resume where you left off. Free browser-based reader.");
   const [file, setFile] = useState<File | null>(null);
   const [pages, setPages] = useState<string[]>([]);

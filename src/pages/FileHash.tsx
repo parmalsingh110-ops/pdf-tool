@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { ShieldCheck, Copy, Check, Loader2 } from 'lucide-react';
 import { usePageSEO } from '../lib/usePageSEO';
+import { useSEO } from '../hooks/useSEO';
 
 interface HashResult { name: string; size: string; md5: string; sha1: string; sha256: string; }
 
@@ -10,6 +11,8 @@ async function computeHash(buffer: ArrayBuffer, algo: string): Promise<string> {
 }
 
 export default function FileHash() {
+  useSEO('File Hash Online Free | PDF Media Suite', 'Free online File Hash tool. No signup or installation required.');
+
   usePageSEO('File Hash Calculator', 'Calculate SHA-1 and SHA-256 hashes for any file. Free online file integrity verification tool.');
   const [file, setFile] = useState<File | null>(null);
   const [result, setResult] = useState<HashResult | null>(null);

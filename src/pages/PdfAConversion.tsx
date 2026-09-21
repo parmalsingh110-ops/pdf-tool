@@ -1,7 +1,10 @@
 import React from 'react';
 import { FileCode, Info } from 'lucide-react';
+import { useSEO } from '../hooks/useSEO';
 
 export default function PdfAConversion() {
+  useSEO('Pdf A Conversion Online Free | PDF Media Suite', 'Free online Pdf A Conversion tool. No signup or installation required.');
+
   return (
     <div className="flex-1 flex flex-col items-center justify-center p-8">
       <div className="text-center mb-8 max-w-2xl mx-auto">

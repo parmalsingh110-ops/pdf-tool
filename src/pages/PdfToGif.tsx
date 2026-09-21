@@ -4,8 +4,11 @@ import * as pdfjsLib from 'pdfjs-dist';
 import '../lib/pdfWorker';
 import { encode } from 'modern-gif';
 import FileDropzone from '../components/FileDropzone';
+import { useSEO } from '../hooks/useSEO';
 
 export default function PdfToGif() {
+  useSEO('Pdf To Gif Online Free | PDF Media Suite', 'Free online Pdf To Gif tool. No signup or installation required.');
+
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState('');

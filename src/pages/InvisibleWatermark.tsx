@@ -1,8 +1,11 @@
 import { Droplet, Info, Eye, ArrowRight } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { usePageSEO } from '../lib/usePageSEO';
+import { useSEO } from '../hooks/useSEO';
 
 export default function InvisibleWatermark() {
+  useSEO('Invisible Watermark Online Free | PDF Media Suite', 'Free online Invisible Watermark tool. No signup or installation required.');
+
   usePageSEO('Invisible Watermarks', 'Embed invisible steganographic tracking data into PDF documents for forensic tracing.');
   return (
     <div className="flex-1 flex flex-col items-center justify-center p-8">

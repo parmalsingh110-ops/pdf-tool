@@ -2,8 +2,11 @@ import { useState } from 'react';
 import { Download, FileText, Layers } from 'lucide-react';
 import FileDropzone from '../components/FileDropzone';
 import { PDFDocument } from 'pdf-lib';
+import { useSEO } from '../hooks/useSEO';
 
 export default function FlattenPDF() {
+  useSEO('Flatten PDF Online Free | PDF Media Suite', 'Free online Flatten PDF tool. No signup or installation required.');
+
   const [file, setFile] = useState<File | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [flattenedUrl, setFlattenedUrl] = useState<string | null>(null);

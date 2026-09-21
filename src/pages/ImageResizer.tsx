@@ -4,6 +4,7 @@ import { preload, removeBackground } from '@imgly/background-removal';
 import JSZip from 'jszip';
 import FileDropzone from '../components/FileDropzone';
 import { encodeCanvasUnderByteBudget, type RasterMime } from '../lib/imageByteBudget';
+import { useSEO } from '../hooks/useSEO';
 
 const RESIZER_IMAGE_ACCEPT: Record<string, string[]> = {
   'image/png': ['.png'],
@@ -50,6 +51,8 @@ function pxToDisplay(px: number, unit: Unit, dpi: number): number {
 }
 
 export default function ImageResizer() {
+  useSEO('Image Resizer Online Free | PDF Media Suite', 'Free online Image Resizer tool. No signup or installation required.');
+
   const [file, setFile] = useState<File | null>(null);
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
   const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);

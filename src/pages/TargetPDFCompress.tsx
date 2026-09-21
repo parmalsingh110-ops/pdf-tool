@@ -4,11 +4,14 @@ import FileDropzone from '../components/FileDropzone';
 import { PDFDocument } from 'pdf-lib';
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+import { useSEO } from '../hooks/useSEO';
 
 // Initialize pdf.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
 export default function TargetPDFCompress() {
+  useSEO('Target PDF Compress Online Free | PDF Media Suite', 'Free online Target PDF Compress tool. No signup or installation required.');
+
   const [file, setFile] = useState<File | null>(null);
   const [targetSizeKB, setTargetSizeKB] = useState<number>(100);
   const [isProcessing, setIsProcessing] = useState(false);

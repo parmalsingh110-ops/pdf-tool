@@ -5,6 +5,7 @@ import FileDropzone from '../components/FileDropzone';
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { usePageSEO } from '../lib/usePageSEO';
+import { useSEO } from '../hooks/useSEO';
 
 // Initialize pdf.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
@@ -17,6 +18,8 @@ interface PageData {
 }
 
 export default function OrganizePDF() {
+  useSEO('Organize PDF Online Free | PDF Media Suite', 'Free online Organize PDF tool. No signup or installation required.');
+
   usePageSEO('Organize PDF Pages', 'Reorder, delete, and rearrange PDF pages with drag & drop. Free online PDF organizer.');
   const [file, setFile] = useState<File | null>(null);
   const [pages, setPages] = useState<PageData[]>([]);

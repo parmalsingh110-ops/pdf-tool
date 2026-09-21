@@ -3,8 +3,11 @@ import { FileCode, Download, Loader2 } from 'lucide-react';
 import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
 import BackendLoader from '../components/BackendLoader';
+import { useSEO } from '../hooks/useSEO';
 
 export default function ExtractTables() {
+  useSEO('Extract Tables Online Free | PDF Media Suite', 'Free online Extract Tables tool. No signup or installation required.');
+
   usePageSEO(
     'Extract Tables from PDF to Excel — Powered by Camelot',
     'Extract all tables from any PDF into a perfectly structured Excel spreadsheet. Uses Python backend with Camelot for precise extraction.',

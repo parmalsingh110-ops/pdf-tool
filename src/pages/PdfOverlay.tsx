@@ -4,8 +4,11 @@ import * as pdfjsLib from 'pdfjs-dist';
 import { PDFDocument } from 'pdf-lib';
 import '../lib/pdfWorker';
 import { usePageSEO } from '../lib/usePageSEO';
+import { useSEO } from '../hooks/useSEO';
 
 export default function PdfOverlay() {
+  useSEO('Pdf Overlay Online Free | PDF Media Suite', 'Free online Pdf Overlay tool. No signup or installation required.');
+
   usePageSEO('PDF Overlay Tool', 'Stack two PDFs on top of each other with adjustable transparency. Free online PDF overlay comparison tool.');
   const [fileA, setFileA] = useState<File | null>(null);
   const [fileB, setFileB] = useState<File | null>(null);

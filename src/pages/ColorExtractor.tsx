@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Palette, Copy, Check } from 'lucide-react';
 import { usePageSEO } from '../lib/usePageSEO';
+import { useSEO } from '../hooks/useSEO';
 
 interface ColorInfo { hex: string; rgb: string; hsl: string; count: number; pct: string; }
 
@@ -24,6 +25,8 @@ function rgbToHsl(r: number, g: number, b: number) {
 }
 
 export default function ColorExtractor() {
+  useSEO('Color Extractor Online Free | PDF Media Suite', 'Free online Color Extractor tool. No signup or installation required.');
+
   usePageSEO('Color Palette Extractor', 'Extract dominant colors from images as HEX, RGB, and HSL values. Free online color palette generator from photos.');
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);

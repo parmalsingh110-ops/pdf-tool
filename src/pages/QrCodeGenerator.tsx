@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { QrCode, Download, Copy } from 'lucide-react';
+import { useSEO } from '../hooks/useSEO';
 
 // Simple QR Code generator using canvas (no external lib needed)
 function generateQRMatrix(text: string): boolean[][] {
@@ -61,6 +62,8 @@ function generateCode128(text: string): number[] {
 }
 
 export default function QrCodeGenerator() {
+  useSEO('Qr Code Generator Online Free | PDF Media Suite', 'Free online Qr Code Generator tool. No signup or installation required.');
+
   const [text, setText] = useState('https://example.com');
   const [mode, setMode] = useState<'qr' | 'barcode'>('qr');
   const [fgColor, setFgColor] = useState('#000000');

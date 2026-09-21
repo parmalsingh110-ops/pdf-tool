@@ -1,7 +1,10 @@
 import { Link } from 'react-router-dom';
 import { Shield, ArrowLeft } from 'lucide-react';
+import { useSEO } from '../hooks/useSEO';
 
 export default function Privacy() {
+  useSEO('Privacy Online Free | PDF Media Suite', 'Free online Privacy tool. No signup or installation required.');
+
   return (
     <div className="max-w-3xl mx-auto px-6 py-12 text-slate-700 dark:text-slate-300">
       <Link

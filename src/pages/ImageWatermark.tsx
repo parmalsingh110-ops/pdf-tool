@@ -1,10 +1,13 @@
 import { useState, useRef } from 'react';
 import { Droplet, Download, Loader2 } from 'lucide-react';
 import { usePageSEO } from '../lib/usePageSEO';
+import { useSEO } from '../hooks/useSEO';
 
 type WatermarkPos = 'center' | 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' | 'tile';
 
 export default function ImageWatermark() {
+  useSEO('Image Watermark Online Free | PDF Media Suite', 'Free online Image Watermark tool. No signup or installation required.');
+
   usePageSEO('Add Watermark to Image', 'Add text watermarks to images with position, opacity, tiling, and rotation controls. Free online image watermark tool.');
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);

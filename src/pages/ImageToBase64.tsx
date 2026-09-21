@@ -1,8 +1,11 @@
 import { useState } from 'react';
 import { Code, Copy, Check } from 'lucide-react';
 import { usePageSEO } from '../lib/usePageSEO';
+import { useSEO } from '../hooks/useSEO';
 
 export default function ImageToBase64() {
+  useSEO('Image To Base64 Online Free | PDF Media Suite', 'Free online Image To Base64 tool. No signup or installation required.');
+
   usePageSEO('Image to Base64 Converter', 'Convert images to Base64 strings. Get Data URI, raw Base64, HTML img tag, and CSS background code.');
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);

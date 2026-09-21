@@ -3,10 +3,13 @@ import { FileText, Scan, Globe, Zap, CheckCircle2, Download, RotateCcw, AlertTri
 import FileDropzone from '../components/FileDropzone';
 import BackendLoader from '../components/BackendLoader';
 import { usePageSEO } from '../lib/usePageSEO';
+import { useSEO } from '../hooks/useSEO';
 
 type Stage = 'idle' | 'processing' | 'done' | 'error';
 
 export default function PdfToWord() {
+  useSEO('Pdf To Word Online Free | PDF Media Suite', 'Free online Pdf To Word tool. No signup or installation required.');
+
   usePageSEO(
     'PDF to Word Converter — Powerful Backend API',
     'Convert any PDF to Word DOCX with perfect layout, tables, and images preserved using our powerful Python AI backend.',

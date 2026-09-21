@@ -3,10 +3,13 @@ import { Presentation, Scan, Globe, Zap, CheckCircle2, Download, RotateCcw, Aler
 import FileDropzone from '../components/FileDropzone';
 import BackendLoader from '../components/BackendLoader';
 import { usePageSEO } from '../lib/usePageSEO';
+import { useSEO } from '../hooks/useSEO';
 
 type Stage = 'idle' | 'processing' | 'done' | 'error';
 
 export default function PdfToPpt() {
+  useSEO('Pdf To Ppt Online Free | PDF Media Suite', 'Free online Pdf To Ppt tool. No signup or installation required.');
+
   usePageSEO(
     'PDF to PPT Converter — Powerful Backend API',
     'Convert PDF to PowerPoint slides accurately using our Python AI backend.',

@@ -2,8 +2,11 @@ import { useState } from 'react';
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 import { Download, FileText, Hash } from 'lucide-react';
 import FileDropzone from '../components/FileDropzone';
+import { useSEO } from '../hooks/useSEO';
 
 export default function PageNumbersPDF() {
+  useSEO('Page Numbers PDF Online Free | PDF Media Suite', 'Free online Page Numbers PDF tool. No signup or installation required.');
+
   const [file, setFile] = useState<File | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [numberedUrl, setNumberedUrl] = useState<string | null>(null);

@@ -3,8 +3,11 @@ import { Download, ImageMinus, Image as ImageIcon } from 'lucide-react';
 import FileDropzone from '../components/FileDropzone';
 import imageCompression from 'browser-image-compression';
 import { encodeCanvasUnderByteBudget } from '../lib/imageByteBudget';
+import { useSEO } from '../hooks/useSEO';
 
 export default function ExactImageSize() {
+  useSEO('Exact Image Size Online Free | PDF Media Suite', 'Free online Exact Image Size tool. No signup or installation required.');
+
   const [file, setFile] = useState<File | null>(null);
   const [targetSizeKB, setTargetSizeKB] = useState<number>(50);
   const [isProcessing, setIsProcessing] = useState(false);

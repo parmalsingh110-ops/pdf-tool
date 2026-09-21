@@ -1,10 +1,13 @@
 ﻿import { useState } from "react";
 import { Globe, Download, AlertTriangle, Loader2, Settings, CheckCircle } from "lucide-react";
 import { usePageSEO } from "../lib/usePageSEO";
+import { useSEO } from '../hooks/useSEO';
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
 export default function WebpageToPdf() {
+  useSEO('Webpage To Pdf Online Free | PDF Media Suite', 'Free online Webpage To Pdf tool. No signup or installation required.');
+
   usePageSEO("Webpage to PDF Converter", "Convert any website URL to a PDF file. Save web pages as PDF online for free — full-page, paginated, print-ready.");
   const [url, setUrl] = useState("");
   const [format, setFormat] = useState("A4");

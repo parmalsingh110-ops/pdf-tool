@@ -1,8 +1,11 @@
 import { CheckCircle, Info, ShieldCheck, ArrowRight } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { usePageSEO } from '../lib/usePageSEO';
+import { useSEO } from '../hooks/useSEO';
 
 export default function ValidateSignatures() {
+  useSEO('Validate Signatures Online Free | PDF Media Suite', 'Free online Validate Signatures tool. No signup or installation required.');
+
   usePageSEO('Validate PDF Signatures', 'Verify and validate digital signatures and X.509 certificates in PDF documents.');
   return (
     <div className="flex-1 flex flex-col items-center justify-center p-8">

@@ -4,8 +4,11 @@ import { usePageSEO } from '../lib/usePageSEO';
 import FileDropzone from '../components/FileDropzone';
 // @ts-ignore
 import * as Zga from 'zgapdfsigner';
+import { useSEO } from '../hooks/useSEO';
 
 export default function CertifyDocument() {
+  useSEO('Certify Document Online Free | PDF Media Suite', 'Free online Certify Document tool. No signup or installation required.');
+
   usePageSEO('Certify PDF Document', 'Digitally sign and certify your PDF document using a .p12 or .pfx certificate. Free online PDF certification tool that works entirely in your browser.');
   
   const [pdfFile, setPdfFile] = useState<File | null>(null);

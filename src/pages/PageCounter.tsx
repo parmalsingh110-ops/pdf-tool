@@ -2,10 +2,13 @@ import { useState } from 'react';
 import { FileText, Hash, Loader2 } from 'lucide-react';
 import { PDFDocument } from 'pdf-lib';
 import { usePageSEO } from '../lib/usePageSEO';
+import { useSEO } from '../hooks/useSEO';
 
 interface PageInfo { name: string; pages: number; size: string; }
 
 export default function PageCounter() {
+  useSEO('Page Counter Online Free | PDF Media Suite', 'Free online Page Counter tool. No signup or installation required.');
+
   usePageSEO('PDF Page Counter', 'Count total pages across multiple PDF files instantly. Free online batch PDF page counter.');
   const [files, setFiles] = useState<File[]>([]);
   const [results, setResults] = useState<PageInfo[]>([]);

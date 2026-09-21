@@ -2,10 +2,13 @@
 import { Crop, Download, AlertTriangle, Loader2, FileText, CheckCircle } from "lucide-react";
 import FileDropzone from "../components/FileDropzone";
 import { usePageSEO } from "../lib/usePageSEO";
+import { useSEO } from '../hooks/useSEO';
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
 export default function AutoCropMargins() {
+  useSEO('Auto Crop Margins Online Free | PDF Media Suite', 'Free online Auto Crop Margins tool. No signup or installation required.');
+
   usePageSEO("Auto-Crop PDF White Margins", "Automatically detect and remove white margins from PDF pages. Perfect for e-book readers, Kindle, and tablets. Free online tool.");
   const [file, setFile] = useState<File | null>(null);
   const [padding, setPadding] = useState(10);

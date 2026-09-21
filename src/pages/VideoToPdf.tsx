@@ -2,8 +2,11 @@ import React, { useState } from 'react';
 import { ImageIcon } from 'lucide-react';
 import { PDFDocument } from 'pdf-lib';
 import GenericToolUI from '../components/GenericToolUI';
+import { useSEO } from '../hooks/useSEO';
 
 export default function VideoToPdf() {
+  useSEO('Video To Pdf Online Free | PDF Media Suite', 'Free online Video To Pdf tool. No signup or installation required.');
+
   const [processingState, setProcessingState] = useState('');
 
   const handleProcess = async (file: File): Promise<string> => {

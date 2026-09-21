@@ -5,10 +5,13 @@ import "../lib/pdfWorker";
 import { PDFDocument } from "pdf-lib";
 import FileDropzone from "../components/FileDropzone";
 import { usePageSEO } from "../lib/usePageSEO";
+import { useSEO } from '../hooks/useSEO';
 
 interface Check { id: string; label: string; desc: string; status: "pass"|"fail"|"warn"; detail?: string; }
 
 export default function AccessibilityChecker() {
+  useSEO('Accessibility Checker Online Free | PDF Media Suite', 'Free online Accessibility Checker tool. No signup or installation required.');
+
   usePageSEO("PDF Accessibility Checker", "Check if your PDF is accessible — WCAG 2.1, screen reader ready, tagged, alt-text, language, reading order. Free compliance tool.");
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);

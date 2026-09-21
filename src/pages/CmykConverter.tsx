@@ -2,10 +2,13 @@
 import { Palette, Download, AlertTriangle, Loader2, FileText, CheckCircle } from "lucide-react";
 import FileDropzone from "../components/FileDropzone";
 import { usePageSEO } from "../lib/usePageSEO";
+import { useSEO } from '../hooks/useSEO';
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
 export default function CmykConverter() {
+  useSEO('Cmyk Converter Online Free | PDF Media Suite', 'Free online Cmyk Converter tool. No signup or installation required.');
+
   usePageSEO("RGB to CMYK PDF Converter", "Convert your RGB PDF to CMYK color space for professional offset printing. Free online tool — no sign-up required.");
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);

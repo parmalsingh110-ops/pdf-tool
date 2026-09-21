@@ -2,12 +2,15 @@
 import { Link, ExternalLink, Loader2, FileText, Copy, Check, AlertTriangle, Download } from "lucide-react";
 import FileDropzone from "../components/FileDropzone";
 import { usePageSEO } from "../lib/usePageSEO";
+import { useSEO } from '../hooks/useSEO';
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
 interface LinkItem { page: number; url: string; rect: number[]; }
 
 export default function LinkExtractor() {
+  useSEO('Link Extractor Online Free | PDF Media Suite', 'Free online Link Extractor tool. No signup or installation required.');
+
   usePageSEO("PDF Link Extractor", "Extract all hyperlinks from a PDF file. View, copy, and export all URLs found in your PDF document. Free online tool.");
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);

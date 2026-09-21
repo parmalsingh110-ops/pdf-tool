@@ -4,8 +4,11 @@ import * as pdfjsLib from "pdfjs-dist";
 import "../lib/pdfWorker";
 import FileDropzone from "../components/FileDropzone";
 import { usePageSEO } from "../lib/usePageSEO";
+import { useSEO } from '../hooks/useSEO';
 
 export default function PdfToMarkdown() {
+  useSEO('Pdf To Markdown Online Free | PDF Media Suite', 'Free online Pdf To Markdown tool. No signup or installation required.');
+
   usePageSEO("PDF to Markdown Converter", "Convert PDF documents to clean Markdown format. Perfect for developers, bloggers, and content writers. Free browser-based tool.");
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);

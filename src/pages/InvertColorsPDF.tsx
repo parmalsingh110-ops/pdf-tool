@@ -4,8 +4,11 @@ import { PDFDocument } from 'pdf-lib';
 import * as pdfjsLib from 'pdfjs-dist';
 import GenericToolUI from '../components/GenericToolUI';
 import { usePageSEO } from '../lib/usePageSEO';
+import { useSEO } from '../hooks/useSEO';
 
 export default function InvertColorsPDF() {
+  useSEO('Invert Colors PDF Online Free | PDF Media Suite', 'Free online Invert Colors PDF tool. No signup or installation required.');
+
   usePageSEO('Invert PDF Colors', 'Invert all colors in PDF pages. Free online PDF color inverter — create dark mode PDFs.');
   const handleProcess = async (file: File): Promise<string> => {
     const arrayBuffer = await file.arrayBuffer();

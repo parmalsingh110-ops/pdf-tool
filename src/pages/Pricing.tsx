@@ -1,8 +1,11 @@
 import { Link } from 'react-router-dom';
 import { ArrowLeft, Tag, CheckCircle } from 'lucide-react';
 import { usePageSEO } from '../lib/usePageSEO';
+import { useSEO } from '../hooks/useSEO';
 
 export default function Pricing() {
+  useSEO('Pricing Online Free | PDF Media Suite', 'Free online Pricing tool. No signup or installation required.');
+
   usePageSEO(
     'Pricing | PDF Media Suite',
     'PDF Media Suite currently provides its core PDF, document and image tools free of charge.'

@@ -4,8 +4,11 @@ import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 import * as pdfjsLib from 'pdfjs-dist';
 import '../lib/pdfWorker';
 import FileDropzone from '../components/FileDropzone';
+import { useSEO } from '../hooks/useSEO';
 
 export default function HighlightText() {
+  useSEO('Highlight Text Online Free | PDF Media Suite', 'Free online Highlight Text tool. No signup or installation required.');
+
   const [file, setFile] = useState<File | null>(null);
   const [keywords, setKeywords] = useState('');
   const [highlightColor, setHighlightColor] = useState('#ffff00');

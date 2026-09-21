@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import FileDropzone from '../components/FileDropzone';
 import { extractTextRegions } from '../lib/advancedVisionEngine';
+import { useSEO } from '../hooks/useSEO';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
@@ -175,6 +176,8 @@ function flattenLines(page: any): EditableWord[] {
 }
 
 export default function ImageTextEditor() {
+  useSEO('Image Text Editor Online Free | PDF Media Suite', 'Free online Image Text Editor tool. No signup or installation required.');
+
   const [file, setFile] = useState<File | null>(null);
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
   const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);

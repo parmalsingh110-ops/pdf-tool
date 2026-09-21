@@ -1,8 +1,11 @@
 import { Lock, Info, ShieldOff, ArrowRight } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { usePageSEO } from '../lib/usePageSEO';
+import { useSEO } from '../hooks/useSEO';
 
 export default function AddDrm() {
+  useSEO('Add Drm Online Free | PDF Media Suite', 'Free online Add Drm tool. No signup or installation required.');
+
   usePageSEO('Add DRM Protection', 'Add DRM (Digital Rights Management) protection to PDFs. Restrict copying, printing, and redistribution.');
   return (
     <div className="flex-1 flex flex-col items-center justify-center p-8">

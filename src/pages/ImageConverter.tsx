@@ -1,6 +1,7 @@
 import { useState, useRef } from 'react';
 import { RefreshCw, Download, Loader2, Trash2 } from 'lucide-react';
 import { usePageSEO } from '../lib/usePageSEO';
+import { useSEO } from '../hooks/useSEO';
 
 type OutputFormat = 'image/jpeg' | 'image/png' | 'image/webp';
 const FORMATS: { label: string; value: OutputFormat; ext: string }[] = [
@@ -10,6 +11,8 @@ const FORMATS: { label: string; value: OutputFormat; ext: string }[] = [
 ];
 
 export default function ImageConverter() {
+  useSEO('Image Converter Online Free | PDF Media Suite', 'Free online Image Converter tool. No signup or installation required.');
+
   usePageSEO('Image Format Converter', 'Convert images between JPG, PNG, and WebP formats. Free online batch image converter with quality control.');
   const [files, setFiles] = useState<File[]>([]);
   const [format, setFormat] = useState<OutputFormat>('image/png');

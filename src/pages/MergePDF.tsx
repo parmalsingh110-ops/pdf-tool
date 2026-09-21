@@ -3,6 +3,7 @@ import { PDFDocument } from 'pdf-lib';
 import { Download, Trash2, GripVertical, FileText, ListRestart } from 'lucide-react';
 import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
+import { useSEO } from '../hooks/useSEO';
 
 const ORDER_KEY = 'mergePdfOrderV1';
 
@@ -43,6 +44,8 @@ function sortFilesBySavedOrder(files: File[], order: OrderEntry[]): File[] {
 }
 
 export default function MergePDF() {
+  useSEO('Merge PDF Online Free | PDF Media Suite', 'Free online Merge PDF tool. No signup or installation required.');
+
   usePageSEO('Merge PDF Online Free', 'Combine multiple PDF files into one document. Free online PDF merger — fast, private, no uploads. Drag & drop to merge PDFs instantly.');
   const [files, setFiles] = useState<File[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);

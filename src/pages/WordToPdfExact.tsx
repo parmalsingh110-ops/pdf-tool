@@ -3,10 +3,13 @@ import { FileText, CheckCircle2, Download, RotateCcw, AlertTriangle } from 'luci
 import FileDropzone from '../components/FileDropzone';
 import BackendLoader from '../components/BackendLoader';
 import { usePageSEO } from '../lib/usePageSEO';
+import { useSEO } from '../hooks/useSEO';
 
 type Stage = 'idle' | 'processing' | 'done' | 'error';
 
 export default function WordToPdfExact() {
+  useSEO('Word To Pdf Exact Online Free | PDF Media Suite', 'Free online Word To Pdf Exact tool. No signup or installation required.');
+
   usePageSEO(
     'Office to PDF Converter — Exact Formatting',
     'Convert Word, Excel, and PowerPoint files to PDF with 100% perfect formatting using our powerful backend.',

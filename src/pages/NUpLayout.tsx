@@ -5,6 +5,7 @@ import * as pdfjsLib from "pdfjs-dist";
 import "../lib/pdfWorker";
 import FileDropzone from "../components/FileDropzone";
 import { usePageSEO } from "../lib/usePageSEO";
+import { useSEO } from '../hooks/useSEO';
 
 const PRESETS = [
   { n: 2, cols: 1, rows: 2 },
@@ -24,6 +25,8 @@ function getBestGrid(n: number): { cols: number; rows: number } {
 }
 
 export default function NUpLayout() {
+  useSEO('N Up Layout Online Free | PDF Media Suite', 'Free online N Up Layout tool. No signup or installation required.');
+
   usePageSEO("N-Up PDF — Print Multiple Pages Per Sheet", "Print 2, 4, 6, 9, or any number of PDF pages on a single sheet. Save paper with N-Up page layout — free browser tool.");
   const [file, setFile] = useState<File | null>(null);
   const [mode, setMode] = useState<number>(4);

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { FileImage, Download, Loader2, GripVertical, RotateCw, Trash2 } from 'lucide-react';
 import { PDFDocument } from 'pdf-lib';
+import { useSEO } from '../hooks/useSEO';
 
 interface ImageItem {
   id: string;
@@ -10,6 +11,8 @@ interface ImageItem {
 }
 
 export default function SmartImageToPdf() {
+  useSEO('Smart Image To Pdf Online Free | PDF Media Suite', 'Free online Smart Image To Pdf tool. No signup or installation required.');
+
   const [images, setImages] = useState<ImageItem[]>([]);
   const [pageSize, setPageSize] = useState<'fit' | 'a4' | 'letter'>('a4');
   const [margin, setMargin] = useState(20);

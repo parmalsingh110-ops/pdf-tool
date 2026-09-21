@@ -4,8 +4,11 @@ import { PDFDocument } from 'pdf-lib';
 import * as pdfjsLib from 'pdfjs-dist';
 import GenericToolUI from '../components/GenericToolUI';
 import { usePageSEO } from '../lib/usePageSEO';
+import { useSEO } from '../hooks/useSEO';
 
 export default function GrayscalePDF() {
+  useSEO('Grayscale PDF Online Free | PDF Media Suite', 'Free online Grayscale PDF tool. No signup or installation required.');
+
   usePageSEO('Convert PDF to Grayscale', 'Convert color PDF to grayscale/black & white. Free online tool to make PDF monochrome for printing.');
   const handleProcess = async (file: File): Promise<string> => {
     const arrayBuffer = await file.arrayBuffer();

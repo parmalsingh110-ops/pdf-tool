@@ -2,10 +2,13 @@ import React, { useState } from 'react';
 import { Hash, Download, Loader2 } from 'lucide-react';
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 import FileDropzone from '../components/FileDropzone';
+import { useSEO } from '../hooks/useSEO';
 
 type Position = 'bottom-right' | 'bottom-left' | 'top-right' | 'top-left' | 'bottom-center' | 'top-center';
 
 export default function BatesNumbering() {
+  useSEO('Bates Numbering Online Free | PDF Media Suite', 'Free online Bates Numbering tool. No signup or installation required.');
+
   const [file, setFile] = useState<File | null>(null);
   const [prefix, setPrefix] = useState('DOC-');
   const [startNumber, setStartNumber] = useState(1);

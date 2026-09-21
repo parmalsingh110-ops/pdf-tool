@@ -4,11 +4,14 @@ import FileDropzone from '../components/FileDropzone';
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { usePageSEO } from '../lib/usePageSEO';
+import { useSEO } from '../hooks/useSEO';
 
 // Initialize pdf.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
 export default function PDFToJPG() {
+  useSEO('PDF To J P G Online Free | PDF Media Suite', 'Free online PDF To J P G tool. No signup or installation required.');
+
   usePageSEO('PDF to JPG Converter', 'Convert PDF pages to high-quality JPG images. Free online PDF to JPEG converter — fast, private, no uploads required.');
   const [file, setFile] = useState<File | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);

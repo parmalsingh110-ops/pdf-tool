@@ -2,8 +2,11 @@ import React from 'react';
 import { Trash2 } from 'lucide-react';
 import { PDFDocument } from 'pdf-lib';
 import GenericToolUI from '../components/GenericToolUI';
+import { useSEO } from '../hooks/useSEO';
 
 export default function RemoveMetadata() {
+  useSEO('Remove Metadata Online Free | PDF Media Suite', 'Free online Remove Metadata tool. No signup or installation required.');
+
   const handleProcess = async (file: File): Promise<string> => {
     const arrayBuffer = await file.arrayBuffer();
     const pdfDoc = await PDFDocument.load(arrayBuffer);

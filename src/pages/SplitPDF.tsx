@@ -3,8 +3,11 @@ import { PDFDocument } from 'pdf-lib';
 import { Download, FileText } from 'lucide-react';
 import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
+import { useSEO } from '../hooks/useSEO';
 
 export default function SplitPDF() {
+  useSEO('Split PDF Online Free | PDF Media Suite', 'Free online Split PDF tool. No signup or installation required.');
+
   usePageSEO('Split PDF Online Free', 'Split PDF into individual pages or extract specific page ranges. Free online PDF splitter — fast, private, browser-based.');
   const [file, setFile] = useState<File | null>(null);
   const [pageCount, setPageCount] = useState<number>(0);

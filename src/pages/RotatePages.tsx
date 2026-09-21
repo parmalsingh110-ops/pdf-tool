@@ -5,10 +5,13 @@ import * as pdfjsLib from 'pdfjs-dist';
 import '../lib/pdfWorker';
 import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
+import { useSEO } from '../hooks/useSEO';
 
 interface PageInfo { index: number; url: string; rotation: number; }
 
 export default function RotatePages() {
+  useSEO('Rotate Pages Online Free | PDF Media Suite', 'Free online Rotate Pages tool. No signup or installation required.');
+
   usePageSEO('Rotate PDF Pages Online', 'Rotate individual PDF pages by 90, 180, or 270 degrees. Free online PDF page rotation tool.');
   const [file, setFile] = useState<File | null>(null);
   const [pages, setPages] = useState<PageInfo[]>([]);

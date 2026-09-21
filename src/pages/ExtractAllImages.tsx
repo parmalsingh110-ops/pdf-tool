@@ -2,8 +2,11 @@ import React, { useState } from 'react';
 import { ImageIcon, Download, Loader2, Package } from 'lucide-react';
 import FileDropzone from '../components/FileDropzone';
 import BackendLoader from '../components/BackendLoader';
+import { useSEO } from '../hooks/useSEO';
 
 export default function ExtractAllImages() {
+  useSEO('Extract All Images Online Free | PDF Media Suite', 'Free online Extract All Images tool. No signup or installation required.');
+
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [resultUrl, setResultUrl] = useState<string | null>(null);

@@ -3,11 +3,14 @@ import { Search, Scan, Globe, Zap, CheckCircle2, Download, RotateCcw, AlertTrian
 import FileDropzone from '../components/FileDropzone';
 import BackendLoader from '../components/BackendLoader';
 import { usePageSEO } from '../lib/usePageSEO';
+import { useSEO } from '../hooks/useSEO';
 
 type Stage = 'idle' | 'processing' | 'done' | 'error';
 type Lang = 'eng' | 'hin' | 'hin+eng';
 
 export default function SearchablePdf() {
+  useSEO('Searchable Pdf Online Free | PDF Media Suite', 'Free online Searchable Pdf tool. No signup or installation required.');
+
   usePageSEO(
     'Make PDF Searchable (OCR) — Powerful Backend API',
     'Convert scanned PDFs into text-searchable PDFs without changing their appearance.',

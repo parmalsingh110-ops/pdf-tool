@@ -2,10 +2,13 @@
 import { Wrench, Download, AlertTriangle, Loader2, FileText, CheckCircle, Info } from "lucide-react";
 import FileDropzone from "../components/FileDropzone";
 import { usePageSEO } from "../lib/usePageSEO";
+import { useSEO } from '../hooks/useSEO';
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
 export default function PdfRepair() {
+  useSEO('Pdf Repair Online Free | PDF Media Suite', 'Free online Pdf Repair tool. No signup or installation required.');
+
   usePageSEO("Fix & Repair Corrupted PDF", "Repair broken, damaged or corrupted PDF files online. Multi-strategy recovery using Ghostscript and MuPDF. Free, no sign-up.");
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);

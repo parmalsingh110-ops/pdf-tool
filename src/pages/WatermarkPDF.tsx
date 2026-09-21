@@ -3,8 +3,11 @@ import { PDFDocument, rgb, degrees, StandardFonts } from 'pdf-lib';
 import { Download, FileText, Type } from 'lucide-react';
 import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
+import { useSEO } from '../hooks/useSEO';
 
 export default function WatermarkPDF() {
+  useSEO('Watermark PDF Online Free | PDF Media Suite', 'Free online Watermark PDF tool. No signup or installation required.');
+
   usePageSEO('Add Watermark to PDF', 'Add text watermarks to PDF pages. Free online PDF watermark tool — customize font, size, and position.');
   const [file, setFile] = useState<File | null>(null);
   const [watermarkText, setWatermarkText] = useState('CONFIDENTIAL');

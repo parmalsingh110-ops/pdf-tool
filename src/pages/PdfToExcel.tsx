@@ -3,11 +3,14 @@ import { Table2, Scan, Globe, Zap, CheckCircle2, Download, RotateCcw, AlertTrian
 import FileDropzone from '../components/FileDropzone';
 import BackendLoader from '../components/BackendLoader';
 import { usePageSEO } from '../lib/usePageSEO';
+import { useSEO } from '../hooks/useSEO';
 
 type Stage = 'idle' | 'processing' | 'done' | 'error';
 type Method = 'auto' | 'lattice' | 'stream';
 
 export default function PdfToExcel() {
+  useSEO('Pdf To Excel Online Free | PDF Media Suite', 'Free online Pdf To Excel tool. No signup or installation required.');
+
   usePageSEO(
     'PDF to Excel Converter — Powerful Backend API',
     'Convert PDF tables to Excel accurately. Retains rows, columns, and data perfectly.',

@@ -4,8 +4,11 @@ import * as pdfjsLib from 'pdfjs-dist';
 import '../lib/pdfWorker';
 import { PDFDocument } from 'pdf-lib';
 import FileDropzone from '../components/FileDropzone';
+import { useSEO } from '../hooks/useSEO';
 
 export default function PdfPageCropper() {
+  useSEO('Pdf Page Cropper Online Free | PDF Media Suite', 'Free online Pdf Page Cropper tool. No signup or installation required.');
+
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [pageImage, setPageImage] = useState<string | null>(null);

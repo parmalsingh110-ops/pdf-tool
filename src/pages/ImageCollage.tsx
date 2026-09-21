@@ -1,6 +1,7 @@
 import React, { useState, useRef, useCallback } from 'react';
 import { LayoutGrid, Download, Plus, X, Move } from 'lucide-react';
 import FileDropzone from '../components/FileDropzone';
+import { useSEO } from '../hooks/useSEO';
 
 const TEMPLATES = [
   { name: '2×1', cols: 2, rows: 1 },
@@ -18,6 +19,8 @@ interface CollageImage {
 }
 
 export default function ImageCollage() {
+  useSEO('Image Collage Online Free | PDF Media Suite', 'Free online Image Collage tool. No signup or installation required.');
+
   const [images, setImages] = useState<CollageImage[]>([]);
   const [cols, setCols] = useState(2);
   const [rows, setRows] = useState(2);

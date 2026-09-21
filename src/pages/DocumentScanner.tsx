@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { ScanLine, Download, Loader2, RotateCw, Crop, Activity, Plus, Trash2, CheckCircle2, FileImage } from 'lucide-react';
 import { wrapPerspective, type Point } from '../lib/perspectiveWarp';
 import { PDFDocument } from 'pdf-lib';
+import { useSEO } from '../hooks/useSEO';
 
 type EnhanceMode = 'document' | 'photo' | 'bw' | 'screen';
 
@@ -17,6 +18,8 @@ interface ScannedPage {
 }
 
 export default function DocumentScanner() {
+  useSEO('Document Scanner Online Free | PDF Media Suite', 'Free online Document Scanner tool. No signup or installation required.');
+
   const [pages, setPages] = useState<ScannedPage[]>([]);
   const [activePageId, setActivePageId] = useState<string | null>(null);
   const activePage = pages.find(p => p.id === activePageId);

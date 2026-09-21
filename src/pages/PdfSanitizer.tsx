@@ -5,6 +5,7 @@ import * as pdfjsLib from "pdfjs-dist";
 import "../lib/pdfWorker";
 import FileDropzone from "../components/FileDropzone";
 import { usePageSEO } from "../lib/usePageSEO";
+import { useSEO } from '../hooks/useSEO';
 
 interface SanitizeReport {
   metadata: number;
@@ -23,6 +24,8 @@ interface SanitizeReport {
 }
 
 export default function PdfSanitizer() {
+  useSEO('Pdf Sanitizer Online Free | PDF Media Suite', 'Free online Pdf Sanitizer tool. No signup or installation required.');
+
   usePageSEO(
     "PDF Deep Sanitizer — Remove All Hidden Data",
     "Completely sanitize your PDF: remove hidden metadata, JavaScript, embedded files, form fields, bookmarks, tracking data and more. Free, private, browser-only."

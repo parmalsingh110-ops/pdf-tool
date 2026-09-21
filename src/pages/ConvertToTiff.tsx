@@ -6,10 +6,13 @@ import JSZip from 'jszip';
 import * as UTIF from 'utif';
 import { PDFDocument } from 'pdf-lib';
 import FileDropzone from '../components/FileDropzone';
+import { useSEO } from '../hooks/useSEO';
 
 type Mode = 'pdf-to-images' | 'tiff-to-pdf';
 
 export default function ConvertToTiff() {
+  useSEO('Convert To Tiff Online Free | PDF Media Suite', 'Free online Convert To Tiff tool. No signup or installation required.');
+
   const [mode, setMode] = useState<Mode>('pdf-to-images');
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);

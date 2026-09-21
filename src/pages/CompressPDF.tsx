@@ -7,10 +7,13 @@ import * as pdfjsLib from 'pdfjs-dist';
 import '../lib/pdfWorker';
 import { usePageSEO } from '../lib/usePageSEO';
 import BackendLoader from '../components/BackendLoader';
+import { useSEO } from '../hooks/useSEO';
 
 type CompressionLevel = 'backend-high-quality' | 'extreme' | 'recommended' | 'low';
 
 export default function CompressPDF() {
+  useSEO('Compress PDF Online Free | PDF Media Suite', 'Free online Compress PDF tool. No signup or installation required.');
+
   usePageSEO('Compress PDF Online Free', 'Reduce PDF file size while maintaining quality. Free online PDF compressor with multiple compression levels — fast and private.');
   const [file, setFile] = useState<File | null>(null);
   const [compressionLevel, setCompressionLevel] = useState<CompressionLevel>('backend-high-quality');

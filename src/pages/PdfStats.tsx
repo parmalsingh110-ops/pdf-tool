@@ -4,6 +4,7 @@ import * as pdfjsLib from 'pdfjs-dist';
 import '../lib/pdfWorker';
 import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
+import { useSEO } from '../hooks/useSEO';
 
 interface PdfStatsResult {
   pages: number;
@@ -17,6 +18,8 @@ interface PdfStatsResult {
 }
 
 export default function PdfStats() {
+  useSEO('Pdf Stats Online Free | PDF Media Suite', 'Free online Pdf Stats tool. No signup or installation required.');
+
   usePageSEO('PDF Word Counter & Stats', 'Analyze PDF document stats — page count, word count, character count, reading time. Free online PDF analyzer.');
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);

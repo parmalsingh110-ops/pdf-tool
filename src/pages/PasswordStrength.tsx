@@ -1,7 +1,10 @@
 import React, { useState } from 'react';
 import { Lock } from 'lucide-react';
+import { useSEO } from '../hooks/useSEO';
 
 export default function PasswordStrength() {
+  useSEO('Password Strength Online Free | PDF Media Suite', 'Free online Password Strength tool. No signup or installation required.');
+
   const [password, setPassword] = useState('');
   const [score, setScore] = useState(0);
 
