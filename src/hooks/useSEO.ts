@@ -1,6 +1,9 @@
 import { useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 
 export function useSEO(title: string, description: string) {
+  const location = useLocation();
+
   useEffect(() => {
     // Update Title
     document.title = title;
@@ -38,5 +41,23 @@ export function useSEO(title: string, description: string) {
       twitterDescription.setAttribute('content', description);
     }
 
-  }, [title, description]);
+    // Update Canonical URL
+    let canonical = document.querySelector('link[rel="canonical"]');
+    const canonicalUrl = `https://pdfmediasuite.in${location.pathname}`;
+    if (canonical) {
+      canonical.setAttribute('href', canonicalUrl);
+    } else {
+      canonical = document.createElement('link');
+      canonical.setAttribute('rel', 'canonical');
+      canonical.setAttribute('href', canonicalUrl);
+      document.head.appendChild(canonical);
+    }
+    
+    // Also update og:url
+    let ogUrl = document.querySelector('meta[property="og:url"]');
+    if (ogUrl) {
+      ogUrl.setAttribute('content', canonicalUrl);
+    }
+
+  }, [title, description, location.pathname]);
 }
