@@ -4,6 +4,7 @@ import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import JSZip from 'jszip';
+import * as UTIF from 'utif';
 import {
   Document, Packer, Paragraph, TextRun, Table as DocxTable, TableRow, TableCell,
   WidthType, HeadingLevel, AlignmentType, BorderStyle,
@@ -17,12 +18,13 @@ import { extractDocxContent, DocxElement, DocxParagraph, DocxTable as DTable, Do
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
 // ─── Types ──────────────────────────────────────────────────────────
-type Target = 'pdf' | 'png' | 'jpg' | 'jpeg' | 'webp' | 'txt' | 'docx' | 'xlsx' | 'pptx' | 'zip' | 'csv';
-type Kind   = 'pdf' | 'image' | 'text' | 'docx' | 'xlsx' | 'pptx' | 'unknown';
+type Target = 'pdf' | 'png' | 'jpg' | 'jpeg' | 'webp' | 'tiff' | 'txt' | 'docx' | 'xlsx' | 'pptx' | 'zip' | 'csv';
+type Kind   = 'pdf' | 'image' | 'tiff' | 'text' | 'docx' | 'xlsx' | 'pptx' | 'unknown';
 
 const KIND_LABELS: Record<Kind, string> = {
   pdf:     'PDF Document',
   image:   'Image',
+  tiff:    'TIFF Image',
   text:    'Text File',
   docx:    'Word Document (.docx)',
   xlsx:    'Excel Spreadsheet (.xlsx)',
@@ -33,6 +35,7 @@ const KIND_LABELS: Record<Kind, string> = {
 const TARGETS_FOR_KIND: Record<Kind, Target[]> = {
   pdf:     ['txt', 'docx', 'xlsx', 'pptx', 'png', 'jpg', 'jpeg', 'zip'],
   image:   ['pdf', 'png', 'jpg', 'jpeg', 'webp'],
+  tiff:    ['pdf', 'png', 'jpg', 'jpeg', 'webp'],
   text:    ['pdf'],
   docx:    ['pdf', 'xlsx', 'pptx', 'txt'],
   xlsx:    ['pdf', 'docx', 'pptx', 'txt', 'csv'],
@@ -46,6 +49,7 @@ const TARGET_LABELS: Record<Target, string> = {
   jpg:  'JPG Image',
   jpeg: 'JPEG Image',
   webp: 'WebP Image',
+  tiff: 'TIFF Image',
   txt:  'Plain Text (.txt)',
   docx: 'Word (.docx)',
   xlsx: 'Excel (.xlsx)',
@@ -61,6 +65,8 @@ function detectKind(file: File): Kind {
   if (name.endsWith('.docx') || type.includes('wordprocessingml')) return 'docx';
   if (name.endsWith('.xlsx') || type.includes('spreadsheetml')) return 'xlsx';
   if (name.endsWith('.pptx') || type.includes('presentationml')) return 'pptx';
+  // TIFF must be checked before generic image/* since some browsers may report image/tiff
+  if (name.endsWith('.tiff') || name.endsWith('.tif') || type === 'image/tiff') return 'tiff';
   if (type.startsWith('image/')) return 'image';
   if (type.startsWith('text/') || name.endsWith('.txt')) return 'text';
   return 'unknown';
@@ -72,7 +78,7 @@ function baseName(name: string) {
 
 function extensionFor(t: Target): string {
   const map: Record<Target, string> = {
-    pdf: '.pdf', png: '.png', jpg: '.jpg', jpeg: '.jpeg', webp: '.webp',
+    pdf: '.pdf', png: '.png', jpg: '.jpg', jpeg: '.jpeg', webp: '.webp', tiff: '.tiff',
     txt: '.txt', docx: '.docx', xlsx: '.xlsx', pptx: '.pptx', zip: '.zip', csv: '.csv',
   };
   return map[t] ?? `.${t}`;
@@ -1480,6 +1486,79 @@ function txtFromSlides(slides: PptxSlide[]): Blob {
   return new Blob([parts.join('\n\n')], { type: 'text/plain;charset=utf-8' });
 }
 
+// ─── TIFF decoder helper ─────────────────────────────────────────────
+
+/**
+ * Decode a TIFF file and return an array of ImageData objects (one per page/frame).
+ * Uses the utif library which handles all TIFF variants including multi-page TIFFs.
+ */
+async function decodeTiffToCanvases(file: File): Promise<HTMLCanvasElement[]> {
+  const buf = await file.arrayBuffer();
+  const ifds = UTIF.decode(buf);
+  if (!ifds || ifds.length === 0) throw new Error('Could not decode TIFF file — file may be corrupted.');
+
+  const canvases: HTMLCanvasElement[] = [];
+  for (const ifd of ifds) {
+    UTIF.decodeImage(buf, ifd);
+    const rgba = UTIF.toRGBA8(ifd);
+    const w = ifd.width;
+    const h = ifd.height;
+    if (!w || !h) continue;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) continue;
+
+    const imageData = ctx.createImageData(w, h);
+    imageData.data.set(rgba);
+    ctx.putImageData(imageData, 0, 0);
+    canvases.push(canvas);
+  }
+
+  if (canvases.length === 0) throw new Error('TIFF file decoded but produced no pages.');
+  return canvases;
+}
+
+/**
+ * Convert a multi-page TIFF to a multi-page PDF.
+ * Each TIFF frame becomes a separate PDF page.
+ */
+async function convertTiffToPdf(file: File): Promise<Blob> {
+  const canvases = await decodeTiffToCanvases(file);
+  const pdf = await PDFDocument.create();
+
+  for (const canvas of canvases) {
+    // Use PNG embedding to preserve lossless quality
+    const pngBlob = await new Promise<Blob | null>(res => canvas.toBlob(res, 'image/png'));
+    if (!pngBlob) continue;
+    const pngBytes = await pngBlob.arrayBuffer();
+    const emb = await pdf.embedPng(pngBytes);
+    const page = pdf.addPage([emb.width, emb.height]);
+    page.drawImage(emb, { x: 0, y: 0, width: emb.width, height: emb.height });
+    canvas.width = 0; // free memory
+    canvas.height = 0;
+  }
+
+  return new Blob([await pdf.save()], { type: 'application/pdf' });
+}
+
+/**
+ * Convert a TIFF to a raster image format (PNG, JPG, WebP).
+ * For multi-page TIFFs, returns only the first frame.
+ */
+async function convertTiffToImage(file: File, outType: Target, quality: number): Promise<Blob> {
+  const canvases = await decodeTiffToCanvases(file);
+  const canvas = canvases[0];
+  if (!canvas) throw new Error('Could not render TIFF page.');
+
+  const mime = outType === 'png' ? 'image/png' : outType === 'webp' ? 'image/webp' : 'image/jpeg';
+  const out = await new Promise<Blob | null>(res => canvas.toBlob(res, mime, quality));
+  if (!out) throw new Error('Image conversion failed.');
+  return out;
+}
+
 // ─── Existing PDF converters (unchanged) ────────────────────────────
 
 async function convertImageFile(f: File, outType: Target, quality: number): Promise<Blob> {
@@ -1702,6 +1781,7 @@ async function aiExtractFromImage(imageBlob: Blob): Promise<string[]> {
 const KIND_ICONS: Record<Kind, any> = {
   pdf: FileText,
   image: FileCog,
+  tiff: FileCog,
   text: FileText,
   docx: FileText,
   xlsx: BarChart2,
@@ -1713,6 +1793,7 @@ const KIND_ICONS: Record<Kind, any> = {
 const MAX_SIZE_BYTES: Record<Kind, number> = {
   pdf:     200 * 1024 * 1024,   // 200 MB
   image:   100 * 1024 * 1024,   // 100 MB
+  tiff:    200 * 1024 * 1024,   // 200 MB (multi-page TIFFs can be large)
   text:     50 * 1024 * 1024,   //  50 MB
   docx:    100 * 1024 * 1024,
   xlsx:    100 * 1024 * 1024,
@@ -1817,7 +1898,16 @@ export default function UniversalConverter() {
       let blob: Blob;
       const name = baseName(file.name);
 
-      if (kind === 'image') {
+      if (kind === 'tiff') {
+        if (target === 'pdf') {
+          setProgress('Converting TIFF to PDF (decoding all pages)…');
+          blob = await convertTiffToPdf(file);
+        } else {
+          setProgress(`Converting TIFF to ${target.toUpperCase()}…`);
+          blob = await convertTiffToImage(file, target, quality);
+        }
+
+      } else if (kind === 'image') {
         setProgress('Converting image…');
         blob = await convertImageFile(file, target, quality);
 
@@ -2112,7 +2202,7 @@ export default function UniversalConverter() {
                   </select>
                 </div>
 
-                {(kind === 'image' || (kind === 'pdf' && ['png','jpg','jpeg'].includes(target))) && (
+                {((kind === 'image' || kind === 'tiff') || (kind === 'pdf' && ['png','jpg','jpeg'].includes(target))) && (
                   <div>
                     <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
                       Quality — {Math.round(quality * 100)}%
