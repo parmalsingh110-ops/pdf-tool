@@ -1,22 +1,133 @@
+# PDF Media Suite — robots.txt
+# https://pdfmediasuite.in
+
 User-agent: *
 Allow: /
+
+# Block internal/build paths
 Disallow: /api/
 Disallow: /_next/
 Disallow: /node_modules/
 Disallow: /src/
+Disallow: /assets/
+Disallow: /*.js$
+Disallow: /*.css$
 
-# Explicit crawl permission for key tools
+# Allow all tool pages explicitly for faster discovery
 Allow: /merge
 Allow: /split
 Allow: /compress
 Allow: /edit
+Allow: /protect
+Allow: /unlock
+Allow: /watermark
+Allow: /remove-watermark
+Allow: /page-numbers
+Allow: /organize
+Allow: /rotate-pages
 Allow: /pdf-to-word
 Allow: /pdf-to-excel
 Allow: /pdf-to-ppt
+Allow: /pdf-to-jpg
+Allow: /jpg-to-pdf
+Allow: /pdf-to-images
+Allow: /screenshot-to-pdf
+Allow: /searchable-pdf
+Allow: /universal-converter
+Allow: /pdf-to-gif
+Allow: /convert-tiff
+Allow: /convert-webp
+Allow: /video-to-pdf
+Allow: /code-to-pdf
+Allow: /word-to-pdf-exact
+Allow: /pdf-to-markdown
+Allow: /pdf-to-audio
+Allow: /webpage-to-pdf
+Allow: /image-resizer
+Allow: /image-crop
+Allow: /pixel-resizer
+Allow: /image-converter
+Allow: /remove-background
+Allow: /image-watermark
+Allow: /image-text-editor
+Allow: /passport-photo-sheet
+Allow: /exact-image-size
+Allow: /color-extractor
+Allow: /image-collage
+Allow: /image-color-correction
+Allow: /image-noise-reduction
+Allow: /image-insert
+Allow: /image-metadata
+Allow: /image-to-base64
+Allow: /smart-image-to-pdf
+Allow: /extract-text
+Allow: /edit-metadata
+Allow: /flatten-pdf
+Allow: /reverse
+Allow: /add-margins
+Allow: /search-replace
+Allow: /remove-text
+Allow: /highlight-text
+Allow: /headers-footers
+Allow: /bates-numbering
+Allow: /extract-images
+Allow: /extract-tables
+Allow: /font-extractor
+Allow: /font-replacer
+Allow: /link-extractor
+Allow: /extract-media
+Allow: /redact
+Allow: /remove-metadata
+Allow: /crypto-sign
+Allow: /validate-signatures
+Allow: /pdf-a-conversion
+Allow: /add-drm
+Allow: /invisible-watermark
+Allow: /self-destruct
+Allow: /certify-document
+Allow: /batch-protect
+Allow: /password-strength
+Allow: /file-hash
+Allow: /pdf-sanitizer
+Allow: /target-compress
+Allow: /increase-size
+Allow: /ink-saver
+Allow: /grayscale-pdf
+Allow: /invert-colors
+Allow: /cmyk-converter
+Allow: /stamp
+Allow: /pdf-stats
+Allow: /booklet
+Allow: /present
+Allow: /extract-pages
+Allow: /remove-blank-pages
+Allow: /duplicate-pages
+Allow: /pdf-overlay
+Allow: /pdf-comparison
+Allow: /page-counter
+Allow: /n-up-layout
+Allow: /auto-crop-margins
+Allow: /long-image-to-pdf
+Allow: /pdf-page-cropper
+Allow: /pdf-repair
+Allow: /qr-code
+Allow: /signature-pad
+Allow: /document-scanner
+Allow: /pdf-form-filler
+Allow: /accessibility-checker
+Allow: /reading-tracker
 Allow: /all-tools
+Allow: /about
+Allow: /pricing
+Allow: /contact
+Allow: /privacy
+Allow: /terms
+
+# Crawl rate — be gentle
+Crawl-delay: 1
 
 # Sitemaps
 Sitemap: https://pdfmediasuite.in/sitemap.xml
 
-# Host directive (for Yandex)
+# Host directive (Yandex)
 Host: https://pdfmediasuite.in
