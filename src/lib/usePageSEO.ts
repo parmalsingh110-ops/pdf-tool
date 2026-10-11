@@ -20,7 +20,9 @@ export function usePageSEO(
 ) {
   useEffect(() => {
     const fullTitle = `${title} | PDF Media Suite`;
-    const path = canonicalPath || window.location.pathname;
+    const rawPath = canonicalPath || window.location.pathname;
+    // Always use non-www canonical to prevent duplicate indexing (www vs non-www)
+    const path = rawPath === '/' ? '/' : rawPath.replace(/\/+$/, '');
     const canonicalUrl = `${BASE_URL}${path}`;
 
     // ── Helper: update or create a <meta> tag ──────────────────────────────

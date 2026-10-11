@@ -91,6 +91,7 @@ Allow: /file-hash
 Allow: /pdf-sanitizer
 Allow: /target-compress
 Allow: /increase-size
+Allow: /id-card-joiner
 Allow: /ink-saver
 Allow: /grayscale-pdf
 Allow: /invert-colors

@@ -122,6 +122,7 @@ const ImageResizer = lazy(() => import('./pages/ImageResizer'));
 const ImageTextEditor = lazy(() => import('./pages/ImageTextEditor'));
 const PassportPhotoSheet = lazy(() => import('./pages/PassportPhotoSheet'));
 const IncreasePdfSize = lazy(() => import('./pages/IncreasePdfSize'));
+const IdCardJoiner = lazy(() => import('./pages/IdCardJoiner'));
 
 export default function App() {
   // ── Backend Warmup Ping ─────────────────────────────────────────
@@ -247,6 +248,7 @@ export default function App() {
         <Route path="present" element={<PdfPresenter />} />
         <Route path="file-hash" element={<FileHash />} />
         <Route path="increase-size" element={<IncreasePdfSize />} />
+        <Route path="id-card-joiner" element={<IdCardJoiner />} />
 
         {/* 13 New Features */}
         <Route path="pdf-sanitizer" element={<PdfSanitizer />} />

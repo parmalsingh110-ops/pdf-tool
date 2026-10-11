@@ -67,7 +67,18 @@
     <meta name="rating" content="General" />
     <meta name="category" content="PDF Tools, Image Tools, File Converter" />
 
-    <!-- ===== CANONICAL + og:url ===== -->
+    <!-- ===== CANONICAL: FORCE NON-WWW (Fixes duplicate indexing in GSC) ===== -->
+    <!-- www.pdfmediasuite.in and pdfmediasuite.in were both being indexed separately -->
+    <!-- This script + canonical tag ensures Google consolidates to non-www version -->
+    <script>
+      (function() {
+        if (window.location.hostname === 'www.pdfmediasuite.in') {
+          window.location.replace(
+            window.location.href.replace('://www.pdfmediasuite.in', '://pdfmediasuite.in')
+          );
+        }
+      })();
+    </script>
     <!-- hreflang: English is primary; Hindi users also served -->
     <link rel="alternate" hreflang="en" href="https://pdfmediasuite.in/" />
     <link rel="alternate" hreflang="hi" href="https://pdfmediasuite.in/" />

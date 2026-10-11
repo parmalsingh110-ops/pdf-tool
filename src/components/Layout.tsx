@@ -509,6 +509,8 @@ export default function Layout() {
               <li><Link to="/merge" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Merge PDF</Link></li>
               <li><Link to="/split" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Split PDF</Link></li>
               <li><Link to="/compress" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Compress PDF</Link></li>
+              <li><Link to="/increase-size" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Increase PDF Size</Link></li>
+              <li><Link to="/id-card-joiner" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">ID Card Joiner</Link></li>
               <li><Link to="/edit" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Edit PDF</Link></li>
               <li><Link to="/protect" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Protect PDF</Link></li>
               <li><Link to="/rotate-pages" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Rotate PDF</Link></li>
