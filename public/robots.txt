@@ -92,6 +92,10 @@ Allow: /pdf-sanitizer
 Allow: /target-compress
 Allow: /increase-size
 Allow: /id-card-joiner
+Allow: /sarkari-photo-signature
+Allow: /clean-signature
+Allow: /masked-aadhaar
+Allow: /exam-document-merger
 Allow: /ink-saver
 Allow: /grayscale-pdf
 Allow: /invert-colors
