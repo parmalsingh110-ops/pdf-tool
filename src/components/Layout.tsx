@@ -563,18 +563,21 @@ export default function Layout() {
 
         {/* Founder strip */}
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-10">
-          <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/50 px-6 py-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/50 px-6 py-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <div>
               <span className="text-[10px] font-bold tracking-widest text-rose-600 dark:text-rose-400 uppercase">Founder & Developer</span>
               <p className="text-sm font-bold text-slate-900 dark:text-white mt-0.5">Parmal Singh Gurjar</p>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Founded and developed by Parmal Singh Gurjar.</p>
             </div>
-            <a
-              href="mailto:parmalsingh26@gmail.com"
-              className="inline-flex items-center gap-2 text-sm font-semibold text-rose-600 dark:text-rose-400 hover:underline shrink-0"
-            >
-              parmalsingh26@gmail.com
-            </a>
+            <div className="flex flex-col sm:items-end gap-1 shrink-0">
+              <a
+                href="mailto:support@pdfmediasuite.in"
+                className="inline-flex items-center gap-2 text-sm font-bold text-rose-600 dark:text-rose-400 hover:underline"
+              >
+                support@pdfmediasuite.in
+              </a>
+              <span className="text-xs text-slate-400">Founder Direct: parmalsingh26@gmail.com</span>
+            </div>
           </div>
         </div>
 

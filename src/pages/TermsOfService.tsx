@@ -67,6 +67,16 @@ export default function TermsOfService() {
             PDF Media Suite and its founder shall not be liable for any direct, indirect, incidental, or consequential damages resulting from the use or inability to use the service, including data loss or file corruption.
           </p>
         </section>
+
+        <section className="mt-8">
+          <h2 className="text-xl font-bold text-slate-900 dark:text-white mb-3">6. Contact & Enquiries</h2>
+          <p>
+            For any questions, legal notices, or feedback regarding these Terms, contact our official support team at{' '}
+            <a href="mailto:support@pdfmediasuite.in" className="text-rose-600 dark:text-rose-400 font-semibold hover:underline">
+              support@pdfmediasuite.in
+            </a>.
+          </p>
+        </section>
       </div>
     </div>
   );

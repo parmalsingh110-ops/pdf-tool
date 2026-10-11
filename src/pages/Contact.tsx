@@ -34,14 +34,29 @@ export default function Contact() {
             For product support, feedback, bug reports or business enquiries, contact:
           </p>
 
-          <div className="p-8 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-center">
-            <Mail className="w-10 h-10 text-rose-600 mx-auto mb-4" />
-            <a 
-              href="mailto:parmalsingh26@gmail.com" 
-              className="text-xl md:text-2xl font-bold text-slate-900 dark:text-white hover:text-rose-600 dark:hover:text-rose-400 transition-colors"
-            >
-              parmalsingh26@gmail.com
-            </a>
+          <div className="grid md:grid-cols-2 gap-6">
+            <div className="p-8 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-center">
+              <Mail className="w-10 h-10 text-rose-600 mx-auto mb-4" />
+              <div className="text-xs font-bold uppercase tracking-wider text-rose-600 dark:text-rose-400 mb-1">Official Support & Enquiries</div>
+              <a 
+                href="mailto:support@pdfmediasuite.in" 
+                className="text-lg md:text-xl font-bold text-slate-900 dark:text-white hover:text-rose-600 dark:hover:text-rose-400 transition-colors"
+              >
+                support@pdfmediasuite.in
+              </a>
+            </div>
+
+            <div className="p-8 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-center">
+              <Mail className="w-10 h-10 text-slate-600 dark:text-slate-400 mx-auto mb-4" />
+              <div className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-1">Founder Direct Contact</div>
+              <p className="font-semibold text-slate-900 dark:text-white mb-1">Parmal Singh Gurjar</p>
+              <a 
+                href="mailto:parmalsingh26@gmail.com" 
+                className="text-sm font-medium text-slate-600 dark:text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 transition-colors"
+              >
+                parmalsingh26@gmail.com
+              </a>
+            </div>
           </div>
         </section>
       </div>

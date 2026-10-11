@@ -42,8 +42,10 @@ export default function Privacy() {
           run that action; check each tool&apos;s on-screen notice.
         </p>
         <p className="text-xs text-slate-500 dark:text-slate-400">
-          This page is informational and not legal advice. For enterprise deployments, add your own DPA and
-          retention policy.
+          This page is informational and not legal advice. For questions about our privacy practices or data handling, contact us at{' '}
+          <a href="mailto:support@pdfmediasuite.in" className="text-rose-600 dark:text-rose-400 font-medium hover:underline">
+            support@pdfmediasuite.in
+          </a>.
         </p>
       </div>
     </div>

@@ -378,10 +378,11 @@ export default function Home() {
             <p className="text-slate-600 dark:text-slate-400 mb-6">
               For product support, feedback, bug reports or business enquiries, contact:
             </p>
-            <div className="p-6 rounded-2xl bg-rose-50 dark:bg-rose-900/20 border border-rose-100 dark:border-rose-900/50">
-              <a href="mailto:parmalsingh26@gmail.com" className="text-lg font-bold text-rose-700 dark:text-rose-300 hover:underline">
-                parmalsingh26@gmail.com
+            <div className="p-6 rounded-2xl bg-rose-50 dark:bg-rose-900/20 border border-rose-100 dark:border-rose-900/50 flex flex-col gap-2">
+              <a href="mailto:support@pdfmediasuite.in" className="text-lg font-bold text-rose-700 dark:text-rose-300 hover:underline">
+                support@pdfmediasuite.in
               </a>
+              <span className="text-xs text-slate-500 dark:text-slate-400">Founder Direct: Parmal Singh Gurjar (parmalsingh26@gmail.com)</span>
             </div>
           </div>
         </div>
