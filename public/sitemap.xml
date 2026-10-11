@@ -53,9 +53,9 @@
   </url>
   <url>
     <loc>https://pdfmediasuite.in/unlock</loc>
-    <lastmod>2026-10-04</lastmod>
-    <changefreq>weekly</changefreq>
-    <priority>0.90</priority>
+    <lastmod>2026-10-11</lastmod>
+    <changefreq>daily</changefreq>
+    <priority>0.95</priority>
   </url>
   <url>
     <loc>https://pdfmediasuite.in/watermark</loc>
@@ -684,6 +684,32 @@
     <lastmod>2026-10-04</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.40</priority>
+  </url>
+
+  <!-- ===== NEW SARKARI & EXAM TOOLS ===== -->
+  <url>
+    <loc>https://pdfmediasuite.in/sarkari-photo-signature</loc>
+    <lastmod>2026-10-11</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.92</priority>
+  </url>
+  <url>
+    <loc>https://pdfmediasuite.in/clean-signature</loc>
+    <lastmod>2026-10-11</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.90</priority>
+  </url>
+  <url>
+    <loc>https://pdfmediasuite.in/masked-aadhaar</loc>
+    <lastmod>2026-10-11</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.92</priority>
+  </url>
+  <url>
+    <loc>https://pdfmediasuite.in/exam-document-merger</loc>
+    <lastmod>2026-10-11</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.90</priority>
   </url>
 
 </urlset>

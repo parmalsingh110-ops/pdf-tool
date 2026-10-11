@@ -123,6 +123,10 @@ const ImageTextEditor = lazy(() => import('./pages/ImageTextEditor'));
 const PassportPhotoSheet = lazy(() => import('./pages/PassportPhotoSheet'));
 const IncreasePdfSize = lazy(() => import('./pages/IncreasePdfSize'));
 const IdCardJoiner = lazy(() => import('./pages/IdCardJoiner'));
+const SarkariPhotoSignature = lazy(() => import('./pages/SarkariPhotoSignature'));
+const CleanSignature = lazy(() => import('./pages/CleanSignature'));
+const MaskedAadhaar = lazy(() => import('./pages/MaskedAadhaar'));
+const ExamDocumentMerger = lazy(() => import('./pages/ExamDocumentMerger'));
 
 export default function App() {
   // ── Backend Warmup Ping ─────────────────────────────────────────
@@ -264,6 +268,12 @@ export default function App() {
         <Route path="pdf-to-audio" element={<PdfToAudio />} />
         <Route path="link-extractor" element={<LinkExtractor />} />
         <Route path="reading-tracker" element={<ReadingTracker />} />
+
+        {/* 4 New Exam & Sarkari Tools */}
+        <Route path="sarkari-photo-signature" element={<SarkariPhotoSignature />} />
+        <Route path="clean-signature" element={<CleanSignature />} />
+        <Route path="masked-aadhaar" element={<MaskedAadhaar />} />
+        <Route path="exam-document-merger" element={<ExamDocumentMerger />} />
       </Route>
     </Routes>
     </Suspense>

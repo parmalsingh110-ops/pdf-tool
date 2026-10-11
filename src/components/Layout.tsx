@@ -33,6 +33,9 @@ import {
   X,
   Star,
   Trash2,
+  Unlock,
+  ContactRound,
+  Pen,
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 import { readRecentTools, recordToolVisit, type RecentEntry } from '../lib/recentFiles';
@@ -60,6 +63,10 @@ const ROUTE_TITLES: Record<string, string> = {
   '/all-tools': 'All tools',
   '/privacy': 'Privacy',
   '/code-to-pdf': 'Code to PDF',
+  '/sarkari-photo-signature': 'Sarkari Photo & Sign',
+  '/clean-signature': 'Clean Signature',
+  '/masked-aadhaar': 'Masked Aadhaar',
+  '/exam-document-merger': 'Exam Bundle Merger',
 };
 
 interface NavGroup { label: string; items: { to: string; label: string; icon: any }[]; }
@@ -73,6 +80,8 @@ const NAV_GROUPS: NavGroup[] = [
       { to: '/split', label: 'Split PDF', icon: Scissors },
       { to: '/compress', label: 'Compress PDF', icon: Minimize2 },
       { to: '/organize', label: 'Organize PDF', icon: Layers },
+      { to: '/unlock', label: 'Unlock PDF (Auto Helper)', icon: Unlock },
+      { to: '/exam-document-merger', label: 'Exam Bundle (<1 MB)', icon: Combine },
       { to: '/watermark', label: 'Watermark', icon: Droplet },
       { to: '/protect', label: 'Protect PDF', icon: Lock },
       { to: '/searchable-pdf', label: 'Searchable PDF (OCR)', icon: ScanSearch },
@@ -98,6 +107,8 @@ const NAV_GROUPS: NavGroup[] = [
     label: 'Image Tools',
     items: [
       { to: '/image-resizer', label: 'Image Resizer', icon: ImageIcon },
+      { to: '/sarkari-photo-signature', label: 'Sarkari Photo & Sign', icon: ContactRound },
+      { to: '/clean-signature', label: 'Clean Paper Sign', icon: Pen },
       { to: '/pixel-resizer', label: 'Pixel Resizer', icon: ImageIcon },
       { to: '/image-crop', label: 'Image Cropper', icon: Crop },
       { to: '/image-converter', label: 'Format Converter', icon: RefreshCw },
@@ -112,6 +123,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: 'Pro Tools',
     items: [
       { to: '/redact', label: 'PDF Redaction', icon: ShieldOff },
+      { to: '/masked-aadhaar', label: 'Masked Aadhaar (XXXX)', icon: ShieldCheck },
       { to: '/stamp', label: 'PDF Stamp', icon: Stamp },
       { to: '/pdf-stats', label: 'PDF Stats', icon: BarChart3 },
       { to: '/booklet', label: 'PDF Booklet', icon: BookOpen },
