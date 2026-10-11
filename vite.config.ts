@@ -36,13 +36,13 @@ export default defineConfig(() => {
       headers: {
         'Content-Security-Policy': [
           "default-src 'self'",
-          "script-src  'self' 'unsafe-inline' 'wasm-unsafe-eval' blob: https://cdn.jsdelivr.net",
+          "script-src  'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: https://cdn.jsdelivr.net https://pdfmediasuite.in https://www.pdfmediasuite.in",
           "style-src   'self' 'unsafe-inline' https://fonts.googleapis.com",
           "font-src    'self' https://fonts.gstatic.com data:",
           "img-src     'self' data: blob: https:",
           "media-src   'self' blob:",
           "connect-src 'self' https://*.onrender.com https://pdfmediasuite.in https://www.pdfmediasuite.in https://generativelanguage.googleapis.com https://cdn.jsdelivr.net https://tessdata.projectnaptha.com https://staticimgly.com https://tfhub.dev https://storage.googleapis.com http://localhost:8000 http://127.0.0.1:8000",
-          "worker-src  'self' blob: https://cdn.jsdelivr.net",
+          "worker-src  'self' blob: https://cdn.jsdelivr.net https://pdfmediasuite.in https://www.pdfmediasuite.in",
           "object-src  'none'",
           "frame-src   'none'",
           "base-uri    'self'",

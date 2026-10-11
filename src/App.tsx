@@ -134,9 +134,10 @@ export default function App() {
   // Render free-tier backend from sleep so it's ready before the user
   // uploads a file. If the backend is already awake, this costs nothing.
   useEffect(() => {
-    const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-    // HEAD request = zero bytes returned from server — wakes up Render without any data transfer
-    fetch(`${API_BASE}/health`, { method: 'HEAD' }).catch(() => {/* silent — server may be starting */});
+    const API_BASE = import.meta.env.VITE_API_URL;
+    if (API_BASE && API_BASE.startsWith('http') && !API_BASE.includes('localhost')) {
+      fetch(`${API_BASE}/health`, { method: 'HEAD' }).catch(() => {/* silent */});
+    }
   }, []);
 
   return (

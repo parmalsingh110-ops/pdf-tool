@@ -1,11 +1,12 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
-    <!-- ===== CONTENT SECURITY POLICY ===== -->
-    <!--
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <!-- ===== CONTENT SECURITY POLICY ===== -->
+  <!--
       Sources allowed:
         'self'                          – same origin (pdfmediasuite.in)
         blob:                           – PDF.js, canvas exports, object URLs
@@ -17,9 +18,7 @@
         'unsafe-inline' (style-src)     – Tailwind / inline styles (React runtime)
         'wasm-unsafe-eval' (script-src) – WebAssembly (PDF.js, pdfjs-dist)
     -->
-    <meta
-      http-equiv="Content-Security-Policy"
-      content="
+  <meta http-equiv="Content-Security-Policy" content="
         default-src 'self';
         script-src  'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: https://cdn.jsdelivr.net;
         style-src   'self' 'unsafe-inline' https://fonts.googleapis.com;
@@ -45,86 +44,77 @@
         frame-src   'none';
         base-uri    'self';
         form-action 'self';
-      "
-    />
+      " />
 
-    <!-- ===== PRIMARY SEO META TAGS ===== -->
-    <title>PDF Media Suite | Free Online PDF & Document Tools</title>
-    <meta
-      name="description"
-      content="PDF Media Suite is a browser-based document productivity platform providing PDF editing, conversion, OCR and image tools."
-    />
-    <meta
-      name="keywords"
-      content="merge pdf, split pdf, compress pdf, pdf to word, pdf to excel, pdf to ppt, pdf to jpg, jpg to pdf, pdf to images, edit pdf, pdf editor, pdf merger, pdf splitter, pdf compressor, pdf converter, image resizer, resize image online, crop image, remove background, remove bg, passport photo, image to pdf, screenshot to pdf, ocr pdf, searchable pdf, pdf redaction, redact pdf, pdf watermark, add watermark to pdf, pdf password, protect pdf, unlock pdf, pdf to gif, rotate pdf pages, organize pdf, page numbers pdf, extract text from pdf, pdf metadata, flatten pdf, reverse pdf, add margins pdf, headers footers pdf, bates numbering, extract images from pdf, pdf to word free, pdf to excel free, convert pdf free, free pdf tools, online pdf editor, pdf merge online, compress pdf online, pdf split online, pdf form filler, fill pdf form, sign pdf, digital signature, e-signature, pdf signature pad, document scanner, scan document, qr code generator, image watermark, image color correction, image noise reduction, grayscale pdf, invert pdf colors, pdf stamp, pdf stats, pdf booklet, pdf presenter, duplicate pages pdf, remove blank pages, pdf overlay, pdf comparison, compare pdf, extract pages pdf, file hash sha256, ink saver pdf, increase pdf size, target pdf size, image collage, image format converter, jpg to png, png to jpg, webp converter, tiff converter, image metadata exif, image to base64, color extractor, code to pdf, video to pdf, certify pdf, batch protect pdf, pdf drm, pdf a conversion, cryptographic signature, validate signature, invisible watermark, self destruct pdf, pdf media suite, pdfmediasuite.in"
-    />
-    <meta name="author" content="PDF Media Suite" />
-    <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
-    <meta name="googlebot" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
-    <meta name="bingbot" content="index, follow" />
-    <meta name="revisit-after" content="3 days" />
-    <meta name="language" content="English" />
-    <meta name="rating" content="General" />
-    <meta name="category" content="PDF Tools, Image Tools, File Converter" />
+  <!-- ===== PRIMARY SEO META TAGS ===== -->
+  <title>PDF Media Suite | Free Online PDF & Document Tools</title>
+  <meta name="description"
+    content="PDF Media Suite is a browser-based document productivity platform providing PDF editing, conversion, OCR and image tools." />
+  <meta name="keywords"
+    content="merge pdf, split pdf, compress pdf, pdf to word, pdf to excel, pdf to ppt, pdf to jpg, jpg to pdf, pdf to images, edit pdf, pdf editor, pdf merger, pdf splitter, pdf compressor, pdf converter, image resizer, resize image online, crop image, remove background, remove bg, passport photo, image to pdf, screenshot to pdf, ocr pdf, searchable pdf, pdf redaction, redact pdf, pdf watermark, add watermark to pdf, pdf password, protect pdf, unlock pdf, pdf to gif, rotate pdf pages, organize pdf, page numbers pdf, extract text from pdf, pdf metadata, flatten pdf, reverse pdf, add margins pdf, headers footers pdf, bates numbering, extract images from pdf, pdf to word free, pdf to excel free, convert pdf free, free pdf tools, online pdf editor, pdf merge online, compress pdf online, pdf split online, pdf form filler, fill pdf form, sign pdf, digital signature, e-signature, pdf signature pad, document scanner, scan document, qr code generator, image watermark, image color correction, image noise reduction, grayscale pdf, invert pdf colors, pdf stamp, pdf stats, pdf booklet, pdf presenter, duplicate pages pdf, remove blank pages, pdf overlay, pdf comparison, compare pdf, extract pages pdf, file hash sha256, ink saver pdf, increase pdf size, target pdf size, image collage, image format converter, jpg to png, png to jpg, webp converter, tiff converter, image metadata exif, image to base64, color extractor, code to pdf, video to pdf, certify pdf, batch protect pdf, pdf drm, pdf a conversion, cryptographic signature, validate signature, invisible watermark, self destruct pdf, pdf media suite, pdfmediasuite.in" />
+  <meta name="author" content="PDF Media Suite" />
+  <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
+  <meta name="googlebot" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
+  <meta name="bingbot" content="index, follow" />
+  <meta name="revisit-after" content="3 days" />
+  <meta name="language" content="English" />
+  <meta name="rating" content="General" />
+  <meta name="category" content="PDF Tools, Image Tools, File Converter" />
 
-    <!-- ===== CANONICAL: FORCE NON-WWW (Fixes duplicate indexing in GSC) ===== -->
-    <!-- www.pdfmediasuite.in and pdfmediasuite.in were both being indexed separately -->
-    <!-- This script + canonical tag ensures Google consolidates to non-www version -->
-    <script>
-      (function() {
-        if (window.location.hostname === 'www.pdfmediasuite.in') {
-          window.location.replace(
-            window.location.href.replace('://www.pdfmediasuite.in', '://pdfmediasuite.in')
-          );
-        }
-      })();
-    </script>
-    <!-- hreflang: English is primary; Hindi users also served -->
-    <link rel="alternate" hreflang="en" href="https://pdfmediasuite.in/" />
-    <link rel="alternate" hreflang="hi" href="https://pdfmediasuite.in/" />
-    <link rel="alternate" hreflang="x-default" href="https://pdfmediasuite.in/" />
+  <!-- ===== CANONICAL: FORCE NON-WWW (Fixes duplicate indexing in GSC) ===== -->
+  <!-- www.pdfmediasuite.in and pdfmediasuite.in were both being indexed separately -->
+  <!-- This script + canonical tag ensures Google consolidates to non-www version -->
+  <script>
+    (function () {
+      if (window.location.hostname === 'www.pdfmediasuite.in') {
+        window.location.replace(
+          window.location.href.replace('://www.pdfmediasuite.in', '://pdfmediasuite.in')
+        );
+      }
+    })();
+  </script>
+  <!-- hreflang: English is primary; Hindi users also served -->
+  <link rel="alternate" hreflang="en" href="https://pdfmediasuite.in/" />
+  <link rel="alternate" hreflang="hi" href="https://pdfmediasuite.in/" />
+  <link rel="alternate" hreflang="x-default" href="https://pdfmediasuite.in/" />
 
-    <meta property="og:type" content="website" />
-    <meta property="og:site_name" content="PDF Media Suite" />
-    <meta property="og:url" content="https://pdfmediasuite.in/" />
-    <meta property="og:title" content="PDF Media Suite | Free Online PDF &amp; Document Tools" />
-    <meta
-      property="og:description"
-      content="PDF Media Suite — 90+ free browser-based PDF and image tools. Merge, split, compress, convert, edit, OCR, sign, protect PDFs and more. No upload, no signup, 100% private."
-    />
-    <meta property="og:image" content="https://pdfmediasuite.in/og-image.png" />
-    <meta property="og:image:width" content="1200" />
-    <meta property="og:image:height" content="630" />
-    <meta property="og:image:alt" content="PDF Media Suite — 90+ Free PDF &amp; Image Tools" />
-    <meta property="og:locale" content="en_IN" />
-    <meta property="og:locale:alternate" content="en_US" />
-    <link rel="canonical" href="https://pdfmediasuite.in/" />
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="PDF Media Suite" />
+  <meta property="og:url" content="https://pdfmediasuite.in/" />
+  <meta property="og:title" content="PDF Media Suite | Free Online PDF &amp; Document Tools" />
+  <meta property="og:description"
+    content="PDF Media Suite — 90+ free browser-based PDF and image tools. Merge, split, compress, convert, edit, OCR, sign, protect PDFs and more. No upload, no signup, 100% private." />
+  <meta property="og:image" content="https://pdfmediasuite.in/og-image.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="PDF Media Suite — 90+ Free PDF &amp; Image Tools" />
+  <meta property="og:locale" content="en_IN" />
+  <meta property="og:locale:alternate" content="en_US" />
+  <link rel="canonical" href="https://pdfmediasuite.in/" />
 
-    <!-- ===== TWITTER CARD ===== -->
-    <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:site" content="@pdfmediasuite" />
-    <meta name="twitter:creator" content="@pdfmediasuite" />
-    <meta name="twitter:title" content="PDF Media Suite | 90+ Free Online PDF &amp; Image Tools" />
-    <meta
-      name="twitter:description"
-      content="Merge, split, compress, convert, edit and sign PDFs free online. 90+ browser-based tools — no upload, no signup, 100% private."
-    />
-    <meta name="twitter:image" content="https://pdfmediasuite.in/og-image.png" />
-    <meta name="twitter:image:alt" content="PDF Media Suite Tools" />
+  <!-- ===== TWITTER CARD ===== -->
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:site" content="@pdfmediasuite" />
+  <meta name="twitter:creator" content="@pdfmediasuite" />
+  <meta name="twitter:title" content="PDF Media Suite | 90+ Free Online PDF &amp; Image Tools" />
+  <meta name="twitter:description"
+    content="Merge, split, compress, convert, edit and sign PDFs free online. 90+ browser-based tools — no upload, no signup, 100% private." />
+  <meta name="twitter:image" content="https://pdfmediasuite.in/og-image.png" />
+  <meta name="twitter:image:alt" content="PDF Media Suite Tools" />
 
-    <!-- ===== FAVICONS & MANIFEST ===== -->
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <link rel="shortcut icon" href="/favicon.svg" />
-    <link rel="apple-touch-icon" href="/favicon.svg" />
-    <link rel="manifest" href="/site.webmanifest" />
-    <meta name="theme-color" content="#e11d48" />
+  <!-- ===== FAVICONS & MANIFEST ===== -->
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="shortcut icon" href="/favicon.svg" />
+  <link rel="apple-touch-icon" href="/favicon.svg" />
+  <link rel="manifest" href="/site.webmanifest" />
+  <meta name="theme-color" content="#e11d48" />
 
-    <!-- ===== PERFORMANCE ===== -->
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="dns-prefetch" href="https://pdfmediasuite.in" />
+  <!-- ===== PERFORMANCE ===== -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="dns-prefetch" href="https://pdfmediasuite.in" />
 
-    <!-- ===== STRUCTURED DATA: WebSite (enables Google Sitelinks Search Box) ===== -->
-    <script type="application/ld+json">
+  <!-- ===== STRUCTURED DATA: WebSite (enables Google Sitelinks Search Box) ===== -->
+  <script type="application/ld+json">
     {
       "@context": "https://schema.org",
       "@type": "WebSite",
@@ -144,8 +134,8 @@
     }
     </script>
 
-    <!-- ===== STRUCTURED DATA: Organization ===== -->
-    <script type="application/ld+json">
+  <!-- ===== STRUCTURED DATA: Organization ===== -->
+  <script type="application/ld+json">
     {
       "@context": "https://schema.org",
       "@type": "Organization",
@@ -169,8 +159,8 @@
     }
     </script>
 
-    <!-- ===== STRUCTURED DATA: WebApplication with ALL 100+ features ===== -->
-    <script type="application/ld+json">
+  <!-- ===== STRUCTURED DATA: WebApplication with ALL 100+ features ===== -->
+  <script type="application/ld+json">
     {
       "@context": "https://schema.org",
       "@type": "WebApplication",
@@ -301,8 +291,8 @@
     </script>
 
 
-    <!-- ===== STRUCTURED DATA: ItemList of ALL Tools for Rich Results ===== -->
-    <script type="application/ld+json">
+  <!-- ===== STRUCTURED DATA: ItemList of ALL Tools for Rich Results ===== -->
+  <script type="application/ld+json">
     {
       "@context": "https://schema.org",
       "@type": "ItemList",
@@ -417,8 +407,8 @@
     }
     </script>
 
-    <!-- ===== STRUCTURED DATA: FAQPage for Google Rich Snippets (15 Q&A) ===== -->
-    <script type="application/ld+json">
+  <!-- ===== STRUCTURED DATA: FAQPage for Google Rich Snippets (15 Q&A) ===== -->
+  <script type="application/ld+json">
     {
       "@context": "https://schema.org",
       "@type": "FAQPage",
@@ -547,8 +537,8 @@
     }
     </script>
 
-    <!-- ===== STRUCTURED DATA: BreadcrumbList for Sitelinks ===== -->
-    <script type="application/ld+json">
+  <!-- ===== STRUCTURED DATA: BreadcrumbList for Sitelinks ===== -->
+  <script type="application/ld+json">
     {
       "@context": "https://schema.org",
       "@type": "BreadcrumbList",
@@ -562,9 +552,11 @@
     }
     </script>
 
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
-  </body>
+</head>
+
+<body>
+  <div id="root"></div>
+  <script type="module" src="/src/main.tsx"></script>
+</body>
+
 </html>
