@@ -25,6 +25,7 @@ export default defineConfig(() => {
     preview: {
       host: '0.0.0.0',
       allowedHosts: [
+        'pdf-tool-adv.onrender.com',
         'mediasuite.onrender.com',
         'pdfmediasuite.in',
         'www.pdfmediasuite.in',
