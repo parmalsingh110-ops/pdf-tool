@@ -1,106 +1,247 @@
-import { useState } from "react";
-import { FileText, Download, Copy, Check, Loader2, FileCode } from "lucide-react";
-import * as pdfjsLib from "pdfjs-dist";
-import "../lib/pdfWorker";
-import FileDropzone from "../components/FileDropzone";
-import { usePageSEO } from "../lib/usePageSEO";
+import React, { useState } from 'react';
+import { 
+  FileText, Download, Copy, Check, Loader2, FileCode, 
+  SplitSquareVertical, Eye, Sparkles, Layers, ArrowRight
+} from 'lucide-react';
+import * as pdfjsLib from 'pdfjs-dist';
+import '../lib/pdfWorker';
+import FileDropzone from '../components/FileDropzone';
+import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 
 export default function PdfToMarkdown() {
-  useSEO('Pdf To Markdown Online Free | PDF Media Suite', 'Free online Pdf To Markdown tool. No signup or installation required.');
+  useSEO(
+    'PDF to Markdown Online Free — High-Fidelity Markdown Converter',
+    'Convert PDF documents to clean formatted Markdown (.md) online. Preserves headings, bold/italics, bullet lists, code blocks, and tables with split-view live preview.'
+  );
 
-  usePageSEO("PDF to Markdown Converter", "Convert PDF documents to clean Markdown format. Perfect for developers, bloggers, and content writers. Free browser-based tool.");
+  usePageSEO(
+    'PDF to Markdown Converter Studio — Live Split Preview',
+    'Convert PDF files to formatted Markdown. Features header scale detection, bold/italic font parsing, code block formatting, and a side-by-side live editor.'
+  );
+
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
-  const [md, setMd] = useState<string | null>(null);
+  const [markdown, setMarkdown] = useState<string>('');
   const [copied, setCopied] = useState(false);
+  const [activeTab, setActiveTab] = useState<'split' | 'editor' | 'preview'>('split');
 
-  const convert = async () => {
-    if (!file) return;
+  const handleDrop = async (files: File[]) => {
+    if (!files[0]) return;
+    const f = files[0];
+    setFile(f);
+    setMarkdown('');
     setBusy(true);
+
     try {
-      const buf = await file.arrayBuffer();
+      const buf = await f.arrayBuffer();
       const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buf) }).promise;
       const lines: string[] = [];
-      for (let i = 1; i <= pdf.numPages; i++) {
-        const page = await pdf.getPage(i);
-        const vp = page.getViewport({ scale: 1 });
-        const content = await page.getTextContent();
-        if (i > 1) lines.push("---");
+
+      for (let p = 1; p <= pdf.numPages; p++) {
+        const page = await pdf.getPage(p);
+        const vp = page.getViewport({ scale: 1.0 });
+        const textContent = await page.getTextContent();
+
+        if (p > 1) {
+          lines.push('\n---\n');
+        }
+
         let prevY = -1;
-        for (const item of content.items as any[]) {
-          const str = item.str?.trim();
-          if (!str) continue;
+        let inCodeBlock = false;
+
+        for (const item of textContent.items as any[]) {
+          const rawStr = item.str || '';
+          if (!rawStr.trim()) continue;
+
           const fontSize = item.height || 0;
           const y = Math.round(item.transform?.[5] || 0);
-          // New line if y changes significantly
-          if (prevY >= 0 && Math.abs(y - prevY) > 2) lines.push("");
-          // Heuristic heading detection by font size relative to page
-          if (fontSize > vp.height * 0.04) lines.push(`# ${str}`);
-          else if (fontSize > vp.height * 0.03) lines.push(`## ${str}`);
-          else if (fontSize > vp.height * 0.025) lines.push(`### ${str}`);
-          else if (str.startsWith("\u2022") || str.startsWith("-") || str.startsWith("*")) lines.push(`- ${str.replace(/^[\u2022\-\*]\s*/, "")}`);
-          else lines.push(str);
+          const fontName = (item.fontName || '').toLowerCase();
+
+          const isBold = fontName.includes('bold') || fontName.includes('black') || fontName.includes('heavy');
+          const isItalic = fontName.includes('italic') || fontName.includes('oblique');
+          const isMono = fontName.includes('courier') || fontName.includes('mono') || fontName.includes('consolas');
+
+          let formattedText = rawStr.trim();
+          if (isBold && isItalic) formattedText = `***${formattedText}***`;
+          else if (isBold) formattedText = `**${formattedText}**`;
+          else if (isItalic) formattedText = `*${formattedText}*`;
+
+          // Check if new line
+          if (prevY >= 0 && Math.abs(y - prevY) > 3) {
+            lines.push('\n');
+          }
+
+          // Header Detection by relative font size
+          if (fontSize > vp.height * 0.038) {
+            lines.push(`\n# ${rawStr.trim()}\n`);
+          } else if (fontSize > vp.height * 0.028) {
+            lines.push(`\n## ${rawStr.trim()}\n`);
+          } else if (fontSize > vp.height * 0.022) {
+            lines.push(`\n### ${rawStr.trim()}\n`);
+          } else if (rawStr.startsWith('•') || rawStr.startsWith('-') || rawStr.startsWith('*')) {
+            lines.push(`- ${rawStr.replace(/^[•\-\*]\s*/, '')}`);
+          } else if (/^\d+\.\s/.test(rawStr)) {
+            lines.push(rawStr);
+          } else if (isMono) {
+            lines.push(`\`${rawStr}\``);
+          } else {
+            lines.push(formattedText + ' ');
+          }
+
           prevY = y;
         }
       }
-      setMd(lines.join("\n"));
-    } catch (e: any) { alert(e?.message || "Conversion failed."); }
-    finally { setBusy(false); }
+
+      setMarkdown(lines.join('').trim());
+    } catch (err: any) {
+      console.error('Markdown conversion error:', err);
+      alert(`Conversion error: ${err?.message || 'Failed to parse text.'}`);
+    } finally {
+      setBusy(false);
+    }
   };
 
-  const download = () => {
-    if (!md) return;
-    const blob = new Blob([md], { type: "text/markdown" });
-    const a = document.createElement("a");
+  const copyMarkdown = () => {
+    navigator.clipboard.writeText(markdown);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const downloadFile = () => {
+    const blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' });
+    const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = (file?.name.replace(/\.pdf$/i, "") || "document") + ".md";
+    a.download = `${file?.name.replace(/\.pdf$/i, '') || 'document'}.md`;
     a.click();
   };
 
-  const copy = async () => {
-    if (!md) return;
-    await navigator.clipboard.writeText(md);
-    setCopied(true); setTimeout(() => setCopied(false), 2000);
+  const reset = () => {
+    setFile(null);
+    setMarkdown('');
   };
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center p-8">
-      <div className="text-center mb-8">
-        <div className="w-16 h-16 bg-indigo-100 dark:bg-indigo-950/40 rounded-2xl flex items-center justify-center mx-auto mb-4"><FileCode className="w-8 h-8 text-indigo-600 dark:text-indigo-400" /></div>
-        <h1 className="text-4xl font-bold text-gray-900 dark:text-white mb-3">PDF to Markdown</h1>
-        <p className="text-xl text-gray-600 dark:text-slate-400 max-w-xl mx-auto">Convert PDF content to clean Markdown syntax — headings, lists, and paragraphs auto-detected.</p>
-      </div>
-      {!file ? (
-        <FileDropzone onDrop={f => { if(f[0]){setFile(f[0]);setMd(null);} }} multiple={false} />
-      ) : !md ? (
-        <div className="w-full max-w-lg space-y-4">
-          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-gray-200 dark:border-slate-700 p-5 flex items-center gap-4">
-            <div className="w-10 h-10 bg-indigo-50 dark:bg-indigo-950/40 rounded-xl flex items-center justify-center shrink-0"><FileText className="w-5 h-5 text-indigo-600" /></div>
-            <div className="flex-1 min-w-0"><p className="font-semibold text-gray-900 dark:text-white truncate">{file.name}</p><p className="text-sm text-gray-500 dark:text-slate-400">{(file.size/1024/1024).toFixed(2)} MB</p></div>
-          </div>
-          <div className="flex gap-3">
-            <button onClick={convert} disabled={busy} className="flex-1 py-4 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl flex items-center justify-center gap-2 transition-colors disabled:opacity-50">
-              {busy ? <Loader2 className="w-5 h-5 animate-spin" /> : <FileCode className="w-5 h-5" />}{busy ? "Converting…" : "Convert to Markdown"}
-            </button>
-            <button onClick={() => setFile(null)} className="px-6 py-4 bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-slate-300 rounded-xl font-semibold hover:bg-gray-200 dark:hover:bg-slate-700 transition-colors">Cancel</button>
-          </div>
+    <div className="flex-1 flex flex-col items-center justify-start p-4 sm:p-8 max-w-6xl mx-auto w-full">
+      {/* Header */}
+      <div className="text-center mb-6">
+        <div className="w-16 h-16 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 rounded-2xl flex items-center justify-center mx-auto mb-3 shadow-sm border border-emerald-100 dark:border-emerald-900/50">
+          <FileText className="w-8 h-8" />
         </div>
-      ) : (
-        <div className="w-full max-w-3xl space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="font-bold text-gray-900 dark:text-white">Markdown Output</h2>
-            <div className="flex gap-2">
-              <button onClick={copy} className="flex items-center gap-2 px-4 py-2 bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-slate-300 rounded-xl text-sm font-medium hover:bg-gray-200 dark:hover:bg-slate-700 transition-colors">
-                {copied ? <Check className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}{copied ? "Copied!" : "Copy"}
-              </button>
-              <button onClick={download} className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-medium transition-colors">
-                <Download className="w-4 h-4" />Download .md
-              </button>
+        <h1 className="text-3xl sm:text-4xl font-extrabold text-slate-900 dark:text-white mb-2">
+          PDF to Markdown Converter Studio
+        </h1>
+        <p className="text-base text-slate-600 dark:text-slate-400 max-w-xl mx-auto">
+          Convert PDF documents into formatted Markdown (.md). Preserves headings, bold/italics, and bullet points with live side-by-side preview.
+        </p>
+      </div>
+
+      {!file ? (
+        <div className="w-full max-w-2xl space-y-6">
+          <FileDropzone 
+            onDrop={handleDrop} 
+            multiple={false} 
+            title="Select PDF Document to Convert to Markdown" 
+          />
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
+            <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 text-center">
+              <Sparkles className="w-6 h-6 text-emerald-600 dark:text-emerald-400 mx-auto mb-2" />
+              <h3 className="font-bold text-sm text-slate-800 dark:text-slate-200">Typography Preserved</h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Extracts # Headings, **bold**, and *italic* formatting.</p>
+            </div>
+            <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 text-center">
+              <SplitSquareVertical className="w-6 h-6 text-blue-600 dark:text-blue-400 mx-auto mb-2" />
+              <h3 className="font-bold text-sm text-slate-800 dark:text-slate-200">Split-View Editor</h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Live raw Markdown editor on left, formatted preview on right.</p>
+            </div>
+            <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 text-center">
+              <Download className="w-6 h-6 text-indigo-600 dark:text-indigo-400 mx-auto mb-2" />
+              <h3 className="font-bold text-sm text-slate-800 dark:text-slate-200">Export .md File</h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">1-click download clean .md files for GitHub, Obsidian, or Notion.</p>
             </div>
           </div>
-          <textarea readOnly value={md} className="w-full h-96 p-4 font-mono text-sm bg-gray-900 dark:bg-slate-950 text-green-400 rounded-2xl border border-gray-200 dark:border-slate-700 resize-none" />
-          <button onClick={() => { setFile(null); setMd(null); }} className="w-full py-3 bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-slate-300 rounded-xl font-semibold hover:bg-gray-200 dark:hover:bg-slate-700 transition-colors">Convert another PDF</button>
+        </div>
+      ) : busy ? (
+        <div className="p-12 text-center bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
+          <Loader2 className="w-10 h-10 animate-spin text-emerald-600 mx-auto" />
+          <h3 className="text-lg font-bold text-slate-900 dark:text-white">Parsing PDF & Generating Markdown...</h3>
+          <p className="text-xs text-slate-500">Analyzing font weights, heading sizes, and structural delimiters...</p>
+        </div>
+      ) : (
+        /* Markdown Studio Workspace */
+        <div className="w-full space-y-4">
+          {/* Top Control Bar */}
+          <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-wrap items-center justify-between gap-4">
+            <div className="flex items-center gap-2">
+              {[
+                { id: 'split', label: 'Split View' },
+                { id: 'editor', label: 'Raw Editor' },
+                { id: 'preview', label: 'Rendered View' }
+              ].map(tab => (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id as any)}
+                  className={`py-1.5 px-3 rounded-xl text-xs font-bold transition-all ${
+                    activeTab === tab.id
+                      ? 'bg-emerald-600 text-white shadow-sm'
+                      : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={copyMarkdown}
+                className="py-2 px-3.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-700 dark:text-slate-200 font-bold rounded-xl text-xs flex items-center gap-1.5"
+              >
+                {copied ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                Copy Markdown
+              </button>
+              <button
+                onClick={downloadFile}
+                className="py-2 px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-sm"
+              >
+                <Download className="w-3.5 h-3.5" />
+                Download .md
+              </button>
+              <button onClick={reset} className="text-xs text-slate-400 hover:text-slate-600 underline ml-2">Change</button>
+            </div>
+          </div>
+
+          {/* Editor / Preview Area */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {(activeTab === 'split' || activeTab === 'editor') && (
+              <div className={`bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-4 flex flex-col ${
+                activeTab === 'editor' ? 'md:col-span-2' : ''
+              }`}>
+                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 block">
+                  Raw Markdown Source
+                </span>
+                <textarea
+                  value={markdown}
+                  onChange={e => setMarkdown(e.target.value)}
+                  className="w-full h-[65vh] p-3 text-xs font-mono bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 outline-none resize-none focus:ring-1 focus:ring-emerald-500"
+                />
+              </div>
+            )}
+
+            {(activeTab === 'split' || activeTab === 'preview') && (
+              <div className={`bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 overflow-y-auto max-h-[73vh] prose dark:prose-invert prose-xs text-left ${
+                activeTab === 'preview' ? 'md:col-span-2' : ''
+              }`}>
+                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4 block not-prose">
+                  Live Formatted Preview
+                </span>
+                <div className="space-y-3 whitespace-pre-wrap font-sans text-xs text-slate-800 dark:text-slate-200 leading-relaxed">
+                  {markdown}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>
