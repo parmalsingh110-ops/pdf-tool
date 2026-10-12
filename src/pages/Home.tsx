@@ -6,7 +6,7 @@ import {
   ContactRound, Zap, BarChart3, ShieldOff, RotateCw, Crop, Palette,
   Presentation, BookOpen, Stamp, Layers2, Lock, Unlock, Droplet, Hash,
   Layers, RefreshCw, Code, ShieldCheck, FileX, MonitorSmartphone,
-  Images, Copy, Info, Download, ScanSearch, Clock3, Maximize,
+  Images, Copy, Info, Download, ScanSearch, Clock3, Maximize, Pen,
 } from 'lucide-react';
 import { readRecentTools, type RecentEntry } from '../lib/recentFiles';
 import { usePageSEO } from '../lib/usePageSEO';
@@ -86,6 +86,7 @@ const TOOL_GROUPS = [
       { title: 'PDF Overlay', desc: 'Layer two PDFs.', path: '/pdf-overlay', icon: Layers2 },
       { title: 'Masked Aadhaar', desc: 'Hide first 8 digits (XXXX-XXXX-1234).', path: '/masked-aadhaar', icon: ShieldCheck },
       { title: 'Exam Bundle PDF', desc: 'All documents in single PDF under 1 MB.', path: '/exam-document-merger', icon: Layers2 },
+      { title: 'Handwriting PDF', desc: 'Convert text to real handwritten notes.', path: '/handwriting-pdf', icon: Pen },
       { title: 'File Hash', desc: 'SHA-256 verify integrity.', path: '/file-hash', icon: ShieldCheck },
     ],
   },

@@ -34,6 +34,7 @@ import PasswordStrength from './pages/PasswordStrength';
 import ConvertToWebP from './pages/ConvertToWebP';
 import BatesNumbering from './pages/BatesNumbering';
 import HeadersFooters from './pages/HeadersFooters';
+import HandwritingPDF from './pages/HandwritingPDF';
 
 // Simulated Tools
 import ExtractAllImages from './pages/ExtractAllImages';
@@ -230,6 +231,7 @@ export default function App() {
         <Route path="pdf-page-cropper" element={<PdfPageCropper />} />
         <Route path="image-noise-reduction" element={<ImageNoiseReduction />} />
         <Route path="image-insert" element={<ImageInsertTool />} />
+        <Route path="handwriting-pdf" element={<HandwritingPDF />} />
 
         {/* 20 New Advanced Features */}
         <Route path="pdf-stats" element={<PdfStats />} />
