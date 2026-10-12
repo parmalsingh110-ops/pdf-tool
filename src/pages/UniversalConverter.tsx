@@ -15,6 +15,7 @@ import FileDropzone from '../components/FileDropzone';
 import { extractTextRegions, extractTableData } from '../lib/advancedVisionEngine';
 import { extractDocxContent, DocxElement, DocxParagraph, DocxTable as DTable, DocxTableRow as DRow, safeStr } from '../lib/docxExtractor';
 import { useSEO } from '../hooks/useSEO';
+import { dataUrlToBytes } from '../lib/utils';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
@@ -1587,7 +1588,7 @@ async function convertImageFile(f: File, outType: Target, quality: number): Prom
 
   if (outType === 'pdf') {
     const pdf = await PDFDocument.create();
-    const jpgBytes = await fetch(canvas.toDataURL('image/jpeg', quality)).then(r => r.arrayBuffer());
+    const jpgBytes = dataUrlToBytes(canvas.toDataURL('image/jpeg', quality));
     const emb = await pdf.embedJpg(jpgBytes);
     const p = pdf.addPage([emb.width, emb.height]);
     p.drawImage(emb, { x: 0, y: 0, width: emb.width, height: emb.height });
@@ -1740,7 +1741,7 @@ async function convertPdfFile(f: File, outType: Target, quality: number): Promis
     if (!ctx) continue;
     canvas.width = viewport.width; canvas.height = viewport.height;
     await page.render({ canvasContext: ctx, viewport, canvas }).promise;
-    const binary = await fetch(canvas.toDataURL(imageMime, quality)).then(r => r.arrayBuffer());
+    const binary = dataUrlToBytes(canvas.toDataURL(imageMime, quality));
     zip.file(`page_${i}.${imageExt}`, binary);
   }
   return zip.generateAsync({ type: 'blob' });

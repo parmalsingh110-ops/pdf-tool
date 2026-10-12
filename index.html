@@ -27,6 +27,7 @@
         media-src   'self' blob:;
         connect-src 'self'
                     blob:
+                    data:
                     https://*.onrender.com
                     https://pdfmediasuite.in
                     https://www.pdfmediasuite.in
@@ -41,7 +42,7 @@
                     http://127.0.0.1:8000;
         worker-src  'self' blob: https://cdn.jsdelivr.net;
         object-src  'none';
-        frame-src   'none';
+        frame-src   'self' blob: data:;
         base-uri    'self';
         form-action 'self';
       " />

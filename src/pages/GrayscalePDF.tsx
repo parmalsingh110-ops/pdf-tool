@@ -5,6 +5,7 @@ import * as pdfjsLib from 'pdfjs-dist';
 import GenericToolUI from '../components/GenericToolUI';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
+import { dataUrlToBytes } from '../lib/utils';
 
 export default function GrayscalePDF() {
   useSEO('Grayscale PDF Online Free | PDF Media Suite', 'Free online Grayscale PDF tool. No signup or installation required.');
@@ -47,7 +48,7 @@ export default function GrayscalePDF() {
       ctx.putImageData(imgData, 0, 0);
       
       const imgDataUrl = canvas.toDataURL('image/jpeg', 0.8);
-      const imgBytes = await fetch(imgDataUrl).then(res => res.arrayBuffer());
+      const imgBytes = dataUrlToBytes(imgDataUrl);
       
       const pdfImage = await newPdfDoc.embedJpg(imgBytes);
       const origVp = page.getViewport({ scale: 1 });
@@ -64,7 +65,7 @@ export default function GrayscalePDF() {
     }
     
     const pdfBytes = await newPdfDoc.save();
-    const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+    const blob = new Blob([pdfBytes as any], { type: 'application/pdf' });
     return URL.createObjectURL(blob);
   };
 

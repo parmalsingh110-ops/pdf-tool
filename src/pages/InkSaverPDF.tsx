@@ -5,6 +5,7 @@ import * as pdfjsLib from 'pdfjs-dist';
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import FileDropzone from '../components/FileDropzone';
 import { useSEO } from '../hooks/useSEO';
+import { dataUrlToBytes } from '../lib/utils';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
@@ -105,7 +106,7 @@ export default function InkSaverPDF() {
 
         ctx.putImageData(img, 0, 0);
         const pngDataUrl = canvas.toDataURL('image/png');
-        const pngBytes = await fetch(pngDataUrl).then((res) => res.arrayBuffer());
+        const pngBytes = dataUrlToBytes(pngDataUrl);
         const image = await outputPdf.embedPng(pngBytes);
 
         const outPage = outputPdf.addPage([viewport.width, viewport.height]);
@@ -116,7 +117,7 @@ export default function InkSaverPDF() {
       }
 
       const bytes = await outputPdf.save();
-      const blob = new Blob([bytes as unknown as Uint8Array<ArrayBuffer>], { type: 'application/pdf' });
+      const blob = new Blob([bytes as any], { type: 'application/pdf' });
       const url = URL.createObjectURL(blob);
       setResultUrl(url);
     } catch (error) {

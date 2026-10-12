@@ -5,6 +5,7 @@ import { PDFDocument } from 'pdf-lib';
 import '../lib/pdfWorker';
 import FileDropzone from '../components/FileDropzone';
 import { useSEO } from '../hooks/useSEO';
+import { dataUrlToBytes } from '../lib/utils';
 
 export default function RemoveText() {
   useSEO('Remove Text Online Free | PDF Media Suite', 'Free online Remove Text tool. No signup or installation required.');
@@ -49,7 +50,7 @@ export default function RemoveText() {
         }
 
         const imgDataUrl = canvas.toDataURL('image/jpeg', 0.92);
-        const imgBytes = await fetch(imgDataUrl).then(r => r.arrayBuffer());
+        const imgBytes = dataUrlToBytes(imgDataUrl);
         const pdfImage = await newPdf.embedJpg(imgBytes);
         const origVp = page.getViewport({ scale: 1 });
         const newPage = newPdf.addPage([origVp.width, origVp.height]);
@@ -59,7 +60,7 @@ export default function RemoveText() {
       }
 
       const pdfBytes = await newPdf.save();
-      const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+      const blob = new Blob([pdfBytes as any], { type: 'application/pdf' });
       setResultUrl(URL.createObjectURL(blob));
     } catch (e: any) {
       alert(e?.message || 'Text removal failed.');

@@ -5,6 +5,7 @@ import JSZip from 'jszip';
 import FileDropzone from '../components/FileDropzone';
 import { encodeCanvasUnderByteBudget, type RasterMime } from '../lib/imageByteBudget';
 import { useSEO } from '../hooks/useSEO';
+import { dataUrlToBytes } from '../lib/utils';
 
 const RESIZER_IMAGE_ACCEPT: Record<string, string[]> = {
   'image/png': ['.png'],
@@ -219,6 +220,10 @@ export default function ImageResizer() {
   };
 
   const urlToFile = async (url: string, filename: string, mime: string): Promise<File> => {
+    if (url.startsWith('data:')) {
+      const bytes = dataUrlToBytes(url);
+      return new File([bytes as any], filename, { type: mime });
+    }
     const r = await fetch(url);
     const b = await r.blob();
     return new File([b], filename, { type: mime });

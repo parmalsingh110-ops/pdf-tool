@@ -3,6 +3,7 @@ import { Upload, Download, Sparkles, Sliders, Shield, Crop, Contrast, CheckCircl
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { PDFDocument } from 'pdf-lib';
+import { dataUrlToBytes } from '../lib/utils';
 
 type InkColorChoice = 'original' | 'black' | 'royal_blue' | 'navy_blue';
 
@@ -204,7 +205,7 @@ export default function CleanSignature() {
     } else if (format === 'pdf') {
       const pdfDoc = await PDFDocument.create();
       const page = pdfDoc.addPage([500, 300]);
-      const imgBytes = await fetch(previewUrl).then((r) => r.arrayBuffer());
+      const imgBytes = dataUrlToBytes(previewUrl);
 
       let embeddedImg;
       if (makeTransparent) {
@@ -222,7 +223,7 @@ export default function CleanSignature() {
       });
 
       const pdfBytes = await pdfDoc.save();
-      const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+      const blob = new Blob([pdfBytes as any], { type: 'application/pdf' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;

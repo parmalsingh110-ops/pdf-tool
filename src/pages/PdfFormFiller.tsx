@@ -5,6 +5,7 @@ import '../lib/pdfWorker';
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 import FileDropzone from '../components/FileDropzone';
 import { useSEO } from '../hooks/useSEO';
+import { dataUrlToBytes } from '../lib/utils';
 
 interface FormField {
   id: string;
@@ -161,7 +162,7 @@ export default function PdfFormFiller() {
         ctx.textBaseline = 'alphabetic';
         ctx.fillText(text, pad + actualLeft, pad + actualAscent);
         const dataUrl = canvas.toDataURL('image/png');
-        const imgBytes = await fetch(dataUrl).then(r => r.arrayBuffer());
+        const imgBytes = dataUrlToBytes(dataUrl);
         const w = canvas.width / SCALE;
         const h = canvas.height / SCALE;
         const baselineFromTop = (pad + actualAscent) / SCALE;
@@ -215,7 +216,7 @@ export default function PdfFormFiller() {
       }
 
       const pdfBytes = await pdfDoc.save();
-      const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+      const blob = new Blob([pdfBytes as any], { type: 'application/pdf' });
       if (resultUrl) URL.revokeObjectURL(resultUrl);
       setResultUrl(URL.createObjectURL(blob));
     } catch (e: any) {

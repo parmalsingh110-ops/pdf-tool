@@ -3,6 +3,7 @@ import { Upload, Download, RefreshCw, Sparkles, CheckCircle2, Shield, Calendar, 
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { PDFDocument } from 'pdf-lib';
+import { dataUrlToBytes } from '../lib/utils';
 
 type LayoutMode = 'ssc_combo' | 'side_by_side' | 'photo_only' | 'sign_only';
 
@@ -337,11 +338,12 @@ export default function SarkariPhotoSignature() {
     } else if (format === 'pdf') {
       const pdfDoc = await PDFDocument.create();
       const page = pdfDoc.addPage([400, 600]);
-      const imgBytes = await fetch(previewDataUrl).then((res) => res.arrayBuffer());
-      const jpgImage = await pdfDoc.embedJpg(imgBytes);
-      const dims = jpgImage.scale(0.8);
+      const imgBytes = dataUrlToBytes(previewDataUrl);
+      const isPng = previewDataUrl.includes('image/png');
+      const img = isPng ? await pdfDoc.embedPng(imgBytes) : await pdfDoc.embedJpg(imgBytes);
+      const dims = img.scale(0.8);
 
-      page.drawImage(jpgImage, {
+      page.drawImage(img, {
         x: (400 - dims.width) / 2,
         y: (600 - dims.height) / 2,
         width: dims.width,
@@ -349,7 +351,7 @@ export default function SarkariPhotoSignature() {
       });
 
       const pdfBytes = await pdfDoc.save();
-      const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+      const blob = new Blob([pdfBytes as any], { type: 'application/pdf' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;

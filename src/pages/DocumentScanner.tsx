@@ -3,6 +3,7 @@ import { ScanLine, Download, Loader2, RotateCw, Crop, Activity, Plus, Trash2, Ch
 import { wrapPerspective, type Point } from '../lib/perspectiveWarp';
 import { PDFDocument } from 'pdf-lib';
 import { useSEO } from '../hooks/useSEO';
+import { dataUrlToBytes } from '../lib/utils';
 
 type EnhanceMode = 'document' | 'photo' | 'bw' | 'screen';
 
@@ -337,14 +338,16 @@ export default function DocumentScanner() {
       const pdfDoc = await PDFDocument.create();
       
       for (const p of readyPages) {
-        const imgBytes = await fetch(p.resultUrl!).then(res => res.arrayBuffer());
+        const imgBytes = p.resultUrl!.startsWith('data:')
+          ? dataUrlToBytes(p.resultUrl!)
+          : await fetch(p.resultUrl!).then(res => res.arrayBuffer());
         const image = await pdfDoc.embedJpg(imgBytes);
         const page = pdfDoc.addPage([image.width, image.height]);
         page.drawImage(image, { x: 0, y: 0, width: image.width, height: image.height });
       }
       
       const pdfBytes = await pdfDoc.save();
-      const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+      const blob = new Blob([pdfBytes as any], { type: 'application/pdf' });
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
       a.download = `Scanned_Document_${Date.now()}.pdf`;

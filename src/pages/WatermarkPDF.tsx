@@ -6,6 +6,7 @@ import * as pdfjsLib from 'pdfjs-dist';
 import '../lib/pdfWorker';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
+import { dataUrlToBytes } from '../lib/utils';
 
 type WatermarkType = 'text' | 'image';
 type Position = 'center' | 'diagonal' | 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' | 'top-center' | 'bottom-center';
@@ -196,12 +197,11 @@ export default function WatermarkPDF() {
           }
         }
       } else if (type === 'image' && wmImage) {
+        const bytes = dataUrlToBytes(wmImage);
         let pdfImage;
         if (wmImage.includes('image/png')) {
-          const bytes = await fetch(wmImage).then(r => r.arrayBuffer());
           pdfImage = await pdfDoc.embedPng(bytes);
         } else {
-          const bytes = await fetch(wmImage).then(r => r.arrayBuffer());
           pdfImage = await pdfDoc.embedJpg(bytes);
         }
         for (const page of pages) {

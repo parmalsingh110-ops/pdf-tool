@@ -3,6 +3,7 @@ import { ImageIcon } from 'lucide-react';
 import { PDFDocument } from 'pdf-lib';
 import GenericToolUI from '../components/GenericToolUI';
 import { useSEO } from '../hooks/useSEO';
+import { dataUrlToBytes } from '../lib/utils';
 
 export default function VideoToPdf() {
   useSEO('Video To Pdf Online Free | PDF Media Suite', 'Free online Video To Pdf tool. No signup or installation required.');
@@ -50,7 +51,7 @@ export default function VideoToPdf() {
             const imgDataUrl = canvas.toDataURL('image/jpeg', 0.85);
 
             // Fetch as bytes and embed
-            const imgBytes = await fetch(imgDataUrl).then(r => r.arrayBuffer());
+            const imgBytes = dataUrlToBytes(imgDataUrl);
             const pdfImage = await newPdf.embedJpg(imgBytes);
 
             const page = newPdf.addPage([canvas.width, canvas.height]);
@@ -64,7 +65,7 @@ export default function VideoToPdf() {
 
           setProcessingState('Compiling final PDF storyboard...');
           const pdfBytes = await newPdf.save();
-          const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+          const blob = new Blob([pdfBytes as any], { type: 'application/pdf' });
           
           URL.revokeObjectURL(video.src);
           resolve(URL.createObjectURL(blob));

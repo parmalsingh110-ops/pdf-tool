@@ -6,6 +6,7 @@ import '../lib/pdfWorker';
 import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
+import { dataUrlToBytes } from '../lib/utils';
 
 interface RedactRect { x: number; y: number; w: number; h: number; pageIndex: number; }
 
@@ -109,7 +110,7 @@ export default function RedactPdf() {
         }
 
         const imgData = canvas.toDataURL('image/jpeg', 0.92);
-        const imgBytes = await fetch(imgData).then(r => r.arrayBuffer());
+        const imgBytes = dataUrlToBytes(imgData);
         const pdfImg = await newDoc.embedJpg(imgBytes);
         const origVp = page.getViewport({ scale: 1 });
         const newPage = newDoc.addPage([origVp.width, origVp.height]);
@@ -118,7 +119,7 @@ export default function RedactPdf() {
       }
 
       const bytes = await newDoc.save();
-      setResultUrl(URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' })));
+      setResultUrl(URL.createObjectURL(new Blob([bytes as any], { type: 'application/pdf' })));
     } catch (e: any) { alert(e?.message || 'Failed'); }
     finally { setBusy(false); }
   };

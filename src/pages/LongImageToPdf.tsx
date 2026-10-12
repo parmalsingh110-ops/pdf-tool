@@ -1,4 +1,4 @@
-﻿import { useState } from "react";
+import { useState } from "react";
 import { Image, Download, Loader2, CheckCircle, SlidersHorizontal } from "lucide-react";
 import { PDFDocument, rgb } from "pdf-lib";
 import FileDropzone from "../components/FileDropzone";
@@ -54,7 +54,7 @@ export default function LongImageToPdf() {
 
       const pdfBytes = await outDoc.save();
       setPageCount(slices.length);
-      setResultUrl(URL.createObjectURL(new Blob([pdfBytes], { type: "application/pdf" })));
+      setResultUrl(URL.createObjectURL(new Blob([pdfBytes as any], { type: "application/pdf" })));
     } catch (e: any) { alert(e?.message || "Processing failed."); }
     finally { setBusy(false); }
   };

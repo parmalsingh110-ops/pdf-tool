@@ -3,6 +3,7 @@ import { Upload, Download, Shield, EyeOff, Sparkles, CheckCircle2, AlertTriangle
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { PDFDocument } from 'pdf-lib';
+import { dataUrlToBytes } from '../lib/utils';
 
 interface MaskBox {
   id: string;
@@ -243,7 +244,7 @@ export default function MaskedAadhaar() {
       const pdfDoc = await PDFDocument.create();
       const page = pdfDoc.addPage([canvas.width * 0.5, canvas.height * 0.5]);
       const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
-      const imgBytes = await fetch(dataUrl).then((r) => r.arrayBuffer());
+      const imgBytes = dataUrlToBytes(dataUrl);
       const jpgImg = await pdfDoc.embedJpg(imgBytes);
 
       page.drawImage(jpgImg, {
@@ -254,7 +255,7 @@ export default function MaskedAadhaar() {
       });
 
       const pdfBytes = await pdfDoc.save();
-      const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+      const blob = new Blob([pdfBytes as any], { type: 'application/pdf' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
