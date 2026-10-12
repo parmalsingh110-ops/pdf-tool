@@ -130,7 +130,7 @@ export default function RotatePages() {
       });
 
       const bytes = await doc.save();
-      const blob = new Blob([bytes], { type: 'application/pdf' });
+      const blob = new Blob([bytes as any], { type: 'application/pdf' });
       setResultUrl(URL.createObjectURL(blob));
     } catch (e: any) {
       console.error('Error saving rotated PDF:', e);

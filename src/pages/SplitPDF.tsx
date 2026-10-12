@@ -106,7 +106,7 @@ export default function SplitPDF() {
           const [copied] = await newPdf.copyPages(sourcePdf, [i]);
           newPdf.addPage(copied);
           const bytes = await newPdf.save();
-          const blob = new Blob([bytes], { type: 'application/pdf' });
+          const blob = new Blob([bytes as any], { type: 'application/pdf' });
           results.push({ url: URL.createObjectURL(blob), name: `page_${i + 1}.pdf`, pages: `Page ${i + 1}` });
         }
       } else if (splitMode === 'selection') {
@@ -117,7 +117,7 @@ export default function SplitPDF() {
         const copied = await newPdf.copyPages(sourcePdf, sorted.map(p => p - 1));
         copied.forEach(p => newPdf.addPage(p));
         const bytes = await newPdf.save();
-        const blob = new Blob([bytes], { type: 'application/pdf' });
+        const blob = new Blob([bytes as any], { type: 'application/pdf' });
         const label = sorted.length === 1 ? `${sorted[0]}` : `${sorted[0]}-${sorted[sorted.length - 1]}`;
         results.push({ url: URL.createObjectURL(blob), name: `pages_${label}.pdf`, pages: `Pages: ${sorted.join(', ')}` });
       } else if (splitMode === 'ranges') {
@@ -138,7 +138,7 @@ export default function SplitPDF() {
           const copied = await newPdf.copyPages(sourcePdf, indices);
           copied.forEach(p => newPdf.addPage(p));
           const bytes = await newPdf.save();
-          const blob = new Blob([bytes], { type: 'application/pdf' });
+          const blob = new Blob([bytes as any], { type: 'application/pdf' });
           results.push({ url: URL.createObjectURL(blob), name: `split_${start}-${end}.pdf`, pages: `Pages ${start}–${end}` });
         }
       } else if (splitMode === 'every') {
@@ -153,7 +153,7 @@ export default function SplitPDF() {
           const copied = await newPdf.copyPages(sourcePdf, indices);
           copied.forEach(p => newPdf.addPage(p));
           const bytes = await newPdf.save();
-          const blob = new Blob([bytes], { type: 'application/pdf' });
+          const blob = new Blob([bytes as any], { type: 'application/pdf' });
           results.push({ url: URL.createObjectURL(blob), name: `part_${chunk}.pdf`, pages: `Pages ${start + 1}–${end + 1}` });
         }
       }

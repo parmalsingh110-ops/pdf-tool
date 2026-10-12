@@ -213,7 +213,7 @@ export default function PageNumbersPDF() {
       });
 
       const pdfBytes = await pdfDoc.save();
-      const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+      const blob = new Blob([pdfBytes as any], { type: 'application/pdf' });
       setNumberedUrl(URL.createObjectURL(blob));
     } catch (error) {
       console.error('Error adding page numbers:', error);

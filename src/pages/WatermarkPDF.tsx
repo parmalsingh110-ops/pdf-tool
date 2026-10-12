@@ -214,7 +214,7 @@ export default function WatermarkPDF() {
       }
 
       const bytes = await pdfDoc.save();
-      const blob = new Blob([bytes], { type: 'application/pdf' });
+      const blob = new Blob([bytes as any], { type: 'application/pdf' });
       setResultUrl(URL.createObjectURL(blob));
     } catch (e) {
       console.error('Watermark error:', e);

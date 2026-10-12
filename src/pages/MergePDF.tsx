@@ -147,7 +147,7 @@ export default function MergePDF() {
         copied.forEach(p => mergedPdf.addPage(p));
       }
       const bytes = await mergedPdf.save();
-      const blob = new Blob([bytes], { type: 'application/pdf' });
+      const blob = new Blob([bytes as any], { type: 'application/pdf' });
       setMergedPdfUrl(URL.createObjectURL(blob));
     } catch (e) {
       console.error('Merge error:', e);

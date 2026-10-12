@@ -123,7 +123,7 @@ export default function ProtectPDF() {
       });
 
       const finalBytes = await pdfDoc.save();
-      const blob = new Blob([finalBytes], { type: 'application/pdf' });
+      const blob = new Blob([finalBytes as any], { type: 'application/pdf' });
       setProtectedUrl(URL.createObjectURL(blob));
     } catch (error) {
       console.error('Error protecting PDF:', error);
