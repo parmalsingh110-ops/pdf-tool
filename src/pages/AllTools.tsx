@@ -201,6 +201,7 @@ export default function AllTools() {
   );
   const [sortMode, setSortMode] = useState<'most-used' | 'newest' | 'a-z'>('most-used');
   const [query, setQuery] = useState('');
+  const [activeCategory, setActiveCategory] = useState<string>('all');
   const [favTick, setFavTick] = useState(0); // force re-render on fav toggle
 
   const handleToggleFav = useCallback((e: React.MouseEvent, path: string, title: string) => {
@@ -221,21 +222,37 @@ export default function AllTools() {
     { id: 'cat-coming-soon', label: 'Coming soon', icon: Sparkles },
   ];
 
+  const categoryFilters = [
+    { id: 'all', label: 'All Tools', icon: LayoutGrid },
+    { id: 'cat-available', label: 'PDF Essentials', icon: Combine },
+    { id: 'cat-advanced-ocr', label: 'Text & OCR', icon: ScanText },
+    { id: 'cat-media', label: 'Images & Media', icon: ImageIcon },
+    { id: 'cat-security', label: 'Security & Legal', icon: ShieldCheck },
+    { id: 'cat-creative', label: 'Creative & Form', icon: Palette },
+    { id: 'cat-pro-tools', label: 'Pro Utilities', icon: Zap },
+  ];
+
   const sortedCategories = useMemo(() => {
-    return categories.map((category) => {
-      let tools = [...category.tools];
-      if (query.trim()) {
-        const q = query.toLowerCase();
-        tools = tools.filter((t: any) => t.title.toLowerCase().includes(q));
-      }
-      if (sortMode === 'a-z') {
-        tools.sort((a: any, b: any) => a.title.localeCompare(b.title));
-      } else if (sortMode === 'newest') {
-        tools = tools.reverse();
-      }
-      return { ...category, tools };
-    });
-  }, [sortMode, query]); // favTick intentionally NOT in deps — fav state read on render
+    return categories
+      .filter((cat) => {
+        if (activeCategory === 'all') return true;
+        return categoryAnchor(cat.title) === activeCategory;
+      })
+      .map((category) => {
+        let tools = [...category.tools];
+        if (query.trim()) {
+          const q = query.toLowerCase();
+          tools = tools.filter((t: any) => t.title.toLowerCase().includes(q));
+        }
+        if (sortMode === 'a-z') {
+          tools.sort((a: any, b: any) => a.title.localeCompare(b.title));
+        } else if (sortMode === 'newest') {
+          tools = tools.reverse();
+        }
+        return { ...category, tools };
+      })
+      .filter((cat) => (query.trim() ? cat.tools.length > 0 : true));
+  }, [sortMode, query, activeCategory]);
 
   // Highlight matching text in search results
   function hl(text: string): React.ReactNode {
@@ -301,33 +318,67 @@ export default function AllTools() {
                   A-Z
                 </button>
               </div>
-              <input
-                type="text"
-                placeholder="Search tools..."
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-full px-4 py-2 text-sm outline-none focus:ring-2 focus:ring-rose-200 dark:text-slate-100"
-              />
+              <div className="relative flex-1 max-w-md">
+                <Search className="w-4 h-4 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  placeholder="Search 90+ tools (e.g. merge, compress, protect...)"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-full pl-10 pr-10 py-2.5 text-sm outline-none focus:ring-2 focus:ring-rose-200 dark:text-slate-100 placeholder:text-slate-400"
+                />
+                {query && (
+                  <button
+                    onClick={() => setQuery('')}
+                    className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs font-bold"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Category Filter Chips */}
+            <div className="mt-5 flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none">
+              {categoryFilters.map((tab) => {
+                const isActive = activeCategory === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    onClick={() => setActiveCategory(tab.id)}
+                    className={`inline-flex items-center gap-2 px-4 py-2 rounded-full text-xs font-bold whitespace-nowrap transition-all ${
+                      isActive
+                        ? 'bg-rose-600 text-white shadow-sm shadow-rose-200'
+                        : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-800 hover:border-rose-300 hover:text-rose-600'
+                    }`}
+                  >
+                    <tab.icon className="w-3.5 h-3.5" />
+                    {tab.label}
+                  </button>
+                );
+              })}
             </div>
           </header>
 
-          <section id="popular" className="mb-16">
-            <div className="flex items-center gap-3 mb-6">
-              <h2 className="text-2xl font-bold text-slate-900 dark:text-white">Popular Artifacts</h2>
-              <div className="h-px flex-1 bg-slate-200 dark:bg-slate-700" />
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
-              <Link to="/merge" className="md:col-span-8 rounded-3xl bg-white border border-slate-200 p-8 shadow-[0px_20px_40px_rgba(0,0,0,0.04)] hover:-translate-y-1 transition-all">
-                <span className="inline-flex text-xs px-3 py-1 rounded-full bg-rose-50 text-rose-700 font-bold">Essential</span>
-                <h3 className="mt-5 text-2xl font-extrabold text-slate-900">Omni-Merge Pro</h3>
-                <p className="mt-2 text-slate-600 text-sm">Combine PDFs with smooth ordering and high-fidelity outputs.</p>
-              </Link>
-              <Link to="/compress" className="md:col-span-4 rounded-3xl bg-white border border-slate-200 p-8 shadow-[0px_20px_40px_rgba(0,0,0,0.04)] hover:-translate-y-1 transition-all">
-                <h3 className="text-xl font-bold text-slate-900">Ultra-Shrink</h3>
-                <p className="mt-2 text-slate-600 text-sm">Reduce size while preserving readability.</p>
-              </Link>
-            </div>
-          </section>
+          {!query.trim() && activeCategory === 'all' && (
+            <section id="popular" className="mb-16">
+              <div className="flex items-center gap-3 mb-6">
+                <h2 className="text-2xl font-bold text-slate-900 dark:text-white">Popular Artifacts</h2>
+                <div className="h-px flex-1 bg-slate-200 dark:bg-slate-700" />
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
+                <Link to="/merge" className="md:col-span-8 rounded-3xl bg-white border border-slate-200 p-8 shadow-[0px_20px_40px_rgba(0,0,0,0.04)] hover:-translate-y-1 transition-all">
+                  <span className="inline-flex text-xs px-3 py-1 rounded-full bg-rose-50 text-rose-700 font-bold">Essential</span>
+                  <h3 className="mt-5 text-2xl font-extrabold text-slate-900">Omni-Merge Pro</h3>
+                  <p className="mt-2 text-slate-600 text-sm">Combine PDFs with smooth ordering and high-fidelity outputs.</p>
+                </Link>
+                <Link to="/compress" className="md:col-span-4 rounded-3xl bg-white border border-slate-200 p-8 shadow-[0px_20px_40px_rgba(0,0,0,0.04)] hover:-translate-y-1 transition-all">
+                  <h3 className="text-xl font-bold text-slate-900">Ultra-Shrink</h3>
+                  <p className="mt-2 text-slate-600 text-sm">Reduce size while preserving readability.</p>
+                </Link>
+              </div>
+            </section>
+          )}
 
           <div className="space-y-16">
             {sortedCategories.map((category, catIdx) => (

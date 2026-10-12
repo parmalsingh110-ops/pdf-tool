@@ -26,6 +26,7 @@ export default function CompressPDF() {
   const [useTargetSize, setUseTargetSize] = useState(false);
   const [stats, setStats] = useState<{original: number, compressed: number, method?: string} | null>(null);
   const [usedFallback, setUsedFallback] = useState(false);
+  const [comparisonView, setComparisonView] = useState<'side-by-side' | 'compressed' | 'original'>('side-by-side');
 
   const handleDrop = (acceptedFiles: File[]) => {
     if (acceptedFiles.length > 0) {
@@ -342,7 +343,7 @@ export default function CompressPDF() {
       {!file ? (
         <FileDropzone onDrop={handleDrop} multiple={false} title="Select PDF file" />
       ) : (
-        <div className="w-full max-w-5xl flex flex-col lg:flex-row gap-8">
+        <div className={`w-full ${compressedUrl ? 'max-w-6xl' : 'max-w-5xl'} flex flex-col lg:flex-row gap-8 transition-all`}>
           <div className="flex-1 bg-white rounded-2xl shadow-sm border border-gray-200 p-8">
             <div className="flex items-center gap-4 p-6 bg-gray-50 rounded-xl border border-gray-200 mb-8">
               <div className="w-16 h-16 bg-green-100 text-green-600 rounded-xl flex items-center justify-center shrink-0">
@@ -487,50 +488,108 @@ export default function CompressPDF() {
             )}
           </div>
 
-          {/* Preview Area (Optional but nice) */}
-          <div className="flex-1 bg-gray-100 rounded-2xl border border-gray-200 overflow-hidden min-h-[500px] flex flex-col">
-            <div className="bg-white px-4 py-3 text-sm font-semibold text-gray-700 border-b border-gray-200">
-              PDF Preview
+          {/* Preview Area (Interactive Before & After Comparison) */}
+          <div className="flex-1 bg-gray-100 rounded-2xl border border-gray-200 overflow-hidden min-h-[520px] flex flex-col">
+            <div className="bg-white px-4 py-3 text-xs font-semibold text-gray-700 border-b border-gray-200 flex items-center justify-between">
+              <span>{compressedUrl ? 'Quality Comparison' : 'PDF Preview'}</span>
+              {compressedUrl && (
+                <div className="flex items-center gap-1 bg-gray-100 p-0.5 rounded-lg text-[11px]">
+                  <button
+                    onClick={() => setComparisonView('side-by-side')}
+                    className={`px-2.5 py-1 rounded-md font-semibold transition-colors ${
+                      comparisonView === 'side-by-side' ? 'bg-white shadow-xs text-green-700' : 'text-gray-500 hover:text-gray-800'
+                    }`}
+                  >
+                    Side-by-Side
+                  </button>
+                  <button
+                    onClick={() => setComparisonView('compressed')}
+                    className={`px-2.5 py-1 rounded-md font-semibold transition-colors ${
+                      comparisonView === 'compressed' ? 'bg-white shadow-xs text-green-700' : 'text-gray-500 hover:text-gray-800'
+                    }`}
+                  >
+                    Compressed
+                  </button>
+                  <button
+                    onClick={() => setComparisonView('original')}
+                    className={`px-2.5 py-1 rounded-md font-semibold transition-colors ${
+                      comparisonView === 'original' ? 'bg-white shadow-xs text-green-700' : 'text-gray-500 hover:text-gray-800'
+                    }`}
+                  >
+                    Original
+                  </button>
+                </div>
+              )}
             </div>
-            <div className="flex-1 relative bg-gray-200">
-               {previewUrl && (
-                 <iframe 
-                    src={`${previewUrl}#toolbar=0`} 
-                    className="absolute inset-0 w-full h-full"
-                    title="PDF Preview"
-                  />
-                )}
-               {isProcessing && compressionLevel === 'backend-high-quality' && (
-                 <div className="absolute inset-0 bg-black/60 backdrop-blur-sm flex flex-col items-center justify-center p-4">
-                   <BackendLoader
-                     title="Compressing PDF…"
-                     accentColor="blue"
-                     steps={[
-                       { icon: '📤', label: 'Uploading', detail: 'Sending your PDF to server...' },
-                       { icon: '🔍', label: 'Analyzing', detail: 'Checking optimization opportunities...' },
-                       { icon: '⚡', label: 'Compressing', detail: 'Ghostscript applying vector compression...' },
-                       { icon: '💾', label: 'Finalizing', detail: 'Packaging compressed output...' },
-                     ]}
-                     tips={[
-                       '⚡ Ghostscript vector compression keeps text crisp.',
-                       '🎨 Images are re-encoded at optimal quality settings.',
-                       '📉 Typical compression: 40-80% size reduction.',
-                       '🔒 File is deleted from server after download.',
-                     ]}
-                   />
-                 </div>
-               )}
-               {isProcessing && compressionLevel !== 'backend-high-quality' && (
-                 <div className="absolute inset-0 bg-black/20 backdrop-blur-sm flex flex-col items-center justify-center text-white p-8">
-                     <div className="w-12 h-12 border-4 border-white border-t-transparent rounded-full animate-spin mb-4"></div>
-                     <p className="text-xl font-bold">{processingStep}</p>
-                     {progressPct > 0 && (
-                       <div className="w-48 h-2 bg-white/30 rounded-full mt-3 overflow-hidden">
-                         <div className="h-full bg-white rounded-full transition-all" style={{width: `${progressPct}%`}} />
-                       </div>
-                     )}
+
+            <div className="flex-1 relative bg-gray-200 min-h-[460px]">
+              {compressedUrl ? (
+                comparisonView === 'side-by-side' ? (
+                  <div className="absolute inset-0 grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-gray-300">
+                    <div className="relative h-full flex flex-col">
+                      <div className="bg-white/95 backdrop-blur-xs px-3 py-1.5 text-[11px] font-bold text-gray-600 flex items-center justify-between border-b border-gray-200 z-10">
+                        <span>Original</span>
+                        <span>{stats ? `${(stats.original / 1024 / 1024).toFixed(2)} MB` : ''}</span>
+                      </div>
+                      <div className="flex-1 relative">
+                        {previewUrl && (
+                          <iframe src={`${previewUrl}#toolbar=0`} className="absolute inset-0 w-full h-full" title="Original PDF" />
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="relative h-full flex flex-col">
+                      <div className="bg-emerald-50 px-3 py-1.5 text-[11px] font-bold text-emerald-800 flex items-center justify-between border-b border-emerald-200 z-10">
+                        <span>Compressed</span>
+                        <span className="text-emerald-700">
+                          {stats ? `${(stats.compressed / 1024 / 1024).toFixed(2)} MB (${Math.round((1 - stats.compressed / stats.original) * 100)}% saved)` : ''}
+                        </span>
+                      </div>
+                      <div className="flex-1 relative">
+                        <iframe src={`${compressedUrl}#toolbar=0`} className="absolute inset-0 w-full h-full" title="Compressed PDF" />
+                      </div>
+                    </div>
                   </div>
-               )}
+                ) : comparisonView === 'compressed' ? (
+                  <iframe src={`${compressedUrl}#toolbar=0`} className="absolute inset-0 w-full h-full" title="Compressed PDF" />
+                ) : (
+                  previewUrl && <iframe src={`${previewUrl}#toolbar=0`} className="absolute inset-0 w-full h-full" title="Original PDF" />
+                )
+              ) : (
+                previewUrl && <iframe src={`${previewUrl}#toolbar=0`} className="absolute inset-0 w-full h-full" title="Original PDF" />
+              )}
+
+              {isProcessing && compressionLevel === 'backend-high-quality' && (
+                <div className="absolute inset-0 bg-black/60 backdrop-blur-sm flex flex-col items-center justify-center p-4 z-20">
+                  <BackendLoader
+                    title="Compressing PDF…"
+                    accentColor="blue"
+                    steps={[
+                      { icon: '📤', label: 'Uploading', detail: 'Sending your PDF to server...' },
+                      { icon: '🔍', label: 'Analyzing', detail: 'Checking optimization opportunities...' },
+                      { icon: '⚡', label: 'Compressing', detail: 'Ghostscript applying vector compression...' },
+                      { icon: '💾', label: 'Finalizing', detail: 'Packaging compressed output...' },
+                    ]}
+                    tips={[
+                      '⚡ Ghostscript vector compression keeps text crisp.',
+                      '🎨 Images are re-encoded at optimal quality settings.',
+                      '📉 Typical compression: 40-80% size reduction.',
+                      '🔒 File is deleted from server after download.',
+                    ]}
+                  />
+                </div>
+              )}
+              {isProcessing && compressionLevel !== 'backend-high-quality' && (
+                <div className="absolute inset-0 bg-black/30 backdrop-blur-sm flex flex-col items-center justify-center text-white p-8 z-20">
+                  <div className="w-12 h-12 border-4 border-white border-t-transparent rounded-full animate-spin mb-4" />
+                  <p className="text-xl font-bold">{processingStep}</p>
+                  {progressPct > 0 && (
+                    <div className="w-48 h-2 bg-white/30 rounded-full mt-3 overflow-hidden">
+                      <div className="h-full bg-white rounded-full transition-all" style={{ width: `${progressPct}%` }} />
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         </div>
