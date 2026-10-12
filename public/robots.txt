@@ -4,14 +4,19 @@
 User-agent: *
 Allow: /
 
-# Block internal/build paths
+# Block private development/source paths
 Disallow: /api/
-Disallow: /_next/
 Disallow: /node_modules/
 Disallow: /src/
-Disallow: /assets/
-Disallow: /*.js$
-Disallow: /*.css$
+
+# Allow all static scripts, styles, and assets so search engine crawlers can fully render the React SPA
+Allow: /assets/
+Allow: /*.js$
+Allow: /*.css$
+Allow: /*.png$
+Allow: /*.jpg$
+Allow: /*.svg$
+Allow: /*.webp$
 
 # Allow all tool pages explicitly for faster discovery
 Allow: /merge
@@ -122,14 +127,12 @@ Allow: /pdf-form-filler
 Allow: /accessibility-checker
 Allow: /reading-tracker
 Allow: /all-tools
+Allow: /handwriting-pdf
 Allow: /about
 Allow: /pricing
 Allow: /contact
 Allow: /privacy
 Allow: /terms
-
-# Crawl rate — be gentle
-Crawl-delay: 1
 
 # Sitemaps
 Sitemap: https://pdfmediasuite.in/sitemap.xml
