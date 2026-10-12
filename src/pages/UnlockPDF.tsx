@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { PDFDocument } from 'pdf-lib';
-import { Download, FileText, Unlock, AlertTriangle, Key, Search, CheckCircle2, Shield, HelpCircle, ChevronDown, Sparkles } from 'lucide-react';
+import { Download, FileText, Unlock, AlertTriangle, Key, Search, CheckCircle2, Shield, HelpCircle, ChevronDown, Sparkles, Eye, ExternalLink } from 'lucide-react';
 import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
+import { dataUrlToBytes } from '../lib/utils';
 
 interface DocPreset {
   id: string;
@@ -378,6 +379,7 @@ export default function UnlockPDF() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState('');
   const [unlockedUrl, setUnlockedUrl] = useState<string | null>(null);
+  const [showPreview, setShowPreview] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [triedPasswords, setTriedPasswords] = useState<string[]>([]);
 
@@ -483,8 +485,7 @@ export default function UnlockPDF() {
         await page.render({ canvasContext: ctx, viewport, canvas } as any).promise;
 
         const pngDataUrl = canvas.toDataURL('image/png');
-        const pngBase64 = pngDataUrl.split(',')[1];
-        const pngBytes = Uint8Array.from(atob(pngBase64), (c) => c.charCodeAt(0));
+        const pngBytes = dataUrlToBytes(pngDataUrl);
 
         const pngImage = await newPdfDoc.embedPng(pngBytes);
         const pdfPage = newPdfDoc.addPage([viewport.width / scale, viewport.height / scale]);
@@ -808,14 +809,46 @@ export default function UnlockPDF() {
                 <p className="text-green-700 mb-6 text-sm max-w-md mx-auto">
                   All passwords and restrictions have been permanently removed. Your new PDF is completely clean and ready to view, print, or share.
                 </p>
-                <a
-                  href={unlockedUrl}
-                  download={`unlocked_${file.name}`}
-                  className="inline-flex items-center justify-center gap-2 px-8 py-4 bg-green-600 hover:bg-green-700 text-white text-base font-bold rounded-xl transition-all shadow-md hover:shadow-lg"
-                >
-                  <Download className="w-5 h-5" />
-                  Download Unlocked PDF
-                </a>
+                <div className="flex flex-wrap items-center justify-center gap-3">
+                  <a
+                    href={unlockedUrl}
+                    download={`unlocked_${file.name}`}
+                    className="inline-flex items-center justify-center gap-2 px-8 py-3.5 bg-green-600 hover:bg-green-700 text-white text-base font-bold rounded-xl transition-all shadow-md hover:shadow-lg"
+                  >
+                    <Download className="w-5 h-5" />
+                    Download Unlocked PDF
+                  </a>
+                  <a
+                    href={unlockedUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center justify-center gap-2 px-5 py-3.5 bg-white hover:bg-gray-50 text-gray-700 font-semibold rounded-xl border border-gray-300 transition-all shadow-xs"
+                  >
+                    <ExternalLink className="w-4 h-4" />
+                    Open in New Tab
+                  </a>
+                  <button
+                    type="button"
+                    onClick={() => setShowPreview(!showPreview)}
+                    className="inline-flex items-center justify-center gap-2 px-5 py-3.5 bg-white hover:bg-gray-50 text-gray-700 font-semibold rounded-xl border border-gray-300 transition-all shadow-xs"
+                  >
+                    <Eye className="w-4 h-4" />
+                    {showPreview ? 'Hide Preview' : 'Show Live Preview'}
+                  </button>
+                </div>
+
+                {showPreview && (
+                  <div className="mt-6 text-left">
+                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Live Document Preview</p>
+                    <div className="w-full h-[550px] rounded-xl border border-gray-200 overflow-hidden bg-gray-100 shadow-inner">
+                      <iframe
+                        src={unlockedUrl}
+                        title="Unlocked PDF Document Preview"
+                        className="w-full h-full border-0"
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
               <button
                 type="button"
