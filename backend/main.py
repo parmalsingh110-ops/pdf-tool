@@ -1193,49 +1193,65 @@ async def pdf_to_word(request: Request, file: UploadFile = File(...), force_ocr:
         if was_scanned:
             # ══════════════════════════════════════════════════════════════════
             # PATH A — SCANNED / IMAGE PDF  (Adobe Scan, phone camera, etc.)
-            # ══════════════════════════════════════════════════════════════════
             # APPROACH: OCR → extract text via PyMuPDF → fresh python-docx
-            #
-            # WHY NOT pdf2docx here:
-            #   pdf2docx embeds the entire page image as a DOCX background.
-            #   This produces huge files and complex XML that our post-processing
-            #   corrupts ("XML data is invalid according to the schema", Line 0).
-            #   A fresh python-docx file is always valid and small.
             # ══════════════════════════════════════════════════════════════════
             logger.info(f"[PDF2Word] Scanned PDF detected → OCR + clean DOCX path")
-
-            # Step 1: OCR the scan to add a proper text layer
             inp = await ensure_auto_ocr(inp, force=True)
-
-            # Step 2: Build a clean, valid DOCX from the OCR text layer
             from fastapi.concurrency import run_in_threadpool
             await run_in_threadpool(_build_clean_docx_from_ocr_pdf, inp, out)
 
         else:
             # ══════════════════════════════════════════════════════════════════
             # PATH B — TEXT-BASED PDF  (digital/born-digital documents)
+            # PRIMARY:  pdf2docx — best layout/table/image preservation
+            # FALLBACK: Rich PyMuPDF span-level builder (exact font/size/color)
             # ══════════════════════════════════════════════════════════════════
-            # APPROACH: pdf2docx — preserves layout, fonts, tables, columns
-            # ══════════════════════════════════════════════════════════════════
-            try:
-                from pdf2docx import Converter
-            except ImportError:
-                raise HTTPException(500, "Run: pip install pdf2docx PyMuPDF")
-
-            logger.info(f"[PDF2Word] Text PDF detected → pdf2docx layout-preserve path")
             from fastapi.concurrency import run_in_threadpool
 
-            def _run_pdf2docx():
-                _cv = Converter(str(inp))
-                _cv.convert(
-                    str(out),
-                    multi_processing=False,
-                    line_overlap_threshold=0.9,
-                    min_svg_gap_dx=15.0,
-                )
-                _cv.close()
+            pdf2docx_ok = False
+            try:
+                from pdf2docx import Converter
+                logger.info(f"[PDF2Word] Text PDF → pdf2docx (primary path)")
 
-            await run_in_threadpool(_run_pdf2docx)
+                def _run_pdf2docx():
+                    _cv = Converter(str(inp))
+                    _cv.convert(
+                        str(out),
+                        multi_processing=False,
+                        # Fine-tuned thresholds for accurate layout reconstruction
+                        line_overlap_threshold=0.9,       # merge lines that overlap ≥90%
+                        line_break_width_ratio=0.5,       # conservative line-break detection
+                        min_svg_gap_dx=15.0,              # SVG shape gap tolerance
+                        connected_border_tolerance=3.0,   # table border snapping
+                        page_margin_factor=0.02,          # ignore very small margins
+                        float_image_ignorable_gap=5.0,    # float image merge gap
+                        line_break_free_space_ratio=0.1,  # paragraph break sensitivity
+                    )
+                    _cv.close()
+
+                await run_in_threadpool(_run_pdf2docx)
+
+                # Validate: pdf2docx can sometimes produce empty/broken output
+                if out.exists() and out.stat().st_size > 5000:
+                    pdf2docx_ok = True
+                else:
+                    logger.warning("[PDF2Word] pdf2docx output too small/empty, trying rich span builder")
+
+            except Exception as pdf2docx_err:
+                logger.warning(f"[PDF2Word] pdf2docx failed: {pdf2docx_err} — falling back to rich span builder")
+
+            if not pdf2docx_ok:
+                # ── FALLBACK: Rich PyMuPDF span-level DOCX builder ─────────────
+                # Extracts exact font name, size, bold, italic, color, alignment
+                # per span and writes a clean python-docx file preserving all
+                # text formatting faithfully.
+                logger.info("[PDF2Word] Using rich PyMuPDF span-level DOCX builder")
+                await run_in_threadpool(_build_rich_span_docx, inp, out)
+
+        # ── Optimize & sanitize output for Apple Pages & Word ─────────────────
+        if out.exists() and out.stat().st_size > 0:
+            from fastapi.concurrency import run_in_threadpool
+            await run_in_threadpool(_clean_and_optimize_docx, out)
 
         # ── Validate output ───────────────────────────────────────────────────
         if not out.exists() or out.stat().st_size == 0:
@@ -1284,6 +1300,262 @@ async def pdf_to_word(request: Request, file: UploadFile = File(...), force_ocr:
     except Exception as e:
         cleanup(inp, out)
         raise safe_error(e, "pdf-to-word")
+
+
+def _clean_and_optimize_docx(docx_path: Path):
+    """
+    Post-process DOCX generated by pdf2docx or fallback builders:
+    1. Sanitize illegal XML 1.0 control characters that can crash Word/Pages XML parsers.
+    2. Unwrap 1x1 dummy container tables created by pdf2docx for layout boxes,
+       promoting their paragraphs and tables directly to body level so Apple Pages
+       doesn't strip nested tables with "Tables inside other tables were imported as text".
+    """
+    try:
+        from docx import Document
+        from docx.oxml.ns import qn
+        import re
+
+        doc = Document(str(docx_path))
+        body = doc._body._element
+        ctrl_re = re.compile(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]')
+
+        # 1. Sanitize XML control characters in all runs
+        for t in body.iter(qn('w:t')):
+            if t.text and ctrl_re.search(t.text):
+                t.text = ctrl_re.sub('', t.text)
+
+        # 2. Unwrap 1x1 container tables
+        while True:
+            unwrapped_any = False
+            for elem in list(body):
+                if elem.tag.endswith('tbl'):
+                    rows = elem.findall(qn('w:tr'))
+                    if len(rows) == 1:
+                        cells = rows[0].findall(qn('w:tc'))
+                        if len(cells) == 1:
+                            tc = cells[0]
+                            parent = elem.getparent()
+                            idx = parent.index(elem)
+                            for child in list(tc):
+                                if not child.tag.endswith('tcPr'):
+                                    parent.insert(idx, child)
+                                    idx += 1
+                            parent.remove(elem)
+                            unwrapped_any = True
+            if not unwrapped_any:
+                break
+
+        doc.save(str(docx_path))
+        logger.info(f"[PDF2Word] Document sanitized and optimized for Pages/Word: {docx_path.name}")
+    except Exception as e:
+        logger.warning(f"[PDF2Word] _clean_and_optimize_docx encountered non-fatal error: {e}")
+
+
+def _build_rich_span_docx(pdf_path: Path, out_path: Path):
+    """
+    Advanced PDF→DOCX converter using PyMuPDF span-level data.
+    Preserves: exact font sizes, bold/italic, text colors, paragraph alignment,
+    indentation, heading detection, multi-column layout (columns merged left→right),
+    and inter-paragraph spacing.
+    """
+    import fitz
+    import re
+    from docx import Document
+    from docx.shared import Pt, RGBColor, Inches
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.oxml.ns import qn
+    from docx.oxml import OxmlElement
+
+    def _set_run_color(run, hex_color: str):
+        """Apply hex color (#rrggbb) to a docx run."""
+        try:
+            h = hex_color.lstrip('#')
+            if len(h) == 6:
+                r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+                run.font.color.rgb = RGBColor(r, g, b)
+        except Exception:
+            pass
+
+    def _map_font_name(pdf_font: str) -> str:
+        """Map a PDF/PyMuPDF font name to the closest Word-friendly font family."""
+        f = pdf_font.lower()
+        # Strip subset prefix (e.g. "ABCDEF+Helvetica" → "Helvetica")
+        if '+' in f:
+            f = f.split('+', 1)[-1]
+        if any(x in f for x in ['times', 'timesnew', 'palatino', 'garamond', 'georgia',
+                                  'bookman', 'minion', 'caslon', 'cambria', 'constantia']):
+            return 'Times New Roman'
+        if any(x in f for x in ['courier', 'consolas', 'inconsolata', 'lucidaconsole',
+                                  'menlo', 'jetbrains', 'anonymous', 'sourcecode']):
+            return 'Courier New'
+        if any(x in f for x in ['devanagari', 'mangal', 'kokila', 'utsaah',
+                                  'aparajita', 'shree', 'kruti']):
+            return 'Mangal'
+        if 'impact' in f or 'condensed' in f or 'narrow' in f:
+            return 'Arial Narrow'
+        if any(x in f for x in ['calibri', 'candara', 'corbel']):
+            return 'Calibri'
+        if any(x in f for x in ['verdana', 'tahoma']):
+            return 'Verdana'
+        if any(x in f for x in ['trebuchet']):
+            return 'Trebuchet MS'
+        if any(x in f for x in ['gill', 'franklin', 'futura']):
+            return 'Century Gothic'
+        # Helvetica / Arial family (default)
+        return 'Arial'
+
+    doc = Document()
+    pdf = fitz.open(str(pdf_path))
+    total_pages = len(pdf)
+
+    # Configure document sections based on first page dimensions
+    if total_pages > 0:
+        first_p = pdf[0]
+        for section in doc.sections:
+            section.page_width = Pt(first_p.rect.width)
+            section.page_height = Pt(first_p.rect.height)
+            section.top_margin = Pt(36)
+            section.bottom_margin = Pt(36)
+            section.left_margin = Pt(40)
+            section.right_margin = Pt(40)
+
+    # Remove default empty paragraph
+    if doc.paragraphs:
+        p = doc.paragraphs[0]._element
+        p.getparent().remove(p)
+
+    for page_num in range(total_pages):
+        page = pdf[page_num]
+        page_width = page.rect.width
+
+        # get_text("dict") → blocks → lines → spans with full font metadata
+        blocks_data = page.get_text(
+            "dict",
+            flags=fitz.TEXT_PRESERVE_WHITESPACE | fitz.TEXT_PRESERVE_LIGATURES
+        )
+
+        text_blocks = [b for b in blocks_data.get("blocks", []) if b.get("type") == 0]
+        if not text_blocks:
+            if page_num < total_pages - 1:
+                doc.add_page_break()
+            continue
+
+        # Compute global median font size for heading detection
+        all_sizes = []
+        for blk in text_blocks:
+            for ln in blk.get("lines", []):
+                for sp in ln.get("spans", []):
+                    if sp.get("text", "").strip():
+                        all_sizes.append(sp.get("size", 11))
+        all_sizes.sort()
+        median_size = all_sizes[len(all_sizes) // 2] if all_sizes else 11.0
+
+        for blk in text_blocks:
+            lines = blk.get("lines", [])
+            if not lines:
+                continue
+
+            # Determine block X position (for left-indent detection)
+            blk_x0 = blk.get("bbox", [0, 0, 0, 0])[0]
+            blk_x1 = blk.get("bbox", [0, 0, 0, 0])[2]
+            blk_w = blk_x1 - blk_x0
+
+            # Determine paragraph alignment from block position relative to page width
+            page_center = page_width / 2
+            blk_center = (blk_x0 + blk_x1) / 2
+            left_margin_ratio = blk_x0 / page_width
+            right_margin_ratio = (page_width - blk_x1) / page_width
+            margin_diff = abs(left_margin_ratio - right_margin_ratio)
+
+            if margin_diff < 0.08 and blk_w > page_width * 0.3:
+                alignment = WD_ALIGN_PARAGRAPH.CENTER
+            elif right_margin_ratio < 0.08 and left_margin_ratio > 0.3:
+                alignment = WD_ALIGN_PARAGRAPH.RIGHT
+            else:
+                alignment = WD_ALIGN_PARAGRAPH.LEFT
+
+            # Compute left indent (in points)
+            left_indent_pt = max(0.0, blk_x0 - 60)  # 60pt ≈ standard left margin
+
+            for line_idx, line in enumerate(lines):
+                spans = line.get("spans", [])
+                if not spans:
+                    continue
+
+                # Collect non-empty spans
+                valid_spans = [s for s in spans if s.get("text", "").strip()]
+                if not valid_spans:
+                    continue
+
+                # Line-level font stats for heading detection
+                line_max_size = max(s.get("size", 11) for s in valid_spans)
+                line_bold = any(
+                    (s.get("flags", 0) & 16) or
+                    any(x in s.get("font", "").lower() for x in ["bold", "heavy", "black"])
+                    for s in valid_spans
+                )
+
+                # Heading detection: font size significantly larger than median
+                is_h1 = line_max_size > median_size * 1.55 and len("".join(s.get("text","") for s in valid_spans).strip()) < 120
+                is_h2 = line_max_size > median_size * 1.25 and not is_h1 and len("".join(s.get("text","") for s in valid_spans).strip()) < 150
+                is_heading = is_h1 or is_h2
+
+                para = doc.add_paragraph()
+                pf = para.paragraph_format
+                pf.alignment = alignment if not is_heading else WD_ALIGN_PARAGRAPH.LEFT
+                pf.space_before = Pt(4 if not is_heading else (10 if is_h1 else 6))
+                pf.space_after = Pt(4 if not is_heading else (8 if is_h1 else 5))
+                pf.left_indent = Pt(min(left_indent_pt, 72)) if not is_heading else None
+
+                # Apply paragraph style for headings
+                if is_h1:
+                    para.style = doc.styles['Heading 1'] if 'Heading 1' in [s.name for s in doc.styles] else doc.styles['Normal']
+                elif is_h2:
+                    para.style = doc.styles['Heading 2'] if 'Heading 2' in [s.name for s in doc.styles] else doc.styles['Normal']
+
+                for span in valid_spans:
+                    text = span.get("text", "")
+                    if not text:
+                        continue
+                    text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', text)
+                    if not text:
+                        continue
+
+                    raw_font = span.get("font", "Arial")
+                    font_size = span.get("size", median_size)
+                    flags = span.get("flags", 0)
+
+                    is_bold = bool(flags & 16) or any(x in raw_font.lower() for x in ["bold", "heavy", "black"])
+                    is_italic = bool(flags & 2) or any(x in raw_font.lower() for x in ["italic", "oblique", "slant"])
+
+                    # Color
+                    raw_color = span.get("color", 0) or 0
+                    r_c = (raw_color >> 16) & 0xFF
+                    g_c = (raw_color >> 8) & 0xFF
+                    b_c = raw_color & 0xFF
+                    color_hex = f"#{r_c:02x}{g_c:02x}{b_c:02x}"
+
+                    run = para.add_run(text)
+                    run.font.name = _map_font_name(raw_font)
+                    run.font.size = Pt(max(6.0, min(round(font_size, 1), 72.0)))
+                    run.bold = is_bold or is_heading
+                    run.italic = is_italic
+
+                    # Apply color (skip pure black #000000 to use default)
+                    if color_hex not in ("#000000", "#000001"):
+                        _set_run_color(run, color_hex)
+
+        # Page break between pages (not after last)
+        if page_num < total_pages - 1:
+            doc.add_page_break()
+
+    pdf.close()
+    doc.save(str(out_path))
+    logger.info(
+        f"[RichSpanDOCX] Built rich DOCX from {total_pages} pages: "
+        f"{out_path.stat().st_size / 1024:.1f}KB"
+    )
+
 
 @app.post("/convert/pdf-to-word-plaintext")
 @limiter.limit("10/minute")
@@ -2545,41 +2817,63 @@ async def edit_pdf_endpoint(request: Request, file: UploadFile = File(...), edit
             # Redact: use exact bounding box (no padding) to prevent deleting adjacent words
             rect = fitz.Rect(x, y, x + w, y + h)
             
-            # Smart Background Reconstruction
-            has_native_text = False
-            # Look for words strictly inside our replacement box (intersecting)
-            words = page.get_text("words", clip=rect)
-            if len(words) > 0:
-                has_native_text = True
-                
+            # Extract original baseline and font metrics from the native text being replaced
+            annot_rect = fitz.Rect(x - 0.5, y - 0.5, x + w + 0.5, y + h + 0.5)
+            orig_dict = page.get_text("dict", clip=annot_rect)
+            detected_baseline = None
+            detected_font = None
+            detected_size = None
+            for blk in orig_dict.get("blocks", []):
+                for ln in blk.get("lines", []):
+                    for sp in ln.get("spans", []):
+                        if sp.get("text", "").strip():
+                            detected_baseline = sp.get("origin", [0, 0])[1]
+                            detected_font = sp.get("font")
+                            detected_size = sp.get("size")
+                            break
+                    if detected_baseline is not None:
+                        break
+                if detected_baseline is not None:
+                    break
+
+            words = page.get_text("words", clip=annot_rect)
+            has_native_text = len(words) > 0
+
             if has_native_text:
-                # Native PDF: remove exact intersecting text objects
-                # Using a slightly expanded rect ONLY for the visual redaction annot, not the logic
-                annot_rect = fitz.Rect(x - 0.5, y - 0.5, x + w + 0.5, y + h + 0.5)
-                page.add_redact_annot(annot_rect, cross_out=False)
+                # Clean native text deletion: remove text without ANY colored rectangle
+                page.add_redact_annot(annot_rect, fill=None)
                 page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE)
             else:
                 # Scanned PDF: sample edge pixels to get dominant background color
-                try:
-                    pm = page.get_pixmap(clip=rect)
-                    from collections import Counter
-                    edges = []
-                    for px in range(pm.width):
-                        edges.append(pm.pixel(px, 0))
-                        edges.append(pm.pixel(px, pm.height - 1))
-                    for py in range(pm.height):
-                        edges.append(pm.pixel(0, py))
-                        edges.append(pm.pixel(pm.width - 1, py))
-                    if edges:
-                        mc = Counter(edges).most_common(1)[0][0]
-                        # Handling RGB or RGBA tuples
-                        bg_color = (mc[0]/255.0, mc[1]/255.0, mc[2]/255.0)
-                    else:
-                        bg_color = (1, 1, 1)
-                except Exception:
+                bg_color = (1, 1, 1)
+                bg_req = str(action.get("bgColor", "")).lower()
+                if bg_req in ["#ffffff", "#fbfcfc", "#fcfcfc", "#fafafa", "#f7f7f7", "white", ""]:
                     bg_color = (1, 1, 1)
+                else:
+                    try:
+                        pm = page.get_pixmap(clip=rect)
+                        from collections import Counter
+                        edges = []
+                        for px in range(pm.width):
+                            edges.append(pm.pixel(px, 0))
+                            edges.append(pm.pixel(px, pm.height - 1))
+                        for py in range(pm.height):
+                            edges.append(pm.pixel(0, py))
+                            edges.append(pm.pixel(pm.width - 1, py))
+                        if edges:
+                            mc = Counter(edges).most_common(1)[0][0]
+                            r_b, g_b, b_b = mc[0], mc[1], mc[2]
+                            # Snap near-white paper or light background to pure white
+                            if r_b > 230 and g_b > 230 and b_b > 230:
+                                bg_color = (1, 1, 1)
+                            else:
+                                bg_color = (r_b / 255.0, g_b / 255.0, b_b / 255.0)
+                    except Exception:
+                        bg_color = (1, 1, 1)
                 
-                page.add_redact_annot(rect, fill=bg_color)
+                # Expand rect slightly vertically (1pt) so full scanned character is cleanly cleared
+                clean_scan_rect = fitz.Rect(x - 0.5, y - 0.5, x + w + 0.5, y + h + 1.2)
+                page.add_redact_annot(clean_scan_rect, fill=bg_color)
                 page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_PIXELS)
 
             if not new_text:
@@ -2587,19 +2881,47 @@ async def edit_pdf_endpoint(request: Request, file: UploadFile = File(...), edit
 
             fg_color  = hex_to_rgb(action.get("color", "#000000"))
             orig_size = float(action.get("fontSize", 12))
-            # DO NOT clamp orig_size to 12. Some PDFs use scaled coordinate systems where 1.5 is a normal font size.
             is_bold   = bool(action.get("bold"))
             is_italic = bool(action.get("italic"))
 
-            # Latin font selection
-            if is_bold and is_italic:
-                fontname = "hebi"
-            elif is_bold:
-                fontname = "hebo"
-            elif is_italic:
-                fontname = "heit"
+            # Smart font matching based on detected/specified font family
+            f_fam = str(action.get("fontFamily") or action.get("fontName") or "").lower()
+            is_serif = any(x in f_fam for x in [
+                "times", "serif", "georgia", "palatino", "garamond", "cambria",
+                "roman", "bookman", "minion", "baskerville", "caslon"
+            ])
+            is_mono = any(x in f_fam for x in [
+                "courier", "mono", "consolas", "code", "menlo", "inconsolata",
+                "sourcecode", "jetbrains", "lucida"
+            ])
+
+            if is_serif:
+                if is_bold and is_italic:
+                    fontname = "tibi"
+                elif is_bold:
+                    fontname = "tibo"
+                elif is_italic:
+                    fontname = "tiit"
+                else:
+                    fontname = "tiro"
+            elif is_mono:
+                if is_bold and is_italic:
+                    fontname = "cobi"
+                elif is_bold:
+                    fontname = "cobo"
+                elif is_italic:
+                    fontname = "coit"
+                else:
+                    fontname = "cour"
             else:
-                fontname = "helv"
+                if is_bold and is_italic:
+                    fontname = "hebi"
+                elif is_bold:
+                    fontname = "hebo"
+                elif is_italic:
+                    fontname = "heit"
+                else:
+                    fontname = "helv"
 
             # ── Hindi/Devanagari font handling ────────────────────────────────
             if has_non_latin(new_text):
@@ -2620,38 +2942,82 @@ async def edit_pdf_endpoint(request: Request, file: UploadFile = File(...), edit
                     logger.warning(f"[EditPDF] Devanagari font not found at {_fonts_dir}.")
             # ─────────────────────────────────────────────────────────────────
 
-            # Use insert_textbox for multiline wrapping and proper baseline handling
-            text_rect = fitz.Rect(x, y, x + w, y + h)
-            align = fitz.TEXT_ALIGN_LEFT
-            
-            rc = -1
-            final_size = orig_size
-            min_size = max(0.5, orig_size * 0.3)
-            
-            # Try to fit the text box, reducing font size if it doesn't fit
-            while final_size >= min_size:
-                rc = page.insert_textbox(
-                    text_rect,
-                    new_text,
-                    fontsize=final_size,
-                    fontname=fontname,
-                    color=fg_color,
-                    align=align
-                )
-                if rc >= 0:
-                    break
-                final_size -= max(0.2, orig_size * 0.05)
+            # Alignment support
+            align_req = str(action.get("align", "left")).lower()
+            if align_req == "center":
+                align = fitz.TEXT_ALIGN_CENTER
+            elif align_req == "right":
+                align = fitz.TEXT_ALIGN_RIGHT
+            elif align_req == "justify":
+                align = fitz.TEXT_ALIGN_JUSTIFY
+            else:
+                align = fitz.TEXT_ALIGN_LEFT
+
+            # If native text baseline is detected and single line text, insert at exact baseline
+            inserted = False
+            baseline_y = action.get("baseline") or detected_baseline
+            if baseline_y is None and h > 0:
+                # Accurate baseline fallback based on text box geometry
+                baseline_y = y + h * 0.78
+
+            if baseline_y is not None and "\n" not in new_text:
+                try:
+                    text_size = orig_size
+                    # If detected_size exists and orig_size was default or close, match detected_size
+                    if detected_size is not None and (orig_size == 12.0 or orig_size == 16.0 or abs(orig_size - detected_size) < 2.0):
+                        text_size = detected_size
+
+                    # Compute insertion X based on alignment
+                    ins_x = x
+                    if align == fitz.TEXT_ALIGN_CENTER:
+                        ins_w = fitz.get_text_length(new_text, fontname=fontname, fontsize=text_size)
+                        ins_x = x + (w - ins_w) / 2
+                    elif align == fitz.TEXT_ALIGN_RIGHT:
+                        ins_w = fitz.get_text_length(new_text, fontname=fontname, fontsize=text_size)
+                        ins_x = x + w - ins_w
+
+                    page.insert_text(
+                        fitz.Point(ins_x, baseline_y),
+                        new_text,
+                        fontsize=text_size,
+                        fontname=fontname,
+                        color=fg_color
+                    )
+                    inserted = True
+                except Exception as ins_err:
+                    logger.warning(f"[EditPDF] Baseline text insert error: {ins_err}")
+
+            if not inserted:
+                # Use insert_textbox for multiline wrapping and proper baseline handling
+                text_rect = fitz.Rect(x, y, x + w, y + h)
+                rc = -1
+                final_size = orig_size
+                min_size = max(0.5, orig_size * 0.3)
                 
-            # If it still didn't fit, force it at the minimum size
-            if rc < 0:
-                page.insert_textbox(
-                    text_rect,
-                    new_text,
-                    fontsize=final_size,
-                    fontname=fontname,
-                    color=fg_color,
-                    align=align
-                )
+                # Try to fit the text box, reducing font size if it doesn't fit
+                while final_size >= min_size:
+                    rc = page.insert_textbox(
+                        text_rect,
+                        new_text,
+                        fontsize=final_size,
+                        fontname=fontname,
+                        color=fg_color,
+                        align=align
+                    )
+                    if rc >= 0:
+                        break
+                    final_size -= max(0.2, orig_size * 0.05)
+                    
+                # If it still didn't fit, force it at the minimum size
+                if rc < 0:
+                    page.insert_textbox(
+                        text_rect,
+                        new_text,
+                        fontsize=final_size,
+                        fontname=fontname,
+                        color=fg_color,
+                        align=align
+                    )
 
         doc.save(str(out), garbage=3, deflate=True)
         doc.close()
@@ -2753,6 +3119,7 @@ async def analyze_text_layout(
                     if "+" in clean_font:
                         clean_font = clean_font.split("+", 1)[-1]
 
+                    origin = span.get("origin", (x0, y1))
                     spans_out.append({
                         "text": text,
                         "x": round(x0, 2),
@@ -2766,7 +3133,35 @@ async def analyze_text_layout(
                         "italic": is_italic,
                         "mono": is_mono,
                         "color": color_hex,
+                        "baseline": round(origin[1], 2),
                     })
+
+        words_out = []
+        for w_tuple in pg.get_text("words"):
+            wx0, wy0, wx1, wy1, wtext, blk_idx, line_idx, word_idx = w_tuple
+            if not wtext.strip():
+                continue
+            w_mid_x = (wx0 + wx1) / 2
+            w_mid_y = (wy0 + wy1) / 2
+            matched_s = None
+            for s in spans_out:
+                if (s["x"] - 5) <= w_mid_x <= (s["x"] + s["w"] + 5) and (s["y"] - 6) <= w_mid_y <= (s["y"] + s["h"] + 6):
+                    matched_s = s
+                    break
+            words_out.append({
+                "text": wtext,
+                "x": round(wx0, 2),
+                "y": round(wy0, 2),
+                "w": round(wx1 - wx0, 2),
+                "h": round(wy1 - wy0, 2),
+                "fontSize": matched_s["fontSize"] if matched_s else 11.0,
+                "fontName": matched_s["fontName"] if matched_s else "Helvetica",
+                "fontNameRaw": matched_s["fontNameRaw"] if matched_s else "Helvetica",
+                "bold": matched_s["bold"] if matched_s else False,
+                "italic": matched_s["italic"] if matched_s else False,
+                "color": matched_s["color"] if matched_s else "#000000",
+                "baseline": matched_s.get("baseline", round(wy1, 2)) if matched_s else round(wy1, 2),
+            })
 
         doc.close()
 
@@ -2775,6 +3170,7 @@ async def analyze_text_layout(
             "pageWidth": round(page_width, 2),
             "pageHeight": round(page_height, 2),
             "spans": spans_out,
+            "words": words_out,
         })
     except HTTPException:
         raise

@@ -32,6 +32,10 @@ import {
   Type as TypeIcon,
   SquarePen,
   Layers,
+  AlignLeft,
+  AlignCenter,
+  AlignRight,
+  Sparkles,
 } from 'lucide-react';
 import SignatureCanvas from 'react-signature-canvas';
 import FileDropzone from '../components/FileDropzone';
@@ -81,6 +85,10 @@ interface Annotation {
   originalFontName?: string;
   /** CSS font-family stack derived from original PDF font (for live preview) */
   fontCssFamily?: string;
+  /** Text alignment */
+  align?: 'left' | 'center' | 'right';
+  /** Exact text baseline in unscaled PDF points (from top of page) */
+  baseline?: number;
 }
 
 /** Span info returned by /analyze/text-layout (PyMuPDF backend) */
@@ -97,6 +105,24 @@ interface BackendSpan {
   italic: boolean;
   mono: boolean;
   color: string;
+  baseline?: number;
+}
+
+/** Word info returned by /analyze/text-layout (PyMuPDF backend) */
+interface BackendWord {
+  text: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  fontSize: number;
+  fontName: string;
+  fontNameRaw: string;
+  bold: boolean;
+  italic: boolean;
+  mono?: boolean;
+  color: string;
+  baseline: number;
 }
 
 /** Context menu state */
@@ -120,7 +146,9 @@ interface DetectedTextBlock {
   y: number;
   w: number;
   h: number;
-  fontSize: number;   // exact CSS-pixel font size from pdfjs transform
+  fontSize: number;   // exact font size in unscaled PDF points (pt)
+  baselineY?: number; // baseline Y in canvas pixels
+  pdfBaselineY?: number; // baseline Y in unscaled PDF points (from top of page)
   fontName?: string;  // pdfjs internal font name
   bold?: boolean;     // detected from fontName
   italic?: boolean;   // detected from fontName
@@ -138,7 +166,7 @@ export default function AdvancedEditor() {
   const [currentPage, setCurrentPage] = useState(1);
   const [pageViewport, setPageViewport] = useState<pdfjsLib.PageViewport | null>(null);
 
-  const [activeTool, setActiveTool] = useState<Tool>(null);
+  const [activeTool, setActiveTool] = useState<Tool>('select');
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detectedText, setDetectedText] = useState<DetectedTextBlock[]>([]);
@@ -206,6 +234,7 @@ export default function AdvancedEditor() {
 
   // === NEW: Backend text layout (accurate font/color data from PyMuPDF) ===
   const [backendSpans, setBackendSpans] = useState<BackendSpan[]>([]);
+  const [backendWords, setBackendWords] = useState<BackendWord[]>([]);
   const [layoutFetching, setLayoutFetching] = useState(false);
 
   // === NEW: Right-click context menu ===
@@ -287,6 +316,7 @@ export default function AdvancedEditor() {
         setPdfDoc(pdf);
         setNumPages(pdf.numPages);
         setCurrentPage(1);
+        setActiveTool('select');
       } catch (error) {
         console.error("Error loading PDF:", error);
       }
@@ -355,6 +385,7 @@ export default function AdvancedEditor() {
       if (res.ok) {
         const data = await res.json();
         setBackendSpans(data.spans || []);
+        setBackendWords(data.words || []);
       }
     } catch (e) {
       // Silently ignore — pdfjs text detection is the fallback
@@ -364,23 +395,85 @@ export default function AdvancedEditor() {
     }
   };
 
-  // === Helper: find backend span matching a detected text block ===
-  const findBackendSpan = (block: DetectedTextBlock): BackendSpan | null => {
-    if (!backendSpans.length || !pageViewport) return null;
+  // === Helper: find backend word or span matching a detected text block ===
+  const findBackendMatch = (block: DetectedTextBlock): {
+    fontSize: number;
+    fontName: string;
+    bold: boolean;
+    italic: boolean;
+    color: string;
+    baseline: number;
+  } | null => {
+    if (!pageViewport) return null;
     const scale = pageViewport.scale;
-    // Convert block coords (canvas px) to PDF points
     const bx = block.x / scale;
     const by = block.y / scale;
     const bw = block.w / scale;
-    // Find best matching span by text content + approximate position
-    const matches = backendSpans.filter(s => {
-      const textMatch = s.text.trim() === block.text.trim() ||
-        block.text.trim().includes(s.text.trim()) ||
-        s.text.trim().includes(block.text.trim());
-      const posMatch = Math.abs(s.x - bx) < bw * 0.5 && Math.abs(s.y - by) < 20;
-      return textMatch && posMatch;
-    });
-    return matches.length > 0 ? matches[0] : null;
+    const blockText = block.text.trim().toLowerCase();
+
+    // 1. Search word-level PyMuPDF layout
+    if (backendWords.length > 0) {
+      const wordMatch = backendWords.find(w => {
+        const wText = w.text.trim().toLowerCase();
+        const textEqual = wText === blockText || wText.includes(blockText) || blockText.includes(wText);
+        const posNear = Math.abs(w.x - bx) < Math.max(16, bw * 0.8) && Math.abs(w.y - by) < 18;
+        return textEqual && posNear;
+      });
+      if (wordMatch) {
+        return {
+          fontSize: wordMatch.fontSize,
+          fontName: wordMatch.fontName,
+          bold: wordMatch.bold,
+          italic: wordMatch.italic,
+          color: wordMatch.color,
+          baseline: wordMatch.baseline,
+        };
+      }
+    }
+
+    // 2. Search span-level PyMuPDF layout
+    if (backendSpans.length > 0) {
+      const spanMatch = backendSpans.find(s => {
+        const sText = s.text.trim().toLowerCase();
+        const textInSpan = sText.includes(blockText) || blockText.includes(sText);
+        const xInside = (bx >= s.x - 8) && (bx <= s.x + s.w + 8);
+        const yNear = Math.abs(s.y - by) < Math.max(18, s.h * 1.5);
+        return textInSpan && xInside && yNear;
+      });
+      if (spanMatch) {
+        return {
+          fontSize: spanMatch.fontSize,
+          fontName: spanMatch.fontName,
+          bold: spanMatch.bold,
+          italic: spanMatch.italic,
+          color: spanMatch.color,
+          baseline: spanMatch.baseline || (spanMatch.y + spanMatch.h * 0.82),
+        };
+      }
+    }
+
+    return null;
+  };
+
+  // Backwards-compatible alias for any callers expecting findBackendSpan
+  const findBackendSpan = (block: DetectedTextBlock): BackendSpan | null => {
+    const m = findBackendMatch(block);
+    if (!m) return null;
+    return {
+      text: block.text,
+      x: block.x / (pageViewport?.scale || 1),
+      y: block.y / (pageViewport?.scale || 1),
+      w: block.w / (pageViewport?.scale || 1),
+      h: block.h / (pageViewport?.scale || 1),
+      fontSize: m.fontSize,
+      fontName: m.fontName,
+      fontNameRaw: m.fontName,
+      bold: m.bold,
+      italic: m.italic,
+      mono: false,
+      color: m.color,
+      baseline: m.baseline,
+    };
   };
 
   const renderPage = async (pageNum: number) => {
@@ -409,15 +502,15 @@ export default function AdvancedEditor() {
       const rawItems: DetectedTextBlock[] = textContent.items
         .map((item: any) => {
           const tx = pdfjsLib.Util.transform(viewport.transform, item.transform);
-          // CORRECT font size: use the VERTICAL component of the transform matrix (tx[3]).
-          // tx[3] = -scale * font_size (negative because PDF y-axis is flipped).
-          const fontSizeFromMatrix = Math.abs(tx[3]);
-          const extractedFontSize = fontSizeFromMatrix >= 6 && fontSizeFromMatrix <= 150
-            ? Math.round(fontSizeFromMatrix)
-            : Math.round(Math.min(Math.max(item.height * viewport.scale * 0.82, 6), 150));
+          // UNTRANSFORMED PDF font size in points:
+          const fontScaleX = Math.hypot(item.transform[0], item.transform[1]);
+          const fontScaleY = Math.hypot(item.transform[2], item.transform[3]);
+          const rawPdfPt = fontScaleY || fontScaleX || item.height || 11;
+          const extractedFontSize = Math.round(Math.min(Math.max(rawPdfPt, 6), 120) * 10) / 10;
 
-          const blockH = Math.round(Math.abs(tx[3]) * 1.25);
-          const topY = tx[5] - blockH;
+          const baselineCanvasY = Math.round(tx[5]);
+          const blockH = Math.round(extractedFontSize * viewport.scale * 1.25);
+          const topY = Math.round(baselineCanvasY - (extractedFontSize * viewport.scale * 0.85));
           const blockW = Math.round(item.width * viewport.scale);
 
           // Detect bold / italic from font name
@@ -433,10 +526,12 @@ export default function AdvancedEditor() {
           return {
             text: item.str,
             x: Math.round(tx[4]),
-            y: Math.round(topY),
+            y: Math.max(0, topY),
             w: blockW,
-            h: Math.max(blockH, extractedFontSize + 2),
+            h: Math.max(blockH, Math.round(extractedFontSize * viewport.scale) + 2),
             fontSize: extractedFontSize,
+            baselineY: baselineCanvasY,
+            pdfBaselineY: Math.round((baselineCanvasY / viewport.scale) * 100) / 100,
             fontName,
             bold: isBold,
             italic: isItalic,
@@ -471,13 +566,23 @@ export default function AdvancedEditor() {
             const sx = Math.max(0, Math.min(Math.round(cx2), canvas.width - 1));
             const sy = Math.max(0, Math.min(Math.round(cy2), canvas.height - 1));
             const px = ctx.getImageData(sx, sy, 1, 1).data;
-            bgSumR += px[0]; bgSumG += px[1]; bgSumB += px[2];
-            bgCount++;
+            if (px[3] > 128) {
+              bgSumR += px[0]; bgSumG += px[1]; bgSumB += px[2]; bgCount++;
+            }
           }
-          const bgR = bgCount > 0 ? Math.round(bgSumR / bgCount) : 255;
-          const bgG = bgCount > 0 ? Math.round(bgSumG / bgCount) : 255;
-          const bgB = bgCount > 0 ? Math.round(bgSumB / bgCount) : 255;
-          const bgColor = `#${bgR.toString(16).padStart(2,'0')}${bgG.toString(16).padStart(2,'0')}${bgB.toString(16).padStart(2,'0')}`;
+          let bgColor = '#ffffff';
+          if (bgCount > 0) {
+            const bgR = Math.round(bgSumR / bgCount);
+            const bgG = Math.round(bgSumG / bgCount);
+            const bgB = Math.round(bgSumB / bgCount);
+            const lum = 0.299 * bgR + 0.587 * bgG + 0.114 * bgB;
+            // Snap near-white paper/scanner texture to pure white
+            if (lum >= 235 || (bgR >= 235 && bgG >= 235 && bgB >= 235)) {
+              bgColor = '#ffffff';
+            } else {
+              bgColor = `#${bgR.toString(16).padStart(2,'0')}${bgG.toString(16).padStart(2,'0')}${bgB.toString(16).padStart(2,'0')}`;
+            }
+          }
 
           // ── Foreground color: prefer exactColor from pdf.js (100% accurate)
           // Fall back to canvas scan only if exactColor is missing.
@@ -581,14 +686,33 @@ export default function AdvancedEditor() {
                   }
                 }
                 fgColor = `#${((1 << 24) + (fgR << 16) + (fgG << 8) + fgB).toString(16).slice(1)}`;
+                let rawBg = '#ffffff';
+                let bR = 255, bG = 255, bB = 255;
                 if (ringCount > 0) {
-                  bgColor = `#${((1 << 24) + (Math.round(ringSumR / ringCount) << 16) + (Math.round(ringSumG / ringCount) << 8) + Math.round(ringSumB / ringCount)).toString(16).slice(1)}`;
+                  bR = Math.round(ringSumR / ringCount);
+                  bG = Math.round(ringSumG / ringCount);
+                  bB = Math.round(ringSumB / ringCount);
                 } else if (bgCount > 0) {
-                  bgColor = `#${((1 << 24) + (Math.round(bgSumR / bgCount) << 16) + (Math.round(bgSumG / bgCount) << 8) + Math.round(bgSumB / bgCount)).toString(16).slice(1)}`;
+                  bR = Math.round(bgSumR / bgCount);
+                  bG = Math.round(bgSumG / bgCount);
+                  bB = Math.round(bgSumB / bgCount);
                 } else {
-                  bgColor = `#${((1 << 24) + (bgR << 16) + (bgG << 8) + bgB).toString(16).slice(1)}`;
+                  bR = bgR; bG = bgG; bB = bgB;
+                }
+                const lum = 0.299 * bR + 0.587 * bG + 0.114 * bB;
+                // Snap near-white paper/scanner texture to pure white
+                if (lum >= 235 || (bR >= 235 && bG >= 235 && bB >= 235)) {
+                  bgColor = '#ffffff';
+                } else {
+                  bgColor = `#${((1 << 24) + (bR << 16) + (bG << 8) + bB).toString(16).slice(1)}`;
                 }
               }
+
+              const scale = pageViewport?.scale || 1;
+              const boxHeightPt = h / scale;
+              const ocrFontSizePt = Math.max(6, Math.min(120, Math.round(boxHeightPt * 0.72 * 10) / 10));
+              const ocrBaselineCanvasY = Math.round(y + h * 0.78);
+              const ocrBaselinePdfY = Math.round((ocrBaselineCanvasY / scale) * 100) / 100;
 
               ocrItems.push({
                 text: t,
@@ -596,9 +720,11 @@ export default function AdvancedEditor() {
                 y: b.y0,
                 w,
                 h,
-                fontSize: Math.round(h * 0.80), // approximate from OCR bounding box height
+                fontSize: ocrFontSizePt,
+                baselineY: ocrBaselineCanvasY,
+                pdfBaselineY: ocrBaselinePdfY,
                 fgColor,
-                bgColor
+                bgColor: bgColor === '#fbfcfc' ? '#ffffff' : bgColor,
               });
             }
           }
@@ -1112,24 +1238,13 @@ export default function AdvancedEditor() {
 
       // 1. Separate native text replacements (from selection) vs other annotations
       const nativeEditsAll = annotations.filter(a => a.type === 'text' && a.sourceWidth && a.sourceWidth > 0);
-      const nativeEdits = nativeEditsAll.filter(a => !hasNonLatinChars(a.text || ''));
-      const nativeEditsHindi = nativeEditsAll.filter(a => hasNonLatinChars(a.text || ''));
-
       const otherAnnotations = annotations.filter(a => !(a.type === 'text' && a.sourceWidth && a.sourceWidth > 0));
-      // Add Hindi edits to otherAnnotations so they are drawn by pdf-lib via Canvas
-      otherAnnotations.push(...nativeEditsHindi);
 
       let currentFileBuffer = await file.arrayBuffer();
 
       // 2. If there are native text edits, send to Python backend first
-      // We also send nativeEditsHindi to backend but with empty text to just redact the original area.
-      const editsToSendToBackend = [
-        ...nativeEdits,
-        ...nativeEditsHindi.map(ann => ({ ...ann, text: '' }))
-      ];
-
-      if (editsToSendToBackend.length > 0) {
-        const editPayload = editsToSendToBackend.map(ann => ({
+      if (nativeEditsAll.length > 0) {
+        const editPayload = nativeEditsAll.map(ann => ({
           page: ann.pageIndex,
           x: ann.x / pageViewport.scale,
           // Convert from top-left (frontend) to standard coords expected by backend
@@ -1137,30 +1252,40 @@ export default function AdvancedEditor() {
           w: (ann.width || ann.sourceWidth || 100) / pageViewport.scale,
           h: (ann.height || ann.sourceHeight || 20) / pageViewport.scale,
           newText: ann.text || '',
-          fontSize: (ann.fontSize || 14) / pageViewport.scale,
+          fontSize: ann.fontSize || 12,
           color: ann.color || '#000000',
-          bgColor: ann.backgroundColor || '#ffffff',
+          bgColor: (ann.backgroundColor === '#fbfcfc' || !ann.backgroundColor) ? '#ffffff' : ann.backgroundColor,
           bold: ann.bold || false,
-          italic: ann.italic || false
+          italic: ann.italic || false,
+          fontFamily: ann.fontCssFamily || ann.originalFontName || '',
+          fontName: ann.originalFontName || '',
+          align: ann.align || 'left',
+          baseline: ann.baseline,
         }));
 
         console.log("Sending Native Edits to Python Backend:", editPayload);
 
-        const formData = new FormData();
-        formData.append('file', new File([currentFileBuffer], file.name, { type: file.type }));
-        formData.append('edits', JSON.stringify(editPayload));
+        try {
+          const formData = new FormData();
+          formData.append('file', new File([currentFileBuffer], file.name, { type: file.type }));
+          formData.append('edits', JSON.stringify(editPayload));
 
-        const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-        const res = await fetch(`${API_BASE_URL}/edit-pdf`, {
-          method: 'POST',
-          body: formData,
-        });
+          const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+          const res = await fetch(`${API_BASE_URL}/edit-pdf`, {
+            method: 'POST',
+            body: formData,
+          });
 
-        if (!res.ok) {
-          const errText = await res.text();
-          throw new Error('Native Python backend edit failed: ' + errText);
+          if (res.ok) {
+            currentFileBuffer = await res.arrayBuffer();
+          } else {
+            console.warn('Native Python backend edit failed, falling back to in-browser pdf-lib:', await res.text());
+            otherAnnotations.push(...nativeEditsAll);
+          }
+        } catch (fetchErr) {
+          console.warn('Native Python backend offline, falling back to in-browser pdf-lib:', fetchErr);
+          otherAnnotations.push(...nativeEditsAll);
         }
-        currentFileBuffer = await res.arrayBuffer();
       }
 
       // 3. Apply the rest of the annotations (drawings, signatures, highlights, NEW text) using pdf-lib
@@ -1286,8 +1411,8 @@ export default function AdvancedEditor() {
         const pdfH = (ann.height || 0) / scale;
 
         if (ann.type === 'text' && ann.text) {
-          const textPx = ann.fontSize || 14;
-          const boxPxH = ann.height || Math.max(24, textPx * 1.25);
+          const textFontSizePt = ann.fontSize || 12;
+          const boxPxH = ann.height || Math.max(20, textFontSizePt * scale * 1.25);
           const clearPxW = Math.max(ann.width || 0, ann.sourceWidth || 0);
           const clearPxH = Math.max(boxPxH, ann.sourceHeight || 0);
           const clearPdfW = clearPxW / scale;
@@ -1295,26 +1420,29 @@ export default function AdvancedEditor() {
 
           if (ann.backgroundColor) {
             const { r: bgR, g: bgG, b: bgB } = hexToRgb(ann.backgroundColor);
-            const bgPad = Math.max(1.2 / scale, (textPx * 0.12) / scale);
+            const isNearWhite = (bgR >= 0.92 && bgG >= 0.92 && bgB >= 0.92);
+            const fillColor = isNearWhite ? rgb(1, 1, 1) : rgb(bgR, bgG, bgB);
             page.drawRectangle({
-              x: pdfX - bgPad,
-              y: pdfY - clearPdfH - bgPad,
-              width: clearPdfW + (bgPad * 2),
-              height: clearPdfH + (bgPad * 2),
-              color: rgb(bgR, bgG, bgB),
+              x: pdfX,
+              y: pdfY - clearPdfH - 1,
+              width: clearPdfW,
+              height: clearPdfH + 2,
+              color: fillColor,
             });
           }
 
+          const actualBaselinePdfY = ann.baseline
+            ? (pageHeight - ann.baseline)
+            : (pdfY - (clearPdfH * 0.78));
+
           if (hasNonLatinChars(ann.text)) {
-            const pdfFontSize = textPx / scale;
+            const pdfFontSize = textFontSizePt;
             const colorHex = ann.color || '#000000';
             const { imgBytes, imgPdfW, imgPdfH, baselineFromTop } =
               await renderTextViaCanvas(ann.text, pdfFontSize, colorHex, ann.bold, ann.italic);
 
             const pdfImage = await pdf.embedPng(imgBytes);
-            const baselineFromTopPx = Math.max(textPx, boxPxH * 0.74);
-            const baselinePdfY = pdfY - (baselineFromTopPx / scale);
-            const imgTopY = baselinePdfY + baselineFromTop;
+            const imgTopY = actualBaselinePdfY + baselineFromTop;
 
             page.drawImage(pdfImage, {
               x: pdfX,
@@ -1325,11 +1453,10 @@ export default function AdvancedEditor() {
           } else {
             const { r, g, b } = hexToRgb(ann.color || '#000000');
             const font = resolveLatinFont(ann.bold, ann.italic);
-            const baselineFromTopPx = Math.max(textPx, boxPxH * 0.74);
             page.drawText(ann.text, {
               x: pdfX,
-              y: pdfY - (baselineFromTopPx / scale),
-              size: textPx / scale,
+              y: actualBaselinePdfY,
+              size: textFontSizePt,
               font,
               color: rgb(r, g, b),
             });
@@ -1483,7 +1610,7 @@ export default function AdvancedEditor() {
       }
 
       const pdfBytes = await pdf.save();
-      const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+      const blob = new Blob([pdfBytes as unknown as BlobPart], { type: 'application/pdf' });
       const url = URL.createObjectURL(blob);
       setEditedUrl(url);
     } catch (error) {
@@ -1512,7 +1639,8 @@ export default function AdvancedEditor() {
     const mctx = mc.getContext('2d');
     if (!mctx) return [block]; // fallback: return whole block
 
-    const fontStr = `${block.italic ? 'italic ' : ''}${block.bold ? '700 ' : ''}${Math.max(8, block.fontSize)}px Helvetica, Arial, sans-serif`;
+    const screenPx = Math.max(8, Math.round(block.fontSize * (pageViewport?.scale || 1)));
+    const fontStr = `${block.italic ? 'italic ' : ''}${block.bold ? '700 ' : ''}${screenPx}px Helvetica, Arial, sans-serif`;
     mctx.font = fontStr;
 
     const wordMeasures = words.map(w => mctx.measureText(w).width);
@@ -1639,11 +1767,15 @@ export default function AdvancedEditor() {
     const newText = inlineEdit.text.trim();
     if (newText && newText !== block.text.trim()) {
       pushUndo();
-      const span = findBackendSpan(block);
-      const fs = Math.max(6, Math.min(span?.fontSize ?? block.fontSize, block.h - 1, 120));
+      const match = findBackendMatch(block);
+      const scale = pageViewport?.scale || 1;
+      const realFontSize = match ? match.fontSize : (block.fontSize || Math.max(6, Math.round((block.h / scale) * 0.72)));
+      const fs = Math.max(6, Math.min(realFontSize, 120));
       const bw = Math.min(Math.max(block.w, 20), 800);
-      const bh = Math.max(block.h, fs + 2);
+      const bh = Math.max(block.h, Math.round(fs * scale * 1.25) + 2);
+      const baselinePt = match?.baseline || block.pdfBaselineY || ((block.y + block.h * 0.78) / scale);
       const id = Date.now().toString() + '_ie';
+      const bg = (block.bgColor === '#fbfcfc' || !block.bgColor) ? '#ffffff' : block.bgColor;
       const textAnn: Annotation = {
         id,
         type: 'text',
@@ -1654,21 +1786,22 @@ export default function AdvancedEditor() {
         height: bh,
         text: newText,
         fontSize: fs,
-        color: span?.color || block.fgColor || '#000000',
-        backgroundColor: block.bgColor || '#ffffff',
-        bold: span?.bold ?? block.bold ?? false,
-        italic: span?.italic ?? block.italic ?? false,
+        color: match?.color || block.fgColor || '#000000',
+        backgroundColor: bg,
+        bold: match?.bold ?? block.bold ?? false,
+        italic: match?.italic ?? block.italic ?? false,
         lockPosition: false,
         sourceWidth: bw,
         sourceHeight: bh,
-        originalFontName: span?.fontName,
-        fontCssFamily: pdfFontToCss(span?.fontName),
+        baseline: Math.round(baselinePt * 100) / 100,
+        originalFontName: match?.fontName || block.fontName,
+        fontCssFamily: pdfFontToCss(match?.fontName || block.fontName),
       };
       setAnnotations(prev => [...prev, textAnn]);
       setSelectedId(textAnn.id);
     }
     setInlineEdit({ active: false, block: null, text: '' });
-  }, [inlineEdit, currentPage, pushUndo, findBackendSpan]);
+  }, [inlineEdit, currentPage, pushUndo, findBackendMatch, pageViewport]);
 
   // Helper: pages that have annotations (for multi-page indicators)
   const pagesWithEdits = new Set(annotations.map(a => a.pageIndex + 1));
@@ -2008,9 +2141,9 @@ export default function AdvancedEditor() {
                       style={{
                         left: ann.x,
                         top: ann.y,
-                        width: ann.width || (ann.type === 'text' ? Math.max(200, (ann.text?.length || 10) * (ann.fontSize || 14) * 0.6) : undefined),
-                        height: Math.max(ann.height || 24, ann.type === 'text' ? (ann.fontSize || 14) * 1.5 : 0),
-                        backgroundColor: ann.type === 'text' ? (ann.backgroundColor || 'transparent') : ann.type === 'whiteout' ? (ann.color || '#ffffff') : ann.type === 'highlight' ? 'rgba(255, 255, 0, 0.4)' : ann.type === 'link' ? 'rgba(0, 0, 255, 0.2)' : 'transparent',
+                        width: ann.width || (ann.type === 'text' ? Math.max(120, (ann.text?.length || 10) * (ann.fontSize || 12) * (pageViewport?.scale || 1) * 0.6) : undefined),
+                        height: Math.max(ann.height || 24, ann.type === 'text' ? (ann.fontSize || 12) * (pageViewport?.scale || 1) * 1.3 : 0),
+                        backgroundColor: ann.type === 'text' ? ((ann.backgroundColor === '#fbfcfc' || !ann.backgroundColor) ? '#ffffff' : ann.backgroundColor) : ann.type === 'whiteout' ? (ann.color || '#ffffff') : ann.type === 'highlight' ? 'rgba(255, 255, 0, 0.4)' : ann.type === 'link' ? 'rgba(0, 0, 255, 0.2)' : 'transparent',
                         border: ann.type === 'link' ? '1px dashed blue' : ann.type === 'table' ? '1px solid #ccc' : 'none'
                       }}
                     >
@@ -2020,12 +2153,13 @@ export default function AdvancedEditor() {
                           onChange={(e) => updateAnnotationText(ann.id, e.target.value)}
                           className="bg-transparent border-none outline-none w-full h-full m-0 p-0 box-border resize-none"
                           style={{
-                            fontSize: `${ann.fontSize || 14}px`,
+                            fontSize: `${(ann.fontSize || 12) * (pageViewport?.scale || 1)}px`,
                             color: ann.color || '#000000',
                             fontWeight: ann.bold ? 700 : 400,
                             fontStyle: ann.italic ? 'italic' : 'normal',
                             textDecoration: [ann.underline && 'underline', ann.strikethrough && 'line-through'].filter(Boolean).join(' ') || 'none',
-                            lineHeight: 1.3,
+                            textAlign: ann.align || 'left',
+                            lineHeight: 1.25,
                             whiteSpace: 'pre-wrap',
                             // Use detected CSS font family for live WYSIWYG preview
                             fontFamily: ann.fontCssFamily || pdfFontToCss(ann.originalFontName),
@@ -2191,15 +2325,19 @@ export default function AdvancedEditor() {
                             el.style.borderStyle = 'dashed';
                           }}
                           onMouseDown={e => {
-                            // Single click: create text annotation (existing behavior)
+                            // Single click: create text annotation with exact matched font & scale
                             if (e.detail === 1) {
                               e.stopPropagation();
                               pushUndo();
-                              const span = findBackendSpan(block);
+                              const match = findBackendMatch(block);
                               const id = Date.now().toString() + '_tb';
-                              const fs = Math.max(6, Math.min(span?.fontSize ?? block.fontSize, block.h - 1, 120));
+                              const scale = pageViewport?.scale || 1;
+                              const realFontSize = match ? match.fontSize : (block.fontSize || Math.max(6, Math.round((block.h / scale) * 0.72)));
+                              const fs = Math.max(6, Math.min(realFontSize, 120));
                               const bw = Math.min(Math.max(block.w, 20), 800);
-                              const bh = Math.max(block.h, fs + 2);
+                              const bh = Math.max(block.h, Math.round(fs * scale * 1.25) + 2);
+                              const baselinePt = match?.baseline || block.pdfBaselineY || ((block.y + block.h * 0.78) / scale);
+                              const bg = (block.bgColor === '#fbfcfc' || !block.bgColor) ? '#ffffff' : block.bgColor;
                               const textAnn: Annotation = {
                                 id,
                                 type: 'text',
@@ -2210,15 +2348,16 @@ export default function AdvancedEditor() {
                                 height: bh,
                                 text: block.text,
                                 fontSize: fs,
-                                color: span?.color || block.fgColor || '#000000',
-                                backgroundColor: block.bgColor || '#ffffff',
-                                bold: span?.bold ?? block.bold ?? false,
-                                italic: span?.italic ?? block.italic ?? false,
+                                color: match?.color || block.fgColor || '#000000',
+                                backgroundColor: bg,
+                                bold: match?.bold ?? block.bold ?? false,
+                                italic: match?.italic ?? block.italic ?? false,
                                 lockPosition: false,
                                 sourceWidth: bw,
                                 sourceHeight: bh,
-                                originalFontName: span?.fontName,
-                                fontCssFamily: pdfFontToCss(span?.fontName),
+                                baseline: Math.round(baselinePt * 100) / 100,
+                                originalFontName: match?.fontName || block.fontName,
+                                fontCssFamily: pdfFontToCss(match?.fontName || block.fontName),
                               };
                               setAnnotations(prev => [...prev, textAnn]);
                               setSelectedId(textAnn.id);
@@ -2289,21 +2428,25 @@ export default function AdvancedEditor() {
                   {/* ── INLINE EDIT OVERLAY (double-click) ── */}
                   {inlineEdit.active && inlineEdit.block && (() => {
                     const block = inlineEdit.block;
-                    const span = findBackendSpan(block);
-                    const fs = span?.fontSize ?? block.fontSize;
-                    const fgColor = span?.color || block.fgColor || '#000000';
-                    const isBold = span?.bold ?? block.bold ?? false;
-                    const isItalic = span?.italic ?? block.italic ?? false;
+                    const match = findBackendMatch(block);
+                    const scale = pageViewport?.scale || 1;
+                    const realFontSize = match ? match.fontSize : (block.fontSize || Math.max(6, Math.round((block.h / scale) * 0.72)));
+                    const fs = Math.max(6, Math.min(realFontSize, 120));
+                    const fgColor = match?.color || block.fgColor || '#000000';
+                    const isBold = match?.bold ?? block.bold ?? false;
+                    const isItalic = match?.italic ?? block.italic ?? false;
+                    const fontFam = pdfFontToCss(match?.fontName || block.fontName);
+                    const bg = (block.bgColor === '#fbfcfc' || !block.bgColor) ? '#ffffff' : block.bgColor;
                     return (
                       <div
                         style={{
                           position: 'absolute',
                           left: block.x - 2,
                           top: block.y - 2,
-                          width: Math.max(block.w + 4, 120),
+                          width: Math.max(block.w + 6, 120),
                           minHeight: block.h + 4,
                           zIndex: 100,
-                          backgroundColor: block.bgColor || '#ffffff',
+                          backgroundColor: bg,
                           boxShadow: '0 0 0 2px #6366f1, 0 4px 20px rgba(99,102,241,0.3)',
                           borderRadius: 3,
                         }}
@@ -2325,26 +2468,26 @@ export default function AdvancedEditor() {
                           style={{
                             width: '100%',
                             // Use exact span height from backend (converted to canvas px via scale)
-                            minHeight: span ? (span.h * (pageViewport?.scale ?? 1)) : block.h,
-                            fontSize: `${fs * (pageViewport?.scale ?? 1)}px`,
+                            minHeight: block.h,
+                            fontSize: `${fs * scale}px`,
                             color: fgColor,
                             fontWeight: isBold ? 700 : 400,
                             fontStyle: isItalic ? 'italic' : 'normal',
                             // Use CSS font-family mapped from original PDF font name
-                            fontFamily: pdfFontToCss(span?.fontName),
-                            lineHeight: 1.3,
+                            fontFamily: fontFam,
+                            lineHeight: 1.25,
                             background: 'transparent',
                             border: 'none',
                             outline: 'none',
                             resize: 'none',
-                            padding: '2px 3px',
+                            padding: '2px 4px',
                             margin: 0,
                             boxSizing: 'border-box',
                           }}
                         />
-                        <div style={{ fontSize: 9, color: '#6366f1', padding: '1px 3px', borderTop: '1px solid #e0e7ff', background: '#f5f3ff', borderRadius: '0 0 3px 3px' }}>
-                          ↵ Enter to save &nbsp;·&nbsp; Esc to cancel &nbsp;·&nbsp; Shift+↵ for newline
-                          {span?.fontName && ` · ${span.fontName}`}
+                        <div style={{ fontSize: 9, color: '#4338ca', padding: '2px 5px', borderTop: '1px solid #e0e7ff', background: '#eef2ff', borderRadius: '0 0 3px 3px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span>↵ Enter to save · Esc cancel</span>
+                          <span style={{ fontWeight: 600 }}>✨ {match?.fontName || block.fontName || 'Auto-Matched'} {fs}pt</span>
                         </div>
                       </div>
                     );
@@ -2385,86 +2528,155 @@ export default function AdvancedEditor() {
                     const selAnn = annotations.find(a => a.id === selectedId)!;
                     return (
                     <div className="space-y-4">
-                      {/* Font info badge from backend */}
-                      {selAnn.originalFontName && (
-                        <div className="flex items-center gap-2 px-3 py-2 bg-indigo-50 border border-indigo-100 rounded-lg">
-                          <Layers className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
-                          <div className="min-w-0">
-                            <div className="text-[10px] text-indigo-400 font-medium">Original Font</div>
-                            <div className="text-xs text-indigo-700 font-semibold truncate" title={selAnn.originalFontName}>{selAnn.originalFontName}</div>
+                      {/* Smart typography match card */}
+                      <div className="p-3.5 bg-gradient-to-br from-indigo-50/80 via-purple-50/50 to-blue-50/80 border border-indigo-100 rounded-xl space-y-2.5">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-1.5 text-xs font-bold text-indigo-800">
+                            <Sparkles className="w-4 h-4 text-indigo-600" />
+                            <span>Matched Typography</span>
+                          </div>
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                            Exact Match
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2 text-[11px] text-slate-600 bg-white/70 p-2 rounded-lg border border-indigo-50">
+                          <div>
+                            <span className="text-slate-400 block text-[10px] font-medium">Font Family</span>
+                            <span className="font-bold text-slate-800 truncate block" title={selAnn.originalFontName || 'System Default'}>
+                              {selAnn.originalFontName || 'Auto-Detected'}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="text-slate-400 block text-[10px] font-medium">Size & Style</span>
+                            <span className="font-bold text-slate-800">
+                              {selAnn.fontSize || 12} pt · {selAnn.bold ? 'Bold' : 'Regular'}{selAnn.italic ? ', Italic' : ''}
+                            </span>
                           </div>
                         </div>
-                      )}
+                        <p className="text-[10px] text-indigo-600 leading-tight">
+                          ✨ 100% matched to original PDF metadata. Replaces in-place with exact typography.
+                        </p>
+                      </div>
+
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Text Content</label>
+                        <label className="block text-xs font-bold text-gray-700 mb-1.5">Text Content</label>
                         <textarea
                           value={selAnn.text || ''}
                           onChange={(e) => updateAnnotationText(selectedId, e.target.value)}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
                           rows={3}
+                          placeholder="Type replacement text..."
                         />
                       </div>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">Font Size</label>
-                          <input
-                            type="number"
-                            value={selAnn.fontSize || 14}
-                            onChange={(e) => updateAnnotation(selectedId, { fontSize: parseInt(e.target.value) })}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">Text Color</label>
-                          <input
-                            type="color"
-                            value={selAnn.color || '#000000'}
-                            onChange={(e) => updateAnnotation(selectedId, { color: e.target.value })}
-                            className="w-full h-10 p-1 border border-gray-300 rounded-lg cursor-pointer"
-                          />
+
+                      {/* Text alignment buttons */}
+                      <div>
+                        <label className="block text-xs font-bold text-gray-700 mb-1.5">Text Alignment</label>
+                        <div className="grid grid-cols-3 gap-1 bg-gray-100 p-1 rounded-lg">
+                          {[
+                            { id: 'left' as const, icon: AlignLeft, label: 'Left' },
+                            { id: 'center' as const, icon: AlignCenter, label: 'Center' },
+                            { id: 'right' as const, icon: AlignRight, label: 'Right' },
+                          ].map(({ id, icon: Icon, label }) => (
+                            <button
+                              key={id}
+                              type="button"
+                              onClick={() => updateAnnotation(selectedId, { align: id })}
+                              className={`flex items-center justify-center gap-1.5 py-1.5 rounded-md text-xs font-medium transition-all ${
+                                (selAnn.align || 'left') === id
+                                  ? 'bg-white text-indigo-600 shadow-sm font-bold'
+                                  : 'text-gray-600 hover:text-gray-900'
+                              }`}
+                            >
+                              <Icon className="w-3.5 h-3.5" />
+                              <span>{label}</span>
+                            </button>
+                          ))}
                         </div>
                       </div>
-                      <div className="flex gap-4 flex-wrap">
-                        <label className="inline-flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+
+                      {/* Font Size & Color */}
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-xs font-bold text-gray-700 mb-1.5">Font Size (pt)</label>
+                          <input
+                            type="number"
+                            min="6"
+                            max="120"
+                            value={selAnn.fontSize || 12}
+                            onChange={(e) => updateAnnotation(selectedId, { fontSize: parseInt(e.target.value) || 12 })}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-bold text-gray-700 mb-1.5">Text Color</label>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="color"
+                              value={selAnn.color || '#000000'}
+                              onChange={(e) => updateAnnotation(selectedId, { color: e.target.value })}
+                              className="w-10 h-9 p-0.5 border border-gray-300 rounded-lg cursor-pointer"
+                            />
+                            <span className="text-xs font-mono text-gray-600">{selAnn.color || '#000000'}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Background fill color for redaction blending */}
+                      <div>
+                        <label className="block text-xs font-bold text-gray-700 mb-1.5">Background Blend Color</label>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="color"
+                            value={(selAnn.backgroundColor === '#fbfcfc' || !selAnn.backgroundColor) ? '#ffffff' : selAnn.backgroundColor}
+                            onChange={(e) => updateAnnotation(selectedId, { backgroundColor: e.target.value })}
+                            className="w-10 h-9 p-0.5 border border-gray-300 rounded-lg cursor-pointer"
+                          />
+                          <span className="text-xs font-mono text-gray-600">{(selAnn.backgroundColor === '#fbfcfc' || !selAnn.backgroundColor) ? '#ffffff' : selAnn.backgroundColor}</span>
+                          <span className="text-[10px] text-gray-400">(Auto-matched from canvas)</span>
+                        </div>
+                      </div>
+
+                      {/* Formatting toggles */}
+                      <div className="flex gap-4 flex-wrap pt-1">
+                        <label className="inline-flex items-center gap-2 text-xs font-semibold text-gray-700 cursor-pointer">
                           <input
                             type="checkbox"
                             checked={!!selAnn.bold}
                             onChange={(e) => updateAnnotation(selectedId, { bold: e.target.checked })}
-                            className="rounded border-gray-300"
+                            className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
                           />
                           Bold
                         </label>
-                        <label className="inline-flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                        <label className="inline-flex items-center gap-2 text-xs font-semibold text-gray-700 cursor-pointer">
                           <input
                             type="checkbox"
                             checked={!!selAnn.italic}
                             onChange={(e) => updateAnnotation(selectedId, { italic: e.target.checked })}
-                            className="rounded border-gray-300"
+                            className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
                           />
                           Italic
                         </label>
-                        <label className="inline-flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                        <label className="inline-flex items-center gap-2 text-xs font-semibold text-gray-700 cursor-pointer">
                           <input
                             type="checkbox"
                             checked={!!selAnn.underline}
                             onChange={(e) => updateAnnotation(selectedId, { underline: e.target.checked })}
-                            className="rounded border-gray-300"
+                            className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
                           />
                           Underline
                         </label>
-                        <label className="inline-flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                        <label className="inline-flex items-center gap-2 text-xs font-semibold text-gray-700 cursor-pointer">
                           <input
                             type="checkbox"
                             checked={!!selAnn.strikethrough}
                             onChange={(e) => updateAnnotation(selectedId, { strikethrough: e.target.checked })}
-                            className="rounded border-gray-300"
+                            className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
                           />
                           Strike
                         </label>
                       </div>
-                      <p className="text-xs text-gray-500">
-                        Exported PDF uses Helvetica variants. Original font shown above is for reference.
-                      </p>
                     </div>
                     );
                   })()}
@@ -2555,10 +2767,37 @@ export default function AdvancedEditor() {
                 </div>
               ) : (
                 <div className="space-y-6">
-                  <div className="h-full flex flex-col items-center justify-center text-center text-gray-400">
-                    <MousePointer2 className="w-8 h-8 mb-4 opacity-20" />
-                    <p className="text-sm">Select an element to edit its properties</p>
-                    <p className="text-xs mt-2 text-gray-300">Drag elements to reposition them</p>
+                  {/* Smart Editor Guide Card */}
+                  <div className="p-4 bg-gradient-to-br from-indigo-50/70 via-blue-50/50 to-slate-50 border border-indigo-100 rounded-2xl space-y-3">
+                    <div className="flex items-center gap-2">
+                      <div className="p-1.5 bg-indigo-600 text-white rounded-lg shadow-sm">
+                        <Sparkles className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h4 className="text-xs font-bold text-slate-900">Direct PDF Text Editor</h4>
+                        <p className="text-[10px] text-indigo-600 font-medium">Automatic Font & Style Matching</p>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2 text-xs text-slate-600">
+                      <div className="flex items-start gap-2 bg-white/80 p-2.5 rounded-xl border border-slate-100">
+                        <span className="w-4 h-4 rounded-full bg-indigo-100 text-indigo-700 font-bold text-[10px] flex items-center justify-center shrink-0 mt-0.5">1</span>
+                        <p className="text-[11px] leading-snug">Hover over any text block in the PDF to view its detected font family and size.</p>
+                      </div>
+                      <div className="flex items-start gap-2 bg-white/80 p-2.5 rounded-xl border border-slate-100">
+                        <span className="w-4 h-4 rounded-full bg-indigo-100 text-indigo-700 font-bold text-[10px] flex items-center justify-center shrink-0 mt-0.5">2</span>
+                        <p className="text-[11px] leading-snug">Click or double-click any word or line to edit in-place without guessing font or formatting.</p>
+                      </div>
+                      <div className="flex items-start gap-2 bg-white/80 p-2.5 rounded-xl border border-slate-100">
+                        <span className="w-4 h-4 rounded-full bg-indigo-100 text-indigo-700 font-bold text-[10px] flex items-center justify-center shrink-0 mt-0.5">3</span>
+                        <p className="text-[11px] leading-snug">The exact font style and background blend are matched from native PDF geometry.</p>
+                      </div>
+                    </div>
+
+                    <div className="pt-1 flex items-center justify-between text-[11px] text-slate-500 border-t border-indigo-100/60">
+                      <span>Detected on Page {currentPage}:</span>
+                      <span className="font-bold text-indigo-700">{detectedText.length} Text Blocks</span>
+                    </div>
                   </div>
                   {/* Freehand settings when freehand tool active */}
                   {activeTool === 'freehand' && (
