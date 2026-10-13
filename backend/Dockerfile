@@ -3,7 +3,8 @@ FROM python:3.12-slim
 # ── Security: set environment ──────────────────────────────────
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1
+    PIP_NO_CACHE_DIR=1 \
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 # ── System dependencies ──────────────────────────────────────────
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -30,7 +31,9 @@ RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
 # ── Playwright Chromium (Webpage to PDF) ─────────────────────────
-RUN playwright install --with-deps chromium
+RUN mkdir -p /ms-playwright \
+    && playwright install --with-deps chromium \
+    && chmod -R 777 /ms-playwright
 
 # ── App code ─────────────────────────────────────────────────────
 COPY . .

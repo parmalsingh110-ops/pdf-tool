@@ -23,6 +23,7 @@ source venv/bin/activate
 echo "Installing dependencies (this may take a while)..."
 pip install --upgrade pip
 pip install -r requirements.txt
+playwright install chromium
 
 # Instructions for system dependencies
 echo ""

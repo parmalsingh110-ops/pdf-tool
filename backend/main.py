@@ -3464,10 +3464,31 @@ async def webpage_to_pdf(
 
         async with WEBPAGE_TO_PDF_SEMAPHORE:
             async with async_playwright() as p:
-                browser = await p.chromium.launch(
-                    headless=True,
-                    args=["--no-sandbox", "--disable-dev-shm-usage"]
-                )
+                try:
+                    browser = await p.chromium.launch(
+                        headless=True,
+                        args=["--no-sandbox", "--disable-dev-shm-usage"]
+                    )
+                except Exception as launch_err:
+                    err_msg = str(launch_err)
+                    if "Executable doesn't exist" in err_msg or "playwright install" in err_msg:
+                        logger.info("[WebpageToPdf] Chromium binary missing on server — downloading automatically...")
+                        import subprocess
+                        import sys
+                        from fastapi.concurrency import run_in_threadpool
+                        await run_in_threadpool(
+                            subprocess.run,
+                            [sys.executable, "-m", "playwright", "install", "chromium"],
+                            check=True,
+                            timeout=180
+                        )
+                        browser = await p.chromium.launch(
+                            headless=True,
+                            args=["--no-sandbox", "--disable-dev-shm-usage"]
+                        )
+                    else:
+                        raise launch_err
+
                 page = await browser.new_page(
                     user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
                 )
