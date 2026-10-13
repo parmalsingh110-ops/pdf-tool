@@ -1,4 +1,4 @@
-﻿import { useState } from "react";
+import { useState } from "react";
 import { Globe, Download, AlertTriangle, Loader2, Settings, CheckCircle } from "lucide-react";
 import { usePageSEO } from "../lib/usePageSEO";
 import { useSEO } from '../hooks/useSEO';
@@ -60,6 +60,9 @@ export default function WebpageToPdf() {
                   <input type="url" value={url} onChange={e => setUrl(e.target.value)} onKeyDown={e => e.key === "Enter" && convert()}
                     placeholder="https://example.com" className="flex-1 py-3 pr-3 bg-transparent text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-slate-500 outline-none text-sm" />
                 </div>
+                <p className="mt-1.5 text-xs text-gray-500 dark:text-slate-400">
+                  Enter a public webpage URL. Private pages requiring login (e.g. Google Search Console, Gmail, private dashboards) cannot be rendered by the server.
+                </p>
               </div>
               <button onClick={() => setShowSettings(!showSettings)} className="flex items-center gap-2 text-sm text-gray-500 dark:text-slate-400 hover:text-gray-900 dark:hover:text-white transition-colors">
                 <Settings className="w-4 h-4" />{showSettings ? "Hide" : "Show"} options

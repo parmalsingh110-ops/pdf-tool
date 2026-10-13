@@ -3468,8 +3468,21 @@ async def webpage_to_pdf(
                     headless=True,
                     args=["--no-sandbox", "--disable-dev-shm-usage"]
                 )
-                page = await browser.new_page()
-                await page.goto(url, wait_until="networkidle", timeout=30000)
+                page = await browser.new_page(
+                    user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+                )
+                try:
+                    await page.goto(url, wait_until="load", timeout=20000)
+                except Exception as goto_err:
+                    logger.warning(f"[WebpageToPdf] Initial load wait timed out ({goto_err}) — continuing with domcontentloaded state")
+                    try:
+                        await page.goto(url, wait_until="domcontentloaded", timeout=10000)
+                    except Exception:
+                        pass  # If page is already partially loaded, proceed to render
+
+                import asyncio
+                await asyncio.sleep(1.0)
+
                 await page.pdf(
                     path=str(out),
                     format=paper_format,
@@ -3498,7 +3511,11 @@ async def webpage_to_pdf(
         raise
     except Exception as e:
         cleanup(out)
-        raise safe_error(e, "webpage-to-pdf")
+        logger.error(f"[ERROR] endpoint=webpage-to-pdf type={type(e).__name__} msg={str(e)[:500]}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to convert webpage to PDF. Please ensure the URL is publicly accessible and does not require private login authentication (e.g. Google Search Console, private dashboards)."
+        )
 
 
 # ─── 12. PDF Font Replacer ─────────────────────────────────────
