@@ -3,6 +3,7 @@ import { Upload, Download, Printer, Layers, ChevronRight } from 'lucide-react';
 import { PDFDocument } from 'pdf-lib';
 import { Link } from 'react-router-dom';
 import { usePageSEO } from '../lib/usePageSEO';
+import { useSEO } from '../hooks/useSEO';
 
 type FilterMode = 'magic' | 'bw' | 'grayscale' | 'original';
 type Layout = 'vertical' | 'horizontal';
@@ -135,6 +136,11 @@ async function processImage(url: string, mode: FilterMode): Promise<string> {
 }
 
 export default function IdCardJoiner() {
+  useSEO(
+    'ID Card Front & Back Joiner Online — Aadhaar, PAN & Voter ID Single Page',
+    'Join front and back of Aadhaar, PAN card, Driving License or Voter ID onto a single A4 PDF or JPG sheet. Magic color filter whitens paper and enhances ink text.'
+  );
+
   usePageSEO(
     'ID Card Front & Back Joiner — Aadhaar, PAN, Voter ID Print',
     'Upload front and back of Aadhaar card, PAN card or any ID card. Apply Magic Color filter to whiten background and sharpen text. Download print-ready A4 PDF or JPG for government portals. Free, browser-based, no signup.',

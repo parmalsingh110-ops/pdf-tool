@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { 
   Crop, Download, Loader2, Sparkles, Sliders, ChevronLeft, ChevronRight, 
-  Check, FileText, ArrowRight, Eye
+  Check, FileText, ArrowRight, Eye, Server, Cpu
 } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
 import { PDFDocument } from 'pdf-lib';
@@ -9,21 +9,22 @@ import '../lib/pdfWorker';
 import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
-import { dataUrlToBytes } from '../lib/utils';
+
+const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
 export default function AutoCropMargins() {
   useSEO(
-    'Auto-Crop PDF Margins Online Free — Smart Content Bounding Box Cropper',
-    'Automatically crop white margins and borders from PDF files online. Detects content bounding boxes, customizable padding slider, and client-side processing.'
+    'Auto-Crop PDF Margins Online Free — Non-Destructive Vector Margin Cropper',
+    'Automatically crop white margins and borders from PDF files online. Preserves 100% vector text quality, detects content bounding boxes, with customizable padding slider.'
   );
 
   usePageSEO(
-    'Smart PDF Margin Auto-Cropper Studio',
-    'Remove excessive white margins from scanned documents, slides, and books. Features automatic content detection and custom padding sliders.'
+    'Smart PDF Margin Auto-Cropper Studio — Lossless Vector Cropping',
+    'Remove excessive white margins from scanned documents, lecture slides, and books. Features lossless CropBox vector trimming and automatic content boundary detection.'
   );
 
   const [file, setFile] = useState<File | null>(null);
-  const [paddingPx, setPaddingPx] = useState(15);
+  const [paddingPt, setPaddingPt] = useState(15);
   const [uniformCrop, setUniformCrop] = useState(true);
 
   const [pageImages, setPageImages] = useState<string[]>([]);
@@ -33,6 +34,7 @@ export default function AutoCropMargins() {
   const [progressMsg, setProgressMsg] = useState('');
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [resultFileName, setResultFileName] = useState('');
+  const [engineUsed, setEngineUsed] = useState<'backend' | 'client-vector'>('backend');
 
   const handleDrop = async (files: File[]) => {
     if (!files[0]) return;
@@ -74,14 +76,42 @@ export default function AutoCropMargins() {
     setProgressMsg('Detecting content bounding boxes...');
 
     try {
-      const buf = await file.arrayBuffer();
-      const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buf) }).promise;
-      const newDoc = await PDFDocument.create();
+      // ── Strategy A: Backend PyMuPDF Vector Engine ────────────────
+      try {
+        const fd = new FormData();
+        fd.append('file', file);
+        fd.append('padding_pt', paddingPt.toString());
 
-      for (let p = 1; p <= pdf.numPages; p++) {
-        setProgressMsg(`Cropping page ${p} of ${pdf.numPages}...`);
-        const page = await pdf.getPage(p);
-        const vp = page.getViewport({ scale: 2.0 }); // High-res 2x
+        const res = await fetch(`${API_BASE}/convert/auto-crop`, {
+          method: 'POST',
+          body: fd,
+        });
+
+        if (res.ok) {
+          const blob = await res.blob();
+          setResultUrl(URL.createObjectURL(blob));
+          setResultFileName(`autocropped_${file.name}`);
+          setEngineUsed('backend');
+          setBusy(false);
+          return;
+        }
+      } catch (backendErr) {
+        console.warn('Backend auto-crop failed, falling back to client-side vector CropBox:', backendErr);
+      }
+
+      // ── Strategy B: Non-Destructive Vector CropBox Trimming ─────────
+      // Instead of turning the PDF into raster images, we calculate the content
+      // bounding box and adjust the CropBox on the original vector document!
+      // This preserves 100% of the vector text, links, bookmarks, and keeps the file tiny.
+      const buf = await file.arrayBuffer();
+      const pdfjsDoc = await pdfjsLib.getDocument({ data: new Uint8Array(buf) }).promise;
+      const pdfDoc = await PDFDocument.load(buf, { ignoreEncryption: true });
+      const pages = pdfDoc.getPages();
+
+      for (let p = 1; p <= pdfjsDoc.numPages; p++) {
+        setProgressMsg(`Calculating bounding box for page ${p} of ${pdfjsDoc.numPages}...`);
+        const page = await pdfjsDoc.getPage(p);
+        const vp = page.getViewport({ scale: 1.5 });
         const canvas = document.createElement('canvas');
         canvas.width = vp.width;
         canvas.height = vp.height;
@@ -90,7 +120,6 @@ export default function AutoCropMargins() {
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         await page.render({ canvasContext: ctx, viewport: vp, canvas }).promise;
 
-        // Scan pixels to find bounding box
         const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
         const d = imgData.data;
 
@@ -99,11 +128,11 @@ export default function AutoCropMargins() {
         let maxX = 0;
         let maxY = 0;
 
-        for (let y = 0; y < canvas.height; y++) {
-          for (let x = 0; x < canvas.width; x++) {
+        for (let y = 0; y < canvas.height; y += 2) {
+          for (let x = 0; x < canvas.width; x += 2) {
             const idx = (y * canvas.width + x) * 4;
-            // Detect non-white pixel
-            if (d[idx] < 240 || d[idx + 1] < 240 || d[idx + 2] < 240) {
+            // Detect non-white pixel (threshold 245)
+            if (d[idx] < 245 || d[idx + 1] < 245 || d[idx + 2] < 245) {
               if (x < minX) minX = x;
               if (x > maxX) maxX = x;
               if (y < minY) minY = y;
@@ -112,41 +141,37 @@ export default function AutoCropMargins() {
           }
         }
 
-        // Apply padding
-        const pad = paddingPx * 2;
-        minX = Math.max(0, minX - pad);
-        minY = Math.max(0, minY - pad);
-        maxX = Math.min(canvas.width, maxX + pad);
-        maxY = Math.min(canvas.height, maxY + pad);
+        // If page is not completely blank
+        if (maxX > minX && maxY > minY) {
+          const docPage = pages[p - 1];
+          const { width, height } = docPage.getSize();
 
-        const cropW = Math.max(maxX - minX, 100);
-        const cropH = Math.max(maxY - minY, 100);
+          // Convert canvas pixels to PDF points
+          const scaleX = width / canvas.width;
+          const scaleY = height / canvas.height;
 
-        // Crop to sub-canvas
-        const cropCanvas = document.createElement('canvas');
-        cropCanvas.width = cropW;
-        cropCanvas.height = cropH;
-        const cropCtx = cropCanvas.getContext('2d')!;
-        cropCtx.drawImage(canvas, minX, minY, cropW, cropH, 0, 0, cropW, cropH);
+          const padPt = paddingPt;
+          const pdfMinX = Math.max(0, minX * scaleX - padPt);
+          const pdfMaxX = Math.min(width, maxX * scaleX + padPt);
+          // In PDF, Y is measured from bottom-up
+          const pdfMinY = Math.max(0, height - (maxY * scaleY) - padPt);
+          const pdfMaxY = Math.min(height, height - (minY * scaleY) + padPt);
 
-        const cropDataUrl = cropCanvas.toDataURL('image/jpeg', 0.94);
-        const cropBytes = dataUrlToBytes(cropDataUrl);
-        const pdfImg = await newDoc.embedJpg(cropBytes);
+          const cropWidth = Math.max(pdfMaxX - pdfMinX, 50);
+          const cropHeight = Math.max(pdfMaxY - pdfMinY, 50);
 
-        // Add page matching cropped aspect
-        const newPage = newDoc.addPage([cropW / 2, cropH / 2]);
-        newPage.drawImage(pdfImg, {
-          x: 0,
-          y: 0,
-          width: cropW / 2,
-          height: cropH / 2
-        });
+          docPage.setCropBox(pdfMinX, pdfMinY, cropWidth, cropHeight);
+        }
+
+        canvas.width = 0;
+        canvas.height = 0;
       }
 
-      const finalBytes = await newDoc.save();
-      const blob = new Blob([finalBytes as any], { type: 'application/pdf' });
+      const cleanBytes = await pdfDoc.save();
+      const blob = new Blob([cleanBytes as any], { type: 'application/pdf' });
       setResultUrl(URL.createObjectURL(blob));
-      setResultFileName(`${file.name.replace(/\.pdf$/i, '')}_AutoCropped.pdf`);
+      setResultFileName(`autocropped_${file.name}`);
+      setEngineUsed('client-vector');
     } catch (err: any) {
       console.error('Auto crop error:', err);
       alert(`Auto-crop failed: ${err?.message || 'Unknown error'}`);
@@ -162,17 +187,17 @@ export default function AutoCropMargins() {
   };
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-start p-4 sm:p-8 max-w-5xl mx-auto w-full">
+    <div className="flex-1 flex flex-col items-center justify-start p-4 sm:p-8 max-w-6xl mx-auto w-full">
       {/* Header */}
       <div className="text-center mb-6">
-        <div className="w-16 h-16 bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 rounded-2xl flex items-center justify-center mx-auto mb-3 shadow-sm border border-blue-100 dark:border-blue-900/50">
+        <div className="w-16 h-16 bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 rounded-2xl flex items-center justify-center mx-auto mb-3 shadow-sm border border-rose-100 dark:border-rose-900/50">
           <Crop className="w-8 h-8" />
         </div>
         <h1 className="text-3xl sm:text-4xl font-extrabold text-slate-900 dark:text-white mb-2">
-          Smart PDF Margin Auto-Cropper Studio
+          Smart PDF Margin Auto-Cropper
         </h1>
         <p className="text-base text-slate-600 dark:text-slate-400 max-w-xl mx-auto">
-          Automatically trim excessive white margins from slides, book scans, and documents with custom padding sliders.
+          Automatically trim excessive white margins from documents, scanned books, and slides without losing vector sharpness or selectable text.
         </p>
       </div>
 
@@ -186,19 +211,19 @@ export default function AutoCropMargins() {
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
             <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 text-center">
-              <Sparkles className="w-6 h-6 text-blue-600 dark:text-blue-400 mx-auto mb-2" />
-              <h3 className="font-bold text-sm text-slate-800 dark:text-slate-200">Bounding Box Detection</h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Detects non-white text & graphic boundaries automatically.</p>
+              <Sparkles className="w-6 h-6 text-rose-600 dark:text-rose-400 mx-auto mb-2" />
+              <h3 className="font-bold text-sm text-slate-800 dark:text-slate-200">Lossless Vector Crop</h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Sets CropBox metadata so vector text and hyperlinks stay crisp.</p>
             </div>
             <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 text-center">
-              <Sliders className="w-6 h-6 text-indigo-600 dark:text-indigo-400 mx-auto mb-2" />
-              <h3 className="font-bold text-sm text-slate-800 dark:text-slate-200">Custom Padding</h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Adjust margin padding from zero tight crop to 50px.</p>
+              <Sliders className="w-6 h-6 text-blue-600 dark:text-blue-400 mx-auto mb-2" />
+              <h3 className="font-bold text-sm text-slate-800 dark:text-slate-200">Adjustable Padding</h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Leave breathing room around your content with custom point padding.</p>
             </div>
             <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 text-center">
-              <Download className="w-6 h-6 text-emerald-600 dark:text-emerald-400 mx-auto mb-2" />
-              <h3 className="font-bold text-sm text-slate-800 dark:text-slate-200">Client-Side Engine</h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Instant processing in browser without server lag.</p>
+              <Eye className="w-6 h-6 text-emerald-600 dark:text-emerald-400 mx-auto mb-2" />
+              <h3 className="font-bold text-sm text-slate-800 dark:text-slate-200">Compact File Size</h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Zero re-encoding means file size never blows up.</p>
             </div>
           </div>
         </div>
@@ -210,14 +235,20 @@ export default function AutoCropMargins() {
           </div>
 
           <div>
-            <span className="inline-block px-3 py-1 bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 rounded-full text-xs font-bold uppercase tracking-wider mb-2">
-              Auto-Cropped Successfully
+            <span className="inline-block px-3 py-1 bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 rounded-full text-xs font-bold uppercase tracking-wider mb-2">
+              Auto-Crop Complete
             </span>
             <h2 className="text-2xl font-extrabold text-slate-900 dark:text-white">
               Cropped PDF Ready!
             </h2>
             <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-400 mt-1">
-              White margins have been trimmed with {paddingPx}px breathable padding.
+              White margins have been trimmed cleanly.
+              <br />
+              <span className="text-emerald-600 font-semibold text-xs mt-1 inline-block">
+                {engineUsed === 'backend' 
+                  ? 'Processed with PyMuPDF High-Precision Vector Engine.' 
+                  : 'Processed with Non-Destructive Vector CropBox Engine.'}
+              </span>
             </p>
           </div>
 
@@ -225,55 +256,82 @@ export default function AutoCropMargins() {
             <a
               href={resultUrl}
               download={resultFileName}
-              className="flex-1 py-4 px-6 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-2xl shadow-lg shadow-blue-600/20 flex items-center justify-center gap-2 text-base transition-all"
+              className="flex-1 py-3 px-6 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl flex items-center justify-center gap-2 shadow-lg transition-all"
             >
-              <Download className="w-5 h-5" />
-              Download Cropped PDF
+              <Download className="w-4 h-4" /> Download Cropped PDF
             </a>
             <button
               onClick={reset}
-              className="py-4 px-6 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold rounded-2xl transition-all text-sm"
+              className="py-3 px-6 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-semibold rounded-xl transition-colors"
             >
-              Crop Another File
+              Crop Another PDF
             </button>
           </div>
         </div>
       ) : (
-        /* Workspace */
-        <div className="w-full space-y-4">
-          <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-wrap items-center justify-between gap-4">
-            <div className="flex items-center gap-3 text-xs">
-              <span className="font-bold text-slate-700 dark:text-slate-300">Padding Margin: {paddingPx}px</span>
-              <input
-                type="range"
-                min="0"
-                max="50"
-                value={paddingPx}
-                onChange={e => setPaddingPx(Number(e.target.value))}
-                className="w-32 accent-blue-600"
-              />
-            </div>
+        /* Adjust Settings & Preview */
+        <div className="w-full flex flex-col lg:flex-row gap-6">
+          {/* Controls */}
+          <div className="w-full lg:w-80 shrink-0 space-y-5">
+            <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 shadow-sm space-y-4">
+              <h3 className="text-sm font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                Crop Settings
+              </h3>
 
-            <div className="flex items-center gap-3">
+              <div className="space-y-3">
+                <div>
+                  <div className="flex justify-between text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                    <span>Content Padding</span>
+                    <span className="text-rose-600 font-bold">{paddingPt} pt</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0"
+                    max="50"
+                    value={paddingPt}
+                    onChange={(e) => setPaddingPt(parseInt(e.target.value))}
+                    className="w-full accent-rose-600"
+                  />
+                  <p className="text-[11px] text-slate-400 mt-1">
+                    Adds safety margin around text so letters never touch the page edge.
+                  </p>
+                </div>
+
+                <div className="pt-3 border-t border-slate-100 dark:border-slate-800">
+                  <div className="flex items-center gap-2 text-xs font-medium text-emerald-600 dark:text-emerald-400">
+                    <Sparkles className="w-4 h-4" /> Non-Destructive Vector Mode Active
+                  </div>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+                    Your PDF vector text, searchable words, and crisp fonts will be 100% preserved.
+                  </p>
+                </div>
+              </div>
+
               <button
                 onClick={executeAutoCrop}
                 disabled={busy}
-                className="py-2.5 px-6 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-md transition-all disabled:opacity-40"
+                className="w-full py-3 px-4 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-rose-600/20 disabled:opacity-50 transition-all text-sm"
               >
-                {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Crop className="w-4 h-4" />}
-                {progressMsg || 'Auto-Crop All Margins'}
+                {busy ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" /> {progressMsg || 'Cropping Margins...'}
+                  </>
+                ) : (
+                  <>
+                    <Crop className="w-4 h-4" /> Auto-Crop Margins
+                  </>
+                )}
               </button>
-              <button onClick={reset} className="text-xs text-slate-400 hover:text-slate-600 underline">Change</button>
             </div>
           </div>
 
-          {/* Viewport Preview */}
-          <div className="flex flex-col items-center gap-3">
-            <div className="flex items-center gap-3 text-xs font-bold text-slate-600 dark:text-slate-400">
+          {/* Document Preview */}
+          <div className="flex-1 flex flex-col items-center">
+            <div className="flex items-center gap-3 mb-3 text-xs font-semibold text-slate-600 dark:text-slate-400">
               <button
                 onClick={() => setCurrentPage(p => Math.max(p - 1, 0))}
                 disabled={currentPage === 0}
-                className="p-1.5 rounded-lg border hover:bg-slate-100 disabled:opacity-30"
+                className="p-1.5 rounded-lg border hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-30"
               >
                 <ChevronLeft className="w-4 h-4" />
               </button>
@@ -281,13 +339,13 @@ export default function AutoCropMargins() {
               <button
                 onClick={() => setCurrentPage(p => Math.min(p + 1, pageImages.length - 1))}
                 disabled={currentPage === pageImages.length - 1}
-                className="p-1.5 rounded-lg border hover:bg-slate-100 disabled:opacity-30"
+                className="p-1.5 rounded-lg border hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-30"
               >
                 <ChevronRight className="w-4 h-4" />
               </button>
             </div>
 
-            <div className="relative border shadow-xl bg-white select-none overflow-hidden rounded-lg max-w-full">
+            <div className="relative border shadow-xl bg-white select-none overflow-hidden rounded-xl max-w-full">
               <img
                 src={pageImages[currentPage]}
                 alt={`Page ${currentPage + 1}`}

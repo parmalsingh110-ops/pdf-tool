@@ -4,11 +4,9 @@ import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 
 export default function TermsOfService() {
-  useSEO('Terms Of Service Online Free | PDF Media Suite', 'Free online Terms Of Service tool. No signup or installation required.');
-
-  usePageSEO(
+  useSEO(
     'Terms of Service | PDF Media Suite',
-    'Terms of Service for using the PDF Media Suite document productivity platform.'
+    'Terms and conditions for utilizing PDF Media Suite online document tools and services.'
   );
 
   return (

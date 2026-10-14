@@ -4,8 +4,8 @@ import { Download, Trash2, GripVertical, FileText, ListRestart, ChevronUp, Chevr
 import FileDropzone from '../components/FileDropzone';
 import * as pdfjsLib from 'pdfjs-dist';
 import '../lib/pdfWorker';
-import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
+import ToolSEOSection from '../components/ToolSEOSection';
 
 const ORDER_KEY = 'mergePdfOrderV1';
 type OrderEntry = { name: string; size: number; lastModified: number };
@@ -58,8 +58,10 @@ async function generateThumb(file: File): Promise<{ thumb: string; pageCount: nu
 }
 
 export default function MergePDF() {
-  useSEO('Merge PDF Online Free | PDF Media Suite', 'Combine multiple PDF files into one. See page previews before merging. Free, browser-based, no upload required.');
-  usePageSEO('Merge PDF Online Free', 'Combine multiple PDF files into one document with page previews. Free online PDF merger — fast, private, no uploads. Drag & drop to merge PDFs instantly.');
+  useSEO(
+    'Merge PDF Online Free — Combine Multiple PDF Files in Seconds',
+    'Merge multiple PDF files into one document with live page previews. Free online PDF combiner — fast, private, runs 100% in your browser without uploads.'
+  );
 
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -287,6 +289,53 @@ export default function MergePDF() {
           </div>
         </div>
       )}
+      {/* SEO Information & FAQs Section */}
+      <ToolSEOSection
+        toolName="Merge PDF"
+        headline="Free Online PDF Merger — Combine PDF Documents Privately"
+        description="Merge two or more PDF files into a single organized document in seconds. Reorder pages with visual drag-and-drop previews. No file size limits, zero uploads, 100% private in your browser."
+        steps={[
+          {
+            step: '01',
+            title: 'Upload PDF Files',
+            desc: 'Select or drag and drop multiple PDF files from your computer or phone.',
+          },
+          {
+            step: '02',
+            title: 'Arrange Page Order',
+            desc: 'View first-page thumbnails and drag to reorder files exactly as you want them merged.',
+          },
+          {
+            step: '03',
+            title: 'Download Merged PDF',
+            desc: 'Click "Merge PDF" and instantly download your single combined PDF document.',
+          },
+        ]}
+        faqs={[
+          {
+            q: 'Is it safe to merge confidential PDFs on PDF Media Suite?',
+            a: 'Yes, 100% safe. All file processing happens locally in your web browser using WebAssembly. Your files are never sent to any external server or saved in the cloud.',
+          },
+          {
+            q: 'Can I reorder the PDF files before merging?',
+            a: 'Yes! Drag and drop the file cards or use the Up/Down arrow buttons to set the exact sequence you want before clicking merge.',
+          },
+          {
+            q: 'Is there a limit on how many PDFs I can merge?',
+            a: 'No, PDF Media Suite has no limits on file count or total page numbers. You can merge as many documents as needed completely free.',
+          },
+          {
+            q: 'Does merging PDFs reduce the quality of text or images?',
+            a: 'No. The merger performs lossless vector-level document assembly, preserving original vector fonts, crisp resolution, and document metadata.',
+          },
+        ]}
+        relatedTools={[
+          { name: 'Split PDF', path: '/split', desc: 'Separate PDF pages into individual files' },
+          { name: 'Compress PDF', path: '/compress', desc: 'Reduce PDF file size without quality loss' },
+          { name: 'Organize PDF', path: '/organize', desc: 'Rearrange, rotate, or delete specific pages' },
+          { name: 'PDF to Word', path: '/pdf-to-word', desc: 'Convert PDF to editable DOCX format' },
+        ]}
+      />
     </div>
   );
 }

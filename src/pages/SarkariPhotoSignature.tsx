@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { Upload, Download, RefreshCw, Sparkles, CheckCircle2, Shield, Calendar, User, FileText, Settings, Sliders } from 'lucide-react';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
+import ToolSEOSection from '../components/ToolSEOSection';
 import { PDFDocument } from 'pdf-lib';
 import { dataUrlToBytes } from '../lib/utils';
 
@@ -413,6 +414,45 @@ export default function SarkariPhotoSignature() {
             </div>
           </div>
 
+          {/* Exam Presets Selector Box */}
+          <div className="p-5 bg-gradient-to-r from-amber-500/10 to-blue-500/10 dark:from-amber-950/30 dark:to-blue-950/30 border border-amber-200 dark:border-amber-800/60 rounded-2xl shadow-xs space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold uppercase tracking-wider text-amber-800 dark:text-amber-300 flex items-center gap-1.5">
+                <Sparkles className="w-4 h-4 text-amber-600" /> 1-Click Official Exam Portal Presets
+              </span>
+              <span className="text-[11px] text-slate-500 font-medium">Auto-configures size & layout</span>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              {[
+                { id: 'ssc', label: 'SSC CGL / CHSL / GD', layout: 'ssc_combo', size: 45, prefix: 'DOP : ' },
+                { id: 'upsc', label: 'UPSC Civil Services', layout: 'photo_only', size: 90, prefix: '' },
+                { id: 'nta', label: 'NTA NEET / JEE', layout: 'photo_only', size: 80, prefix: 'DATE : ' },
+                { id: 'rrb', label: 'Railway RRB Exams', layout: 'ssc_combo', size: 40, prefix: 'DOP : ' },
+                { id: 'ibps', label: 'IBPS Bank PO / Clerk', layout: 'side_by_side', size: 45, prefix: '' },
+                { id: 'custom', label: 'Custom Manual', layout: 'ssc_combo', size: 45, prefix: 'DOP : ' },
+              ].map((preset) => (
+                <button
+                  key={preset.id}
+                  type="button"
+                  onClick={() => {
+                    setLayoutMode(preset.layout as LayoutMode);
+                    setTargetSizeKb(preset.size);
+                    setDopPrefix(preset.prefix);
+                  }}
+                  className={`py-2 px-2.5 rounded-xl border text-left text-xs font-semibold transition-all ${
+                    layoutMode === preset.layout && targetSizeKb === preset.size
+                      ? 'bg-amber-600 text-white border-amber-600 shadow-sm'
+                      : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  <div className="truncate">{preset.label}</div>
+                  <div className="text-[10px] opacity-80 mt-0.5">{preset.size} KB limit</div>
+                </button>
+              ))}
+            </div>
+          </div>
+
           {/* Details Config Box */}
           <div className="p-5 bg-white border border-gray-200 rounded-2xl shadow-xs space-y-4">
             <h2 className="text-sm font-bold text-gray-900 flex items-center gap-2">
@@ -434,9 +474,24 @@ export default function SarkariPhotoSignature() {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1">
-                  Date of Photo (DOP)
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs font-semibold text-gray-700">
+                    Date of Photo (DOP)
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const today = new Date();
+                      const dd = String(today.getDate()).padStart(2, '0');
+                      const mm = String(today.getMonth() + 1).padStart(2, '0');
+                      const yyyy = today.getFullYear();
+                      setPhotoDate(`${dd}/${mm}/${yyyy}`);
+                    }}
+                    className="text-[10px] font-bold text-blue-600 hover:text-blue-800"
+                  >
+                    Set Today
+                  </button>
+                </div>
                 <div className="flex gap-2">
                   <select
                     value={dopPrefix}
@@ -663,6 +718,54 @@ export default function SarkariPhotoSignature() {
           </div>
         </div>
       </div>
+
+      {/* SEO Guide & Sarkari Exam FAQs */}
+      <ToolSEOSection
+        toolName="Sarkari Photo & Signature Joiner"
+        headline="Free Sarkari Photo & Signature Maker with Name & Date (DOP)"
+        description="Format passport photograph with printed Candidate Name and Date of Taking Photograph (DOP). Merge photo and signature into single combo cards or exact portal dimension presets for SSC CGL, CHSL, MTS, GD, UPSC, IBPS, RRB, and Police recruitment."
+        steps={[
+          {
+            step: '01',
+            title: 'Upload Photo & Signature',
+            desc: 'Select your passport size photo and your clean signature image from your gallery or computer.',
+          },
+          {
+            step: '02',
+            title: 'Enter Name & Date (DOP)',
+            desc: 'Type your candidate name and the exact photo capture date to overlay the white name banner.',
+          },
+          {
+            step: '03',
+            title: 'Choose Exam Preset & Download',
+            desc: 'Select 1-click presets for SSC, UPSC, NTA, or IBPS, adjust target KB (20KB - 50KB), and download.',
+          },
+        ]}
+        faqs={[
+          {
+            q: 'Is Name and Date of Photo (DOP) mandatory for SSC applications?',
+            a: 'Yes. Most SSC notifications (CGL, CHSL, MTS, GD, Stenographer) explicitly require photographs taken within the last 3 months with clearly printed candidate name and date of photo.',
+          },
+          {
+            q: 'How do I compress the photo to between 20 KB and 50 KB?',
+            a: 'Use the built-in Target File Size slider! Move the slider to 35 KB or 45 KB, and the tool will automatically output the exact file size required by government upload portals.',
+          },
+          {
+            q: 'Can I download the result as JPG, PNG, or PDF?',
+            a: 'Yes! The tool supports 1-click downloads for high-resolution JPG (the official standard for online forms), transparent PNG, and print-ready PDF.',
+          },
+          {
+            q: 'Are my personal exam documents secure on this site?',
+            a: '100% secure. Everything runs client-side directly on your phone or PC. Your photo and signature are never sent to any server.',
+          },
+        ]}
+        relatedTools={[
+          { name: 'Clean Signature', path: '/clean-signature', desc: 'Turn mobile photos of signatures into transparent PNG or pure white background' },
+          { name: 'Masked Aadhaar', path: '/masked-aadhaar', desc: 'Mask first 8 digits of Aadhaar card for KYC safety (XXXX-XXXX-1234)' },
+          { name: 'Exam Bundle Merger', path: '/exam-document-merger', desc: 'Merge 10th, 12th, Degree, Caste & Domicile certificates under 1 MB' },
+          { name: 'Exact Image Size (KB)', path: '/exact-image-size', desc: 'Strict KB sizing (20KB, 50KB, 100KB) for government portals' },
+        ]}
+      />
     </div>
   );
 }

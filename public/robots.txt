@@ -128,6 +128,8 @@ Allow: /accessibility-checker
 Allow: /reading-tracker
 Allow: /all-tools
 Allow: /handwriting-pdf
+Allow: /ai-pdf-summarizer
+Allow: /ai-summarizer
 Allow: /about
 Allow: /pricing
 Allow: /contact
@@ -137,5 +139,5 @@ Allow: /terms
 # Sitemaps
 Sitemap: https://pdfmediasuite.in/sitemap.xml
 
-# Host directive (Yandex)
-Host: https://pdfmediasuite.in
+# Host directive
+Host: pdfmediasuite.in

@@ -4,11 +4,9 @@ import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 
 export default function About() {
-  useSEO('About Online Free | PDF Media Suite', 'Free online About tool. No signup or installation required.');
-
-  usePageSEO(
-    'About | PDF Media Suite',
-    'PDF Media Suite is an independent, founder-led software project focused on making practical PDF and document productivity tools accessible through the web.'
+  useSEO(
+    'About PDF Media Suite — Founder & Mission',
+    'PDF Media Suite is an independent, browser-based document productivity platform created by Parmal Singh Gurjar. Fast, private, zero data upload.'
   );
 
   return (

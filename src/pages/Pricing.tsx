@@ -4,11 +4,9 @@ import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 
 export default function Pricing() {
-  useSEO('Pricing Online Free | PDF Media Suite', 'Free online Pricing tool. No signup or installation required.');
-
-  usePageSEO(
-    'Pricing | PDF Media Suite',
-    'PDF Media Suite currently provides its core PDF, document and image tools free of charge.'
+  useSEO(
+    'Pricing — 100% Free Forever | PDF Media Suite',
+    'All 110+ PDF and image tools on PDF Media Suite are 100% free with no subscription, no hidden charges, and no signup needed.'
   );
 
   return (

@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { Download, FileText, Maximize2, Check, ChevronRight } from 'lucide-react';
 import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
+import { useSEO } from '../hooks/useSEO';
 
 // Quick preset sizes in bytes
 const PRESETS = [
@@ -25,6 +26,11 @@ const FAQS = [
 ];
 
 export default function IncreasePdfSize() {
+  useSEO(
+    'Increase PDF File Size Online Free — Exact Target KB & MB',
+    'Increase PDF file size to exact KB or MB online free. Set target to 100 KB, 200 KB, 500 KB, 1 MB, 2 MB, 5 MB, 10 MB or 20 MB. Perfect for government portals, SSC, UPSC, Railway forms. No quality loss, no signup.'
+  );
+
   usePageSEO(
     'Increase PDF File Size Online Free — PDF Size Increaser',
     'Increase PDF file size to exact KB or MB online free. Set target to 100 KB, 200 KB, 500 KB, 1 MB, 2 MB, 5 MB, 10 MB or 20 MB. Perfect for government portals, SSC, UPSC, Railway forms. No quality loss, no signup.',

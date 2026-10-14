@@ -2,8 +2,12 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { Upload, Download, Shield, EyeOff, Sparkles, CheckCircle2, AlertTriangle, Plus, Trash2, Move, FileText, Lock } from 'lucide-react';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
+import ToolSEOSection from '../components/ToolSEOSection';
 import { PDFDocument } from 'pdf-lib';
 import { dataUrlToBytes } from '../lib/utils';
+
+import * as pdfjsLib from 'pdfjs-dist';
+import '../lib/pdfWorker';
 
 interface MaskBox {
   id: string;
@@ -64,16 +68,9 @@ export default function MaskedAadhaar() {
 
     if (uploadedFile.type === 'application/pdf' || uploadedFile.name.endsWith('.pdf')) {
       setIsPdf(true);
-      const arrayBuffer = await uploadedFile.arrayBuffer();
-      const pdfjsLib = await import('pdfjs-dist');
-      pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-        'pdfjs-dist/build/pdf.worker.mjs',
-        import.meta.url
-      ).toString();
-
       try {
-        const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) });
-        const pdfDoc = await loadingTask.promise;
+        const arrayBuffer = await uploadedFile.arrayBuffer();
+        const pdfDoc = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
         setPdfPageCount(pdfDoc.numPages);
         setCurrentPage(1);
 
@@ -315,6 +312,54 @@ export default function MaskedAadhaar() {
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
           {/* Visual Masking Canvas (7 cols) */}
           <div className="lg:col-span-7 space-y-4">
+            {/* Quick Layout Presets */}
+            <div className="p-3.5 bg-gradient-to-r from-emerald-500/10 to-blue-500/10 border border-emerald-200 dark:border-emerald-800/60 rounded-xl space-y-2">
+              <span className="text-[11px] font-bold text-emerald-800 dark:text-emerald-300 uppercase tracking-wider flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-emerald-600" /> 1-Click Document Presets
+              </span>
+              <div className="flex flex-wrap gap-1.5">
+                {[
+                  {
+                    label: 'Full e-Aadhaar Letter',
+                    masks: [
+                      { id: 'm_num', xPercent: 30, yPercent: 78, wPercent: 38, hPercent: 4.5, style: 'uidai_xxxx' as const },
+                      { id: 'm_qr', xPercent: 70, yPercent: 62, wPercent: 24, hPercent: 20, style: 'qr_mask' as const },
+                    ],
+                  },
+                  {
+                    label: 'Wallet Card (Front)',
+                    masks: [
+                      { id: 'm_num', xPercent: 26, yPercent: 79, wPercent: 48, hPercent: 7.5, style: 'uidai_xxxx' as const },
+                    ],
+                  },
+                  {
+                    label: 'Wallet Card (Back)',
+                    masks: [
+                      { id: 'm_qr', xPercent: 64, yPercent: 22, wPercent: 30, hPercent: 45, style: 'qr_mask' as const },
+                    ],
+                  },
+                  {
+                    label: 'PAN Card Mask',
+                    masks: [
+                      { id: 'm_pan', xPercent: 38, yPercent: 54, wPercent: 24, hPercent: 6, style: 'black_bar' as const },
+                    ],
+                  },
+                ].map((preset, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => {
+                      setMasks(preset.masks);
+                      setSelectedMaskId(preset.masks[0].id);
+                    }}
+                    className="py-1 px-2.5 bg-white dark:bg-slate-800 hover:bg-emerald-50 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 text-xs font-semibold rounded-lg shadow-2xs transition-colors"
+                  >
+                    {preset.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             <div className="flex items-center justify-between text-xs text-gray-600">
               <span className="font-semibold flex items-center gap-1.5">
                 <Move className="w-4 h-4 text-emerald-600" /> Drag mask box over the 8 digits
@@ -513,6 +558,23 @@ export default function MaskedAadhaar() {
                       placeholder="e.g. FOR HOTEL CHECK-IN ONLY"
                       className="w-full px-3 py-1.5 bg-white border border-gray-300 rounded-lg text-xs font-medium focus:ring-2 focus:ring-emerald-500 outline-none uppercase"
                     />
+                    <div className="flex flex-wrap gap-1 pt-1.5">
+                      {[
+                        'FOR SIM VERIFICATION',
+                        'FOR HOTEL CHECK-IN',
+                        'FOR EXAM ADMIT CARD',
+                        'FOR BANK KYC ONLY',
+                      ].map((chip) => (
+                        <button
+                          key={chip}
+                          type="button"
+                          onClick={() => setKycPurposeText(chip)}
+                          className="text-[10px] py-0.5 px-2 bg-white border border-slate-200 hover:border-emerald-500 rounded text-slate-600 font-medium transition-colors"
+                        >
+                          {chip}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>
@@ -580,6 +642,54 @@ export default function MaskedAadhaar() {
           </div>
         </div>
       </div>
+
+      {/* SEO Guide & UIDAI Masking FAQs */}
+      <ToolSEOSection
+        toolName="Masked Aadhaar Card Maker"
+        headline="Free Online Masked Aadhaar Card Maker — UIDAI & RBI Compliant"
+        description="Hide the first 8 digits of your 12-digit Aadhaar card (e.g. XXXX-XXXX-1234) and mask the QR code for safe KYC verification. Protect against identity theft at hotels, airport gates, SIM card kiosks, and exam centers. 100% private in browser."
+        steps={[
+          {
+            step: '01',
+            title: 'Upload e-Aadhaar PDF or Image',
+            desc: 'Select your official e-Aadhaar PDF or a scanned Aadhaar image from your device.',
+          },
+          {
+            step: '02',
+            title: 'Apply 1-Click Masking Preset',
+            desc: 'Choose Full e-Aadhaar Sheet, Wallet Card, or PAN preset to automatically overlay the official UIDAI XXXX-XXXX pattern.',
+          },
+          {
+            step: '03',
+            title: 'Download Masked Aadhaar',
+            desc: 'Save your privacy-protected Aadhaar as a crisp PDF or high-resolution JPG image immediately.',
+          },
+        ]}
+        faqs={[
+          {
+            q: 'Is Masked Aadhaar legally valid for hotel check-ins and job verification?',
+            a: 'Yes! According to official circulars from UIDAI, RBI, and TRAI, Masked Aadhaar showing only the last 4 digits is legally valid across all non-banking verification processes.',
+          },
+          {
+            q: 'Why should I mask the QR code on my Aadhaar card?',
+            a: 'The QR code on an unmasked Aadhaar card contains your full 12-digit Aadhaar number, name, address, and date of birth in encoded format. Masking the QR code prevents rogue scanners from extracting your private data.',
+          },
+          {
+            q: 'Can I unmask the card later?',
+            a: 'The output file is permanently redacted and flattened so that unauthorized third parties cannot remove the mask or peek behind it.',
+          },
+          {
+            q: 'Does PDF Media Suite save a copy of my Aadhaar card?',
+            a: 'Never. The redaction and masking algorithms run 100% client-side inside your browser memory. No data is transmitted across the internet.',
+          },
+        ]}
+        relatedTools={[
+          { name: 'Sarkari Photo & Sign', path: '/sarkari-photo-signature', desc: 'Format passport photo with name and date (DOP) for exam forms' },
+          { name: 'Clean Signature', path: '/clean-signature', desc: 'Convert phone photo of paper signature to transparent PNG' },
+          { name: 'Exam Bundle Merger', path: '/exam-document-merger', desc: 'Merge all educational documents into a single PDF under 1 MB' },
+          { name: 'PDF Redact', path: '/redact', desc: 'Permanently black out sensitive text, account numbers, and phone numbers' },
+        ]}
+      />
     </div>
   );
 }

@@ -7,7 +7,7 @@ import { PDFDocument } from 'pdf-lib';
 import * as pdfjsLib from 'pdfjs-dist';
 import '../lib/pdfWorker';
 import FileDropzone from '../components/FileDropzone';
-import { usePageSEO } from '../lib/usePageSEO';
+import ToolSEOSection from '../components/ToolSEOSection';
 import { useSEO } from '../hooks/useSEO';
 import { dataUrlToBytes } from '../lib/utils';
 
@@ -23,11 +23,6 @@ export default function PdfRepair() {
   useSEO(
     'PDF Repair Online Free — Fix Corrupted & Broken PDF Files',
     'Repair damaged, corrupted, or unreadable PDF files online. Multi-strategy recovery rebuilds XREF tables, fixes headers, and salvages damaged page streams.'
-  );
-
-  usePageSEO(
-    'PDF Repair & Document Recovery Studio',
-    'Fix corrupted PDF files using in-browser header reconstruction, XREF rebuilding, and visual stream recovery. 100% private and resilient.'
   );
 
   const [file, setFile] = useState<File | null>(null);
@@ -329,6 +324,54 @@ export default function PdfRepair() {
           </div>
         </div>
       )}
+
+      {/* SEO Guide & Recovery Details for Search Ranking */}
+      <ToolSEOSection
+        toolName="PDF Repair"
+        headline="Free Online PDF Repair Tool — Fix Damaged & Corrupted PDFs"
+        description="Recover damaged, broken, or unreadable PDF files online. Our multi-tiered reconstruction engine fixes broken header signatures, rebuilds damaged XREF cross-reference tables, and rescues pages from corrupt files. 100% private in browser."
+        steps={[
+          {
+            step: '01',
+            title: 'Upload Damaged PDF',
+            desc: 'Select or drag & drop the damaged, corrupt, or unopenable PDF file into the recovery area.',
+          },
+          {
+            step: '02',
+            title: 'Multi-Strategy Diagnostic & Repair',
+            desc: 'Our engine applies byte sanitization, XREF cross-reference rebuilding, and rasterized page salvage.',
+          },
+          {
+            step: '03',
+            title: 'Download Restored PDF',
+            desc: 'Preview the diagnostic repair report and download your fully restored, valid PDF file.',
+          },
+        ]}
+        faqs={[
+          {
+            q: 'Can this tool fix "PDF format error" or "file is damaged" warnings in Adobe Acrobat?',
+            a: 'Yes! Most PDF opening errors are caused by corrupted byte headers or truncated cross-reference tables. Our recovery engine synthesizes clean PDF trailers and restores standard compatibility.',
+          },
+          {
+            q: 'Will my text and formatting be preserved during repair?',
+            a: 'Yes. Level 1 and Level 2 repairs operate losslessly on the underlying PDF stream objects, preserving exact text, fonts, and vector paths.',
+          },
+          {
+            q: 'What if the PDF file is severely corrupted or truncated?',
+            a: 'If stream objects are damaged beyond byte repair, our engine automatically falls back to visual page salvage, rendering every readable page canvas into a fresh standard PDF.',
+          },
+          {
+            q: 'Are my confidential files stored during repair?',
+            a: 'No. The initial recovery stages run 100% locally in your web browser. Even when backend deep recovery is invoked, files are processed purely in memory and wiped immediately.',
+          },
+        ]}
+        relatedTools={[
+          { name: 'PDF Sanitizer', path: '/pdf-sanitizer', desc: 'Remove malicious JavaScript and dangerous hidden objects from PDFs' },
+          { name: 'Flatten PDF', path: '/flatten-pdf', desc: 'Merge interactive form fields and annotations into static pages' },
+          { name: 'Searchable PDF (OCR)', path: '/searchable-pdf', desc: 'Extract text from scanned and damaged document pages' },
+          { name: 'Merge PDF', path: '/merge', desc: 'Combine multiple salvaged PDFs into one master document' },
+        ]}
+      />
     </div>
   );
 }

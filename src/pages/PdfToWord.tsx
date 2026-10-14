@@ -11,7 +11,7 @@ import {
 } from 'docx';
 import FileDropzone from '../components/FileDropzone';
 import BackendLoader from '../components/BackendLoader';
-import { usePageSEO } from '../lib/usePageSEO';
+import ToolSEOSection from '../components/ToolSEOSection';
 import { useSEO } from '../hooks/useSEO';
 import '../lib/pdfWorker';
 
@@ -356,12 +356,8 @@ async function convertBackend(file: File, forceOcr: boolean): Promise<Blob> {
 // ─── Main Component ──────────────────────────────────────────────────────────
 export default function PdfToWord() {
   useSEO(
-    'PDF to Word Converter — Ultra-Precision Layout Online Free | PDF Media Suite',
-    'Convert PDF to Word DOCX with exact formatting, table structures, columns, and fonts preserved. AI Layout + OCR engine.'
-  );
-  usePageSEO(
-    'PDF to Word — Exact Format & Layout Preservation',
-    'High-fidelity PDF to Word converter with deep table extraction, column detection, image preservation, and font matching.',
+    'PDF to Word Converter Online Free — Exact DOCX Formatting',
+    'Convert PDF to editable Word document (.docx) online for free. Preserves tables, columns, exact font weights, and layout geometry. 100% private, no signup.'
   );
 
   const [file, setFile] = useState<File | null>(null);
@@ -716,6 +712,54 @@ export default function PdfToWord() {
         )}
 
       </div>
+
+      {/* SEO Content & FAQs for Google Indexing */}
+      <ToolSEOSection
+        toolName="PDF to Word Converter"
+        headline="Free Online PDF to Word Converter — Accurate DOCX Layout"
+        description="Transform any PDF into a fully editable Microsoft Word document (.docx). Our dual-engine system preserves fonts, tables, multi-column articles, and embedded graphics with razor-sharp fidelity. Zero file uploads, 100% private."
+        steps={[
+          {
+            step: '01',
+            title: 'Upload PDF Document',
+            desc: 'Select or drag & drop your PDF file into the converter box above.',
+          },
+          {
+            step: '02',
+            title: 'Automatic Layout Reconstruction',
+            desc: 'Our engine detects paragraphs, font sizes, table coordinates, and text styling in real time.',
+          },
+          {
+            step: '03',
+            title: 'Download Editable Word (.docx)',
+            desc: 'Instantly download your clean .docx file ready for Microsoft Word, Google Docs, or LibreOffice.',
+          },
+        ]}
+        faqs={[
+          {
+            q: 'Can I edit the converted Word document in Microsoft Word?',
+            a: 'Yes, 100%! The converted file is a standard Microsoft Word OpenXML (.docx) document with native editable paragraphs, heading styles, tables, and text runs.',
+          },
+          {
+            q: 'Will tables and grid layouts stay aligned?',
+            a: 'Yes. Our converter uses layout reconstruction to detect table borders, cell rows, and column boundaries, mapping them into native Word table cells.',
+          },
+          {
+            q: 'Can it convert scanned PDFs with images?',
+            a: 'Yes. If a PDF consists of scanned pages or image snapshots without embedded text, our OCR engine automatically kicks in to recognize text and render it into editable text.',
+          },
+          {
+            q: 'Are my confidential documents kept safe?',
+            a: 'Absolutely. Standard documents are processed directly inside your browser client-side. No files are retained, logged, or shared.',
+          },
+        ]}
+        relatedTools={[
+          { name: 'Word to PDF', path: '/word-to-pdf-exact', desc: 'Convert DOCX documents back to exact PDF format' },
+          { name: 'PDF to Excel', path: '/pdf-to-excel', desc: 'Extract data tables into editable XLSX spreadsheets' },
+          { name: 'PDF to PPT', path: '/pdf-to-ppt', desc: 'Convert PDF presentation slides to PowerPoint' },
+          { name: 'Extract Tables', path: '/extract-tables', desc: 'Isolate and export data tables as CSV, Excel, or JSON' },
+        ]}
+      />
     </div>
   );
 }

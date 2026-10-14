@@ -173,12 +173,13 @@ const categories = [
       { title: 'Color Palette Extractor', path: '/color-extractor', icon: Palette, color: 'text-pink-500', bg: 'bg-pink-50' },
       { title: 'PDF Slide Presenter', path: '/present', icon: Presentation, color: 'text-indigo-600', bg: 'bg-indigo-50' },
       { title: 'File Hash Calculator', path: '/file-hash', icon: ShieldCheck, color: 'text-green-600', bg: 'bg-green-50' },
+      { title: 'AI PDF Summarizer & Insights', path: '/ai-summarizer', icon: Sparkles, color: 'text-purple-600', bg: 'bg-purple-50' },
     ]
   },
   {
-    title: "AI & NLP Integration (Coming Soon)",
+    title: "AI & NLP Integration",
     tools: [
-      { title: 'AI PDF Summarizer', icon: FileText },
+      { title: 'AI PDF Summarizer (Live)', path: '/ai-summarizer', icon: Sparkles, color: 'text-purple-600', bg: 'bg-purple-50' },
       { title: 'AI Translator', icon: FileText },
       { title: 'Smart Redaction', icon: ShieldCheck },
       { title: 'Sentiment Analysis', icon: Search },

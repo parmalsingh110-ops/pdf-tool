@@ -3,97 +3,99 @@ import { Routes, Route } from 'react-router-dom';
 import { ToastProvider } from './components/Toast';
 import Layout from './components/Layout';
 import Home from './pages/Home';
-import MergePDF from './pages/MergePDF';
-import SplitPDF from './pages/SplitPDF';
-import CompressPDF from './pages/CompressPDF';
-import PDFToJPG from './pages/PDFToJPG';
-import JPGToPDF from './pages/JPGToPDF';
-import OrganizePDF from './pages/OrganizePDF';
-import ProtectPDF from './pages/ProtectPDF';
-import UnlockPDF from './pages/UnlockPDF';
-import WatermarkPDF from './pages/WatermarkPDF';
-import RemoveWatermark from './pages/RemoveWatermark';
-import PageNumbersPDF from './pages/PageNumbersPDF';
-import ExtractText from './pages/ExtractText';
-import EditMetadata from './pages/EditMetadata';
-import FlattenPDF from './pages/FlattenPDF';
-import ReversePDF from './pages/ReversePDF';
-import AddMargins from './pages/AddMargins';
-import AllTools from './pages/AllTools';
-import Privacy from './pages/Privacy';
-import TermsOfService from './pages/TermsOfService';
-import About from './pages/About';
-import Pricing from './pages/Pricing';
-import Contact from './pages/Contact';
+
+// ── Lazy Loaded Tool & Informational Pages (Code Splitting for Core Web Vitals) ──
+const MergePDF = lazy(() => import('./pages/MergePDF'));
+const SplitPDF = lazy(() => import('./pages/SplitPDF'));
+const CompressPDF = lazy(() => import('./pages/CompressPDF'));
+const PDFToJPG = lazy(() => import('./pages/PDFToJPG'));
+const JPGToPDF = lazy(() => import('./pages/JPGToPDF'));
+const OrganizePDF = lazy(() => import('./pages/OrganizePDF'));
+const ProtectPDF = lazy(() => import('./pages/ProtectPDF'));
+const UnlockPDF = lazy(() => import('./pages/UnlockPDF'));
+const WatermarkPDF = lazy(() => import('./pages/WatermarkPDF'));
+const RemoveWatermark = lazy(() => import('./pages/RemoveWatermark'));
+const PageNumbersPDF = lazy(() => import('./pages/PageNumbersPDF'));
+const ExtractText = lazy(() => import('./pages/ExtractText'));
+const EditMetadata = lazy(() => import('./pages/EditMetadata'));
+const FlattenPDF = lazy(() => import('./pages/FlattenPDF'));
+const ReversePDF = lazy(() => import('./pages/ReversePDF'));
+const AddMargins = lazy(() => import('./pages/AddMargins'));
+const AllTools = lazy(() => import('./pages/AllTools'));
+const Privacy = lazy(() => import('./pages/Privacy'));
+const TermsOfService = lazy(() => import('./pages/TermsOfService'));
+const About = lazy(() => import('./pages/About'));
+const Pricing = lazy(() => import('./pages/Pricing'));
+const Contact = lazy(() => import('./pages/Contact'));
 
 // Native Tools
-import GrayscalePDF from './pages/GrayscalePDF';
-import InvertColorsPDF from './pages/InvertColorsPDF';
-import RemoveMetadata from './pages/RemoveMetadata';
-import PasswordStrength from './pages/PasswordStrength';
-import ConvertToWebP from './pages/ConvertToWebP';
-import BatesNumbering from './pages/BatesNumbering';
-import HeadersFooters from './pages/HeadersFooters';
-import HandwritingPDF from './pages/HandwritingPDF';
+const GrayscalePDF = lazy(() => import('./pages/GrayscalePDF'));
+const InvertColorsPDF = lazy(() => import('./pages/InvertColorsPDF'));
+const RemoveMetadata = lazy(() => import('./pages/RemoveMetadata'));
+const PasswordStrength = lazy(() => import('./pages/PasswordStrength'));
+const ConvertToWebP = lazy(() => import('./pages/ConvertToWebP'));
+const BatesNumbering = lazy(() => import('./pages/BatesNumbering'));
+const HeadersFooters = lazy(() => import('./pages/HeadersFooters'));
+const HandwritingPDF = lazy(() => import('./pages/HandwritingPDF'));
 
-// Simulated Tools
-import ExtractAllImages from './pages/ExtractAllImages';
-import PdfToWord from './pages/PdfToWord';
-import PdfToExcel from './pages/PdfToExcel';
-import PdfToPpt from './pages/PdfToPpt';
-import ExtractTables from './pages/ExtractTables';
-import FontExtractor from './pages/FontExtractor';
-import SearchReplace from './pages/SearchReplace';
-import RemoveText from './pages/RemoveText';
-import HighlightText from './pages/HighlightText';
-import PdfToGif from './pages/PdfToGif';
-import VideoToPdf from './pages/VideoToPdf';
-import RemoveBackground from './pages/RemoveBackground';
-import WordToPdfExact from './pages/WordToPdfExact';
-import ConvertToTiff from './pages/ConvertToTiff';
-import ExtractMedia from './pages/ExtractMedia';
-import CryptographicSignatures from './pages/CryptographicSignatures';
-import ValidateSignatures from './pages/ValidateSignatures';
-import PdfAConversion from './pages/PdfAConversion';
-import AddDrm from './pages/AddDrm';
-import InvisibleWatermark from './pages/InvisibleWatermark';
-import SelfDestruct from './pages/SelfDestruct';
-import CertifyDocument from './pages/CertifyDocument';
-import BatchProtect from './pages/BatchProtect';
-import InkSaverPDF from './pages/InkSaverPDF';
-import UniversalConverter from './pages/UniversalConverter';
-import CodeToPdf from './pages/CodeToPdf';
+// Conversion & Complex Tools
+const ExtractAllImages = lazy(() => import('./pages/ExtractAllImages'));
+const PdfToWord = lazy(() => import('./pages/PdfToWord'));
+const PdfToExcel = lazy(() => import('./pages/PdfToExcel'));
+const PdfToPpt = lazy(() => import('./pages/PdfToPpt'));
+const ExtractTables = lazy(() => import('./pages/ExtractTables'));
+const FontExtractor = lazy(() => import('./pages/FontExtractor'));
+const SearchReplace = lazy(() => import('./pages/SearchReplace'));
+const RemoveText = lazy(() => import('./pages/RemoveText'));
+const HighlightText = lazy(() => import('./pages/HighlightText'));
+const PdfToGif = lazy(() => import('./pages/PdfToGif'));
+const VideoToPdf = lazy(() => import('./pages/VideoToPdf'));
+const RemoveBackground = lazy(() => import('./pages/RemoveBackground'));
+const WordToPdfExact = lazy(() => import('./pages/WordToPdfExact'));
+const ConvertToTiff = lazy(() => import('./pages/ConvertToTiff'));
+const ExtractMedia = lazy(() => import('./pages/ExtractMedia'));
+const CryptographicSignatures = lazy(() => import('./pages/CryptographicSignatures'));
+const ValidateSignatures = lazy(() => import('./pages/ValidateSignatures'));
+const PdfAConversion = lazy(() => import('./pages/PdfAConversion'));
+const AddDrm = lazy(() => import('./pages/AddDrm'));
+const InvisibleWatermark = lazy(() => import('./pages/InvisibleWatermark'));
+const SelfDestruct = lazy(() => import('./pages/SelfDestruct'));
+const CertifyDocument = lazy(() => import('./pages/CertifyDocument'));
+const BatchProtect = lazy(() => import('./pages/BatchProtect'));
+const InkSaverPDF = lazy(() => import('./pages/InkSaverPDF'));
+const UniversalConverter = lazy(() => import('./pages/UniversalConverter'));
+const CodeToPdf = lazy(() => import('./pages/CodeToPdf'));
 
-// 13 New Features
-import PdfSanitizer from './pages/PdfSanitizer';
-import CmykConverter from './pages/CmykConverter';
-import PdfRepair from './pages/PdfRepair';
-import WebpageToPdf from './pages/WebpageToPdf';
-import PdfToMarkdown from './pages/PdfToMarkdown';
-import NUpLayout from './pages/NUpLayout';
-import AutoCropMargins from './pages/AutoCropMargins';
-import LongImageToPdf from './pages/LongImageToPdf';
-import PdfFontReplacer from './pages/PdfFontReplacer';
-import AccessibilityChecker from './pages/AccessibilityChecker';
-import PdfToAudio from './pages/PdfToAudio';
-import LinkExtractor from './pages/LinkExtractor';
-import ReadingTracker from './pages/ReadingTracker';
+// Document Optimization & Maintenance
+const PdfSanitizer = lazy(() => import('./pages/PdfSanitizer'));
+const CmykConverter = lazy(() => import('./pages/CmykConverter'));
+const PdfRepair = lazy(() => import('./pages/PdfRepair'));
+const WebpageToPdf = lazy(() => import('./pages/WebpageToPdf'));
+const PdfToMarkdown = lazy(() => import('./pages/PdfToMarkdown'));
+const NUpLayout = lazy(() => import('./pages/NUpLayout'));
+const AutoCropMargins = lazy(() => import('./pages/AutoCropMargins'));
+const LongImageToPdf = lazy(() => import('./pages/LongImageToPdf'));
+const PdfFontReplacer = lazy(() => import('./pages/PdfFontReplacer'));
+const AccessibilityChecker = lazy(() => import('./pages/AccessibilityChecker'));
+const PdfToAudio = lazy(() => import('./pages/PdfToAudio'));
+const LinkExtractor = lazy(() => import('./pages/LinkExtractor'));
+const ReadingTracker = lazy(() => import('./pages/ReadingTracker'));
 
-// New Advanced Tools
-import ImageCollage from './pages/ImageCollage';
-import QrCodeGenerator from './pages/QrCodeGenerator';
-import SignaturePad from './pages/SignaturePad';
-import DocumentScanner from './pages/DocumentScanner';
-import PdfComparison from './pages/PdfComparison';
-import SmartImageToPdf from './pages/SmartImageToPdf';
-import PdfFormFiller from './pages/PdfFormFiller';
-import ImageColorCorrection from './pages/ImageColorCorrection';
-import PdfPageCropper from './pages/PdfPageCropper';
-import ImageNoiseReduction from './pages/ImageNoiseReduction';
-import ImageInsertTool from './pages/ImageInsertTool';
-import SearchablePdf from './pages/SearchablePdf';
+// Image & Interactive Tools
+const ImageCollage = lazy(() => import('./pages/ImageCollage'));
+const QrCodeGenerator = lazy(() => import('./pages/QrCodeGenerator'));
+const SignaturePad = lazy(() => import('./pages/SignaturePad'));
+const DocumentScanner = lazy(() => import('./pages/DocumentScanner'));
+const PdfComparison = lazy(() => import('./pages/PdfComparison'));
+const SmartImageToPdf = lazy(() => import('./pages/SmartImageToPdf'));
+const PdfFormFiller = lazy(() => import('./pages/PdfFormFiller'));
+const ImageColorCorrection = lazy(() => import('./pages/ImageColorCorrection'));
+const PdfPageCropper = lazy(() => import('./pages/PdfPageCropper'));
+const ImageNoiseReduction = lazy(() => import('./pages/ImageNoiseReduction'));
+const ImageInsertTool = lazy(() => import('./pages/ImageInsertTool'));
+const SearchablePdf = lazy(() => import('./pages/SearchablePdf'));
 
-// 20 New Advanced Features
+// Advanced Feature Pages
 const PdfStats = lazy(() => import('./pages/PdfStats'));
 const ExtractPages = lazy(() => import('./pages/ExtractPages'));
 const Booklet = lazy(() => import('./pages/Booklet'));
@@ -128,12 +130,11 @@ const SarkariPhotoSignature = lazy(() => import('./pages/SarkariPhotoSignature')
 const CleanSignature = lazy(() => import('./pages/CleanSignature'));
 const MaskedAadhaar = lazy(() => import('./pages/MaskedAadhaar'));
 const ExamDocumentMerger = lazy(() => import('./pages/ExamDocumentMerger'));
+const AiPdfSummarizer = lazy(() => import('./pages/AiPdfSummarizer'));
+const NotFound = lazy(() => import('./pages/NotFound'));
 
 export default function App() {
   // ── Backend Warmup Ping ─────────────────────────────────────────
-  // Fires once when the user opens the website. This "wakes up" the
-  // Render free-tier backend from sleep so it's ready before the user
-  // uploads a file. If the backend is already awake, this costs nothing.
   useEffect(() => {
     const API_BASE = import.meta.env.VITE_API_URL;
     if (API_BASE && API_BASE.startsWith('http') && !API_BASE.includes('localhost')) {
@@ -181,7 +182,7 @@ export default function App() {
         <Route path="pricing" element={<Pricing />} />
         <Route path="contact" element={<Contact />} />
 
-        {/* New 29 Native & Simulated Tools */}
+        {/* Native & Core Tools */}
         <Route path="grayscale-pdf" element={<GrayscalePDF />} />
         <Route path="invert-colors" element={<InvertColorsPDF />} />
         <Route path="remove-metadata" element={<RemoveMetadata />} />
@@ -219,7 +220,7 @@ export default function App() {
         <Route path="universal-converter" element={<UniversalConverter />} />
         <Route path="code-to-pdf" element={<CodeToPdf />} />
 
-        {/* 10 New Advanced Tools */}
+        {/* 10 Advanced Tools */}
         <Route path="image-collage" element={<ImageCollage />} />
         <Route path="qr-code" element={<QrCodeGenerator />} />
         <Route path="signature-pad" element={<SignaturePad />} />
@@ -233,7 +234,7 @@ export default function App() {
         <Route path="image-insert" element={<ImageInsertTool />} />
         <Route path="handwriting-pdf" element={<HandwritingPDF />} />
 
-        {/* 20 New Advanced Features */}
+        {/* 20 Advanced Features */}
         <Route path="pdf-stats" element={<PdfStats />} />
         <Route path="extract-pages" element={<ExtractPages />} />
         <Route path="booklet" element={<Booklet />} />
@@ -257,7 +258,7 @@ export default function App() {
         <Route path="increase-size" element={<IncreasePdfSize />} />
         <Route path="id-card-joiner" element={<IdCardJoiner />} />
 
-        {/* 13 New Features */}
+        {/* 13 Utility Features */}
         <Route path="pdf-sanitizer" element={<PdfSanitizer />} />
         <Route path="cmyk-converter" element={<CmykConverter />} />
         <Route path="pdf-repair" element={<PdfRepair />} />
@@ -272,11 +273,18 @@ export default function App() {
         <Route path="link-extractor" element={<LinkExtractor />} />
         <Route path="reading-tracker" element={<ReadingTracker />} />
 
-        {/* 4 New Exam & Sarkari Tools */}
+        {/* 4 Exam & Sarkari Tools */}
         <Route path="sarkari-photo-signature" element={<SarkariPhotoSignature />} />
         <Route path="clean-signature" element={<CleanSignature />} />
         <Route path="masked-aadhaar" element={<MaskedAadhaar />} />
         <Route path="exam-document-merger" element={<ExamDocumentMerger />} />
+        
+        {/* AI Tools */}
+        <Route path="ai-summarizer" element={<AiPdfSummarizer />} />
+        <Route path="ai-pdf-summarizer" element={<AiPdfSummarizer />} />
+
+        {/* 404 Catch-All Route: Eliminates Soft-404 Errors in Google Search Console */}
+        <Route path="*" element={<NotFound />} />
       </Route>
     </Routes>
     </Suspense>

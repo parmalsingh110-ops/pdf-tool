@@ -130,42 +130,12 @@ const COLOR_MAP: Record<string, { card: string; iconBg: string; iconText: string
 };
 
 export default function Home() {
-  useSEO('Home Online Free | PDF Media Suite', 'Free online Home tool. No signup or installation required.');
+  useSEO(
+    'PDF Media Suite | 110+ Free Online PDF, Image & Document Tools',
+    'Free online PDF editor, merger, splitter, compressor, converter, OCR and 110+ productivity tools. Fast, 100% private in browser — no file uploads, no signup required.'
+  );
 
   const [recent, setRecent] = useState<RecentEntry[]>([]);
-  // Set canonical for homepage
-  usePageSEO(
-    'PDF Media Suite — Free Online PDF & Image Tools',
-    'Free online PDF editor, merger, splitter, compressor, image resizer, background remover, and 90+ tools. Fast, private, browser-based. No uploads required.',
-    undefined,
-    '/'
-  );
-  // Dynamic SEO
-  useEffect(() => {
-    document.title = 'PDF Media Suite | Free Online PDF & Document Tools';
-    const metaDesc = document.querySelector('meta[name="description"]');
-    if (metaDesc) metaDesc.setAttribute('content', 'PDF Media Suite is a browser-based document productivity platform providing PDF editing, conversion, OCR and image tools.');
-    // Add JSON-LD structured data
-    const existing = document.querySelector('#mediasuite-jsonld');
-    if (!existing) {
-      const script = document.createElement('script');
-      script.type = 'application/ld+json';
-      script.id = 'mediasuite-jsonld';
-      script.textContent = JSON.stringify({
-        '@context': 'https://schema.org',
-        '@type': 'WebApplication',
-        name: 'PDF Media Suite',
-        url: window.location.origin,
-        description: 'PDF Media Suite is a browser-based document productivity platform providing PDF editing, conversion, OCR and image tools.',
-        applicationCategory: 'UtilitiesApplication',
-        operatingSystem: 'Any',
-        offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
-        featureList: 'PDF Merge, PDF Split, PDF Compress, PDF to Word, PDF to Excel, PDF to JPG, Image Resize, Image Crop, Background Removal, PDF Redaction, PDF Stamp, OCR',
-      });
-      document.head.appendChild(script);
-    }
-    return () => { const el = document.querySelector('#mediasuite-jsonld'); if (el) el.remove(); };
-  }, []);
 
   useEffect(() => {
     setRecent(readRecentTools().filter((r) => r.path !== '/').slice(0, 4));

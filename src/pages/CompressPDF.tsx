@@ -5,16 +5,17 @@ import { Download, FileText, Minimize2, Check, Zap, Gauge, Shield, Target } from
 import FileDropzone from '../components/FileDropzone';
 import * as pdfjsLib from 'pdfjs-dist';
 import '../lib/pdfWorker';
-import { usePageSEO } from '../lib/usePageSEO';
 import BackendLoader from '../components/BackendLoader';
+import ToolSEOSection from '../components/ToolSEOSection';
 import { useSEO } from '../hooks/useSEO';
 
 type CompressionLevel = 'backend-high-quality' | 'extreme' | 'recommended' | 'low';
 
 export default function CompressPDF() {
-  useSEO('Compress PDF Online Free | PDF Media Suite', 'Free online Compress PDF tool. No signup or installation required.');
-
-  usePageSEO('Compress PDF Online Free', 'Reduce PDF file size while maintaining quality. Free online PDF compressor with multiple compression levels — fast and private.');
+  useSEO(
+    'Compress PDF Online Free — Reduce PDF Size in KB & MB',
+    'Compress PDF files online while maintaining crisp text and vector quality. Choose target file size in KB or automatic compression. 100% private in browser.'
+  );
   const [file, setFile] = useState<File | null>(null);
   const [compressionLevel, setCompressionLevel] = useState<CompressionLevel>('backend-high-quality');
   const [isProcessing, setIsProcessing] = useState(false);
@@ -594,6 +595,54 @@ export default function CompressPDF() {
           </div>
         </div>
       )}
+
+      {/* SEO Guide & FAQs for Search Ranking */}
+      <ToolSEOSection
+        toolName="Compress PDF"
+        headline="Free Online PDF Compressor — Reduce File Size without Quality Loss"
+        description="Shrink heavy PDF files down to target KB sizes for email attachments, government portal job applications, and web uploads. Choose between AI vector optimization, custom target KB limits, or extreme raster compression."
+        steps={[
+          {
+            step: '01',
+            title: 'Choose PDF File',
+            desc: 'Drag & drop or browse for the PDF you need to compress.',
+          },
+          {
+            step: '02',
+            title: 'Select Compression Mode',
+            desc: 'Pick High-Quality Vector compression, specify target KB (e.g. under 100 KB or 200 KB), or extreme compression.',
+          },
+          {
+            step: '03',
+            title: 'Download Optimized PDF',
+            desc: 'Preview the side-by-side comparison and download your lightweight PDF instantly.',
+          },
+        ]}
+        faqs={[
+          {
+            q: 'Can I compress a PDF to a specific target size (e.g. under 200 KB)?',
+            a: 'Yes! Toggle the "Target Size" mode and type your desired file size in KB. Our intelligent optimization engine will dial in the exact compression settings to meet your requirement.',
+          },
+          {
+            q: 'Will compressing my PDF make the text blurry?',
+            a: 'No. The High-Quality vector engine removes redundant embedded metadata, downsamples high-DPI raster images, and streams deflate compression without altering font vectors.',
+          },
+          {
+            q: 'Is this PDF compressor safe for bank statements and tax forms?',
+            a: 'Yes, 100%. Processing takes place directly inside your web browser. No documents are uploaded to third-party databases or stored on remote servers.',
+          },
+          {
+            q: 'Is there a file size limit for compression?',
+            a: 'PDF Media Suite handles files up to several hundred megabytes smoothly right on your device.',
+          },
+        ]}
+        relatedTools={[
+          { name: 'Target Compress', path: '/target-compress', desc: 'Strict KB sizing for government and exam portal uploads' },
+          { name: 'Merge PDF', path: '/merge', desc: 'Combine multiple PDF documents into a single file' },
+          { name: 'Ink Saver PDF', path: '/ink-saver', desc: 'Lighten dark backgrounds to save printer ink' },
+          { name: 'PDF to JPG', path: '/pdf-to-jpg', desc: 'Convert PDF pages into lightweight image files' },
+        ]}
+      />
     </div>
   );
 }

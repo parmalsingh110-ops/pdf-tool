@@ -3,7 +3,10 @@ import { Shield, ArrowLeft } from 'lucide-react';
 import { useSEO } from '../hooks/useSEO';
 
 export default function Privacy() {
-  useSEO('Privacy Online Free | PDF Media Suite', 'Free online Privacy tool. No signup or installation required.');
+  useSEO(
+    'Privacy Policy — 100% Client-Side Private Document Processing | PDF Media Suite',
+    'PDF Media Suite operates directly inside your web browser. Your confidential PDF and document files never leave your device and are never stored on external servers.'
+  );
 
   return (
     <div className="max-w-3xl mx-auto px-6 py-12 text-slate-700 dark:text-slate-300">

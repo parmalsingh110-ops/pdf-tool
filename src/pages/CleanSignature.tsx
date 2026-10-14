@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { Upload, Download, Sparkles, Sliders, Shield, Crop, Contrast, CheckCircle2, RotateCw } from 'lucide-react';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
+import ToolSEOSection from '../components/ToolSEOSection';
 import { PDFDocument } from 'pdf-lib';
 import { dataUrlToBytes } from '../lib/utils';
 
@@ -194,13 +195,20 @@ export default function CleanSignature() {
     processSignature();
   }, [processSignature]);
 
-  const downloadSignature = async (format: 'png' | 'jpg' | 'pdf') => {
+  const downloadSignature = async (format: 'png' | 'jpg' | 'pdf' | 'svg') => {
     if (!previewUrl) return;
 
     if (format === 'png' || format === 'jpg') {
       const a = document.createElement('a');
       a.href = previewUrl;
       a.download = `clean_signature_${makeTransparent ? 'transparent' : 'white_bg'}.${format}`;
+      a.click();
+    } else if (format === 'svg') {
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 200" width="100%" height="100%"><image href="${previewUrl}" width="500" height="200" /></svg>`;
+      const blob = new Blob([svg], { type: 'image/svg+xml' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'signature_vector.svg';
       a.click();
     } else if (format === 'pdf') {
       const pdfDoc = await PDFDocument.create();
@@ -487,14 +495,22 @@ export default function CleanSignature() {
                   {makeTransparent ? 'Download Transparent PNG Signature' : 'Download Clean White JPG (10-20KB)'}
                 </button>
 
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-3 gap-2">
                   <button
                     type="button"
                     onClick={() => downloadSignature('jpg')}
                     disabled={!previewUrl}
                     className="py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-800 text-xs font-semibold rounded-xl border border-gray-200 transition-colors"
                   >
-                    Download as JPG
+                    Download JPG
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => downloadSignature('svg')}
+                    disabled={!previewUrl}
+                    className="py-2.5 bg-gray-100 hover:bg-gray-200 text-indigo-700 text-xs font-semibold rounded-xl border border-indigo-200 transition-colors"
+                  >
+                    Vector SVG
                   </button>
                   <button
                     type="button"
@@ -502,7 +518,7 @@ export default function CleanSignature() {
                     disabled={!previewUrl}
                     className="py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-800 text-xs font-semibold rounded-xl border border-gray-200 transition-colors"
                   >
-                    Download as PDF
+                    Download PDF
                   </button>
                 </div>
               </div>
@@ -543,6 +559,54 @@ export default function CleanSignature() {
           </div>
         </div>
       </div>
+
+      {/* SEO Guide & Signature FAQs */}
+      <ToolSEOSection
+        toolName="Clean Signature"
+        headline="Free Online Paper Signature Cleaner — Transparent PNG & White Background"
+        description="Convert photos of handwritten ink signatures into clean digital assets. Remove yellow paper tints, camera shadows, and lined notebook marks. Export as transparent PNG, pure white JPG, scalable vector SVG, or PDF under 20 KB."
+        steps={[
+          {
+            step: '01',
+            title: 'Snap & Upload Paper Sign',
+            desc: 'Take a photo of your handwritten signature with your phone and upload it here.',
+          },
+          {
+            step: '02',
+            title: 'Auto-Clean & Boost Contrast',
+            desc: 'Our canvas filter eliminates dark shadows, whitens background paper, and sharpens ink strokes.',
+          },
+          {
+            step: '03',
+            title: 'Pick Ink Color & Download',
+            desc: 'Select Black, Royal Blue, or Navy Blue ink, set target KB (10KB - 20KB for exams), and download.',
+          },
+        ]}
+        faqs={[
+          {
+            q: 'How do I get a transparent background signature without Photoshop?',
+            a: 'Simply check the "Make Background Transparent" option! The tool instantly replaces the white/gray paper with transparency, allowing you to paste your signature onto any contract or PDF.',
+          },
+          {
+            q: 'Will government job portals accept this digital signature?',
+            a: 'Yes! Portals like SSC, UPSC, NTA, IBPS, and State PSCs require clean signatures on a pure white background between 10 KB and 20 KB. This tool is built specifically to meet those official criteria.',
+          },
+          {
+            q: 'Can I change my blue ballpen signature into dark black ink?',
+            a: 'Yes. Use the Ink Color selector to switch between Original Ink, Dark Black, Royal Blue, or Navy Blue with 1-click.',
+          },
+          {
+            q: 'Is my handwritten signature kept private?',
+            a: 'Yes, 100%. All image thresholding, cropping, and background removal occurs directly inside your browser canvas. No signature data is uploaded to any server.',
+          },
+        ]}
+        relatedTools={[
+          { name: 'Sarkari Photo & Sign', path: '/sarkari-photo-signature', desc: 'Join photo and sign with candidate name and date of photo (DOP)' },
+          { name: 'Signature Pad', path: '/signature-pad', desc: 'Draw a smooth handwritten signature directly with your finger or stylus' },
+          { name: 'Crop Image', path: '/image-crop', desc: 'Crop images and signatures with custom bounding boxes' },
+          { name: 'Exact Image Size (KB)', path: '/exact-image-size', desc: 'Compress signature to strict 10KB - 20KB portal limits' },
+        ]}
+      />
     </div>
   );
 }

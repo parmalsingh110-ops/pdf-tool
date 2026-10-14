@@ -60,10 +60,9 @@ export function useSEO(titleOrOptions: string | SEOOptions, descriptionArg?: str
     // ── 5. Canonical URL ──
     setLink('canonical', canonicalUrl);
 
-    // ── 6. hreflang tags ──
-    setLink('alternate', canonicalUrl, 'en');
-    setLink('alternate', canonicalUrl, 'hi');
+    // ── 6. hreflang tag ──
     setLink('alternate', canonicalUrl, 'x-default');
+    setLink('alternate', canonicalUrl, 'en');
 
     // ── 7. Open Graph ──
     setMetaProp('og:title', fullTitle);
@@ -87,48 +86,57 @@ export function useSEO(titleOrOptions: string | SEOOptions, descriptionArg?: str
 
     // ── 9. Per-page JSON-LD Structured Data ──
     // Remove any previously injected per-page LD+JSON
-    const existingLd = document.querySelector('script[data-seo-ld]');
+    const existingLd = document.querySelector('script[data-seo-ld="page"]');
     if (existingLd) existingLd.remove();
 
-    // Build the LD+JSON: use provided structuredData, or generate a SoftwareApplication snippet
+    // Build the LD+JSON graph: WebPage/SoftwareApplication + BreadcrumbList
+    const isHomePage = canonicalPath === '/';
     const ldJson = structuredData || {
       '@context': 'https://schema.org',
-      '@type': 'WebPage',
-      name: fullTitle,
-      description: description,
-      url: canonicalUrl,
-      isPartOf: {
-        '@type': 'WebSite',
-        name: SITE_NAME,
-        url: BASE_URL,
-      },
-      breadcrumb: {
-        '@type': 'BreadcrumbList',
-        itemListElement: [
-          { '@type': 'ListItem', position: 1, name: 'Home', item: BASE_URL },
-          ...(canonicalPath !== '/'
-            ? [
-                {
-                  '@type': 'ListItem',
-                  position: 2,
-                  name: 'All Tools',
-                  item: `${BASE_URL}/all-tools`,
-                },
-                {
-                  '@type': 'ListItem',
-                  position: 3,
-                  name: title,
-                  item: canonicalUrl,
-                },
-              ]
-            : []),
-        ],
-      },
-      provider: {
-        '@type': 'Organization',
-        name: SITE_NAME,
-        url: BASE_URL,
-      },
+      '@graph': [
+        isHomePage
+          ? {
+              '@type': 'WebSite',
+              name: SITE_NAME,
+              url: BASE_URL,
+              description: description,
+            }
+          : {
+              '@type': 'SoftwareApplication',
+              name: fullTitle,
+              description: description,
+              url: canonicalUrl,
+              applicationCategory: 'UtilitiesApplication',
+              operatingSystem: 'Any',
+              offers: {
+                '@type': 'Offer',
+                price: '0',
+                priceCurrency: 'INR',
+              },
+            },
+        {
+          '@type': 'BreadcrumbList',
+          itemListElement: [
+            { '@type': 'ListItem', position: 1, name: 'Home', item: BASE_URL },
+            ...(canonicalPath !== '/'
+              ? [
+                  {
+                    '@type': 'ListItem',
+                    position: 2,
+                    name: 'All Tools',
+                    item: `${BASE_URL}/all-tools`,
+                  },
+                  {
+                    '@type': 'ListItem',
+                    position: 3,
+                    name: title,
+                    item: canonicalUrl,
+                  },
+                ]
+              : []),
+          ],
+        },
+      ],
     };
 
     const script = document.createElement('script');

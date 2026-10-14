@@ -4,11 +4,9 @@ import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 
 export default function Contact() {
-  useSEO('Contact Online Free | PDF Media Suite', 'Free online Contact tool. No signup or installation required.');
-
-  usePageSEO(
+  useSEO(
     'Contact & Support | PDF Media Suite',
-    'Contact PDF Media Suite for product support, feedback, bug reports or business enquiries.'
+    'Get in touch with the PDF Media Suite team for product support, bug reports, feature suggestions, or business inquiries.'
   );
 
   return (

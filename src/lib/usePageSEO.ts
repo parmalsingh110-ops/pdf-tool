@@ -120,7 +120,6 @@ export function usePageSEO(
 
     // ── Cleanup ────────────────────────────────────────────────────────────
     return () => {
-      document.title = prevTitle;
       const el = document.querySelector(`#${jsonLdId}`);
       if (el) el.remove();
     };
