@@ -162,6 +162,10 @@ export default function IdCardJoiner() {
   const handleFile = useCallback(async (e: React.ChangeEvent<HTMLInputElement>, side: 'front' | 'back') => {
     const f = e.target.files?.[0];
     if (!f) return;
+    if (f.size > 25 * 1024 * 1024) {
+      alert('Image file is too large. Maximum allowed size is 25 MB.');
+      return;
+    }
     const url = URL.createObjectURL(f);
     const filteredUrl = await processImage(url, filter);
     if (side === 'front') setFront({ file: f, url, filteredUrl });
@@ -243,7 +247,7 @@ export default function IdCardJoiner() {
       const pdfImg = await pdfDoc.embedJpg(compositeBytes);
       page.drawImage(pdfImg, { x: 0, y: 0, width: 595.28, height: 841.89 });
       const pdfBytes = await pdfDoc.save();
-      const pdfBlob = new Blob([pdfBytes], { type: 'application/pdf' });
+      const pdfBlob = new Blob([pdfBytes as any], { type: 'application/pdf' });
       if (resultUrl) URL.revokeObjectURL(resultUrl);
       setResultUrl(URL.createObjectURL(pdfBlob));
       setStep('done');
