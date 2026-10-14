@@ -5,9 +5,15 @@
  */
 
 // In development or production, determine backend API URL
-const BACKEND_URL =
-  import.meta.env.VITE_BACKEND_URL ||
-  (window.location.hostname === 'localhost' ? 'http://localhost:8000' : '');
+export function getBackendUrl(): string {
+  if (typeof window !== 'undefined') {
+    const custom = localStorage.getItem('pdf_admin_backend_url');
+    if (custom && custom.trim()) return custom.trim().replace(/\/$/, '');
+  }
+  const envUrl = import.meta.env.VITE_API_URL || import.meta.env.VITE_BACKEND_URL;
+  if (envUrl && envUrl.trim()) return envUrl.trim().replace(/\/$/, '');
+  return typeof window !== 'undefined' && window.location.hostname === 'localhost' ? 'http://localhost:8000' : '';
+}
 
 export interface ToolFeedbackPayload {
   toolPath: string;
@@ -37,8 +43,9 @@ const recentErrors = new Set<string>();
  * Submit manual user rating and feedback
  */
 export async function submitToolFeedback(payload: ToolFeedbackPayload): Promise<boolean> {
+  const backend = getBackendUrl();
   try {
-    const res = await fetch(`${BACKEND_URL}/api/feedback`, {
+    const res = await fetch(`${backend}/api/feedback`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -62,6 +69,7 @@ export async function submitToolFeedback(payload: ToolFeedbackPayload): Promise<
  * Report an automatic error or crash incident
  */
 export async function reportToolError(payload: ToolErrorPayload): Promise<void> {
+  const backend = getBackendUrl();
   try {
     const signature = `${payload.toolPath}:${payload.errorMessage.slice(0, 80)}`;
     if (recentErrors.has(signature)) {
@@ -70,7 +78,7 @@ export async function reportToolError(payload: ToolErrorPayload): Promise<void> 
     recentErrors.add(signature);
     setTimeout(() => recentErrors.delete(signature), 30000); // 30s debounce
 
-    await fetch(`${BACKEND_URL}/api/telemetry/error`, {
+    await fetch(`${backend}/api/telemetry/error`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

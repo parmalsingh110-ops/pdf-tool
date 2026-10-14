@@ -14,9 +14,11 @@ import {
   MessageSquare,
   CheckCircle2,
   Clock,
-  Laptop
+  Laptop,
+  Settings
 } from 'lucide-react';
 import { useSEO } from '../hooks/useSEO';
+import { getBackendUrl } from '../lib/telemetry';
 
 interface TelemetryData {
   summary: {
@@ -58,12 +60,12 @@ interface TelemetryData {
   };
 }
 
-const BACKEND_URL =
-  import.meta.env.VITE_BACKEND_URL ||
-  (window.location.hostname === 'localhost' ? 'http://localhost:8000' : '');
-
 export default function AdminDashboard() {
   useSEO('Admin Telemetry & Health Dashboard — PDF Media Suite', 'Monitor tool performance, ratings, and error logs in real time.');
+
+  const [backendUrl, setBackendUrl] = useState(() => getBackendUrl());
+  const [customBackendInput, setCustomBackendInput] = useState(() => getBackendUrl());
+  const [showConfig, setShowConfig] = useState(false);
 
   const [passcode, setPasscode] = useState(() => sessionStorage.getItem('pdf_admin_pass') || '');
   const [inputPass, setInputPass] = useState('');
@@ -76,11 +78,19 @@ export default function AdminDashboard() {
   const [expandedErrorId, setExpandedErrorId] = useState<number | null>(null);
   const [testWebhookStatus, setTestWebhookStatus] = useState<string | null>(null);
 
-  const fetchTelemetry = async (key: string) => {
+  const fetchTelemetry = async (key: string, urlOverride?: string) => {
+    const targetUrl = urlOverride !== undefined ? urlOverride : (backendUrl || getBackendUrl());
     setLoading(true);
     setAuthError('');
     try {
-      const res = await fetch(`${BACKEND_URL}/api/admin/telemetry?key=${encodeURIComponent(key)}`, {
+      if (!targetUrl && window.location.hostname !== 'localhost') {
+        setAuthError('Backend URL is not set. Please enter your Render backend URL below.');
+        setShowConfig(true);
+        setLoading(false);
+        return;
+      }
+
+      const res = await fetch(`${targetUrl}/api/admin/telemetry?key=${encodeURIComponent(key)}`, {
         headers: {
           'X-Admin-Key': key,
         },
@@ -93,12 +103,21 @@ export default function AdminDashboard() {
         return;
       }
 
+      const contentType = res.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        setAuthError(`Backend returned non-JSON response from "${targetUrl || window.location.origin}". Make sure your Python backend service URL is entered below (e.g. https://your-backend.onrender.com).`);
+        setShowConfig(true);
+        setLoading(false);
+        return;
+      }
+
       const json = await res.json();
       setData(json);
       setIsAuthenticated(true);
       sessionStorage.setItem('pdf_admin_pass', key);
     } catch (err: any) {
-      setAuthError('Unable to connect to backend telemetry service. Make sure backend is running.');
+      setAuthError(`Unable to connect to backend at "${targetUrl || window.location.origin}". If your backend is hosted on Render, enter your Render URL below.`);
+      setShowConfig(true);
     } finally {
       setLoading(false);
     }
@@ -125,9 +144,10 @@ export default function AdminDashboard() {
   };
 
   const sendTestWebhook = async () => {
+    const targetUrl = backendUrl || getBackendUrl();
     setTestWebhookStatus('Sending test notification...');
     try {
-      const res = await fetch(`${BACKEND_URL}/api/admin/test-webhook?key=${encodeURIComponent(passcode)}`, {
+      const res = await fetch(`${targetUrl}/api/admin/test-webhook?key=${encodeURIComponent(passcode)}`, {
         method: 'POST',
         headers: { 'X-Admin-Key': passcode },
       });
@@ -187,7 +207,49 @@ export default function AdminDashboard() {
             </button>
           </form>
 
-          <div className="mt-6 pt-4 border-t border-slate-100 dark:border-slate-800 text-center text-[11px] text-slate-400">
+          {/* Configurable Backend URL */}
+          <div className="mt-5 pt-4 border-t border-slate-100 dark:border-slate-800 text-center">
+            <button
+              type="button"
+              onClick={() => setShowConfig(!showConfig)}
+              className="text-xs text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 flex items-center justify-center gap-1.5 mx-auto font-medium"
+            >
+              <Settings className="w-3.5 h-3.5" />
+              <span>{showConfig ? 'Hide Backend Settings' : 'Configure Backend Server URL'}</span>
+            </button>
+
+            {showConfig && (
+              <div className="mt-3 p-3.5 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200 dark:border-slate-700 text-left space-y-2.5 animate-fadeIn">
+                <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300">
+                  Python Backend Service URL (Render / VPS)
+                </label>
+                <input
+                  type="text"
+                  value={customBackendInput}
+                  onChange={(e) => setCustomBackendInput(e.target.value)}
+                  placeholder="https://your-backend.onrender.com"
+                  className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:outline-none"
+                />
+                <p className="text-[10px] text-slate-400">
+                  Enter your Render FastAPI URL (e.g. <code>https://your-backend.onrender.com</code>).
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const clean = customBackendInput.trim().replace(/\/$/, '');
+                    localStorage.setItem('pdf_admin_backend_url', clean);
+                    setBackendUrl(clean);
+                    fetchTelemetry(passcode || inputPass, clean);
+                  }}
+                  className="w-full py-2 px-3 bg-slate-900 hover:bg-black dark:bg-rose-600 dark:hover:bg-rose-700 text-white rounded-xl text-xs font-semibold shadow-sm transition-all"
+                >
+                  Save & Connect
+                </button>
+              </div>
+            )}
+          </div>
+
+          <div className="mt-4 text-center text-[11px] text-slate-400">
             Protected endpoint &bull; Environment variable <code>ADMIN_SECRET_KEY</code>
           </div>
         </div>
