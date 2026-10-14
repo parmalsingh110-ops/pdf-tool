@@ -80,7 +80,7 @@ export default function AdminDashboard() {
     setLoading(true);
     setAuthError('');
     try {
-      const res = await fetch(`${BACKEND_URL}/api/admin/telemetry`, {
+      const res = await fetch(`${BACKEND_URL}/api/admin/telemetry?key=${encodeURIComponent(key)}`, {
         headers: {
           'X-Admin-Key': key,
         },
@@ -127,7 +127,7 @@ export default function AdminDashboard() {
   const sendTestWebhook = async () => {
     setTestWebhookStatus('Sending test notification...');
     try {
-      const res = await fetch(`${BACKEND_URL}/api/admin/test-webhook`, {
+      const res = await fetch(`${BACKEND_URL}/api/admin/test-webhook?key=${encodeURIComponent(passcode)}`, {
         method: 'POST',
         headers: { 'X-Admin-Key': passcode },
       });
