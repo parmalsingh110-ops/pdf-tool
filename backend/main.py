@@ -111,7 +111,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
     allow_methods=["GET", "POST", "HEAD", "OPTIONS"],
-    allow_headers=["Content-Type", "Accept", "Authorization"],
+    allow_headers=["Content-Type", "Accept", "Authorization", "X-Admin-Key"],
     expose_headers=["X-Match-Count"],
     allow_credentials=False,
 )
@@ -4208,4 +4208,102 @@ async def remove_watermark(
         # Only clean up if background_tasks didn't register them (error path)
         # cleanup() is idempotent (no-op if file doesn't exist), so safe to call here too.
         pass
+
+
+# ─── Telemetry & Feedback Endpoints ─────────────────────────────
+try:
+    import telemetry
+    telemetry.init_db()
+except Exception as _te_err:
+    logger.warning(f"[TELEMETRY] Failed to initialize telemetry module: {_te_err}")
+
+
+@app.post("/api/feedback")
+async def submit_feedback(request: Request):
+    """Save user rating and feedback with optional instant alerts."""
+    try:
+        body = await request.json()
+        tool_path = str(body.get("tool_path", "/")).strip()
+        tool_name = str(body.get("tool_name", "Unknown Tool")).strip()
+        rating = int(body.get("rating", 5))
+        feedback_type = str(body.get("feedback_type", "general")).strip()
+        comment = str(body.get("comment", "")).strip()
+        user_agent = request.headers.get("user-agent", "")
+        client_ip = request.client.host if request.client else ""
+
+        import telemetry
+        fid = telemetry.save_feedback(
+            tool_path=tool_path,
+            tool_name=tool_name,
+            rating=rating,
+            feedback_type=feedback_type,
+            comment=comment,
+            user_agent=user_agent,
+            client_ip=client_ip
+        )
+        return {"success": True, "id": fid}
+    except Exception as e:
+        logger.error(f"[FEEDBACK] Error processing feedback: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/telemetry/error")
+async def report_telemetry_error(request: Request):
+    """Log an automatic crash/error occurrence for diagnostics and alerts."""
+    try:
+        body = await request.json()
+        tool_path = str(body.get("tool_path", "/")).strip()
+        tool_name = str(body.get("tool_name", "Unknown Tool")).strip()
+        error_message = str(body.get("error_message", "Unknown error")).strip()
+        error_stack = str(body.get("error_stack", "")).strip()
+        file_info = body.get("file_info", {})
+        user_agent = request.headers.get("user-agent", "")
+        client_ip = request.client.host if request.client else ""
+
+        import telemetry
+        eid = telemetry.save_error(
+            tool_path=tool_path,
+            tool_name=tool_name,
+            error_message=error_message,
+            error_stack=error_stack,
+            file_info=file_info,
+            user_agent=user_agent,
+            client_ip=client_ip
+        )
+        return {"success": True, "id": eid}
+    except Exception as e:
+        logger.error(f"[TELEMETRY] Error logging telemetry: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/api/admin/telemetry")
+async def get_admin_telemetry(request: Request):
+    """Retrieve full telemetry, ratings, and error analytics for admin dashboard."""
+    import telemetry
+    key = request.headers.get("X-Admin-Key") or request.query_params.get("key", "")
+    if key != telemetry.ADMIN_SECRET_KEY:
+        raise HTTPException(status_code=401, detail="Unauthorized: Invalid Admin Passcode")
+
+    return telemetry.get_telemetry_summary()
+
+
+@app.post("/api/admin/test-webhook")
+async def test_webhook(request: Request):
+    """Send test alert to verify Discord or Telegram notifications."""
+    import telemetry
+    key = request.headers.get("X-Admin-Key") or request.query_params.get("key", "")
+    if key != telemetry.ADMIN_SECRET_KEY:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    telemetry.send_discord_alert(
+        "🔔 Test Notification",
+        "Your Discord webhook is working properly! You will receive instant alerts whenever a user encounters an error or leaves feedback.",
+        [{"name": "Status", "value": "✅ Online", "inline": True}],
+        0x2ECC71
+    )
+    telemetry.send_telegram_alert(
+        "🔔 *PDF Tool Test Alert!*\nYour Telegram webhook is connected successfully! You will now receive instant alerts when a tool fails or gets a review."
+    )
+    return {"success": True, "message": "Test notifications triggered."}
+
 

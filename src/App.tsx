@@ -27,6 +27,7 @@ const TermsOfService = lazy(() => import('./pages/TermsOfService'));
 const About = lazy(() => import('./pages/About'));
 const Pricing = lazy(() => import('./pages/Pricing'));
 const Contact = lazy(() => import('./pages/Contact'));
+const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
 
 // Native Tools
 const GrayscalePDF = lazy(() => import('./pages/GrayscalePDF'));
@@ -282,6 +283,9 @@ export default function App() {
         {/* AI Tools */}
         <Route path="ai-summarizer" element={<AiPdfSummarizer />} />
         <Route path="ai-pdf-summarizer" element={<AiPdfSummarizer />} />
+
+        {/* Admin Telemetry Dashboard */}
+        <Route path="admin" element={<AdminDashboard />} />
 
         {/* 404 Catch-All Route: Eliminates Soft-404 Errors in Google Search Console */}
         <Route path="*" element={<NotFound />} />

@@ -43,6 +43,7 @@ import { getFavorites, toggleFavorite, type FavoriteItem } from '../lib/favorite
 import KeyboardShortcutsModal from './KeyboardShortcutsModal';
 import ErrorBoundary from './ErrorBoundary';
 import GlobalSearch from './GlobalSearch';
+import ToolFeedback from './ToolFeedback';
 
 const ROUTE_TITLES: Record<string, string> = {
   '/': 'Home',
@@ -499,6 +500,7 @@ export default function Layout() {
             <Outlet />
           </Suspense>
         </ErrorBoundary>
+        <ToolFeedback />
       </main>
 
       {/* ── FOOTER ── */}

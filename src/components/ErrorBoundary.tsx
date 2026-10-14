@@ -1,5 +1,6 @@
 import React from 'react';
 import { AlertTriangle, RefreshCw, Home } from 'lucide-react';
+import { reportToolError } from '../lib/telemetry';
 
 interface State {
   hasError: boolean;
@@ -31,6 +32,13 @@ export default class ErrorBoundary extends React.Component<Props, State> {
     // eslint-disable-next-line no-console
     console.error('[ErrorBoundary]', error, errorInfo);
     this.setState({ errorInfo });
+
+    // Automatically log crash to telemetry database and send alert
+    reportToolError({
+      toolPath: window.location.pathname,
+      errorMessage: error.message || 'React rendering exception',
+      errorStack: error.stack || errorInfo.componentStack || '',
+    });
   }
 
   componentDidUpdate(prevProps: Props) {

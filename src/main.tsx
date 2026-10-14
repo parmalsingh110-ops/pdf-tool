@@ -6,6 +6,10 @@ import { BrowserRouter } from 'react-router-dom';
 import App from './App.tsx';
 import './index.css';
 import { ThemeProvider } from './context/ThemeContext';
+import { initGlobalErrorLogging } from './lib/telemetry';
+
+// Activate automatic silent crash and unhandled error reporter
+initGlobalErrorLogging();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
