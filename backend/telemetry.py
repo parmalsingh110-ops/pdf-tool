@@ -7,6 +7,7 @@ Supports optional instant notifications to Telegram or Discord via webhooks.
 import os
 import sqlite3
 import hashlib
+import hmac
 import json
 import logging
 import urllib.request
@@ -39,7 +40,7 @@ def get_db_connection() -> sqlite3.Connection:
 
 
 def init_db():
-    """Initialize SQLite database tables for feedback and error telemetry."""
+    """Initialize SQLite database tables for feedback, error telemetry, and settings."""
     try:
         with get_db_connection() as conn:
             cursor = conn.cursor()
@@ -69,6 +70,13 @@ def init_db():
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS system_settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
             # Create indexes for fast query performance
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_feedback_tool ON tool_feedback(tool_path)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_errors_tool ON error_telemetry(tool_path)")
@@ -77,6 +85,47 @@ def init_db():
             logger.info("Telemetry database initialized successfully at %s", DB_PATH)
     except Exception as e:
         logger.error("Failed to initialize telemetry database: %s", e)
+
+
+def get_admin_passcode() -> str:
+    """Return configured passcode (checks DB first, then ADMIN_SECRET_KEY env var, then default)."""
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT value FROM system_settings WHERE key = 'admin_passcode'")
+            row = cursor.fetchone()
+            if row and row[0]:
+                return str(row[0])
+    except Exception as e:
+        logger.warning("Could not read admin passcode from DB: %s", e)
+    return os.environ.get("ADMIN_SECRET_KEY", "pdfadmin2026")
+
+
+def set_admin_passcode(new_passcode: str) -> bool:
+    """Persist new admin passcode into SQLite settings table."""
+    if not new_passcode or len(new_passcode.strip()) < 6:
+        return False
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO system_settings (key, value, updated_at)
+                VALUES ('admin_passcode', ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
+            """, (new_passcode.strip(),))
+            conn.commit()
+            return True
+    except Exception as e:
+        logger.error("Failed to update admin passcode: %s", e)
+        return False
+
+
+def verify_admin_key(key: str) -> bool:
+    """Constant-time comparison of admin passcode to protect against timing attacks."""
+    if not key:
+        return False
+    expected = get_admin_passcode()
+    return hmac.compare_digest(key.strip(), expected.strip())
 
 
 def hash_ip(ip: str) -> str:

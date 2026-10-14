@@ -15,7 +15,11 @@ import {
   CheckCircle2,
   Clock,
   Laptop,
-  Settings
+  Settings,
+  Eye,
+  EyeOff,
+  KeyRound,
+  ShieldCheck
 } from 'lucide-react';
 import { useSEO } from '../hooks/useSEO';
 import { getBackendUrl } from '../lib/telemetry';
@@ -69,14 +73,22 @@ export default function AdminDashboard() {
 
   const [passcode, setPasscode] = useState(() => sessionStorage.getItem('pdf_admin_pass') || '');
   const [inputPass, setInputPass] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [authError, setAuthError] = useState('');
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<TelemetryData | null>(null);
-  const [activeTab, setActiveTab] = useState<'tools' | 'errors' | 'reviews' | 'alerts'>('tools');
+  const [activeTab, setActiveTab] = useState<'tools' | 'errors' | 'reviews' | 'alerts' | 'security'>('tools');
   const [searchFilter, setSearchFilter] = useState('');
   const [expandedErrorId, setExpandedErrorId] = useState<number | null>(null);
   const [testWebhookStatus, setTestWebhookStatus] = useState<string | null>(null);
+
+  // Change Passcode state
+  const [newPasscode, setNewPasscode] = useState('');
+  const [confirmPasscode, setConfirmPasscode] = useState('');
+  const [passcodeChangeStatus, setPasscodeChangeStatus] = useState<string | null>(null);
+  const [passcodeChangeError, setPasscodeChangeError] = useState<string | null>(null);
+  const [changingPasscode, setChangingPasscode] = useState(false);
 
   const fetchTelemetry = async (key: string, urlOverride?: string) => {
     const targetUrl = urlOverride !== undefined ? urlOverride : (backendUrl || getBackendUrl());
@@ -97,7 +109,7 @@ export default function AdminDashboard() {
       });
 
       if (res.status === 401) {
-        setAuthError('Incorrect passcode. Default passcode is "pdfadmin2026".');
+        setAuthError('Invalid admin passcode. Access denied.');
         setIsAuthenticated(false);
         setLoading(false);
         return;
@@ -163,6 +175,48 @@ export default function AdminDashboard() {
     setTimeout(() => setTestWebhookStatus(null), 6000);
   };
 
+  const handleChangePasscode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPasscodeChangeStatus(null);
+    setPasscodeChangeError(null);
+
+    if (newPasscode.length < 6) {
+      setPasscodeChangeError('New passcode must be at least 6 characters long.');
+      return;
+    }
+    if (newPasscode !== confirmPasscode) {
+      setPasscodeChangeError('New passcode and confirm passcode do not match.');
+      return;
+    }
+
+    const targetUrl = backendUrl || getBackendUrl();
+    setChangingPasscode(true);
+    try {
+      const res = await fetch(`${targetUrl}/api/admin/change-passcode?key=${encodeURIComponent(passcode)}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Admin-Key': passcode,
+        },
+        body: JSON.stringify({ new_passcode: newPasscode }),
+      });
+      const json = await res.json();
+      if (res.ok && json.success) {
+        setPasscode(newPasscode);
+        sessionStorage.setItem('pdf_admin_pass', newPasscode);
+        setNewPasscode('');
+        setConfirmPasscode('');
+        setPasscodeChangeStatus('✅ Passcode successfully updated! Your new passcode is now active.');
+      } else {
+        setPasscodeChangeError(json.detail || json.message || 'Failed to update passcode.');
+      }
+    } catch {
+      setPasscodeChangeError('Network error updating passcode. Please verify backend connection.');
+    } finally {
+      setChangingPasscode(false);
+    }
+  };
+
   // Login Screen
   if (!isAuthenticated) {
     return (
@@ -183,13 +237,24 @@ export default function AdminDashboard() {
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
                 Admin Passcode
               </label>
-              <input
-                type="password"
-                value={inputPass}
-                onChange={(e) => setInputPass(e.target.value)}
-                placeholder="Enter passcode (default: pdfadmin2026)"
-                className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-rose-500/40"
-              />
+              <div className="relative">
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  value={inputPass}
+                  onChange={(e) => setInputPass(e.target.value)}
+                  placeholder="Enter Admin Passcode"
+                  autoComplete="current-password"
+                  className="w-full pl-4 pr-11 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-rose-500/40"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3.5 top-3.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                >
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
             </div>
 
             {authError && (
@@ -250,7 +315,7 @@ export default function AdminDashboard() {
           </div>
 
           <div className="mt-4 text-center text-[11px] text-slate-400">
-            Protected endpoint &bull; Environment variable <code>ADMIN_SECRET_KEY</code>
+            🔒 Secure Admin Portal &bull; Unauthorized access is strictly prohibited.
           </div>
         </div>
       </div>
@@ -368,6 +433,7 @@ export default function AdminDashboard() {
             { id: 'errors', label: 'Error Crash Reports', badge: data?.recent_errors.length || 0 },
             { id: 'reviews', label: 'User Feedback & Reviews', badge: data?.recent_feedback.length || 0 },
             { id: 'alerts', label: 'Instant Alerts Setup (Telegram / Discord)' },
+            { id: 'security', label: 'Passcode & Security' },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -736,6 +802,87 @@ export default function AdminDashboard() {
                   <li>Done! Any user error or low rating will instantly ping your Discord channel with formatted rich cards.</li>
                 </ol>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* TAB 5: PASSCODE & SECURITY */}
+        {activeTab === 'security' && (
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 sm:p-8 shadow-sm space-y-6 max-w-3xl">
+            <div>
+              <div className="inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1 rounded-full bg-rose-100 dark:bg-rose-950/60 text-rose-700 dark:text-rose-400 mb-2">
+                <ShieldCheck className="w-3.5 h-3.5" />
+                <span>ACCESS CONTROL & SECURITY</span>
+              </div>
+              <h3 className="text-xl font-bold text-slate-900 dark:text-white">
+                Change Admin Passcode
+              </h3>
+              <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400">
+                Update your secret admin passcode anytime. Your new passcode is immediately saved into the database.
+              </p>
+            </div>
+
+            <form onSubmit={handleChangePasscode} className="space-y-4 pt-2">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                  New Passcode (min 6 characters)
+                </label>
+                <input
+                  type="password"
+                  value={newPasscode}
+                  onChange={(e) => setNewPasscode(e.target.value)}
+                  placeholder="Enter new strong passcode"
+                  className="w-full px-4 py-2.5 text-xs sm:text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-rose-500/40"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                  Confirm New Passcode
+                </label>
+                <input
+                  type="password"
+                  value={confirmPasscode}
+                  onChange={(e) => setConfirmPasscode(e.target.value)}
+                  placeholder="Confirm new passcode"
+                  className="w-full px-4 py-2.5 text-xs sm:text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-rose-500/40"
+                  required
+                />
+              </div>
+
+              {passcodeChangeError && (
+                <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 text-rose-600 dark:text-rose-400 text-xs">
+                  {passcodeChangeError}
+                </div>
+              )}
+
+              {passcodeChangeStatus && (
+                <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-400 text-xs font-semibold">
+                  {passcodeChangeStatus}
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={changingPasscode || !newPasscode}
+                className="inline-flex items-center gap-2 px-6 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-semibold text-xs sm:text-sm shadow-md transition-all disabled:opacity-50"
+              >
+                <KeyRound className="w-4 h-4" />
+                <span>{changingPasscode ? 'Updating...' : 'Save New Passcode'}</span>
+              </button>
+            </form>
+
+            <div className="pt-4 border-t border-slate-100 dark:border-slate-800 text-xs text-slate-500 dark:text-slate-400 space-y-1">
+              <p className="font-semibold text-slate-700 dark:text-slate-300">
+                Alternative: Environment Variable Method
+              </p>
+              <p>
+                You can also configure your passcode directly in Render Dashboard &gt; Environment Variables as:
+              </p>
+              <pre className="p-2 rounded-lg bg-slate-100 dark:bg-slate-800 font-mono text-[11px] text-slate-800 dark:text-slate-200 mt-1">
+                ADMIN_SECRET_KEY="your_custom_secret_key"
+              </pre>
             </div>
           </div>
         )}

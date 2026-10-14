@@ -4277,22 +4277,51 @@ async def report_telemetry_error(request: Request):
 
 
 @app.get("/api/admin/telemetry")
+@limiter.limit("20/minute")
 async def get_admin_telemetry(request: Request):
     """Retrieve full telemetry, ratings, and error analytics for admin dashboard."""
     import telemetry
     key = request.headers.get("X-Admin-Key") or request.query_params.get("key", "")
-    if key != telemetry.ADMIN_SECRET_KEY:
-        raise HTTPException(status_code=401, detail="Unauthorized: Invalid Admin Passcode")
+    if not telemetry.verify_admin_key(key):
+        raise HTTPException(status_code=401, detail="Unauthorized: Access denied")
 
     return telemetry.get_telemetry_summary()
 
 
+@app.post("/api/admin/change-passcode")
+@limiter.limit("10/minute")
+async def change_admin_passcode(request: Request):
+    """Allow authorized admin to update their passcode directly."""
+    import telemetry
+    key = request.headers.get("X-Admin-Key") or request.query_params.get("key", "")
+    if not telemetry.verify_admin_key(key):
+        raise HTTPException(status_code=401, detail="Unauthorized: Access denied")
+
+    try:
+        body = await request.json()
+        new_passcode = str(body.get("new_passcode", "")).strip()
+        if len(new_passcode) < 6:
+            raise HTTPException(status_code=400, detail="New passcode must be at least 6 characters long.")
+
+        ok = telemetry.set_admin_passcode(new_passcode)
+        if not ok:
+            raise HTTPException(status_code=500, detail="Failed to save new passcode to database.")
+
+        return {"success": True, "message": "Admin passcode updated successfully."}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[PASSCODE] Failed to change passcode: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update passcode.")
+
+
 @app.post("/api/admin/test-webhook")
+@limiter.limit("10/minute")
 async def test_webhook(request: Request):
     """Send test alert to verify Discord or Telegram notifications."""
     import telemetry
     key = request.headers.get("X-Admin-Key") or request.query_params.get("key", "")
-    if key != telemetry.ADMIN_SECRET_KEY:
+    if not telemetry.verify_admin_key(key):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
     telemetry.send_discord_alert(
@@ -4305,5 +4334,6 @@ async def test_webhook(request: Request):
         "🔔 *PDF Tool Test Alert!*\nYour Telegram webhook is connected successfully! You will now receive instant alerts when a tool fails or gets a review."
     )
     return {"success": True, "message": "Test notifications triggered."}
+
 
 
