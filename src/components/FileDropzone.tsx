@@ -1,15 +1,17 @@
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import { useDropzone, FileRejection } from 'react-dropzone';
-import { UploadCloud, AlertTriangle } from 'lucide-react';
+import { UploadCloud, AlertTriangle, AlertCircle, X } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 const MAX_WARN_MB = 50;
+const DEFAULT_MAX_SIZE_BYTES = 100 * 1024 * 1024; // 100 MB hard safety ceiling
 
 interface FileDropzoneProps {
   onDrop: (acceptedFiles: File[]) => void;
   onDropRejected?: (message: string) => void;
   accept?: Record<string, string[]>;
   maxFiles?: number;
+  maxSize?: number;
   multiple?: boolean;
   title?: string;
   subtitle?: string;
@@ -32,6 +34,7 @@ export default function FileDropzone({
   onDropRejected,
   accept = { 'application/pdf': ['.pdf'] },
   maxFiles = 0,
+  maxSize = DEFAULT_MAX_SIZE_BYTES,
   multiple = true,
   title = 'Select PDF files',
   subtitle = 'or drop PDFs here',
@@ -39,13 +42,16 @@ export default function FileDropzone({
   variant = 'light',
   buttonLabel = 'Select files',
 }: FileDropzoneProps) {
+  const [dropError, setDropError] = useState<string | null>(null);
+
   const handleDrop = useCallback(
     (acceptedFiles: File[]) => {
-      // Warn if any file exceeds 50 MB (no blocking — backend has its own limit)
+      setDropError(null);
+      // Warn if any file exceeds 50 MB (processing may be slower)
       const oversized = acceptedFiles.filter((f) => f.size > MAX_WARN_MB * 1024 * 1024);
       if (oversized.length > 0 && onDropRejected) {
         onDropRejected(
-          `Large file detected (${(oversized[0].size / 1024 / 1024).toFixed(1)} MB). Processing may take longer.`,
+          `Large file detected (${(oversized[0].size / 1024 / 1024).toFixed(1)} MB). Processing may take a moment.`,
         );
       }
       onDrop(acceptedFiles);
@@ -55,28 +61,39 @@ export default function FileDropzone({
 
   const handleRejected = useCallback(
     (fileRejections: FileRejection[]) => {
-      if (!onDropRejected || fileRejections.length === 0) return;
+      if (fileRejections.length === 0) return;
       const codes = fileRejections.flatMap((r) => r.errors.map((e) => e.code));
       const uniq = [...new Set(codes)];
+      const maxMB = Math.round(maxSize / (1024 * 1024));
       let msg = 'Some files were not added.';
-      if (uniq.includes('file-invalid-type')) msg = 'File type not accepted. Check allowed formats.';
-      else if (uniq.includes('too-many-files')) msg = 'Too many files at once.';
-      else if (uniq.includes('file-too-large')) msg = 'A file is too large.';
-      onDropRejected(msg);
+      if (uniq.includes('file-too-large')) {
+        const rejectedSizeMB = (fileRejections[0].file.size / (1024 * 1024)).toFixed(1);
+        msg = `File too large (${rejectedSizeMB} MB). Maximum allowed size is ${maxMB} MB to prevent browser crashes.`;
+      } else if (uniq.includes('file-invalid-type')) {
+        msg = 'File type not accepted. Please check allowed formats.';
+      } else if (uniq.includes('too-many-files')) {
+        msg = 'Too many files at once. Please upload fewer files.';
+      }
+      setDropError(msg);
+      if (onDropRejected) {
+        onDropRejected(msg);
+      }
     },
-    [onDropRejected],
+    [maxSize, onDropRejected],
   );
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop: handleDrop,
-    onDropRejected: onDropRejected ? handleRejected : undefined,
+    onDropRejected: handleRejected,
     accept,
     maxFiles: maxFiles > 0 ? maxFiles : undefined,
+    maxSize,
     multiple,
   });
 
   const isDark = variant === 'dark';
   const hint = getFileTypeHint(accept);
+  const maxAllowedMB = Math.round(maxSize / (1024 * 1024));
 
   return (
     <div
@@ -129,10 +146,35 @@ export default function FileDropzone({
         </p>
       )}
 
+      {/* Rejection error banner */}
+      {dropError && (
+        <div
+          onClick={(e) => {
+            e.stopPropagation();
+            setDropError(null);
+          }}
+          className="mt-3 px-4 py-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/60 border border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300 text-xs sm:text-sm font-medium flex items-center gap-2 max-w-md shadow-sm transition-all"
+        >
+          <AlertCircle className="w-4 h-4 flex-shrink-0 text-rose-600 dark:text-rose-400" />
+          <span className="flex-1 text-left">{dropError}</span>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setDropError(null);
+            }}
+            className="text-rose-400 hover:text-rose-600 dark:hover:text-rose-200 p-0.5"
+            aria-label="Dismiss error"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
       {/* Max size warning */}
       <div className={cn('flex items-center gap-1.5 mt-2 text-xs', isDark ? 'text-slate-500' : 'text-gray-400')}>
-        <AlertTriangle className="w-3 h-3" />
-        <span>Max recommended size: {MAX_WARN_MB} MB</span>
+        <AlertTriangle className="w-3 h-3 text-amber-500" />
+        <span>Max size: {maxAllowedMB} MB (Safe browser processing limit)</span>
       </div>
 
       {/* CTA Button */}

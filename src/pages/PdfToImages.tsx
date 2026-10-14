@@ -62,15 +62,27 @@ export default function PdfToImages() {
       const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buf) }).promise;
       const total = pdf.numPages;
 
+      let pagesToRender = total;
+      if (total > 150) {
+        const proceed = confirm(
+          `This PDF contains ${total} pages. Rendering over 150 pages at once can exhaust browser memory and cause the tab to crash.\n\nClick OK to safely process the first 150 pages, or Cancel to stop.`
+        );
+        if (!proceed) {
+          setIsProcessing(false);
+          return;
+        }
+        pagesToRender = 150;
+      }
+
       const renderedList: RenderedImage[] = [];
       const zip = new JSZip();
 
       const ext = format === 'jpeg' ? 'jpg' : format;
       const mime = `image/${format}`;
 
-      for (let i = 1; i <= total; i++) {
-        setProgressMsg(`Rendering page ${i} of ${total} (${format.toUpperCase()})...`);
-        setProgressPercent(Math.round(5 + (i / total) * 85));
+      for (let i = 1; i <= pagesToRender; i++) {
+        setProgressMsg(`Rendering page ${i} of ${pagesToRender} (${format.toUpperCase()})...`);
+        setProgressPercent(Math.round(5 + (i / pagesToRender) * 85));
 
         const page = await pdf.getPage(i);
         const vp = page.getViewport({ scale: scaleFactor });

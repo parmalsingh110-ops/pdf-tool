@@ -109,6 +109,12 @@ export default function IncreasePdfSize() {
         return;
       }
 
+      if (targetBytesLength > 100 * 1024 * 1024) {
+        alert('Maximum target size allowed is 100 MB to prevent browser memory crashes.');
+        setIsProcessing(false);
+        return;
+      }
+
       const finalBytes = new Uint8Array(targetBytesLength);
       finalBytes.set(origBytes, 0);
 
