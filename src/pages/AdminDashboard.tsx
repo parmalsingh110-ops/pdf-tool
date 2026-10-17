@@ -22,7 +22,7 @@ import {
   ShieldCheck
 } from 'lucide-react';
 import { useSEO } from '../hooks/useSEO';
-import { getBackendUrl } from '../lib/telemetry';
+import { getBackendUrl, getPendingTelemetryCount, flushTelemetryQueue } from '../lib/telemetry';
 
 interface TelemetryData {
   summary: {
@@ -90,11 +90,28 @@ export default function AdminDashboard() {
   const [passcodeChangeError, setPasscodeChangeError] = useState<string | null>(null);
   const [changingPasscode, setChangingPasscode] = useState(false);
 
+  // Offline queue state
+  const [pendingQueueCount, setPendingQueueCount] = useState(() => getPendingTelemetryCount());
+
+  const handleSyncQueue = async () => {
+    setLoading(true);
+    await flushTelemetryQueue();
+    setPendingQueueCount(getPendingTelemetryCount());
+    if (passcode) {
+      await fetchTelemetry(passcode);
+    } else {
+      setLoading(false);
+    }
+  };
+
   const fetchTelemetry = async (key: string, urlOverride?: string) => {
     const targetUrl = urlOverride !== undefined ? urlOverride : (backendUrl || getBackendUrl());
     setLoading(true);
     setAuthError('');
     try {
+      // Also trigger a background flush of any pending browser queue
+      void flushTelemetryQueue().then(() => setPendingQueueCount(getPendingTelemetryCount()));
+
       if (!targetUrl && window.location.hostname !== 'localhost') {
         setAuthError('Backend URL is not set. Please enter your Render backend URL below.');
         setShowConfig(true);
@@ -139,6 +156,10 @@ export default function AdminDashboard() {
     if (passcode) {
       fetchTelemetry(passcode);
     }
+    const timer = setInterval(() => {
+      setPendingQueueCount(getPendingTelemetryCount());
+    }, 5000);
+    return () => clearInterval(timer);
   }, []);
 
   const handleLogin = (e: React.FormEvent) => {
@@ -348,6 +369,17 @@ export default function AdminDashboard() {
           </div>
 
           <div className="flex items-center gap-2.5">
+            {pendingQueueCount > 0 && (
+              <button
+                onClick={handleSyncQueue}
+                disabled={loading}
+                title="Telemetry reports queued locally in this browser waiting for backend. Click to sync now."
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-amber-500/10 border border-amber-500/30 text-xs font-semibold text-amber-600 dark:text-amber-400 hover:bg-amber-500/20 transition-colors"
+              >
+                <Activity className="w-3.5 h-3.5 animate-pulse" />
+                <span>{pendingQueueCount} Queued Sync</span>
+              </button>
+            )}
             <button
               onClick={() => fetchTelemetry(passcode)}
               disabled={loading}

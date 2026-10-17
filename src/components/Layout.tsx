@@ -44,6 +44,7 @@ import KeyboardShortcutsModal from './KeyboardShortcutsModal';
 import ErrorBoundary from './ErrorBoundary';
 import GlobalSearch from './GlobalSearch';
 import ToolFeedback from './ToolFeedback';
+import BrandLogo from './BrandLogo';
 
 const ROUTE_TITLES: Record<string, string> = {
   '/': 'Home',
@@ -276,9 +277,7 @@ export default function Layout() {
 
           {/* Logo */}
           <Link to="/" className="flex items-center gap-2.5 shrink-0 group">
-            <div className="w-8 h-8 rounded-lg bg-rose-600 flex items-center justify-center shrink-0 group-hover:bg-rose-700 transition-colors">
-              <FileText className="w-4 h-4 text-white" />
-            </div>
+            <BrandLogo className="w-8 h-8 rounded-xl shadow-sm" />
             <span className="font-extrabold tracking-tight text-slate-900 dark:text-white text-[15px] hidden sm:block">
               PDF Media Suite
             </span>
@@ -507,10 +506,8 @@ export default function Layout() {
       <footer className="bg-slate-50 dark:bg-slate-900 py-14 border-t border-slate-200/70 dark:border-slate-800">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 grid grid-cols-2 md:grid-cols-5 gap-10">
           <div className="col-span-2 md:col-span-1">
-            <div className="flex items-center gap-2 mb-3">
-              <div className="w-7 h-7 rounded-lg bg-rose-600 flex items-center justify-center">
-                <FileText className="w-3.5 h-3.5 text-white" />
-              </div>
+            <div className="flex items-center gap-2.5 mb-3">
+              <BrandLogo className="w-7 h-7 rounded-lg shadow-sm" />
               <h3 className="text-base font-bold text-slate-900 dark:text-white">PDF Media Suite</h3>
             </div>
             <p className="text-sm text-slate-500 dark:text-slate-400">
