@@ -7,6 +7,10 @@ import App from './App.tsx';
 import './index.css';
 import { ThemeProvider } from './context/ThemeContext';
 import { initGlobalErrorLogging } from './lib/telemetry';
+import { initDomResilience } from './lib/domResilience';
+
+// Prevent browser translate and extension DOM mutations from crashing React
+initDomResilience();
 
 // Activate automatic silent crash and unhandled error reporter
 initGlobalErrorLogging();

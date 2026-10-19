@@ -176,9 +176,13 @@ export default function IncreasePdfSize() {
                 <p className="font-bold text-slate-900 dark:text-white truncate">{file.name}</p>
                 <p className="text-sm text-slate-500 dark:text-slate-400">Current size: <strong>{formatSize(file.size)}</strong></p>
               </div>
-              <button onClick={() => { setFile(null); setCompressedUrl(null); setStats(null); }}
-                className="text-xs text-slate-500 hover:text-rose-500 dark:text-slate-400 font-medium shrink-0">
-                ✕ Change
+              <button
+                type="button"
+                onClick={() => { setFile(null); setCompressedUrl(null); setStats(null); }}
+                className="text-xs text-slate-500 hover:text-rose-500 dark:text-slate-400 font-medium shrink-0 notranslate"
+                translate="no"
+              >
+                <span>✕ Change</span>
               </button>
             </div>
 
@@ -251,30 +255,48 @@ export default function IncreasePdfSize() {
                       {inputMode.toUpperCase()}
                     </div>
                   </div>
-                  <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
-                    Target: <strong className="text-blue-600 dark:text-blue-400">{formatSize(targetBytes)}</strong>
-                    {file && <> · Current file: <strong>{formatSize(file.size)}</strong> · Will add: <strong>{formatSize(Math.max(0, targetBytes - file.size))}</strong></>}
+                  <p className="mt-2 text-xs text-slate-500 dark:text-slate-400 notranslate" translate="no">
+                    <span>Target: </span>
+                    <strong className="text-blue-600 dark:text-blue-400">{formatSize(targetBytes)}</strong>
+                    {file && (
+                      <span>
+                        <span> · Current file: </span>
+                        <strong>{formatSize(file.size)}</strong>
+                        <span> · Will add: </span>
+                        <strong>{formatSize(Math.max(0, targetBytes - file.size))}</strong>
+                      </span>
+                    )}
                   </p>
                 </div>
 
                 {/* Increase button */}
                 <div className="flex gap-3 pt-2">
                   <button
+                    type="button"
                     onClick={increasePdfSize}
                     disabled={isProcessing || !file || file.size >= targetBytes}
-                    className="flex-1 py-4 bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-base font-extrabold rounded-xl hover:from-blue-700 hover:to-indigo-700 transition-all disabled:opacity-50 shadow-md flex items-center justify-center gap-2"
+                    className="flex-1 py-4 bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-base font-extrabold rounded-xl hover:from-blue-700 hover:to-indigo-700 transition-all disabled:opacity-50 shadow-md flex items-center justify-center gap-2 notranslate"
+                    translate="no"
                   >
                     {isProcessing ? (
-                      <><div className="w-5 h-5 border-3 border-white border-t-transparent rounded-full animate-spin" />Increasing Size…</>
+                      <span className="flex items-center gap-2">
+                        <span className="w-5 h-5 border-3 border-white border-t-transparent rounded-full animate-spin inline-block" />
+                        <span>Increasing Size…</span>
+                      </span>
                     ) : (
-                      <><Maximize2 className="w-5 h-5" />Increase PDF Size</>
+                      <span className="flex items-center gap-2">
+                        <Maximize2 className="w-5 h-5" />
+                        <span>Increase PDF Size</span>
+                      </span>
                     )}
                   </button>
                   <button
+                    type="button"
                     onClick={() => setFile(null)}
-                    className="px-5 py-4 bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 font-semibold rounded-xl hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors"
+                    className="px-5 py-4 bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 font-semibold rounded-xl hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors notranslate"
+                    translate="no"
                   >
-                    Cancel
+                    <span>Cancel</span>
                   </button>
                 </div>
               </div>
@@ -301,13 +323,22 @@ export default function IncreasePdfSize() {
                     </div>
                   </div>
                 )}
-                <a href={compressedUrl!} download={`increased_${file.name}`}
-                  className="flex items-center justify-center gap-2 w-full py-3.5 bg-blue-600 text-white font-extrabold rounded-xl hover:bg-blue-700 transition-colors shadow-md">
-                  <Download className="w-5 h-5" />Download Increased PDF
+                <a
+                  href={compressedUrl!}
+                  download={`increased_${file.name}`}
+                  className="flex items-center justify-center gap-2 w-full py-3.5 bg-blue-600 text-white font-extrabold rounded-xl hover:bg-blue-700 transition-colors shadow-md notranslate"
+                  translate="no"
+                >
+                  <Download className="w-5 h-5" />
+                  <span>Download Increased PDF</span>
                 </a>
-                <button onClick={() => { if (compressedUrl) URL.revokeObjectURL(compressedUrl); setFile(null); setCompressedUrl(null); setStats(null); }}
-                  className="mt-3 text-sm text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 font-medium mx-auto block">
-                  ↩ Process another PDF
+                <button
+                  type="button"
+                  onClick={() => { if (compressedUrl) URL.revokeObjectURL(compressedUrl); setFile(null); setCompressedUrl(null); setStats(null); }}
+                  className="mt-3 text-sm text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 font-medium mx-auto block notranslate"
+                  translate="no"
+                >
+                  <span>↩ Process another PDF</span>
                 </button>
 
                 {/* Cross-link after download */}

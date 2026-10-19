@@ -29,6 +29,8 @@ ADMIN_SECRET_KEY = os.environ.get("ADMIN_SECRET_KEY", "pdfadmin2026")
 
 # Webhook URLs (optional - if set, sends instant alerts)
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL", "")
+DISCORD_FEEDBACK_WEBHOOK_URL = os.environ.get("DISCORD_FEEDBACK_WEBHOOK_URL", "") or DISCORD_WEBHOOK_URL
+DISCORD_CRASH_WEBHOOK_URL = os.environ.get("DISCORD_CRASH_WEBHOOK_URL", "") or DISCORD_WEBHOOK_URL
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 
@@ -136,9 +138,16 @@ def hash_ip(ip: str) -> str:
     return hashlib.sha256(f"{ip}_{salt}".encode()).hexdigest()[:16]
 
 
-def send_discord_alert(title: str, description: str, fields: List[Dict[str, str]], color: int = 0x3498DB):
+def send_discord_alert(
+    title: str,
+    description: str,
+    fields: List[Dict[str, str]],
+    color: int = 0x3498DB,
+    webhook_url: Optional[str] = None
+):
     """Send formatted embed message to Discord webhook if configured."""
-    if not DISCORD_WEBHOOK_URL:
+    target_url = (webhook_url or DISCORD_WEBHOOK_URL).strip()
+    if not target_url:
         return
     try:
         payload = {
@@ -153,7 +162,7 @@ def send_discord_alert(title: str, description: str, fields: List[Dict[str, str]
         }
         data = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(
-            DISCORD_WEBHOOK_URL,
+            target_url,
             data=data,
             headers={"Content-Type": "application/json", "User-Agent": "PdfTool-Telemetry"}
         )
@@ -193,7 +202,7 @@ def save_feedback(
     user_agent: str = "",
     client_ip: str = ""
 ) -> int:
-    """Save user rating and feedback into SQLite and notify webhooks if applicable."""
+    """Save user rating and feedback into SQLite and notify webhooks for all ratings."""
     ip_h = hash_ip(client_ip)
     feedback_id = -1
     try:
@@ -212,28 +221,46 @@ def save_feedback(
         logger.error("Error saving feedback: %s", e)
         return -1
 
-    # Send instant alert if negative rating or notable feedback
-    if rating <= 2 or comment:
-        stars = "⭐" * rating
-        disc_fields = [
-            {"name": "Tool", "value": f"`{tool_name}` ({tool_path})", "inline": True},
-            {"name": "Rating", "value": f"{stars} ({rating}/5)", "inline": True},
-            {"name": "Type", "value": feedback_type, "inline": True},
-        ]
-        if comment:
-            disc_fields.append({"name": "User Comment", "value": comment[:500], "inline": False})
-        color = 0xE74C3C if rating <= 2 else 0xF1C40F
-        send_discord_alert("📝 New Tool Feedback", f"User submitted a review for **{tool_name}**", disc_fields, color)
+    # Send instant alert for ALL user feedback (1 to 5 stars)
+    safe_rating = max(1, min(5, rating))
+    stars = "⭐" * safe_rating
+    disc_fields = [
+        {"name": "Tool", "value": f"`{tool_name}` ({tool_path})", "inline": True},
+        {"name": "Rating", "value": f"{stars} ({safe_rating}/5)", "inline": True},
+        {"name": "Type / Category", "value": feedback_type or "General", "inline": True},
+    ]
+    if comment:
+        disc_fields.append({"name": "User Comment", "value": comment[:500], "inline": False})
+    else:
+        disc_fields.append({"name": "User Comment", "value": "*(No comment provided)*", "inline": False})
 
-        tg_msg = (
-            f"📝 *New Tool Feedback*\n"
-            f"• *Tool:* `{tool_name}` ({tool_path})\n"
-            f"• *Rating:* {stars} ({rating}/5)\n"
-            f"• *Issue/Category:* {feedback_type}\n"
-        )
-        if comment:
-            tg_msg += f"• *Comment:* {comment}\n"
-        send_telegram_alert(tg_msg)
+    if safe_rating >= 4:
+        color = 0x2ECC71  # Vibrant Green for positive feedback
+        title = f"🌟 New Positive Review ({safe_rating}/5 Stars)"
+    elif safe_rating == 3:
+        color = 0xF1C40F  # Gold/Yellow for neutral
+        title = f"💬 New User Review ({safe_rating}/5 Stars)"
+    else:
+        color = 0xE74C3C  # Red for negative feedback
+        title = f"⚠️ Low Rating Feedback ({safe_rating}/5 Stars)"
+
+    send_discord_alert(
+        title=title,
+        description=f"User submitted a review for **{tool_name}**",
+        fields=disc_fields,
+        color=color,
+        webhook_url=DISCORD_FEEDBACK_WEBHOOK_URL
+    )
+
+    tg_msg = (
+        f"🌟 *New User Review* ({safe_rating}/5)\n"
+        f"• *Tool:* `{tool_name}` ({tool_path})\n"
+        f"• *Rating:* {stars} ({safe_rating}/5)\n"
+        f"• *Category:* {feedback_type}\n"
+    )
+    if comment:
+        tg_msg += f"• *Comment:* {comment}\n"
+    send_telegram_alert(tg_msg)
 
     return feedback_id
 
@@ -267,7 +294,7 @@ def save_error(
         logger.error("Error saving error telemetry: %s", e)
         return -1
 
-    # Send instant crash alert
+    # Send instant crash alert with high-visibility styling
     disc_fields = [
         {"name": "Tool", "value": f"`{tool_name}` ({tool_path})", "inline": True},
         {"name": "Error", "value": f"```{error_message[:300]}```", "inline": False},
@@ -275,7 +302,14 @@ def save_error(
     if file_info:
         file_desc = f"Name: {file_info.get('name', 'N/A')} | Size: {file_info.get('sizeFormatted', 'N/A')}"
         disc_fields.append({"name": "File Details", "value": file_desc, "inline": False})
-    send_discord_alert("🚨 Tool Failure / Crash Detected", f"Error triggered in `{tool_path}`", disc_fields, 0xE74C3C)
+
+    send_discord_alert(
+        title="🚨 Tool Failure / Crash Detected",
+        description=f"Error triggered in `{tool_path}`",
+        fields=disc_fields,
+        color=0xE74C3C,
+        webhook_url=DISCORD_CRASH_WEBHOOK_URL
+    )
 
     tg_msg = (
         f"🚨 *Tool Failure Alert!*\n"
