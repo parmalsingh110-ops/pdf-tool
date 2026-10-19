@@ -218,7 +218,7 @@ export default function ExamDocumentMerger() {
       if (bestPdfBytes) {
         const finalKb = Math.round(bestPdfBytes.length / 1024);
         setFinalSizeKb(finalKb);
-        const blob = new Blob([bestPdfBytes], { type: 'application/pdf' });
+        const blob = new Blob([bestPdfBytes as any], { type: 'application/pdf' });
         setMergedPdfUrl(URL.createObjectURL(blob));
       }
     } catch (err: any) {
