@@ -1,6 +1,8 @@
 import React from 'react';
-import { AlertTriangle, RefreshCw, Home } from 'lucide-react';
+import { AlertTriangle, RefreshCw, Home, Sparkles } from 'lucide-react';
 import { reportToolError } from '../lib/telemetry';
+import { isChunkLoadError, handleChunkLoadFailure } from '../lib/chunkReloader';
+import { isDomMutationError } from '../lib/domResilience';
 
 interface State {
   hasError: boolean;
@@ -33,7 +35,20 @@ export default class ErrorBoundary extends React.Component<Props, State> {
     console.error('[ErrorBoundary]', error, errorInfo);
     this.setState({ errorInfo });
 
-    // Automatically log crash to telemetry database and send alert
+    // Handle post-deployment stale chunk errors (e.g. user had old tab open when new version was deployed)
+    if (isChunkLoadError(error)) {
+      console.warn('[ErrorBoundary] Chunk load error detected, triggering auto-reload...');
+      handleChunkLoadFailure('ErrorBoundary');
+      return; // Do not send false alarm crash alert to Discord
+    }
+
+    // Handle Google Translate / extension DOM mutations
+    if (isDomMutationError(error)) {
+      console.warn('[ErrorBoundary] DOM mutation error suppressed from crash telemetry.');
+      return; // Do not send false alarm crash alert to Discord
+    }
+
+    // Automatically log actual crashes to telemetry database and send alert
     reportToolError({
       toolPath: window.location.pathname,
       errorMessage: error.message || 'React rendering exception',
@@ -75,8 +90,43 @@ export default class ErrorBoundary extends React.Component<Props, State> {
       return <React.Fragment key={this.state.resetKey}>{this.props.children}</React.Fragment>;
     }
 
+    const isChunkError = isChunkLoadError(this.state.error);
     const message = this.state.error?.message ?? 'An unexpected error occurred.';
     const stack = this.state.error?.stack ?? '';
+
+    if (isChunkError) {
+      return (
+        <div className="flex-1 flex items-center justify-center p-6 min-h-[60vh]">
+          <div className="w-full max-w-md bg-white dark:bg-slate-900 border border-blue-200 dark:border-blue-900/60 rounded-2xl shadow-lg p-8 text-center">
+            <div className="w-14 h-14 rounded-full bg-blue-50 dark:bg-blue-950/50 text-blue-600 dark:text-blue-400 flex items-center justify-center mx-auto mb-4">
+              <Sparkles className="w-7 h-7" />
+            </div>
+            <h2 className="text-xl font-extrabold text-slate-900 dark:text-white mb-2">
+              New Update Available
+            </h2>
+            <p className="text-sm text-slate-600 dark:text-slate-400 mb-6 leading-relaxed">
+              We just released an update with new improvements. Please refresh to load the latest tools.
+            </p>
+            <div className="flex flex-col sm:flex-row gap-3 justify-center">
+              <button
+                onClick={this.handleReload}
+                className="inline-flex items-center justify-center gap-2 px-5 py-3 bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded-xl transition-colors shadow-md"
+              >
+                <RefreshCw className="w-4 h-4" />
+                Update &amp; Refresh
+              </button>
+              <button
+                onClick={this.handleHome}
+                className="inline-flex items-center justify-center gap-2 px-4 py-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-sm font-semibold rounded-xl transition-colors"
+              >
+                <Home className="w-4 h-4" />
+                Home
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
 
     return (
       <div className="flex-1 flex items-center justify-center p-6 min-h-[60vh]">

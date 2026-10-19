@@ -8,6 +8,10 @@ import './index.css';
 import { ThemeProvider } from './context/ThemeContext';
 import { initGlobalErrorLogging } from './lib/telemetry';
 import { initDomResilience } from './lib/domResilience';
+import { initChunkReloader } from './lib/chunkReloader';
+
+// Automatically handle and recover from stale build chunk errors after deployments
+initChunkReloader();
 
 // Prevent browser translate and extension DOM mutations from crashing React
 initDomResilience();

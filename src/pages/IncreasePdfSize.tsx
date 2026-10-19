@@ -174,7 +174,10 @@ export default function IncreasePdfSize() {
               </div>
               <div className="flex-1 min-w-0">
                 <p className="font-bold text-slate-900 dark:text-white truncate">{file.name}</p>
-                <p className="text-sm text-slate-500 dark:text-slate-400">Current size: <strong>{formatSize(file.size)}</strong></p>
+                <p className="text-sm text-slate-500 dark:text-slate-400">
+                  <span>Current size: </span>
+                  <strong className="notranslate" translate="no">{formatSize(file.size)}</strong>
+                </p>
               </div>
               <button
                 type="button"
@@ -311,15 +314,15 @@ export default function IncreasePdfSize() {
                   </div>
                 </div>
                 {stats && (
-                  <div className="flex justify-center gap-10 mb-5 p-4 bg-white dark:bg-slate-800 rounded-xl border border-blue-100 dark:border-blue-900 shadow-sm text-center">
+                  <div className="flex justify-center gap-10 mb-5 p-4 bg-white dark:bg-slate-800 rounded-xl border border-blue-100 dark:border-blue-900 shadow-sm text-center notranslate" translate="no">
                     <div>
-                      <p className="text-xs text-slate-500 mb-1">Original</p>
-                      <p className="font-bold text-slate-900 dark:text-white text-lg">{formatSize(stats.original)}</p>
+                      <p className="text-xs text-slate-500 mb-1"><span>Original</span></p>
+                      <p className="font-bold text-slate-900 dark:text-white text-lg notranslate">{formatSize(stats.original)}</p>
                     </div>
-                    <div className="text-2xl text-blue-400 flex items-center">→</div>
+                    <div className="text-2xl text-blue-400 flex items-center notranslate">→</div>
                     <div>
-                      <p className="text-xs text-slate-500 mb-1">New Size</p>
-                      <p className="font-bold text-blue-700 dark:text-blue-300 text-xl">{formatSize(stats.newSize)}</p>
+                      <p className="text-xs text-slate-500 mb-1"><span>New Size</span></p>
+                      <p className="font-bold text-blue-700 dark:text-blue-300 text-xl notranslate">{formatSize(stats.newSize)}</p>
                     </div>
                   </div>
                 )}

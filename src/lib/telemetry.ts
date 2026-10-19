@@ -10,6 +10,9 @@
  * - Deduplication & Safety Caps: Limits memory usage and prevents duplicate error spam.
  */
 
+import { isChunkLoadError, handleChunkLoadFailure } from './chunkReloader';
+import { isDomMutationError } from './domResilience';
+
 export interface ToolFeedbackPayload {
   toolPath: string;
   toolName: string;
@@ -267,6 +270,11 @@ export async function submitToolFeedback(payload: ToolFeedbackPayload): Promise<
  */
 export async function reportToolError(payload: ToolErrorPayload): Promise<void> {
   try {
+    // Never report stale chunk reload errors or browser translation DOM exceptions as crashes
+    if (isChunkLoadError(payload.errorMessage) || isDomMutationError(payload.errorMessage)) {
+      return;
+    }
+
     const signature = `${payload.toolPath}:${payload.errorMessage.slice(0, 80)}`;
     if (recentErrors.has(signature)) {
       return; // Deduplicate
@@ -302,6 +310,20 @@ export function initGlobalErrorLogging(): void {
   window.addEventListener('error', (event) => {
     if (!event.filename || event.filename.includes('chrome-extension')) return;
 
+    // Check for stale chunk load errors (post-deployment cache mismatch)
+    if (isChunkLoadError(event.error) || isChunkLoadError(event.message)) {
+      handleChunkLoadFailure('window.error');
+      try { event.preventDefault(); } catch {}
+      return;
+    }
+
+    // Check for Google Translate / extension DOM mutations
+    if (isDomMutationError(event.error) || isDomMutationError(event.message)) {
+      console.warn('[Telemetry] Suppressed DOM mutation error from reporting:', event.message);
+      try { event.preventDefault(); } catch {}
+      return;
+    }
+
     void reportToolError({
       toolPath: window.location.pathname,
       errorMessage: event.message || 'Script error',
@@ -313,6 +335,21 @@ export function initGlobalErrorLogging(): void {
   window.addEventListener('unhandledrejection', (event) => {
     const reason = event.reason;
     const msg = reason?.message || String(reason || 'Unhandled Promise Rejection');
+
+    // Check for stale chunk load errors (dynamic import failure)
+    if (isChunkLoadError(reason) || isChunkLoadError(msg)) {
+      handleChunkLoadFailure('unhandledrejection');
+      try { event.preventDefault(); } catch {}
+      return;
+    }
+
+    // Check for Google Translate / extension DOM mutations
+    if (isDomMutationError(reason) || isDomMutationError(msg)) {
+      console.warn('[Telemetry] Suppressed DOM mutation rejection from reporting:', msg);
+      try { event.preventDefault(); } catch {}
+      return;
+    }
+
     void reportToolError({
       toolPath: window.location.pathname,
       errorMessage: msg,
