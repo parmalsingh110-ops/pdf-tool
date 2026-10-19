@@ -390,15 +390,19 @@ export default function ExamDocumentMerger() {
                 type="button"
                 onClick={mergeAndCompressBundle}
                 disabled={isProcessing}
-                className="w-full py-4 bg-blue-600 hover:bg-blue-700 text-white font-bold text-base rounded-xl shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                className="w-full py-4 bg-blue-600 hover:bg-blue-700 text-white font-bold text-base rounded-xl shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 notranslate"
+                translate="no"
               >
                 {isProcessing ? (
-                  <>Processing {docs.length} Documents...</>
+                  <span className="flex items-center gap-2">
+                    <span className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin inline-block" />
+                    <span>Processing {docs.length} Documents...</span>
+                  </span>
                 ) : (
-                  <>
+                  <span className="flex items-center gap-2">
                     <Layers className="w-5 h-5" />
-                    Merge All Documents into Single PDF (Target: Under {targetSizeLimitKb} KB)
-                  </>
+                    <span>Merge All Documents into Single PDF (Target: Under {targetSizeLimitKb} KB)</span>
+                  </span>
                 )}
               </button>
             </div>
@@ -408,9 +412,11 @@ export default function ExamDocumentMerger() {
                 <CheckCircle2 className="w-7 h-7" />
               </div>
               <div>
-                <h3 className="text-xl font-extrabold text-emerald-950">Documents Merged & Compressed!</h3>
+                <h3 className="text-xl font-extrabold text-emerald-950">Documents Merged &amp; Compressed!</h3>
                 <p className="text-xs text-emerald-800 mt-1">
-                  Final Bundle Size: <strong>{finalSizeKb} KB</strong> (Limit: Under {targetSizeLimitKb} KB) • Portal Accepted ✅
+                  <span>Final Bundle Size: </span>
+                  <strong className="notranslate" translate="no">{finalSizeKb} KB</strong>
+                  <span> (Limit: Under {targetSizeLimitKb} KB) • Portal Accepted ✅</span>
                 </p>
               </div>
 

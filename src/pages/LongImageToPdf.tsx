@@ -83,8 +83,9 @@ export default function LongImageToPdf() {
             <p className="text-xs text-gray-500 dark:text-slate-400 mt-2">Overlap between pages prevents content from being cut off at page boundaries</p>
           </div>
           <div className="flex gap-3">
-            <button onClick={process} disabled={busy} className="flex-1 py-4 bg-sky-600 hover:bg-sky-700 text-white font-bold rounded-xl flex items-center justify-center gap-2 transition-colors disabled:opacity-50">
-              {busy ? <Loader2 className="w-5 h-5 animate-spin" /> : <Image className="w-5 h-5" />}{busy ? "Slicing into pages…" : "Convert to PDF"}
+            <button onClick={process} disabled={busy} className="flex-1 py-4 bg-sky-600 hover:bg-sky-700 text-white font-bold rounded-xl flex items-center justify-center gap-2 transition-colors disabled:opacity-50 notranslate" translate="no">
+              {busy ? <Loader2 className="w-5 h-5 animate-spin" /> : <Image className="w-5 h-5" />}
+              <span>{busy ? "Slicing into pages…" : "Convert to PDF"}</span>
             </button>
             <button onClick={() => setFile(null)} className="px-6 py-4 bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-slate-300 rounded-xl font-semibold hover:bg-gray-200 dark:hover:bg-slate-700 transition-colors">Cancel</button>
           </div>

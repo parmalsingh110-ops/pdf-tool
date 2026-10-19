@@ -115,8 +115,9 @@ export default function AccessibilityChecker() {
             <div className="flex-1 min-w-0"><p className="font-semibold text-gray-900 dark:text-white truncate">{file.name}</p><p className="text-sm text-gray-500 dark:text-slate-400">{(file.size/1024/1024).toFixed(2)} MB</p></div>
           </div>
           <div className="flex gap-3">
-            <button onClick={analyze} disabled={busy} className="flex-1 py-4 bg-green-600 hover:bg-green-700 text-white font-bold rounded-xl flex items-center justify-center gap-2 transition-colors disabled:opacity-50">
-              {busy ? <Loader2 className="w-5 h-5 animate-spin" /> : <Accessibility className="w-5 h-5" />}{busy ? "Analyzing…" : "Run Accessibility Check"}
+            <button onClick={analyze} disabled={busy} className="flex-1 py-4 bg-green-600 hover:bg-green-700 text-white font-bold rounded-xl flex items-center justify-center gap-2 transition-colors disabled:opacity-50 notranslate" translate="no">
+              {busy ? <Loader2 className="w-5 h-5 animate-spin" /> : <Accessibility className="w-5 h-5" />}
+              <span>{busy ? "Analyzing…" : "Run Accessibility Check"}</span>
             </button>
             <button onClick={() => setFile(null)} className="px-6 py-4 bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-slate-300 rounded-xl font-semibold hover:bg-gray-200 dark:hover:bg-slate-700 transition-colors">Cancel</button>
           </div>

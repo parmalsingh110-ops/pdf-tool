@@ -361,8 +361,20 @@ export default function IdCardJoiner() {
               ))}
             </div>
             <button onClick={buildPdf} disabled={!front.filteredUrl||!back.filteredUrl||processing}
-              className="w-full py-4 rounded-xl bg-gradient-to-r from-orange-500 to-rose-500 text-white font-extrabold text-base shadow-lg hover:from-orange-600 hover:to-rose-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2">
-              {processing ? (<><div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"/>Generating…</>) : (<><Printer className="w-5 h-5"/>Generate Print-Ready A4 PDF &amp; JPG</>)}
+              className="w-full py-4 rounded-xl bg-gradient-to-r from-orange-500 to-rose-500 text-white font-extrabold text-base shadow-lg hover:from-orange-600 hover:to-rose-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 notranslate"
+              translate="no"
+            >
+              {processing ? (
+                <span className="flex items-center gap-2">
+                  <span className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin inline-block" />
+                  <span>Generating…</span>
+                </span>
+              ) : (
+                <span className="flex items-center gap-2">
+                  <Printer className="w-5 h-5" />
+                  <span>Generate Print-Ready A4 PDF &amp; JPG</span>
+                </span>
+              )}
             </button>
             {(!front.filteredUrl || !back.filteredUrl) && <p className="text-center text-xs text-slate-400 mt-2">Upload both Front &amp; Back to generate</p>}
           </div>

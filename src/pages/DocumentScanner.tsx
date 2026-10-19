@@ -486,8 +486,9 @@ export default function DocumentScanner() {
                     </div>
 
                     <div className="flex gap-4">
-                      <button onClick={applyCrop} disabled={busy} className="px-8 py-3 bg-indigo-600 text-white font-bold rounded-xl shadow-md hover:bg-indigo-700 flex gap-2 items-center">
-                         {busy ? <Loader2 className="w-5 h-5 animate-spin"/> : <Crop className="w-5 h-5"/>} Align & Process
+                      <button onClick={applyCrop} disabled={busy} className="px-8 py-3 bg-indigo-600 text-white font-bold rounded-xl shadow-md hover:bg-indigo-700 flex gap-2 items-center notranslate" translate="no">
+                         {busy ? <Loader2 className="w-5 h-5 animate-spin"/> : <Crop className="w-5 h-5"/>}
+                         <span>Align &amp; Process</span>
                       </button>
                     </div>
                   </div>

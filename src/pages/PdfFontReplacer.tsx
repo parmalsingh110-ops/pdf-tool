@@ -1,4 +1,4 @@
-﻿import { useState } from "react";
+import { useState } from "react";
 import { Type, Download, AlertTriangle, Loader2, FileText, CheckCircle } from "lucide-react";
 import FileDropzone from "../components/FileDropzone";
 import { usePageSEO } from "../lib/usePageSEO";
@@ -68,8 +68,9 @@ export default function PdfFontReplacer() {
           </div>
           {error && <div className="p-4 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-xl flex items-start gap-3 text-red-700 dark:text-red-300 text-sm"><AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" /><p>{error}</p></div>}
           <div className="flex gap-3">
-            <button onClick={process} disabled={busy} className="flex-1 py-4 bg-fuchsia-600 hover:bg-fuchsia-700 text-white font-bold rounded-xl flex items-center justify-center gap-2 transition-colors disabled:opacity-50">
-              {busy ? <Loader2 className="w-5 h-5 animate-spin" /> : <Type className="w-5 h-5" />}{busy ? "Replacing fonts…" : "Replace Fonts"}
+            <button onClick={process} disabled={busy} className="flex-1 py-4 bg-fuchsia-600 hover:bg-fuchsia-700 text-white font-bold rounded-xl flex items-center justify-center gap-2 transition-colors disabled:opacity-50 notranslate" translate="no">
+              {busy ? <Loader2 className="w-5 h-5 animate-spin" /> : <Type className="w-5 h-5" />}
+              <span>{busy ? "Replacing fonts…" : "Replace Fonts"}</span>
             </button>
             <button onClick={() => { setFile(null); setError(null); }} className="px-6 py-4 bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-slate-300 rounded-xl font-semibold hover:bg-gray-200 dark:hover:bg-slate-700 transition-colors">Cancel</button>
           </div>
