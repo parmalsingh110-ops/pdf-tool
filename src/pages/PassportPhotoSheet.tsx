@@ -1,907 +1,2773 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Download, Camera, RefreshCw, User, FileImage, Loader2, RotateCcw, Eye, Sparkles } from 'lucide-react';
+import {
+  Download,
+  Camera,
+  RefreshCw,
+  User,
+  FileImage,
+  Loader2,
+  RotateCcw,
+  Eye,
+  Sparkles,
+  Printer,
+  Scissors,
+  CheckCircle2,
+  Settings2,
+  ZoomIn,
+  ZoomOut,
+  RotateCw,
+  FlipHorizontal,
+  Grid,
+  Plus,
+  Minus,
+  Check,
+  AlertCircle,
+  Trash2,
+  ArrowLeft,
+  ChevronLeft,
+  ChevronRight,
+  Package,
+  Layers,
+  Image as ImageIcon,
+  ShieldCheck,
+  Sliders,
+  Maximize2,
+  Info,
+  Sun,
+  Contrast,
+  CreditCard,
+  FileText,
+  FileCheck2,
+} from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { preload, removeBackground } from '@imgly/background-removal';
-import * as tf from '@tensorflow/tfjs-core';
-import '@tensorflow/tfjs-backend-webgl';
-import { createSegmenter, SupportedModels } from '@tensorflow-models/body-segmentation';
-import type { BodySegmenter } from '@tensorflow-models/body-segmentation';
+import { PDFDocument } from 'pdf-lib';
+import JSZip from 'jszip';
 import FileDropzone from '../components/FileDropzone';
-import {
-  PASSPORT_ASPECT,
-  clampCropRect,
-  maskToPersonBBox,
-  suggestCropFromPerson,
-  centerAspectCrop,
-  buildPassportGridPdf,
-  type SheetPageSize,
-} from '../lib/passportPhotoSheet';
-import {
-  type PhotoAdjustments,
-  DEFAULT_ADJUSTMENTS,
-  isDefault,
-  applyAdjustments,
-  ADJUSTMENT_GROUPS,
-  ADJUSTMENT_RANGES,
-  PRESETS,
-} from '../lib/photoAdjustments';
-import { fetchGeminiWithFallback } from '../lib/advancedVisionEngine';
 import { useSEO } from '../hooks/useSEO';
 
-const PHOTO_W_MM = 35;
-const PHOTO_H_MM = 45;
-const DPI_OPTIONS = [300, 600] as const;
-type DpiChoice = (typeof DPI_OPTIONS)[number];
+/* ─── Standard Photo Size Presets (mm) ─── */
+export interface PhotoPreset {
+  id: string;
+  label: string;
+  wMm: number;
+  hMm: number;
+  desc?: string;
+}
+
+export const PHOTO_PRESETS: PhotoPreset[] = [
+  { id: 'in_passport', label: '3.5 × 4.5 cm — Indian Passport / Aadhaar / PAN ★', wMm: 35, hMm: 45, desc: 'India standard 35x45mm' },
+  { id: 'us_visa', label: '2 × 2 inch (51×51 mm) — US Visa / OCI / Passport', wMm: 50.8, hMm: 50.8, desc: 'US 2x2 inch square' },
+  { id: 'in_exam', label: '3.5 × 3.5 cm — SSC, UPSC & Railway Exams', wMm: 35, hMm: 35, desc: 'Govt online exam portals' },
+  { id: 'stamp', label: '2.5 × 3.0 cm — Stamp Size / Admit Card', wMm: 25, hMm: 30, desc: 'Small stamp size' },
+  { id: 'uk_eu', label: '3.5 × 4.5 cm — UK / Europe / Schengen Visa', wMm: 35, hMm: 45, desc: 'Schengen & UK biometrics' },
+  { id: 'canada', label: '5.0 × 7.0 cm — Canada Visa / Citizenship', wMm: 50, hMm: 70, desc: 'Canada high-portrait size' },
+  { id: 'joint', label: '7.0 × 4.5 cm — Joint Photo (Couple / Pension)', wMm: 70, hMm: 45, desc: 'Double width couple photo' },
+  { id: 'custom', label: 'Custom Dimensions (Enter mm)', wMm: 35, hMm: 45, desc: 'Manual width & height' },
+];
+
+/* ─── Paper Sizes (mm) ─── */
+export interface PaperPreset {
+  id: string;
+  name: string;
+  desc: string;
+  wMm: number;
+  hMm: number;
+}
+
+export const PAPER_PRESETS: PaperPreset[] = [
+  { id: '4r', name: '4R (4×6 in)', desc: '10×15 cm Standard Studio Photo Paper ★', wMm: 101.6, hMm: 152.4 },
+  { id: 'a4', name: 'A4', desc: '210 × 297 mm Standard Home/Office Sheet', wMm: 210, hMm: 297 },
+  { id: 'a5', name: 'A5', desc: '148 × 210 mm Half-A4 Sheet', wMm: 148, hMm: 210 },
+  { id: 'letter', name: 'US Letter', desc: '8.5 × 11 in Standard Sheet', wMm: 215.9, hMm: 279.4 },
+];
+
+/* ─── Photo Item in Multi-Photo Session ─── */
+export interface PhotoSlotItem {
+  id: string;
+  file: File;
+  objectUrl: string;
+  img: HTMLImageElement;
+  processedImg: HTMLImageElement | null;
+  copies: number;
+  zoom: number; // 60 - 200%
+  rotation: number; // -30 to +30 deg (slider) or -180 to 180 (90° steps)
+  isFlippedH: boolean;
+  panOffset: { x: number; y: number };
+  isBgRemoved: boolean;
+  isRemovingBg: boolean;
+  isJointPhoto: boolean;
+  // Studio Face Lighting (Real Photography Enhancement)
+  brightness: number; // -30 to +40 (default 0)
+  contrast: number;   // -30 to +40 (default 0)
+  saturation: number; // -50 to +60 (default 0) — NEW
+}
 
 const bgRemoverConfig = {
-  // publicPath points to the SEPARATE data package that hosts WASM/ONNX models on CDN.
-  // Note: it's background-removal-DATA (different npm package), not background-removal!
   publicPath: 'https://staticimgly.com/@imgly/background-removal-data/1.7.0/dist/',
   model: 'isnet_quint8' as const,
   device: 'cpu' as const,
-  proxyToWorker: false,   // proxyToWorker only works with WebGPU; CPU mode must be false
+  proxyToWorker: false,
   rescale: true,
   fetchArgs: { cache: 'force-cache' as RequestCache },
   output: { format: 'image/png' as const, quality: 1 },
 };
 
-const applyRemoveBg = async (blob: Blob) => {
-  const result = await removeBackground(blob, bgRemoverConfig);
-  return result as Blob;
-};
-
-async function canvasToBlob(c: HTMLCanvasElement, type = 'image/png', quality?: number): Promise<Blob> {
-  return new Promise((res, rej) => c.toBlob((b) => (b ? res(b) : rej(new Error('toBlob'))), type, quality));
-}
-
-function compositeOnColor(img: HTMLImageElement, hexColor: string): HTMLCanvasElement {
-  const c = document.createElement('canvas');
-  c.width = img.naturalWidth || img.width;
-  c.height = img.naturalHeight || img.height;
-  const ctx = c.getContext('2d');
-  if (!ctx) throw new Error('2d');
-  ctx.fillStyle = hexColor;
-  ctx.fillRect(0, 0, c.width, c.height);
-  ctx.drawImage(img, 0, 0, c.width, c.height);
-  return c;
-}
-
-async function cropToCanvas(img: HTMLImageElement, crop: { x: number; y: number; w: number; h: number }): Promise<HTMLCanvasElement> {
-  const c = document.createElement('canvas');
-  c.width = Math.round(crop.w);
-  c.height = Math.round(crop.h);
-  const ctx = c.getContext('2d');
-  if (!ctx) throw new Error('2d');
-  ctx.drawImage(img, crop.x, crop.y, crop.w, crop.h, 0, 0, c.width, c.height);
-  return c;
-}
-
-function unsharpMask(canvas: HTMLCanvasElement, amount = 0.5, radius = 1): HTMLCanvasElement {
-  const w = canvas.width, h = canvas.height;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return canvas;
-  const blurred = document.createElement('canvas');
-  blurred.width = w; blurred.height = h;
-  const bctx = blurred.getContext('2d');
-  if (!bctx) return canvas;
-  bctx.filter = `blur(${radius}px)`;
-  bctx.drawImage(canvas, 0, 0);
-  bctx.filter = 'none';
-  const origData = ctx.getImageData(0, 0, w, h);
-  const blurData = bctx.getImageData(0, 0, w, h);
-  const od = origData.data, bd = blurData.data;
-  for (let i = 0; i < od.length; i += 4) {
-    od[i]     = Math.min(255, Math.max(0, od[i]     + amount * (od[i]     - bd[i])));
-    od[i + 1] = Math.min(255, Math.max(0, od[i + 1] + amount * (od[i + 1] - bd[i + 1])));
-    od[i + 2] = Math.min(255, Math.max(0, od[i + 2] + amount * (od[i + 2] - bd[i + 2])));
-  }
-  const out = document.createElement('canvas');
-  out.width = w; out.height = h;
-  const octx = out.getContext('2d');
-  if (!octx) return canvas;
-  octx.putImageData(origData, 0, 0);
-  return out;
-}
-
-function drawBorder(canvas: HTMLCanvasElement, borderPx: number): HTMLCanvasElement {
-  if (borderPx <= 0) return canvas;
-  const out = document.createElement('canvas');
-  out.width = canvas.width; out.height = canvas.height;
-  const ctx = out.getContext('2d')!;
-  ctx.drawImage(canvas, 0, 0);
-  ctx.strokeStyle = '#d4d4d8';
-  ctx.lineWidth = borderPx;
-  const inset = borderPx / 2;
-  ctx.strokeRect(inset, inset, canvas.width - borderPx, canvas.height - borderPx);
-  return out;
-}
-
-function resizeHighQuality(src: HTMLCanvasElement, tw: number, th: number): HTMLCanvasElement {
-  let current = src, cw = src.width, ch = src.height;
-  while (cw / 2 > tw && ch / 2 > th) {
-    const half = document.createElement('canvas');
-    half.width = Math.round(cw / 2); half.height = Math.round(ch / 2);
-    const hctx = half.getContext('2d');
-    if (!hctx) break;
-    hctx.imageSmoothingEnabled = true; hctx.imageSmoothingQuality = 'high';
-    hctx.drawImage(current, 0, 0, half.width, half.height);
-    current = half; cw = half.width; ch = half.height;
-  }
-  const out = document.createElement('canvas');
-  out.width = tw; out.height = th;
-  const ctx = out.getContext('2d')!;
-  ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(current, 0, 0, tw, th);
-  return out;
-}
-
-/* ─── sidebar tab type ─── */
-type SidebarTab = 'edit' | 'layout' | 'export';
-
-/* ─── page dimensions (pts) for sheet preview ─── */
-const PAGE_PT: Record<SheetPageSize, [number, number]> = {
-  a4: [595.28, 841.89], letter: [612, 792], '4x6': [288, 432],
-};
-
-let _segmenter: BodySegmenter | null = null;
-
 export default function PassportPhotoSheet() {
-  useSEO('Passport Photo Sheet Online Free | PDF Media Suite', 'Free online Passport Photo Sheet tool. No signup or installation required.');
+  useSEO(
+    'Pro Studio Passport Photo Sheet Maker | 4R, A4, Zero Cut-off Multi-Pack',
+    'Studio-grade passport photo sheet maker. Zero cut-off auto arrangement for 4R/A4 paper, biometric oval guide, studio face lighting, SSC/UPSC 20-50KB portal compression, and direct printing.'
+  );
 
-  const [file, setFile] = useState<File | null>(null);
-  const [img, setImg] = useState<HTMLImageElement | null>(null);
-  const [imgObjectUrl, setImgObjectUrl] = useState<string | null>(null);
-  const [crop, setCrop] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
-  const [bgColor, setBgColor] = useState('#ffffff');
-  const [removeBg, setRemoveBg] = useState(true);
-  const [borderPx, setBorderPx] = useState(2);
-  const [qty, setQty] = useState(8);
-  const [gapMm, setGapMm] = useState(3);
-  const [marginMm, setMarginMm] = useState(10);
-  const [exportDpi, setExportDpi] = useState<DpiChoice>(300);
-  const [showFaceGuide, setShowFaceGuide] = useState(true);
-  const [sharpenAmount, setSharpenAmount] = useState(0.45);
-  const [pageSize, setPageSize] = useState<SheetPageSize>('a4');
-  const [bgModelReady, setBgModelReady] = useState(false);
-  const [bgPreloadMsg, setBgPreloadMsg] = useState('');
-  const [segLoading, setSegLoading] = useState(false);
-  const [detectMsg, setDetectMsg] = useState('');
-  const [displayScale, setDisplayScale] = useState(1);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [busyLabel, setBusyLabel] = useState('');
-  const [error, setError] = useState<string | null>(null);
+  // === MULTI-PHOTO STATE ===
+  const [photos, setPhotos] = useState<PhotoSlotItem[]>([]);
+  const [activePhotoId, setActivePhotoId] = useState<string | null>(null);
+  const [isCropModalOpen, setIsCropModalOpen] = useState<boolean>(false);
+  const [modalActiveTab, setModalActiveTab] = useState<'align' | 'light'>('align');
+  const [showBiometricGuides, setShowBiometricGuides] = useState<boolean>(true);
+  const [isLoadingPhotos, setIsLoadingPhotos] = useState<boolean>(false);
+  const [toastMsg, setToastMsg] = useState<{ text: string; type: 'error' | 'success' | 'info' } | null>(null);
+  const [activeSarkariId, setActiveSarkariId] = useState<string | null>(null);
+  const [isBatchRemovingBg, setIsBatchRemovingBg] = useState<boolean>(false);
 
-  // === NEW: Photo adjustments ===
-  const [adjustments, setAdjustments] = useState<PhotoAdjustments>({ ...DEFAULT_ADJUSTMENTS });
-  const [sidebarTab, setSidebarTab] = useState<SidebarTab>('edit');
-  const [openGroup, setOpenGroup] = useState<string | null>('💡 Light');
-  const [aiEnhancing, setAiEnhancing] = useState(false);
+  // Drag pan refs for crop modal (mouse + touch)
+  const isDraggingRef = useRef<boolean>(false);
+  const dragStartRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
 
-  // === NEW: Sheet preview ===
-  const sheetCanvasRef = useRef<HTMLCanvasElement>(null);
+  // Toast helper
+  const showToast = (text: string, type: 'error' | 'success' | 'info' = 'info') => {
+    setToastMsg({ text, type });
+    setTimeout(() => setToastMsg(null), 3500);
+  };
 
-  // === LIVE EFFECT PREVIEW ===
-  const [livePreviewUrl, setLivePreviewUrl] = useState<string | null>(null);
-  const liveDebounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  // Active photo
+  const currentPhoto = useMemo(() => {
+    if (!photos.length) return null;
+    return photos.find((p) => p.id === activePhotoId) || photos[0];
+  }, [photos, activePhotoId]);
 
-  const wrapRef = useRef<HTMLDivElement>(null);
-  const dragRef = useRef<{ px: number; py: number; start: { x: number; y: number } } | null>(null);
+  // Photo size preset & custom mm
+  const [photoPresetId, setPhotoPresetId] = useState<string>('in_passport');
+  const [customPhotoW, setCustomPhotoW] = useState<number>(35);
+  const [customPhotoH, setCustomPhotoH] = useState<number>(45);
 
-  const ensureSegmenter = useCallback(async () => {
-    if (_segmenter) return _segmenter;
-    setSegLoading(true);
-    await tf.ready();
-    _segmenter = await createSegmenter(SupportedModels.MediaPipeSelfieSegmentation, {
-      runtime: 'tfjs',
-      modelType: 'general',
-    });
-    setSegLoading(false);
-    return _segmenter;
-  }, []);
+  const selectedPreset = useMemo(() => {
+    return PHOTO_PRESETS.find((p) => p.id === photoPresetId) || PHOTO_PRESETS[0];
+  }, [photoPresetId]);
 
-  useEffect(() => {
-    setBgPreloadMsg('Loading background removal model…');
-    preload(bgRemoverConfig)
-      .then(() => { setBgModelReady(true); setBgPreloadMsg(''); })
-      .catch(() => setBgPreloadMsg('BG model load failed (will retry on use).'));
-  }, []);
+  const basePhotoWidthMm = photoPresetId === 'custom' ? customPhotoW : selectedPreset.wMm;
+  const basePhotoHeightMm = photoPresetId === 'custom' ? customPhotoH : selectedPreset.hMm;
 
-  const onFile = useCallback(async (files: File[]) => {
-    const f = files[0];
-    if (!f) return;
-    setFile(f);
-    setError(null);
-    setPreviewUrl(null);
-    setPdfUrl(null);
-    setAdjustments({ ...DEFAULT_ADJUSTMENTS });
-    try {
-      const url = URL.createObjectURL(f);
-      setImgObjectUrl(url);
-      const loaded = await new Promise<HTMLImageElement>((res, rej) => {
-        const i = new Image();
-        i.onload = () => res(i);
-        i.onerror = rej;
-        i.src = url;
-      });
-      setImg(loaded);
-      const nw = loaded.naturalWidth;
-      const nh = loaded.naturalHeight;
-      setCrop(centerAspectCrop(nw, nh, PASSPORT_ASPECT));
-    } catch (e: unknown) {
-      setError((e as Error).message);
-      setImg(null); setFile(null); setCrop(null);
+  // Background color
+  const [bgColor, setBgColor] = useState<string>('#ffffff');
+
+  // Photo border
+  const [hasBorder, setHasBorder] = useState<boolean>(true);
+  const [borderWidthMm, setBorderWidthMm] = useState<number>(0.5);
+  const [borderColor, setBorderColor] = useState<string>('#000000');
+
+  // Candidate Text (Name & DOP) — STRICTLY UNCHECKED BY DEFAULT
+  const [hasCandidateText, setHasCandidateText] = useState<boolean>(false);
+  const [candidateName, setCandidateName] = useState<string>('');
+  const [candidateDate, setCandidateDate] = useState<string>(() => {
+    const d = new Date();
+    const dd = String(d.getDate()).padStart(2, '0');
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const yyyy = d.getFullYear();
+    return `${dd}-${mm}-${yyyy}`;
+  });
+
+  // === PRINT LAYOUT & CAPACITY ENGINE ===
+  const [paperSizeId, setPaperSizeId] = useState<string>('4r');
+  const [orientation, setOrientation] = useState<'portrait' | 'landscape'>('portrait');
+  const [gapMm, setGapMm] = useState<number>(3);
+  const [marginMm, setMarginMm] = useState<number>(4);
+  const [noMargins, setNoMargins] = useState<boolean>(false);
+  const [hasCutGuides, setHasCutGuides] = useState<boolean>(true);
+  const [studioWatermark, setStudioWatermark] = useState<string>('');
+  const [isFullscreenPreview, setIsFullscreenPreview] = useState<boolean>(false);
+  const photoHistoryRef = useRef<Record<string, { zoom: number; rotation: number; panOffset: { x: number; y: number }; brightness: number; contrast: number; saturation: number }>>({});
+
+  // Target Photo Quantity (User can type 28, 16, 8, etc.)
+  const [targetPhotoCount, setTargetPhotoCount] = useState<number>(6);
+
+  // Grid Rows x Cols
+  const [gridRows, setGridRows] = useState<number>(3);
+  const [gridCols, setGridCols] = useState<number>(2);
+
+  // Sheet Pagination Carousel (For when photos span multiple sheets)
+  const [activeSheetIndex, setActiveSheetIndex] = useState<number>(0);
+
+  // Export Settings
+  const [exportDpi, setExportDpi] = useState<number>(300);
+  const [isGenerating, setIsGenerating] = useState<boolean>(false);
+
+  // Hidden canvases & refs
+  const previewCanvasRef = useRef<HTMLCanvasElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Paper dimensions
+  const activePaper = useMemo(() => {
+    const p = PAPER_PRESETS.find((x) => x.id === paperSizeId) || PAPER_PRESETS[0];
+    if (orientation === 'landscape') {
+      return { ...p, wMm: Math.max(p.wMm, p.hMm), hMm: Math.min(p.wMm, p.hMm) };
     }
-  }, []);
+    return { ...p, wMm: Math.min(p.wMm, p.hMm), hMm: Math.max(p.wMm, p.hMm) };
+  }, [paperSizeId, orientation]);
 
-  const nw = img?.naturalWidth ?? 0;
-  const nh = img?.naturalHeight ?? 0;
+  // Safe Physical Limits Calculation (Prevents Overflow & Cut-off)
+  const safeLimits = useMemo(() => {
+    const effectiveMargin = noMargins ? 0 : marginMm;
+    const availW = Math.max(10, activePaper.wMm - 2 * effectiveMargin);
+    const availH = Math.max(10, activePaper.hMm - 2 * effectiveMargin);
+
+    const maxCols = Math.max(1, Math.floor((availW + gapMm) / (basePhotoWidthMm + gapMm)));
+    const maxRows = Math.max(1, Math.floor((availH + gapMm) / (basePhotoHeightMm + gapMm)));
+    const maxSlotsPerSheet = maxCols * maxRows;
+
+    const currentW = gridCols * basePhotoWidthMm + (gridCols - 1) * gapMm;
+    const currentH = gridRows * basePhotoHeightMm + (gridRows - 1) * gapMm;
+    const isWOverflow = currentW > availW + 1;
+    const isHOverflow = currentH > availH + 1;
+
+    return {
+      maxCols,
+      maxRows,
+      maxSlotsPerSheet,
+      availW,
+      availH,
+      currentW,
+      currentH,
+      isOverflow: isWOverflow || isHOverflow,
+      isWOverflow,
+      isHOverflow,
+    };
+  }, [activePaper, noMargins, marginMm, gapMm, basePhotoWidthMm, basePhotoHeightMm, gridCols, gridRows]);
+
+  const slotsPerSheet = useMemo(() => gridRows * gridCols, [gridRows, gridCols]);
+
+  const totalSheetsRequired = useMemo(() => {
+    if (slotsPerSheet <= 0) return 1;
+    return Math.max(1, Math.ceil(targetPhotoCount / slotsPerSheet));
+  }, [targetPhotoCount, slotsPerSheet]);
 
   useEffect(() => {
-    if (!nw || !nh || !wrapRef.current) return;
-    const el = wrapRef.current;
-    const update = () => {
-      const maxW = Math.min(640, el.clientWidth || 640);
-      const maxH = window.innerHeight * 0.45;
-      setDisplayScale(Math.min(maxW / nw, maxH / nh, 1));
-    };
-    update();
-    const ro = new ResizeObserver(update);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [nw, nh, img]);
+    if (activeSheetIndex >= totalSheetsRequired) {
+      setActiveSheetIndex(Math.max(0, totalSheetsRequired - 1));
+    }
+  }, [totalSheetsRequired, activeSheetIndex]);
 
-  const runAiEnhance = async () => {
-    if (!img || !crop) return;
-    const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
-    if (!apiKey) {
-      alert("Please configure Gemini API Key in Settings to use AI Auto Enhance.");
+  useEffect(() => {
+    if (photos.length === 1) {
+      setPhotos((prev) => (prev[0]?.copies !== targetPhotoCount ? [{ ...prev[0], copies: targetPhotoCount }] : prev));
+    } else if (photos.length > 1) {
+      const sum = photos.reduce((acc, p) => acc + p.copies, 0);
+      if (sum !== targetPhotoCount) {
+        setTargetPhotoCount(sum);
+      }
+    }
+  }, [photos, targetPhotoCount]);
+
+  useEffect(() => {
+    preload(bgRemoverConfig).catch(() => {});
+    return () => {
+      // Memory cleanup on unmount
+      photos.forEach((p) => {
+        if (p.objectUrl) URL.revokeObjectURL(p.objectUrl);
+      });
+    };
+  }, []);
+
+  const handleAutoFit = useCallback(() => {
+    const effectiveMargin = noMargins ? 0 : marginMm;
+    const availW = Math.max(10, activePaper.wMm - 2 * effectiveMargin);
+    const availH = Math.max(10, activePaper.hMm - 2 * effectiveMargin);
+
+    const fitCols = Math.max(1, Math.floor((availW + gapMm) / (basePhotoWidthMm + gapMm)));
+    const fitRows = Math.max(1, Math.floor((availH + gapMm) / (basePhotoHeightMm + gapMm)));
+
+    setGridCols(fitCols);
+    setGridRows(fitRows);
+  }, [activePaper, noMargins, marginMm, gapMm, basePhotoWidthMm, basePhotoHeightMm]);
+
+  // Smart Photo Quantity & Grid Layout Allocator (Optimized for Xerox / Studio workflows)
+  const handleTargetCountChange = (newCount: number) => {
+    const count = Math.max(1, Math.min(120, newCount));
+    setTargetPhotoCount(count);
+
+    // 1. Sync photo copies in session
+    if (photos.length === 1) {
+      setPhotos((prev) => (prev[0] ? [{ ...prev[0], copies: count }] : prev));
+    } else if (photos.length > 1) {
+      const perPhoto = Math.floor(count / photos.length);
+      const remainder = count % photos.length;
+      setPhotos((prev) =>
+        prev.map((p, idx) => ({
+          ...p,
+          copies: Math.max(1, perPhoto + (idx < remainder ? 1 : 0)),
+        }))
+      );
+    }
+
+    // 2. Smart Paper Allocation:
+    // If count > 8 (e.g. 12, 16, 24, 28, 30, 32) and paper is currently 4R (4x6 in),
+    // 4R can only fit 6-8 photos physically. Auto-switch to A4 so user gets 1 complete sheet without miniature shrinking!
+    if (count > 8 && paperSizeId === '4r') {
+      setPaperSizeId('a4');
+      setOrientation('portrait');
+      setGridCols(5);
+      setGridRows(Math.min(6, Math.max(1, Math.ceil(count / 5))));
+      showToast(`Auto-switched to A4 sheet to fit all ${count} full-size photos on 1 page!`, 'info');
       return;
     }
-    setAiEnhancing(true);
-    try {
-      // Create a small preview image to send to AI
-      const tempCanvas = document.createElement('canvas');
-      const maxPrev = 512;
-      const scale = Math.min(1, maxPrev / Math.max(crop.w, crop.h));
-      tempCanvas.width = Math.round(crop.w * scale);
-      tempCanvas.height = Math.round(crop.h * scale);
-      const tctx = tempCanvas.getContext('2d');
-      if (!tctx) throw new Error("Canvas context failed");
-      tctx.drawImage(img, crop.x, crop.y, crop.w, crop.h, 0, 0, tempCanvas.width, tempCanvas.height);
-      const b64 = tempCanvas.toDataURL('image/jpeg', 0.8).split(',')[1];
-      tempCanvas.width = 0; tempCanvas.height = 0;
 
-      const prompt = `You are an expert professional portrait photo editor. Analyze this passport photo.
-Your goal is to make it look HD, clear, well-lit, and give it a premium studio look WITHOUT altering or modifying the person's face structure in any way.
-Return ONLY a valid JSON object with the exact slider adjustments needed. Do not return any other text.
-Use these keys and ranges:
-"exposure" (-100 to 100), "contrast" (-100 to 100), "highlights" (-100 to 100), "shadows" (-100 to 100), "whites" (-100 to 100), "blacks" (-100 to 100),
-"temperature" (-100 to 100), "tint" (-100 to 100), "saturation" (-100 to 100), "vibrance" (-100 to 100),
-"clarity" (-100 to 100) (adds crispness/HD feel), "dehaze" (0 to 100).
-Example format:
-{"exposure": 5, "contrast": 12, "highlights": 8, "shadows": -5, "whites": 15, "blacks": -10, "temperature": -2, "tint": 0, "saturation": 5, "vibrance": 10, "clarity": 15, "dehaze": 5}`;
-
-      const requestBody = {
-        contents: [{ parts: [{ text: prompt }, { inline_data: { mime_type: 'image/jpeg', data: b64 } }] }],
-        generationConfig: { temperature: 0.1, response_mime_type: "application/json" }
-      };
-
-      const res = await fetchGeminiWithFallback(apiKey, requestBody);
-      
-      const data = await res.json();
-      const raw = data.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
-      const parsed = JSON.parse(raw.replace(/```json|```/g, '').trim());
-      
-      // Merge with default to ensure all keys exist
-      const newAdj = { ...DEFAULT_ADJUSTMENTS };
-      for (const key of Object.keys(DEFAULT_ADJUSTMENTS)) {
-        if (parsed[key] !== undefined && typeof parsed[key] === 'number') {
-          newAdj[key as keyof PhotoAdjustments] = parsed[key];
-        }
+    // 3. Grid allocation according to paper size
+    if (paperSizeId === 'a4') {
+      if (count <= 4) {
+        setGridCols(2);
+        setGridRows(2);
+      } else if (count <= 6) {
+        setGridCols(3);
+        setGridRows(2);
+      } else if (count <= 8) {
+        setGridCols(4);
+        setGridRows(2);
+      } else if (count <= 12) {
+        setGridCols(4);
+        setGridRows(3);
+      } else if (count <= 16) {
+        setGridCols(4);
+        setGridRows(4);
+      } else if (count <= 20) {
+        setGridCols(5);
+        setGridRows(4);
+      } else if (count <= 25) {
+        setGridCols(5);
+        setGridRows(5);
+      } else {
+        // 26 to 30+ (including 28 photos: 5 cols × 6 rows = 30 slots)
+        setGridCols(5);
+        setGridRows(6);
       }
-      setAdjustments(newAdj);
-    } catch (e: any) {
-      console.error(e);
-      alert("AI Enhance failed. Please try manual adjustments.");
-    } finally {
-      setAiEnhancing(false);
+    } else if (paperSizeId === '4r') {
+      if (count <= 6) {
+        setOrientation('portrait');
+        setGridCols(2);
+        setGridRows(Math.min(3, Math.ceil(count / 2)));
+      } else if (count <= 8) {
+        setOrientation('landscape');
+        setGridCols(4);
+        setGridRows(2);
+      } else {
+        setGridCols(2);
+        setGridRows(3);
+      }
+    } else {
+      handleAutoFit();
     }
   };
 
-  const runAutoDetect = useCallback(async () => {
-    if (!img || !nw || !nh) return;
-    setError(null);
-    setDetectMsg('Detecting person…');
+  const handleSwitchToA4 = () => {
+    setPaperSizeId('a4');
+    setOrientation('portrait');
+    setGridCols(5);
+    setGridRows(6);
+    setActiveSheetIndex(0);
+  };
+
+  const applyPresetPack = (packId: '4r_classic' | '4r_max' | 'a4_full' | 'a4_half' | 'a5_pack') => {
+    if (packId === '4r_classic') {
+      setPaperSizeId('4r');
+      setOrientation('portrait');
+      setGridCols(2);
+      setGridRows(3);
+      setTargetPhotoCount(6);
+    } else if (packId === '4r_max') {
+      setPaperSizeId('4r');
+      setOrientation('landscape');
+      setGridCols(4);
+      setGridRows(2);
+      setTargetPhotoCount(8);
+    } else if (packId === 'a4_full') {
+      setPaperSizeId('a4');
+      setOrientation('portrait');
+      setGridCols(5);
+      setGridRows(6);
+      setTargetPhotoCount(30);
+    } else if (packId === 'a4_half') {
+      setPaperSizeId('a4');
+      setOrientation('portrait');
+      setGridCols(5);
+      setGridRows(3);
+      setTargetPhotoCount(15);
+    } else if (packId === 'a5_pack') {
+      setPaperSizeId('a5');
+      setOrientation('portrait');
+      setGridCols(3);
+      setGridRows(4);
+      setTargetPhotoCount(12);
+    }
+    setActiveSheetIndex(0);
+  };
+
+  // Sarkari Exam Quick Mode Handler — Leaves Name/DOP UNCHECKED by default
+  const applySarkariPortalPreset = (type: 'ssc' | 'upsc' | 'rrb' | 'passport' | 'us_visa' | 'neet') => {
+    setActiveSarkariId(type); // track for active button highlight
+    if (type === 'ssc' || type === 'upsc') {
+      setPhotoPresetId('in_passport');
+      setHasBorder(true);
+      setBorderWidthMm(0.5);
+      setBgColor('#ffffff');
+    } else if (type === 'rrb') {
+      setPhotoPresetId('in_passport');
+      setHasBorder(true);
+      setBorderWidthMm(0.3);
+      setBgColor('#ffffff');
+    } else if (type === 'passport') {
+      setPhotoPresetId('in_passport');
+      setHasBorder(false);
+      setBgColor('#ffffff');
+    } else if (type === 'us_visa') {
+      setPhotoPresetId('us_visa');
+      setHasBorder(false);
+      setBgColor('#ffffff');
+    } else if (type === 'neet') {
+      setPhotoPresetId('in_exam'); // 35x35mm for NEET portal
+      setHasBorder(false);
+      setBgColor('#ffffff');
+    }
+    setTimeout(handleAutoFit, 10);
+  };
+
+  const addFilesToSession = async (filesToAdd: File[]) => {
+    if (!filesToAdd.length) return;
+    setIsLoadingPhotos(true);
+    const newItems: PhotoSlotItem[] = [];
+
     try {
-      const seg = await ensureSegmenter();
-      const maxSeg = 640;
-      const sc = Math.min(1, maxSeg / Math.max(nw, nh));
-      const sw = Math.round(nw * sc), sh = Math.round(nh * sc);
-      const scCanvas = document.createElement('canvas');
-      scCanvas.width = sw; scCanvas.height = sh;
-      const sctx = scCanvas.getContext('2d')!;
-      sctx.drawImage(img, 0, 0, sw, sh);
-      const [person] = await seg.segmentPeople(scCanvas);
-      const idata = await person.mask.toImageData();
-      const bboxSmall = maskToPersonBBox(idata, sw, sh);
-      const bbox = bboxSmall && {
-        x0: (bboxSmall.x0 / sw) * nw, y0: (bboxSmall.y0 / sh) * nh,
-        x1: (bboxSmall.x1 / sw) * nw, y1: (bboxSmall.y1 / sh) * nh,
-      };
+      for (const f of filesToAdd) {
+        const url = URL.createObjectURL(f);
+        const loadedImg = await new Promise<HTMLImageElement>((resolve, reject) => {
+          const imgEl = new Image();
+          imgEl.onload = () => resolve(imgEl);
+          imgEl.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Image load failed')); };
+          imgEl.src = url;
+        });
 
-      // If TF detection failed or gave very small bbox, try Gemini as fallback
-      if (!bbox || (bbox.x1 - bbox.x0 < nw * 0.1)) {
-        setDetectMsg('Trying AI face detection…');
-        try {
-          const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
-          if (apiKey) {
-            const tmpCanvas = document.createElement('canvas');
-            const scale = Math.min(1, 600 / Math.max(nw, nh));
-            tmpCanvas.width = Math.round(nw * scale);
-            tmpCanvas.height = Math.round(nh * scale);
-            const tc = tmpCanvas.getContext('2d')!;
-            tc.drawImage(img, 0, 0, tmpCanvas.width, tmpCanvas.height);
-            const b64 = tmpCanvas.toDataURL('image/jpeg', 0.85).split(',')[1];
-            tmpCanvas.width = 0;
-
-            const prompt = `Analyze this portrait photo. Return ONLY valid JSON with face bounding box as fraction of image size (0.0-1.0):
-{"face_x": 0.3, "face_y": 0.1, "face_w": 0.4, "face_h": 0.5, "has_face": true}
-If no face found, return {"has_face": false}.`;
-            const res = await fetch(
-              `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
-              {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ contents: [{ parts: [{ text: prompt }, { inline_data: { mime_type: 'image/jpeg', data: b64 } }] }] })
-              }
-            );
-            if (res.ok) {
-              const data = await res.json();
-              const raw = data.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
-              const parsed = JSON.parse(raw.replace(/```json|```/g, '').trim());
-              if (parsed.has_face && parsed.face_x !== undefined) {
-                const fx = parsed.face_x * nw, fy = parsed.face_y * nh;
-                const fw = parsed.face_w * nw, fh = parsed.face_h * nh;
-                // Expand face bbox to passport proportions (include top of head + shoulders)
-                const expandedBbox = {
-                  x0: Math.max(0, fx - fw * 0.3),
-                  y0: Math.max(0, fy - fh * 0.5),
-                  x1: Math.min(nw, fx + fw * 1.3),
-                  y1: Math.min(nh, fy + fh * 2.2),
-                };
-                const next = suggestCropFromPerson(nw, nh, expandedBbox, PASSPORT_ASPECT);
-                setCrop(clampCropRect(next, nw, nh, PASSPORT_ASPECT));
-                setDetectMsg('AI detected face — crop updated!');
-                setTimeout(() => setDetectMsg(''), 4000);
-                return;
-              }
-            }
-          }
-        } catch { /* use default center crop */ }
+        const newItem: PhotoSlotItem = {
+          id: `photo_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+          file: f,
+          objectUrl: url,
+          img: loadedImg,
+          processedImg: null, // null = use original img (not stale copy)
+          copies: photos.length === 0 ? targetPhotoCount : 1,
+          zoom: 100,
+          rotation: 0,
+          isFlippedH: false,
+          panOffset: { x: 0, y: 0 },
+          isBgRemoved: false,
+          isRemovingBg: false,
+          isJointPhoto: false,
+          brightness: 0,
+          contrast: 0,
+          saturation: 0,
+        };
+        newItems.push(newItem);
       }
-
-      const next = suggestCropFromPerson(nw, nh, bbox, PASSPORT_ASPECT);
-      setCrop(clampCropRect(next, nw, nh, PASSPORT_ASPECT));
-      setDetectMsg(bbox ? 'Crop updated from person outline.' : 'No clear person mask — centered crop.');
-    } catch (e: unknown) {
-      setError((e as Error).message || 'Detection failed');
-      setDetectMsg('');
+    } catch (err) {
+      showToast('One or more images could not be loaded. Please try again.', 'error');
     } finally {
-      setTimeout(() => setDetectMsg(''), 4000);
-    }
-  }, [img, nw, nh, ensureSegmenter]);
-
-
-  const onPointerDownCrop = useCallback((e: React.PointerEvent) => {
-    if (!crop) return;
-    e.preventDefault();
-    (e.target as HTMLElement).setPointerCapture(e.pointerId);
-    dragRef.current = { px: e.clientX, py: e.clientY, start: { x: crop.x, y: crop.y } };
-  }, [crop]);
-
-  const onPointerMoveCrop = useCallback((e: React.PointerEvent) => {
-    if (!dragRef.current || !crop || !nw || !nh) return;
-    const dx = (e.clientX - dragRef.current.px) / displayScale;
-    const dy = (e.clientY - dragRef.current.py) / displayScale;
-    setCrop(clampCropRect({ ...crop, x: dragRef.current.start.x + dx, y: dragRef.current.start.y + dy }, nw, nh, PASSPORT_ASPECT));
-  }, [crop, nw, nh, displayScale]);
-
-  const onPointerUpCrop = useCallback((e: React.PointerEvent) => {
-    try { (e.target as HTMLElement).releasePointerCapture(e.pointerId); } catch { /**/ }
-    dragRef.current = null;
-  }, []);
-
-  const onResizeCrop = useCallback((delta: number) => {
-    if (!crop || !nw || !nh) return;
-    const factor = 1 + delta * 0.04;
-    const nhNew = clamp(crop.h * factor, 48, nh * 1.2);
-    const nwNew = nhNew * PASSPORT_ASPECT;
-    const cx = crop.x + crop.w / 2, cy = crop.y + crop.h / 2;
-    setCrop(clampCropRect({ x: cx - nwNew / 2, y: cy - nhNew / 2, w: nwNew, h: nhNew }, nw, nh, PASSPORT_ASPECT));
-  }, [crop, nw, nh]);
-
-  // Dynamic columns: auto-fill row based on page width, photo width, margin, gap
-  const columns = useMemo(() => {
-    const [pageW] = PAGE_PT[pageSize] ?? [595.28, 841.89];
-    const mmToPt = 72 / 25.4;
-    const marginPt = marginMm * mmToPt;
-    const gapPt = gapMm * mmToPt;
-    const photoWPt = PHOTO_W_MM * mmToPt;
-    const usableW = pageW - 2 * marginPt + gapPt;
-    return Math.max(1, Math.floor(usableW / (photoWPt + gapPt)));
-  }, [pageSize, marginMm, gapMm]);
-
-  const EXPORT_W = useMemo(() => Math.round((PHOTO_W_MM / 25.4) * exportDpi), [exportDpi]);
-  const EXPORT_H = useMemo(() => Math.round((PHOTO_H_MM / 25.4) * exportDpi), [exportDpi]);
-
-  const buildTilePng = useCallback(async (): Promise<Uint8Array> => {
-    if (!img || !crop) throw new Error('No image');
-    setBusyLabel(removeBg ? 'Removing background…' : 'Processing…');
-    let working = await cropToCanvas(img, crop);
-
-    // === Apply photo adjustments ===
-    if (!isDefault(adjustments)) {
-      setBusyLabel('Applying photo adjustments…');
-      working = applyAdjustments(working, adjustments);
+      setIsLoadingPhotos(false);
     }
 
-    let blob = await canvasToBlob(working, 'image/jpeg', 0.95);
+    if (newItems.length > 0) {
+      setPhotos((prev) => [...prev, ...newItems]);
+      setActivePhotoId(newItems[0].id);
+      if (photos.length === 0) setIsCropModalOpen(true);
+    }
+  };
 
-    if (removeBg) {
-      if (!bgModelReady) throw new Error('Background model not ready yet');
-      const cutBlob = await applyRemoveBg(blob);
-      const cutUrl = URL.createObjectURL(cutBlob);
-      const cutImg = await new Promise<HTMLImageElement>((res, rej) => {
-        const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = cutUrl;
+  const updatePhoto = (id: string, updater: (p: PhotoSlotItem) => PhotoSlotItem) => {
+    setPhotos((prev) => prev.map((item) => (item.id === id ? updater(item) : item)));
+  };
+
+  const removePhoto = (id: string) => {
+    setPhotos((prev) => {
+      const toRemove = prev.find((p) => p.id === id);
+      // Memory leak fix: revoke object URL when removing
+      if (toRemove) URL.revokeObjectURL(toRemove.objectUrl);
+      const next = prev.filter((p) => p.id !== id);
+      if (activePhotoId === id) {
+        setActivePhotoId(next.length > 0 ? next[0].id : null);
+        if (next.length === 0) setIsCropModalOpen(false);
+      }
+      return next;
+    });
+  };
+
+  const movePhoto = (fromIdx: number, toIdx: number) => {
+    if (toIdx < 0 || toIdx >= photos.length) return;
+    setPhotos((prev) => {
+      const copy = [...prev];
+      const item = copy.splice(fromIdx, 1)[0];
+      copy.splice(toIdx, 0, item);
+      return copy;
+    });
+  };
+
+  const openCropModal = (photoId: string) => {
+    const photo = photos.find((p) => p.id === photoId);
+    if (photo) {
+      photoHistoryRef.current[photoId] = {
+        zoom: photo.zoom,
+        rotation: photo.rotation,
+        panOffset: { ...photo.panOffset },
+        brightness: photo.brightness,
+        contrast: photo.contrast,
+        saturation: photo.saturation,
+      };
+    }
+    setActivePhotoId(photoId);
+    setIsCropModalOpen(true);
+  };
+
+  const handleUndoPhotoChanges = (photoId: string) => {
+    const prev = photoHistoryRef.current[photoId];
+    if (prev) {
+      updatePhoto(photoId, (p) => ({
+        ...p,
+        zoom: prev.zoom,
+        rotation: prev.rotation,
+        panOffset: { ...prev.panOffset },
+        brightness: prev.brightness,
+        contrast: prev.contrast,
+        saturation: prev.saturation,
+      }));
+      showToast('Reverted adjustments to previous snapshot.', 'info');
+    }
+  };
+
+  const handleRemoveBackground = async (photo: PhotoSlotItem) => {
+    updatePhoto(photo.id, (p) => ({ ...p, isRemovingBg: true }));
+    showToast('1/2 Initializing AI portrait segmentation...', 'info');
+    let blobUrl: string | null = null;
+    try {
+      const resultBlob = await removeBackground(photo.file, {
+        ...bgRemoverConfig,
+        progress: (key, current, total) => {
+          if (total > 0) {
+            const pct = Math.round((current / total) * 100);
+            if (pct % 30 === 0) showToast(`Removing background... ${pct}%`, 'info');
+          }
+        },
       });
-      URL.revokeObjectURL(cutUrl);
-      working = compositeOnColor(cutImg, bgColor);
-    } else {
-      const c2 = document.createElement('canvas');
-      c2.width = working.width; c2.height = working.height;
-      const c2x = c2.getContext('2d')!;
-      c2x.fillStyle = bgColor;
-      c2x.fillRect(0, 0, c2.width, c2.height);
-      c2x.drawImage(working, 0, 0);
-      working = c2;
+      showToast('2/2 Rendering transparent HD portrait...', 'info');
+      blobUrl = URL.createObjectURL(resultBlob);
+      const transparentImg = new Image();
+      transparentImg.onload = () => {
+        // Revoke blob URL after image is loaded to free memory
+        if (blobUrl) URL.revokeObjectURL(blobUrl);
+        updatePhoto(photo.id, (p) => ({
+          ...p,
+          processedImg: transparentImg,
+          isBgRemoved: true,
+          isRemovingBg: false,
+        }));
+        showToast('✓ AI Background removed successfully!', 'success');
+      };
+      transparentImg.onerror = () => {
+        if (blobUrl) URL.revokeObjectURL(blobUrl);
+        updatePhoto(photo.id, (p) => ({ ...p, isRemovingBg: false }));
+        showToast('Background removal failed. You can still adjust layout.', 'error');
+      };
+      transparentImg.src = blobUrl;
+    } catch (err) {
+      if (blobUrl) URL.revokeObjectURL(blobUrl);
+      console.error('[PassportSheet] BG removal failed:', err);
+      showToast('Background removal could not run. You can still apply border and adjust layout.', 'error');
+      updatePhoto(photo.id, (p) => ({ ...p, isRemovingBg: false }));
     }
+  };
 
-    setBusyLabel('Enhancing & sharpening…');
-    const sized = resizeHighQuality(working, EXPORT_W, EXPORT_H);
-    const sharpened = unsharpMask(sized, sharpenAmount, 1);
-    const bordered = drawBorder(sharpened, borderPx);
-    const outBlob = await canvasToBlob(bordered, 'image/png');
-    return new Uint8Array(await outBlob.arrayBuffer());
-  }, [img, crop, removeBg, bgColor, borderPx, bgModelReady, EXPORT_W, EXPORT_H, sharpenAmount, adjustments]);
-
-  const runPreview = useCallback(async () => {
-    if (!img || !crop) return;
-    setBusy(true); setError(null);
-    try {
-      const bytes = await buildTilePng();
-      const blob = new Blob([bytes], { type: 'image/png' });
-      setPreviewUrl((u) => { if (u) URL.revokeObjectURL(u); return URL.createObjectURL(blob); });
-    } catch (e: unknown) { setError((e as Error).message || 'Preview failed'); }
-    finally { setBusy(false); setBusyLabel(''); }
-  }, [img, crop, buildTilePng]);
-
-  const runPdf = useCallback(async () => {
-    if (!img || !crop) return;
-    setBusy(true); setError(null);
-    try {
-      const tilePng = await buildTilePng();
-      setBusyLabel('Building PDF…');
-      const pdfBytes = await buildPassportGridPdf({ tilePng, totalCount: qty, columns, photoWidthMm: PHOTO_W_MM, photoHeightMm: PHOTO_H_MM, gapMm, marginMm, pageSize });
-      const blob = new Blob([pdfBytes], { type: 'application/pdf' });
-      const pdfObjectUrl = URL.createObjectURL(blob);
-      setPdfUrl((u) => { if (u) URL.revokeObjectURL(u); return pdfObjectUrl; });
-      const tileBlob = new Blob([tilePng], { type: 'image/png' });
-      setPreviewUrl((u) => { if (u) URL.revokeObjectURL(u); return URL.createObjectURL(tileBlob); });
-      const a = document.createElement('a');
-      a.href = pdfObjectUrl; a.download = 'passport-photos-sheet.pdf'; a.rel = 'noopener';
-      document.body.appendChild(a); a.click(); a.remove();
-    } catch (e: unknown) { setError((e as Error).message || 'PDF failed'); }
-    finally { setBusy(false); setBusyLabel(''); }
-  }, [img, crop, buildTilePng, qty, columns, gapMm, marginMm, pageSize]);
-
-  useEffect(() => {
-    return () => { if (previewUrl) URL.revokeObjectURL(previewUrl); if (pdfUrl) URL.revokeObjectURL(pdfUrl); };
-  }, [previewUrl, pdfUrl]);
-
-  useEffect(() => {
-    return () => { if (imgObjectUrl) URL.revokeObjectURL(imgObjectUrl); };
-  }, [imgObjectUrl]);
-
-  // === LIVE EFFECT PREVIEW: auto-update when adjustments or crop changes ===
-  useEffect(() => {
-    if (!img || !crop || isDefault(adjustments)) {
-      if (livePreviewUrl) { URL.revokeObjectURL(livePreviewUrl); setLivePreviewUrl(null); }
+  // Batch BG Removal — removes background for all photos in session
+  const handleBatchRemoveBackground = async () => {
+    const pending = photos.filter((p) => !p.isBgRemoved && !p.isRemovingBg);
+    if (!pending.length) {
+      showToast('All photos already processed!', 'info');
       return;
     }
-    if (liveDebounceRef.current) clearTimeout(liveDebounceRef.current);
-    liveDebounceRef.current = setTimeout(async () => {
-      try {
-        // Small preview for speed (max 300px)
-        const tempCanvas = document.createElement('canvas');
-        const maxPrev = 300;
-        const scale = Math.min(1, maxPrev / Math.max(crop.w, crop.h));
-        tempCanvas.width = Math.round(crop.w * scale);
-        tempCanvas.height = Math.round(crop.h * scale);
-        const tctx = tempCanvas.getContext('2d');
-        if (!tctx) return;
-        tctx.drawImage(img, crop.x, crop.y, crop.w, crop.h, 0, 0, tempCanvas.width, tempCanvas.height);
+    setIsBatchRemovingBg(true);
+    let doneCount = 0;
+    for (const photo of pending) {
+      await handleRemoveBackground(photo);
+      doneCount++;
+      showToast(`Removing background... ${doneCount}/${pending.length}`, 'info');
+    }
+    setIsBatchRemovingBg(false);
+    showToast(`✓ Background removed for ${doneCount} photo(s)!`, 'success');
+  };
 
-        const adjusted = applyAdjustments(tempCanvas, adjustments);
-        const blob = await new Promise<Blob | null>(res => adjusted.toBlob(b => res(b), 'image/jpeg', 0.85));
-        if (blob) {
-          setLivePreviewUrl(prev => { if (prev) URL.revokeObjectURL(prev); return URL.createObjectURL(blob); });
+
+  // Render a Single Photo Tile with Transforms, Studio Lighting & Borders
+  const renderSinglePhotoTile = useCallback(
+    (photo: PhotoSlotItem, dpi = 300): HTMLCanvasElement => {
+      const dpmm = dpi / 25.4;
+      const targetWmm = photo.isJointPhoto ? basePhotoWidthMm * 2 : basePhotoWidthMm;
+      const targetHmm = basePhotoHeightMm;
+
+      const targetW = Math.round(targetWmm * dpmm);
+      const targetH = Math.round(targetHmm * dpmm);
+
+      const canvas = document.createElement('canvas');
+      canvas.width = targetW;
+      canvas.height = targetH;
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      if (!ctx) return canvas;
+
+      // 1. Fill Background
+      ctx.fillStyle = bgColor;
+      ctx.fillRect(0, 0, targetW, targetH);
+
+      // 2. Draw Customer Photo with Studio Lighting (Brightness / Contrast / Saturation)
+      const activeImg = photo.processedImg ?? photo.img;
+      if (activeImg) {
+        ctx.save();
+        const modalRefScale = targetH / 220;
+        ctx.translate(
+          targetW / 2 + photo.panOffset.x * modalRefScale,
+          targetH / 2 + photo.panOffset.y * modalRefScale
+        );
+        ctx.rotate((photo.rotation * Math.PI) / 180);
+        ctx.scale((photo.zoom / 100) * (photo.isFlippedH ? -1 : 1), photo.zoom / 100);
+
+        // Build combined CSS filter (brightness + contrast + saturation)
+        const filters: string[] = [];
+        if (photo.brightness !== 0) filters.push(`brightness(${100 + photo.brightness}%)`);
+        if (photo.contrast !== 0) filters.push(`contrast(${100 + photo.contrast}%)`);
+        if (photo.saturation !== 0) filters.push(`saturate(${100 + photo.saturation}%)`);
+        if (filters.length > 0) ctx.filter = filters.join(' ');
+
+        const imgW = activeImg.naturalWidth || activeImg.width || 1;
+        const imgH = activeImg.naturalHeight || activeImg.height || 1;
+        const imgAspect = imgW / imgH;
+        const tileAspect = targetW / targetH;
+        let drawW = targetW;
+        let drawH = targetH;
+        if (imgAspect > tileAspect) {
+          drawH = targetH;
+          drawW = targetH * imgAspect;
+        } else {
+          drawW = targetW;
+          drawH = targetW / imgAspect;
         }
-        tempCanvas.width = 0; tempCanvas.height = 0;
-      } catch { /* silent */ }
-    }, 200);
-    return () => { if (liveDebounceRef.current) clearTimeout(liveDebounceRef.current); };
-  }, [img, crop, adjustments]);
 
-  // === SHEET PREVIEW: draw grid layout in real-time ===
-  useEffect(() => {
-    const canvas = sheetCanvasRef.current;
-    if (!canvas || !previewUrl) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+        ctx.drawImage(activeImg, -drawW / 2, -drawH / 2, drawW, drawH);
+        ctx.restore();
+      }
 
-    const tileImg = new Image();
-    tileImg.onload = () => {
-      const [pageW, pageH] = PAGE_PT[pageSize];
-      const previewScale = 200 / pageW; // fit preview ~200px wide
-      const cw = Math.round(pageW * previewScale);
-      const ch = Math.round(pageH * previewScale);
-      canvas.width = cw; canvas.height = ch;
+      // 3. Candidate Name & Date of Photo (DOP) Banner
+      if (hasCandidateText && (candidateName.trim() || candidateDate.trim())) {
+        const bannerH = Math.round(targetH * 0.16);
+        const bannerY = targetH - bannerH;
 
-      // White page background
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, bannerY, targetW, bannerH);
+
+        ctx.strokeStyle = '#cbd5e1';
+        ctx.lineWidth = Math.max(1, Math.round(dpmm * 0.2));
+        ctx.beginPath();
+        ctx.moveTo(0, bannerY);
+        ctx.lineTo(targetW, bannerY);
+        ctx.stroke();
+
+        ctx.fillStyle = '#000000';
+        ctx.textAlign = 'center';
+
+        const fontSize = Math.max(10, Math.round(bannerH * 0.36));
+        ctx.font = `bold ${fontSize}px sans-serif`;
+
+        if (candidateName.trim() && candidateDate.trim()) {
+          ctx.fillText(candidateName.trim().toUpperCase(), targetW / 2, bannerY + bannerH * 0.44);
+          ctx.font = `600 ${Math.round(fontSize * 0.88)}px sans-serif`;
+          ctx.fillText(`DOP: ${candidateDate.trim()}`, targetW / 2, bannerY + bannerH * 0.86);
+        } else if (candidateName.trim()) {
+          ctx.fillText(candidateName.trim().toUpperCase(), targetW / 2, bannerY + bannerH * 0.65);
+        } else if (candidateDate.trim()) {
+          ctx.fillText(`DOP: ${candidateDate.trim()}`, targetW / 2, bannerY + bannerH * 0.65);
+        }
+      }
+
+      // 4. Photo Border
+      if (hasBorder && borderWidthMm > 0) {
+        const borderPx = Math.max(1, Math.round(borderWidthMm * dpmm));
+        ctx.strokeStyle = borderColor;
+        ctx.lineWidth = borderPx;
+        const half = borderPx / 2;
+        ctx.strokeRect(half, half, targetW - borderPx, targetH - borderPx);
+      }
+
+      return canvas;
+    },
+    [
+      basePhotoWidthMm,
+      basePhotoHeightMm,
+      bgColor,
+      hasCandidateText,
+      candidateName,
+      candidateDate,
+      hasBorder,
+      borderWidthMm,
+      borderColor,
+      photos, // needed so tile re-renders when photo adjustments change
+    ]
+  );
+
+  // Render a Specific Sheet Page to Canvas (Zero Cut-off Guarantee)
+  const renderSheetPageCanvas = useCallback(
+    (sheetIndex = 0, dpi = 300): HTMLCanvasElement => {
+      const dpmm = dpi / 25.4;
+      const sheetW = Math.round(activePaper.wMm * dpmm);
+      const sheetH = Math.round(activePaper.hMm * dpmm);
+
+      const canvas = document.createElement('canvas');
+      canvas.width = sheetW;
+      canvas.height = sheetH;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return canvas;
+
       ctx.fillStyle = '#ffffff';
-      ctx.fillRect(0, 0, cw, ch);
-      ctx.strokeStyle = '#e2e8f0';
-      ctx.lineWidth = 1;
-      ctx.strokeRect(0, 0, cw, ch);
+      ctx.fillRect(0, 0, sheetW, sheetH);
 
-      const mmToPt = 72 / 25.4;
-      const margin = marginMm * mmToPt * previewScale;
-      const gap = gapMm * mmToPt * previewScale;
-      const photoW = PHOTO_W_MM * mmToPt * previewScale;
-      const photoH = PHOTO_H_MM * mmToPt * previewScale;
+      if (!photos.length) {
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = `bold ${Math.round(sheetW * 0.032)}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.fillText('Select or drop a photo to preview print sheet', sheetW / 2, sheetH / 2);
+        return canvas;
+      }
 
-      const cols = columns;
-      const rows = Math.ceil(qty / cols);
-
-      for (let r = 0; r < rows; r++) {
-        for (let c = 0; c < cols; c++) {
-          const idx = r * cols + c;
-          if (idx >= qty) break;
-          // Centering for last row
-          const rowStart = r * cols;
-          const rowEnd = Math.min(rowStart + cols, qty);
-          const photosInRow = rowEnd - rowStart;
-          const rowOffsetX = photosInRow < cols
-            ? (cw - (photosInRow * photoW + (photosInRow - 1) * gap)) / 2
-            : margin;
-          const x = rowOffsetX + c * (photoW + gap);
-          const y = margin + r * (photoH + gap);
-          ctx.drawImage(tileImg, x, y, photoW, photoH);
-          ctx.strokeStyle = '#d4d4d8';
-          ctx.lineWidth = 0.5;
-          ctx.strokeRect(x, y, photoW, photoH);
+      const allQueuedPhotos: PhotoSlotItem[] = [];
+      for (const p of photos) {
+        for (let i = 0; i < p.copies; i++) {
+          allQueuedPhotos.push(p);
         }
       }
 
-      // Draw cut guides (dashed lines)
-      ctx.setLineDash([3, 3]);
-      ctx.strokeStyle = '#94a3b8';
-      ctx.lineWidth = 0.3;
-      for (let c = 1; c < cols; c++) {
-        const x = margin + c * (photoW + gap) - gap / 2;
-        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, ch); ctx.stroke();
-      }
-      for (let r = 1; r <= rows; r++) {
-        const y = margin + r * (photoH + gap) - gap / 2;
-        if (y < ch) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(cw, y); ctx.stroke(); }
-      }
-      ctx.setLineDash([]);
-    };
-    tileImg.src = previewUrl;
-  }, [previewUrl, qty, columns, gapMm, marginMm, pageSize]);
+      const startIndex = sheetIndex * slotsPerSheet;
+      const pagePhotos = allQueuedPhotos.slice(startIndex, startIndex + slotsPerSheet);
 
-  const dispW = useMemo(() => (nw ? Math.round(nw * displayScale) : 0), [nw, displayScale]);
-  const dispH = useMemo(() => (nh ? Math.round(nh * displayScale) : 0), [nh, displayScale]);
+      const renderedTileMap = new Map<string, HTMLCanvasElement>();
+      for (const p of photos) {
+        renderedTileMap.set(p.id, renderSinglePhotoTile(p, dpi));
+      }
 
-  const adjSlider = (key: keyof PhotoAdjustments) => {
-    const range = ADJUSTMENT_RANGES[key];
-    const val = adjustments[key];
-    return (
-      <div key={key} className="flex items-center gap-2 text-xs">
-        <span className="w-24 text-slate-600 dark:text-slate-400 capitalize font-medium">{key}</span>
-        <input
-          type="range"
-          min={range.min}
-          max={range.max}
-          step={1}
-          value={val}
-          onChange={(e) => setAdjustments(prev => ({ ...prev, [key]: Number(e.target.value) }))}
-          className="flex-1 h-1.5 accent-rose-500"
-        />
-        <span className={`w-8 text-right font-mono ${val === 0 ? 'text-slate-400' : val > 0 ? 'text-emerald-600' : 'text-rose-500'}`}>
-          {val > 0 ? `+${val}` : val}
-        </span>
-      </div>
-    );
+      const defaultTile = renderedTileMap.get(photos[0].id)!;
+      const tileW = defaultTile.width;
+      const tileH = defaultTile.height;
+
+      const gapPx = Math.round(gapMm * dpmm);
+      const marginPx = noMargins ? 0 : Math.round(marginMm * dpmm);
+
+      const totalGridW = gridCols * tileW + (gridCols - 1) * gapPx;
+      const totalGridH = gridRows * tileH + (gridRows - 1) * gapPx;
+
+      let scaleFactor = 1.0;
+      const availW = sheetW - 2 * marginPx;
+      const availH = sheetH - 2 * marginPx;
+
+      if (totalGridW > availW || totalGridH > availH) {
+        scaleFactor = Math.min(availW / totalGridW, availH / totalGridH);
+      }
+
+      ctx.save();
+      const scaledGridW = totalGridW * scaleFactor;
+      const scaledGridH = totalGridH * scaleFactor;
+      const startX = Math.round((sheetW - scaledGridW) / 2);
+      const startY = Math.round((sheetH - scaledGridH) / 2);
+
+      ctx.translate(startX, startY);
+      ctx.scale(scaleFactor, scaleFactor);
+
+      let placed = 0;
+      for (let r = 0; r < gridRows; r++) {
+        for (let c = 0; c < gridCols; c++) {
+          if (placed >= slotsPerSheet) break;
+
+          const photoItem = pagePhotos[placed] || null;
+          const px = c * (tileW + gapPx);
+          const py = r * (tileH + gapPx);
+
+          if (photoItem) {
+            const tileCanvas = renderedTileMap.get(photoItem.id) || defaultTile;
+            ctx.drawImage(tileCanvas, px, py);
+          } else {
+            ctx.strokeStyle = '#e2e8f0';
+            ctx.lineWidth = Math.max(1, Math.round(dpmm * 0.2));
+            ctx.setLineDash([Math.round(dpmm * 1.5), Math.round(dpmm * 1.5)]);
+            ctx.strokeRect(px, py, tileW, tileH);
+            ctx.setLineDash([]);
+          }
+
+          placed++;
+        }
+      }
+
+      if (hasCutGuides && gapPx > 0 && pagePhotos.length > 1) {
+        ctx.strokeStyle = '#94a3b8';
+        ctx.lineWidth = Math.max(1, Math.round(dpmm * 0.22));
+        ctx.setLineDash([Math.round(dpmm * 1.5), Math.round(dpmm * 1.5)]);
+
+        for (let c = 1; c < gridCols; c++) {
+          const cutX = c * tileW + (c - 0.5) * gapPx;
+          ctx.beginPath();
+          ctx.moveTo(cutX, 0);
+          ctx.lineTo(cutX, totalGridH);
+          ctx.stroke();
+        }
+
+        for (let r = 1; r < gridRows; r++) {
+          const cutY = r * tileH + (r - 0.5) * gapPx;
+          ctx.beginPath();
+          ctx.moveTo(0, cutY);
+          ctx.lineTo(totalGridW, cutY);
+          ctx.stroke();
+        }
+
+        ctx.setLineDash([]);
+      }
+
+      ctx.restore();
+
+      // Sheet Numbering & Studio Footer in non-print margin (Crisp Studio Branding)
+      const bottomSpace = sheetH - (startY + scaledGridH);
+      if (marginPx >= 8 || bottomSpace >= 22) {
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = `600 ${Math.max(9, Math.round(dpmm * 2.3))}px sans-serif`;
+        ctx.textAlign = 'center';
+        const footerY = Math.min(sheetH - 8, Math.max(sheetH - (marginPx ? marginPx / 2 : 12), startY + scaledGridH + Math.round(dpmm * 4.2)));
+        const studioNote = studioWatermark.trim() ? `${studioWatermark.trim()} • ` : '';
+        ctx.fillText(`${studioNote}Sheet ${sheetIndex + 1} of ${totalSheetsRequired} • 100% Actual Size (${exportDpi} DPI)`, sheetW / 2, footerY);
+      }
+
+      return canvas;
+    },
+    [
+      activePaper,
+      photos,
+      renderSinglePhotoTile,
+      slotsPerSheet,
+      gridCols,
+      gridRows,
+      gapMm,
+      noMargins,
+      marginMm,
+      hasCutGuides,
+      studioWatermark,
+      exportDpi,
+      totalSheetsRequired,
+    ]
+  );
+
+  // Live Screen Preview
+  useEffect(() => {
+    if (!previewCanvasRef.current) return;
+    const previewDpi = 96;
+    const rendered = renderSheetPageCanvas(activeSheetIndex, previewDpi);
+
+    const targetCanvas = previewCanvasRef.current;
+    targetCanvas.width = rendered.width;
+    targetCanvas.height = rendered.height;
+    const tctx = targetCanvas.getContext('2d');
+    if (tctx) {
+      tctx.drawImage(rendered, 0, 0);
+    }
+  }, [renderSheetPageCanvas, activeSheetIndex]);
+
+  // Direct Browser Print (100% Actual Size)
+  const handlePrint = () => {
+    if (!photos.length) return;
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      showToast('Pop-up was blocked. Please allow pop-ups to print directly.', 'error');
+      return;
+    }
+
+    const pagesHtml: string[] = [];
+    for (let i = 0; i < totalSheetsRequired; i++) {
+      const pageCanvas = renderSheetPageCanvas(i, exportDpi);
+      const dataUrl = pageCanvas.toDataURL('image/jpeg', 0.96);
+      pagesHtml.push(`
+        <div class="page">
+          <img src="${dataUrl}" />
+        </div>
+      `);
+    }
+
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Passport Photo Print Sheet (${paperSizeId.toUpperCase()})</title>
+          <style>
+            @page {
+              size: ${activePaper.wMm}mm ${activePaper.hMm}mm;
+              margin: 0;
+            }
+            body {
+              margin: 0;
+              padding: 0;
+              background: #fff;
+            }
+            .page {
+              page-break-after: always;
+              width: ${activePaper.wMm}mm;
+              height: ${activePaper.hMm}mm;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+            }
+            img {
+              width: 100%;
+              height: 100%;
+              object-fit: contain;
+              display: block;
+            }
+          </style>
+        </head>
+        <body>
+          ${pagesHtml.join('')}
+          <script>
+            window.onload = function() {
+              window.print();
+              window.close();
+            };
+          </script>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+  };
+
+  const handleDownloadCurrentSheet = (format: 'png' | 'jpeg') => {
+    if (!photos.length) return;
+    setIsGenerating(true);
+    setTimeout(() => {
+      try {
+        const canvas = renderSheetPageCanvas(activeSheetIndex, exportDpi);
+        const mime = format === 'png' ? 'image/png' : 'image/jpeg';
+        const quality = format === 'jpeg' ? 0.96 : undefined;
+
+        canvas.toBlob((blob) => {
+          if (!blob) return;
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `passport_sheet_${paperSizeId}_sheet${activeSheetIndex + 1}_of_${totalSheetsRequired}.${format === 'png' ? 'png' : 'jpg'}`;
+          a.click();
+          URL.revokeObjectURL(url);
+          setIsGenerating(false);
+        }, mime, quality);
+      } catch (e) {
+        console.error(e);
+        setIsGenerating(false);
+      }
+    }, 40);
+  };
+
+  const handleDownloadAllSheetsPdf = async () => {
+    if (!photos.length) return;
+    setIsGenerating(true);
+    try {
+      const pdf = await PDFDocument.create();
+      const mmToPt = 72 / 25.4;
+      const pageW = activePaper.wMm * mmToPt;
+      const pageH = activePaper.hMm * mmToPt;
+
+      for (let i = 0; i < totalSheetsRequired; i++) {
+        const pageCanvas = renderSheetPageCanvas(i, exportDpi);
+        const pngBlob = await new Promise<Blob | null>((res) => pageCanvas.toBlob(res, 'image/png'));
+        if (!pngBlob) continue;
+
+        const arrayBuffer = await pngBlob.arrayBuffer();
+        const embeddedImg = await pdf.embedPng(new Uint8Array(arrayBuffer));
+        const page = pdf.addPage([pageW, pageH]);
+        page.drawImage(embeddedImg, { x: 0, y: 0, width: pageW, height: pageH });
+      }
+
+      const pdfBytes = await pdf.save();
+      const pdfBlob = new Blob([pdfBytes as any], { type: 'application/pdf' });
+      const url = URL.createObjectURL(pdfBlob);
+
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `passport_photo_sheets_${paperSizeId}_${targetPhotoCount}photos.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error(e);
+      showToast('Failed to generate PDF. Please download as PNG or JPG.', 'error');
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  const handleDownloadAllSheetsZip = async (format: 'png' | 'jpeg') => {
+    if (!photos.length) return;
+    setIsGenerating(true);
+    try {
+      const zip = new JSZip();
+      // Bug fix: was always using PNG — now correctly uses the requested format
+      const mime = format === 'png' ? 'image/png' : 'image/jpeg';
+      const quality = format === 'jpeg' ? 0.95 : undefined;
+      const ext = format === 'png' ? 'png' : 'jpg';
+
+      for (let i = 0; i < totalSheetsRequired; i++) {
+        const canvas = renderSheetPageCanvas(i, exportDpi);
+        const blob = await new Promise<Blob | null>((res) => canvas.toBlob(res, mime, quality));
+        if (blob) {
+          zip.file(`passport_sheet_${paperSizeId}_page_${i + 1}.${ext}`, blob);
+        }
+      }
+
+      const zipBlob = await zip.generateAsync({ type: 'blob' });
+      const url = URL.createObjectURL(zipBlob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `passport_sheets_${paperSizeId}_${targetPhotoCount}photos_${ext}.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error(e);
+      showToast('Failed to generate ZIP package.', 'error');
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  const handleDownloadSinglePhoto = (format: 'png' | 'jpeg') => {
+    if (!currentPhoto) return;
+    const tile = renderSinglePhotoTile(currentPhoto, exportDpi);
+    const mime = format === 'png' ? 'image/png' : 'image/jpeg';
+    const quality = format === 'jpeg' ? 0.98 : undefined;
+
+    tile.toBlob((blob) => {
+      if (!blob) return;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `single_passport_photo_${basePhotoWidthMm}x${basePhotoHeightMm}mm.${format === 'png' ? 'png' : 'jpg'}`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }, mime, quality);
+  };
+
+  // Dedicated Govt Portal Photo Downloader (Guaranteed 20 - 50 KB JPEG)
+  const handleDownloadGovtPortalPhoto = async () => {
+    if (!currentPhoto) return;
+    setIsGenerating(true);
+    try {
+      const tile = renderSinglePhotoTile(currentPhoto, 300);
+      let low = 0.25;
+      let high = 0.95;
+      let bestBlob: Blob | null = null;
+
+      for (let iter = 0; iter < 6; iter++) {
+        const mid = (low + high) / 2;
+        const blob = await new Promise<Blob | null>((res) => tile.toBlob(res, 'image/jpeg', mid));
+        if (!blob) break;
+        const kb = blob.size / 1024;
+        bestBlob = blob;
+        if (kb > 46) {
+          high = mid;
+        } else if (kb < 22) {
+          low = mid;
+        } else {
+          break; // Perfect ~35 KB range!
+        }
+      }
+
+      if (bestBlob) {
+        const url = URL.createObjectURL(bestBlob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `sarkari_photo_${basePhotoWidthMm}x${basePhotoHeightMm}mm_${Math.round(bestBlob.size / 1024)}KB.jpg`;
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+    } catch (e) {
+      console.error(e);
+      showToast('Auto-compression reached fallback. Downloading standard photo...', 'info');
+      handleDownloadSinglePhoto('jpeg');
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
   return (
-    <div className="flex-1 flex flex-col items-center p-6 md:p-10 pb-24">
-      <div className="text-center max-w-2xl mb-8">
-        <h1 className="text-3xl md:text-4xl font-bold text-slate-900 dark:text-white">Passport Photo Studio</h1>
-        <p className="mt-2 text-slate-600 dark:text-slate-400 text-sm md:text-base">
-          Upload a portrait, adjust crop & photo editing, then export a ready-to-print PDF sheet. 
-          Photo size <strong>35×45 mm</strong> (India standard).
-        </p>
+    <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 text-slate-800 dark:text-slate-200">
+      <input
+        type="file"
+        ref={fileInputRef}
+        onChange={(e) => {
+          if (e.target.files) addFilesToSession(Array.from(e.target.files));
+          e.target.value = '';
+        }}
+        accept="image/png, image/jpeg, image/jpg, image/webp"
+        multiple
+        className="hidden"
+      />
+
+      {/* ─── Toast Notification (replaces browser alert) ─── */}
+      {toastMsg && (
+        <div className={`fixed top-5 right-5 z-[9999] flex items-center gap-3 px-5 py-3 rounded-2xl shadow-2xl text-sm font-semibold transition-all animate-fade-in max-w-sm ${
+          toastMsg.type === 'error'
+            ? 'bg-red-600 text-white'
+            : toastMsg.type === 'success'
+            ? 'bg-emerald-600 text-white'
+            : 'bg-indigo-700 text-white'
+        }`}>
+          <span className="text-base">
+            {toastMsg.type === 'error' ? '⚠️' : toastMsg.type === 'success' ? '✓' : 'ℹ'}
+          </span>
+          <span>{toastMsg.text}</span>
+        </div>
+      )}
+
+      {/* ─── Photo Loading Overlay ─── */}
+      {isLoadingPhotos && (
+        <div className="fixed inset-0 z-[9998] bg-black/40 backdrop-blur-sm flex items-center justify-center">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl px-8 py-6 shadow-2xl flex items-center gap-4">
+            <Loader2 className="w-6 h-6 animate-spin text-indigo-600" />
+            <span className="text-sm font-bold text-slate-800 dark:text-white">Loading photo(s)…</span>
+          </div>
+        </div>
+      )}
+
+      {/* ================= CYBER CAFÉ & XEROX STUDIO HUB STRIP ================= */}
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-2xl bg-slate-900 text-white text-xs shadow-md">
+        <div className="flex items-center gap-2 px-2">
+          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+          <span className="font-bold text-slate-200">Cyber Café &amp; Studio Suite:</span>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Link
+            to="/id-card-joiner"
+            className="px-3 py-1 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold flex items-center gap-1.5 transition-colors"
+          >
+            <CreditCard className="w-3.5 h-3.5 text-indigo-400" /> Aadhaar/ID Dual-Side Joiner
+          </Link>
+          <Link
+            to="/ink-saver"
+            className="px-3 py-1 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold flex items-center gap-1.5 transition-colors"
+          >
+            <FileText className="w-3.5 h-3.5 text-emerald-400" /> Xerox Eco Document Cleaner
+          </Link>
+          <Link
+            to="/clean-signature"
+            className="px-3 py-1 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold flex items-center gap-1.5 transition-colors"
+          >
+            <FileCheck2 className="w-3.5 h-3.5 text-amber-400" /> Sarkari Signature Resizer
+          </Link>
+        </div>
       </div>
 
-      {!file || !img || !crop ? (
-        <div className="w-full max-w-xl space-y-4">
-          <FileDropzone
-            onDrop={onFile} multiple={false} title="Upload portrait photo"
-            subtitle="JPG, PNG, WEBP — or use camera on phone"
-            accept={{ 'image/*': ['.jpg', '.jpeg', '.png', '.webp', '.bmp'] }}
-            variant="dark" className="dark:bg-slate-900/60"
-          />
-          <label className="flex items-center justify-center gap-2 w-full py-3 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 font-semibold cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700">
-            <Camera className="w-5 h-5" />
-            Take photo
-            <input type="file" accept="image/*" capture="user" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) onFile([f]); }} />
-          </label>
+      {/* ================= HERO HEADER ================= */}
+      <header className="mb-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800 text-xs font-bold uppercase tracking-wider">
+              <Sparkles className="w-3.5 h-3.5" />
+              Pro Studio Passport Sheet Suite
+            </div>
+            <h1 className="mt-2 text-2xl sm:text-3xl lg:text-4xl font-black text-slate-900 dark:text-white tracking-tight">
+              Passport Photo Sheet Maker
+            </h1>
+            <p className="mt-1 text-sm text-slate-600 dark:text-slate-400 max-w-2xl">
+              Zero cut-off studio printing engine. Auto-arrange on 4R photo paper or A4, biometric head guides, face lighting glow, and instant 20–50 KB govt portal compression.
+            </p>
+          </div>
+
+          <div className="hidden sm:flex items-center gap-2 px-4 py-2 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm text-xs font-bold">
+            <ShieldCheck className="w-4 h-4 text-emerald-500" />
+            <span>Guaranteed Zero Cut-Off • 300 DPI Studio Quality</span>
+          </div>
         </div>
-      ) : (
-        <div className="w-full max-w-6xl grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-8">
-          {/* LEFT: Image + Crop + Actions */}
-          <div className="space-y-4">
-            <div ref={wrapRef} className="relative mx-auto w-full max-w-[640px] flex justify-center">
-              <div className="relative rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 bg-slate-900" style={{ width: dispW, height: dispH }}>
-                {imgObjectUrl && <img src={imgObjectUrl} alt="Source" width={dispW} height={dispH} className="block pointer-events-none" draggable={false} />}
-                {crop && (
-                  <div className="absolute left-0 top-0 cursor-move touch-none" style={{ width: dispW, height: dispH }}
-                    onPointerDown={onPointerDownCrop} onPointerMove={onPointerMoveCrop} onPointerUp={onPointerUpCrop} onPointerCancel={onPointerUpCrop}>
-                    <div className="absolute border-2 border-white shadow-lg rounded-sm pointer-events-none"
-                      style={{ left: crop.x * displayScale, top: crop.y * displayScale, width: crop.w * displayScale, height: crop.h * displayScale, boxShadow: '0 0 0 4096px rgba(0,0,0,0.5)' }}>
-                      {showFaceGuide && (
-                        <svg className="absolute inset-0 w-full h-full pointer-events-none" viewBox="0 0 100 100" preserveAspectRatio="none">
-                          <ellipse cx="50" cy="40" rx="22" ry="30" fill="none" stroke="rgba(255,255,255,0.5)" strokeWidth="0.7" strokeDasharray="3 2" />
-                          <line x1="50" y1="2" x2="50" y2="12" stroke="rgba(255,255,255,0.3)" strokeWidth="0.4" />
-                          <line x1="50" y1="88" x2="50" y2="98" stroke="rgba(255,255,255,0.3)" strokeWidth="0.4" />
-                        </svg>
+
+        {/* ================= ONE-CLICK STUDIO PACKS BAR ================= */}
+        <div className="mt-5 p-3 rounded-2xl bg-slate-100/80 dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800">
+          <div className="flex items-center justify-between mb-2 px-1">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+              <Package className="w-3.5 h-3.5 text-indigo-500" /> Quick Studio Presets (1-Click Setup)
+            </span>
+            <span className="text-[11px] text-slate-400">Select standard photo paper packs</span>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+            <button
+              type="button"
+              onClick={() => applyPresetPack('4r_classic')}
+              className={`py-2 px-3 rounded-xl border text-left transition-all ${
+                paperSizeId === '4r' && orientation === 'portrait' && gridCols === 2 && gridRows === 3
+                  ? 'border-indigo-600 bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 font-bold shadow-xs'
+                  : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/80 hover:border-slate-300 text-slate-700 dark:text-slate-300'
+              }`}
+            >
+              <div className="text-xs font-black">4R Classic (6)</div>
+              <div className="text-[10px] text-slate-400">2×3 Grid • Studio 4×6"</div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => applyPresetPack('4r_max')}
+              className={`py-2 px-3 rounded-xl border text-left transition-all ${
+                paperSizeId === '4r' && orientation === 'landscape' && gridCols === 4 && gridRows === 2
+                  ? 'border-indigo-600 bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 font-bold shadow-xs'
+                  : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/80 hover:border-slate-300 text-slate-700 dark:text-slate-300'
+              }`}
+            >
+              <div className="text-xs font-black">4R Landscape (8)</div>
+              <div className="text-[10px] text-slate-400">4×2 Grid • Max 4×6"</div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => applyPresetPack('a4_full')}
+              className={`py-2 px-3 rounded-xl border text-left transition-all ${
+                paperSizeId === 'a4' && gridCols === 5 && gridRows === 6
+                  ? 'border-indigo-600 bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 font-bold shadow-xs'
+                  : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/80 hover:border-slate-300 text-slate-700 dark:text-slate-300'
+              }`}
+            >
+              <div className="text-xs font-black">A4 Full Sheet (30) ★</div>
+              <div className="text-[10px] text-indigo-500 font-semibold">Perfect for 28 Photos</div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => applyPresetPack('a4_half')}
+              className={`py-2 px-3 rounded-xl border text-left transition-all ${
+                paperSizeId === 'a4' && gridCols === 5 && gridRows === 3
+                  ? 'border-indigo-600 bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 font-bold shadow-xs'
+                  : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/80 hover:border-slate-300 text-slate-700 dark:text-slate-300'
+              }`}
+            >
+              <div className="text-xs font-black">A4 Half Pack (15)</div>
+              <div className="text-[10px] text-slate-400">5×3 Grid • Top Half</div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => applyPresetPack('a5_pack')}
+              className={`py-2 px-3 rounded-xl border text-left transition-all ${
+                paperSizeId === 'a5' && gridCols === 3 && gridRows === 4
+                  ? 'border-indigo-600 bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 font-bold shadow-xs'
+                  : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/80 hover:border-slate-300 text-slate-700 dark:text-slate-300'
+              }`}
+            >
+              <div className="text-xs font-black">A5 Pack (12)</div>
+              <div className="text-[10px] text-slate-400">3×4 Grid • Compact</div>
+            </button>
+          </div>
+        </div>
+
+        {/* ================= SARKARI EXAM QUICK PORTAL MODES ================= */}
+        <div className="mt-3 p-3 rounded-2xl bg-indigo-50/40 dark:bg-indigo-950/20 border border-indigo-200/60 dark:border-indigo-900/40">
+          <div className="flex items-center justify-between mb-2 px-1">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-indigo-900 dark:text-indigo-300 flex items-center gap-1.5">
+              <FileCheck2 className="w-3.5 h-3.5 text-indigo-600" /> 🏛️ Sarkari Exam &amp; Portal Presets
+            </span>
+            <span className="text-[10px] text-indigo-600 dark:text-indigo-400 font-semibold">
+              Select portal for standard dimensions
+            </span>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            {[
+              { id: 'ssc', label: 'SSC (GD/CGL/CHSL)', sub: '35×45mm Standard' },
+              { id: 'upsc', label: 'UPSC Civil Services', sub: '35×45mm Format' },
+              { id: 'rrb', label: 'Railway RRB/NTPC', sub: 'Clean White BG' },
+              { id: 'neet', label: 'NEET / JEE / CUET', sub: '35×35mm Square' },
+              { id: 'passport', label: 'Indian Passport Kendra', sub: 'White BG • No Border' },
+              { id: 'us_visa', label: 'US Visa 2×2 inch', sub: '51×51mm Square' },
+            ].map((sp) => (
+              <button
+                key={sp.id}
+                type="button"
+                onClick={() => applySarkariPortalPreset(sp.id as any)}
+                className={`px-3 py-1.5 rounded-xl border text-left transition-all ${
+                  activeSarkariId === sp.id
+                    ? 'border-indigo-600 bg-indigo-600 shadow-sm'
+                    : 'border-indigo-200 dark:border-indigo-800 bg-white dark:bg-slate-800 hover:bg-indigo-50 dark:hover:bg-indigo-950/30'
+                }`}
+              >
+                <div className={`text-xs font-bold ${
+                  activeSarkariId === sp.id ? 'text-white' : 'text-slate-900 dark:text-white'
+                }`}>
+                  {activeSarkariId === sp.id && '\u2713 '}{sp.label}
+                </div>
+                <div className={`text-[10px] ${
+                  activeSarkariId === sp.id ? 'text-indigo-200' : 'text-indigo-600 dark:text-indigo-400'
+                }`}>{sp.sub}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+      </header>
+
+      {/* ================= SMART CAPACITY ADVISORY (e.g. For 28 Photos on 4R) ================= */}
+      {targetPhotoCount > slotsPerSheet && (
+        <div className="mb-6 p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+          <div className="flex items-start gap-3">
+            <Info className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+            <div>
+              <p className="text-xs sm:text-sm font-bold text-amber-950 dark:text-amber-200">
+                You selected <strong>{targetPhotoCount} photos</strong>. On {activePaper.name}, 1 sheet holds max <strong>{slotsPerSheet} photos</strong> (Total {totalSheetsRequired} sheets required).
+              </p>
+              <p className="text-xs text-amber-800 dark:text-amber-300 mt-0.5">
+                Want all {targetPhotoCount} photos on a <strong>single sheet</strong> without multiple papers? Switch to A4.
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleSwitchToA4}
+            className="shrink-0 px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs shadow-sm flex items-center gap-1.5 transition-all"
+          >
+            <Sparkles className="w-3.5 h-3.5" /> Switch to A4 Sheet (1 Page)
+          </button>
+        </div>
+      )}
+
+      {/* ================= OVERFLOW SAFETY WARNING ================= */}
+      {safeLimits.isOverflow && (
+        <div className="mb-6 p-4 rounded-2xl bg-red-50 dark:bg-red-950/40 border border-red-300 dark:border-red-800 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+          <div className="flex items-start gap-3">
+            <AlertCircle className="w-5 h-5 text-red-600 dark:text-red-400 shrink-0 mt-0.5" />
+            <div>
+              <p className="text-xs sm:text-sm font-bold text-red-950 dark:text-red-200">
+                ⚠️ Grid Overflow Warning: Current {gridRows} rows × {gridCols} cols exceed printable sheet bounds!
+              </p>
+              <p className="text-xs text-red-800 dark:text-red-300 mt-0.5">
+                On {activePaper.name}, maximum safe dimensions are <strong>{safeLimits.maxRows} rows × {safeLimits.maxCols} cols</strong>.
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleAutoFit}
+            className="shrink-0 px-4 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold text-xs shadow-sm flex items-center gap-1.5 transition-all"
+          >
+            <RefreshCw className="w-3.5 h-3.5" /> Auto-Fix Grid
+          </button>
+        </div>
+      )}
+
+      {/* ================= BIOMETRIC ALIGNMENT & FACE GLOW MODAL ================= */}
+      {isCropModalOpen && currentPhoto && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4">
+          <div className="w-full max-w-4xl bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden flex flex-col max-h-[92vh]">
+            {/* Modal Header & Navigation Tabs */}
+            <div className="flex flex-wrap items-center justify-between px-6 py-3.5 border-b border-slate-100 dark:border-slate-800 gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-full bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 flex items-center justify-center">
+                  <Camera className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                    Biometric &amp; Lighting Studio
+                  </h3>
+                  <p className="text-[11px] text-slate-400">Center face in oval • Adjust face lighting</p>
+                </div>
+              </div>
+
+              {/* Mode Tabs: Align & Lighting */}
+              <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-2xl">
+                <button
+                  type="button"
+                  onClick={() => setModalActiveTab('align')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                    modalActiveTab === 'align'
+                      ? 'bg-white dark:bg-slate-900 text-indigo-600 shadow-xs'
+                      : 'text-slate-600 dark:text-slate-400'
+                  }`}
+                >
+                  📐 Biometrics &amp; Crop
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setModalActiveTab('light')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                    modalActiveTab === 'light'
+                      ? 'bg-white dark:bg-slate-900 text-indigo-600 shadow-xs'
+                      : 'text-slate-600 dark:text-slate-400'
+                  }`}
+                >
+                  💡 Studio Face Lighting
+                </button>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsCropModalOpen(false)}
+                className="px-4 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-sm transition-all"
+              >
+                Done &amp; Apply
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="grid grid-cols-1 md:grid-cols-12 gap-6 p-6 overflow-y-auto items-center">
+              {/* Left Live Viewport */}
+              <div className="md:col-span-7 flex flex-col items-center justify-center">
+                <div
+                  className="relative w-full max-w-sm h-80 bg-slate-950 rounded-2xl overflow-hidden flex items-center justify-center select-none cursor-grab active:cursor-grabbing border border-slate-800 shadow-inner touch-none"
+                  onMouseDown={(e) => {
+                    isDraggingRef.current = true;
+                    dragStartRef.current = {
+                      x: e.clientX - currentPhoto.panOffset.x,
+                      y: e.clientY - currentPhoto.panOffset.y,
+                    };
+                  }}
+                  onMouseMove={(e) => {
+                    if (!isDraggingRef.current) return;
+                    const newX = e.clientX - dragStartRef.current.x;
+                    const newY = e.clientY - dragStartRef.current.y;
+                    updatePhoto(currentPhoto.id, (p) => ({ ...p, panOffset: { x: newX, y: newY } }));
+                  }}
+                  onMouseUp={() => { isDraggingRef.current = false; }}
+                  onMouseLeave={() => { isDraggingRef.current = false; }}
+                  // Touch support for mobile devices
+                  onTouchStart={(e) => {
+                    isDraggingRef.current = true;
+                    const t = e.touches[0];
+                    dragStartRef.current = {
+                      x: t.clientX - currentPhoto.panOffset.x,
+                      y: t.clientY - currentPhoto.panOffset.y,
+                    };
+                  }}
+                  onTouchMove={(e) => {
+                    if (!isDraggingRef.current) return;
+                    e.preventDefault();
+                    const t = e.touches[0];
+                    const newX = t.clientX - dragStartRef.current.x;
+                    const newY = t.clientY - dragStartRef.current.y;
+                    updatePhoto(currentPhoto.id, (p) => ({ ...p, panOffset: { x: newX, y: newY } }));
+                  }}
+                  onTouchEnd={() => { isDraggingRef.current = false; }}
+                >
+                  {/* Photo Card Frame — matches exact passport aspect ratio & covers identically to canvas */}
+                  {(() => {
+                    const modalTileH = 220;
+                    const modalTileW = Math.round(((currentPhoto.isJointPhoto ? basePhotoWidthMm * 2 : basePhotoWidthMm) / basePhotoHeightMm) * modalTileH);
+                    const activeImg = currentPhoto.processedImg ?? currentPhoto.img;
+                    const imgW = activeImg.naturalWidth || activeImg.width || 1;
+                    const imgH = activeImg.naturalHeight || activeImg.height || 1;
+                    const imgAspect = imgW / imgH;
+                    const tileAspect = modalTileW / modalTileH;
+                    let drawW = modalTileW;
+                    let drawH = modalTileH;
+                    if (imgAspect > tileAspect) {
+                      drawH = modalTileH;
+                      drawW = modalTileH * imgAspect;
+                    } else {
+                      drawW = modalTileW;
+                      drawH = modalTileW / imgAspect;
+                    }
+
+                    return (
+                      <div
+                        className="relative rounded-sm overflow-hidden shadow-2xl flex items-center justify-center shrink-0 border border-slate-700/60"
+                        style={{
+                          width: `${modalTileW}px`,
+                          height: `${modalTileH}px`,
+                          backgroundColor: bgColor,
+                        }}
+                      >
+                        {/* Real Photo with Live Lighting, Contrast, Saturation & Transforms */}
+                        <img
+                          src={activeImg.src}
+                          alt="Alignment"
+                          style={{
+                            width: `${drawW}px`,
+                            height: `${drawH}px`,
+                            position: 'absolute',
+                            left: '50%',
+                            top: '50%',
+                            marginLeft: `${-drawW / 2}px`,
+                            marginTop: `${-drawH / 2}px`,
+                            transform: `translate(${currentPhoto.panOffset.x}px, ${currentPhoto.panOffset.y}px) rotate(${currentPhoto.rotation}deg) scale(${currentPhoto.zoom / 100}) scaleX(${currentPhoto.isFlippedH ? -1 : 1})`,
+                            transformOrigin: 'center center',
+                            filter: [
+                              currentPhoto.brightness !== 0 ? `brightness(${100 + currentPhoto.brightness}%)` : '',
+                              currentPhoto.contrast !== 0 ? `contrast(${100 + currentPhoto.contrast}%)` : '',
+                              currentPhoto.saturation !== 0 ? `saturate(${100 + currentPhoto.saturation}%)` : '',
+                            ].filter(Boolean).join(' ') || undefined,
+                            pointerEvents: 'none',
+                            maxWidth: 'none',
+                            maxHeight: 'none',
+                          }}
+                        />
+
+                        {/* Candidate Text Overlay inside photo preview if enabled */}
+                        {hasCandidateText && (candidateName.trim() || candidateDate.trim()) && (
+                          <div className="absolute bottom-0 inset-x-0 bg-white/95 border-t border-slate-300 py-0.5 px-1 text-center pointer-events-none z-10">
+                            {candidateName.trim() && (
+                              <p className="text-[9px] font-black uppercase text-black leading-tight truncate">
+                                {candidateName.trim()}
+                              </p>
+                            )}
+                            {candidateDate.trim() && (
+                              <p className="text-[8px] font-bold text-black leading-tight">
+                                DOP: {candidateDate.trim()}
+                              </p>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Photo Border preview if enabled */}
+                        {hasBorder && borderWidthMm > 0 && (
+                          <div
+                            className="absolute inset-0 pointer-events-none z-10"
+                            style={{
+                              border: `${Math.max(1, Math.round(borderWidthMm * 2))}px solid ${borderColor}`,
+                            }}
+                          />
+                        )}
+
+                        {/* Biometric Oval Guide Overlay */}
+                        {showBiometricGuides && modalActiveTab === 'align' && (
+                          <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center z-20">
+                            <div
+                              className="relative flex items-center justify-center"
+                              style={{
+                                width: `${modalTileW}px`,
+                                height: `${modalTileH}px`,
+                                boxShadow: '0 0 0 9999px rgba(0,0,0,0.5)',
+                                borderRadius: '50%',
+                                border: '2px solid #6366f1',
+                              }}
+                            >
+                              {/* Eye-level guide line */}
+                              <div className="absolute w-full top-[44%] border-t border-dashed border-amber-400 opacity-80" />
+                              {/* Head zone inner guide */}
+                              <div
+                                className="absolute border border-dashed border-emerald-400 opacity-70"
+                                style={{
+                                  width: '70%',
+                                  height: '72%',
+                                  top: '9%',
+                                  borderRadius: '50%',
+                                }}
+                              />
+                              <span className="absolute bottom-[-22px] text-[10px] font-bold text-white bg-black/80 px-2 py-0.5 rounded whitespace-nowrap shadow-sm">
+                                Eyes on amber line • Head 70–80%
+                              </span>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+                </div>
+                <span className="text-[11px] text-slate-400 mt-4">
+                  👆 Drag (mouse or touch) to position head in the oval
+                </span>
+
+              </div>
+
+              {/* Right Panel Tabs */}
+              <div className="md:col-span-5 space-y-4">
+                {/* TAB 1: ALIGNMENT & BIOMETRICS */}
+                {modalActiveTab === 'align' && (
+                  <div className="space-y-4">
+                    <div className="space-y-2">
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveBackground(currentPhoto)}
+                        disabled={currentPhoto.isRemovingBg || isBatchRemovingBg}
+                        className="w-full py-2.5 px-3 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold text-xs shadow-sm flex items-center justify-center gap-2 disabled:opacity-50"
+                      >
+                        {currentPhoto.isRemovingBg ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                        {currentPhoto.isBgRemoved ? 'Background Removed ✓' : 'Remove Background (AI)'}
+                      </button>
+
+                      {photos.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={handleBatchRemoveBackground}
+                          disabled={isBatchRemovingBg || currentPhoto.isRemovingBg}
+                          className="w-full py-2 px-3 rounded-xl border border-purple-200 dark:border-purple-800 bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 font-bold text-xs shadow-sm flex items-center justify-center gap-2 hover:bg-purple-100 dark:hover:bg-purple-900/40 disabled:opacity-50"
+                        >
+                          {isBatchRemovingBg ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <Layers className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
+                          )}
+                          Remove BG for All ({photos.length} Photos)
+                        </button>
                       )}
-                      <span className="absolute -top-6 left-0 text-[10px] font-bold text-white whitespace-nowrap drop-shadow-md">35×45mm — drag to adjust</span>
+                    </div>
+
+                    <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700">
+                      <div>
+                        <span className="text-xs font-bold text-slate-800 dark:text-white block">Joint Photo (2-in-1)</span>
+                        <span className="text-[10px] text-slate-400">Double width for couple / pension</span>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={currentPhoto.isJointPhoto}
+                        onChange={(e) =>
+                          updatePhoto(currentPhoto.id, (p) => ({ ...p, isJointPhoto: e.target.checked }))
+                        }
+                        className="w-4 h-4 rounded text-indigo-600"
+                      />
+                    </div>
+
+                    {/* Zoom */}
+                    <div>
+                      <div className="flex justify-between text-xs font-semibold mb-1">
+                        <span>Zoom: {currentPhoto.zoom}%</span>
+                        <button
+                          type="button"
+                          onClick={() => updatePhoto(currentPhoto.id, (p) => ({ ...p, zoom: 100 }))}
+                          className="text-indigo-600 text-[11px] hover:underline"
+                        >
+                          Reset
+                        </button>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => updatePhoto(currentPhoto.id, (p) => ({ ...p, zoom: Math.max(60, p.zoom - 5) }))}
+                          className="p-1 rounded bg-slate-100 dark:bg-slate-800"
+                        >
+                          <Minus className="w-3.5 h-3.5" />
+                        </button>
+                        <input
+                          type="range"
+                          min={60}
+                          max={200}
+                          value={currentPhoto.zoom}
+                          onChange={(e) => updatePhoto(currentPhoto.id, (p) => ({ ...p, zoom: Number(e.target.value) }))}
+                          className="w-full accent-indigo-600"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => updatePhoto(currentPhoto.id, (p) => ({ ...p, zoom: Math.min(200, p.zoom + 5) }))}
+                          className="p-1 rounded bg-slate-100 dark:bg-slate-800"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Straighten / Rotation */}
+                    <div>
+                      <div className="flex justify-between text-xs font-semibold mb-1">
+                        <span>Straighten: {currentPhoto.rotation}°</span>
+                        <button
+                          type="button"
+                          onClick={() => updatePhoto(currentPhoto.id, (p) => ({ ...p, rotation: 0 }))}
+                          className="text-indigo-600 text-[11px] hover:underline"
+                        >
+                          0°
+                        </button>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => updatePhoto(currentPhoto.id, (p) => ({ ...p, rotation: (p.rotation - 90) % 360 }))}
+                          className="px-2 py-1 rounded bg-slate-100 dark:bg-slate-800 text-[10px] font-bold"
+                        >
+                          ↺ 90°
+                        </button>
+                        <input
+                          type="range"
+                          min={-30}
+                          max={30}
+                          value={currentPhoto.rotation}
+                          onChange={(e) => updatePhoto(currentPhoto.id, (p) => ({ ...p, rotation: Number(e.target.value) }))}
+                          className="w-full accent-indigo-600"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => updatePhoto(currentPhoto.id, (p) => ({ ...p, rotation: (p.rotation + 90) % 360 }))}
+                          className="px-2 py-1 rounded bg-slate-100 dark:bg-slate-800 text-[10px] font-bold"
+                        >
+                          ↻ 90°
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => updatePhoto(currentPhoto.id, (p) => ({ ...p, isFlippedH: !p.isFlippedH }))}
+                        className="flex-1 py-1.5 px-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold flex items-center justify-center gap-1"
+                      >
+                        <FlipHorizontal className="w-3.5 h-3.5" /> Flip Horizontal
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleUndoPhotoChanges(currentPhoto.id)}
+                        className="py-1.5 px-2.5 rounded-xl text-xs text-indigo-600 dark:text-indigo-400 font-bold hover:underline flex items-center gap-1"
+                        title="Revert to state before adjustments"
+                      >
+                        <RotateCcw className="w-3 h-3" /> Undo
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          updatePhoto(currentPhoto.id, (p) => ({
+                            ...p,
+                            panOffset: { x: 0, y: 0 },
+                            zoom: 100,
+                            rotation: 0,
+                            isFlippedH: false,
+                          }))
+                        }
+                        className="py-1.5 px-3 rounded-xl text-xs text-slate-500 hover:underline"
+                      >
+                        Reset All
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* TAB 2: STUDIO FACE LIGHTING */}
+                {modalActiveTab === 'light' && (
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-slate-800 dark:text-white">
+                        Studio Lighting &amp; Contrast
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          updatePhoto(currentPhoto.id, (p) => ({
+                            ...p,
+                            brightness: 10,
+                            contrast: 14,
+                            saturation: 8,
+                          }))
+                        }
+                        className="px-2.5 py-1 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-300 text-amber-700 dark:text-amber-300 text-[11px] font-bold flex items-center gap-1"
+                      >
+                        <Sun className="w-3 h-3 text-amber-500" /> 1-Click Studio Glow
+                      </button>
+                    </div>
+
+                    {/* Face Brightness */}
+                    <div>
+                      <div className="flex justify-between text-xs font-semibold mb-1">
+                        <span className="flex items-center gap-1.5">
+                          <Sun className="w-3.5 h-3.5 text-amber-500" /> Face Brightness: {currentPhoto.brightness > 0 ? `+${currentPhoto.brightness}` : currentPhoto.brightness}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => updatePhoto(currentPhoto.id, (p) => ({ ...p, brightness: 0 }))}
+                          className="text-indigo-600 text-[11px] hover:underline"
+                        >
+                          Default
+                        </button>
+                      </div>
+                      <input
+                        type="range"
+                        min={-30}
+                        max={40}
+                        value={currentPhoto.brightness}
+                        onChange={(e) =>
+                          updatePhoto(currentPhoto.id, (p) => ({ ...p, brightness: Number(e.target.value) }))
+                        }
+                        className="w-full accent-amber-500"
+                      />
+                    </div>
+
+                    {/* Face Contrast */}
+                    <div>
+                      <div className="flex justify-between text-xs font-semibold mb-1">
+                        <span className="flex items-center gap-1.5">
+                          <Contrast className="w-3.5 h-3.5 text-indigo-500" /> Studio Contrast: {currentPhoto.contrast > 0 ? `+${currentPhoto.contrast}` : currentPhoto.contrast}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => updatePhoto(currentPhoto.id, (p) => ({ ...p, contrast: 0 }))}
+                          className="text-indigo-600 text-[11px] hover:underline"
+                        >
+                          Default
+                        </button>
+                      </div>
+                      <input
+                        type="range"
+                        min={-30}
+                        max={40}
+                        value={currentPhoto.contrast}
+                        onChange={(e) =>
+                          updatePhoto(currentPhoto.id, (p) => ({ ...p, contrast: Number(e.target.value) }))
+                        }
+                        className="w-full accent-indigo-600"
+                      />
+                    </div>
+
+                    {/* Color Saturation / Warmth */}
+                    <div>
+                      <div className="flex justify-between text-xs font-semibold mb-1">
+                        <span className="flex items-center gap-1.5">
+                          <Sliders className="w-3.5 h-3.5 text-rose-500" /> Color Saturation / Warmth: {currentPhoto.saturation > 0 ? `+${currentPhoto.saturation}` : currentPhoto.saturation}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => updatePhoto(currentPhoto.id, (p) => ({ ...p, saturation: 0 }))}
+                          className="text-indigo-600 text-[11px] hover:underline"
+                        >
+                          Default
+                        </button>
+                      </div>
+                      <input
+                        type="range"
+                        min={-50}
+                        max={60}
+                        value={currentPhoto.saturation}
+                        onChange={(e) =>
+                          updatePhoto(currentPhoto.id, (p) => ({ ...p, saturation: Number(e.target.value) }))
+                        }
+                        className="w-full accent-rose-500"
+                      />
+                    </div>
+
+                    <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 text-[11px] text-slate-500 space-y-1">
+                      <p>✨ <strong>Studio Tip:</strong> Phone photos often have dark face shadows and dull colors. Setting Brightness to +10, Contrast to +14, and Saturation to +8 creates a professional studio strobe flash look.</p>
                     </div>
                   </div>
                 )}
               </div>
             </div>
-            <div className="flex flex-wrap gap-2 justify-center">
-              <button type="button" onClick={runAutoDetect} disabled={segLoading || busy}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-rose-600 text-white font-semibold text-sm hover:bg-rose-700 disabled:opacity-50">
-                {segLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <User className="w-4 h-4" />} Auto-detect
-              </button>
-              <button type="button" onClick={() => onResizeCrop(1)} className="px-3 py-2 rounded-xl bg-slate-200 dark:bg-slate-700 text-sm font-semibold">Larger</button>
-              <button type="button" onClick={() => onResizeCrop(-1)} className="px-3 py-2 rounded-xl bg-slate-200 dark:bg-slate-700 text-sm font-semibold">Smaller</button>
-              <button type="button" onClick={() => { setImgObjectUrl(u => { if (u) URL.revokeObjectURL(u); return null; }); setFile(null); setImg(null); setCrop(null); setPreviewUrl(null); setPdfUrl(null); }}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-slate-300 dark:border-slate-600 text-sm font-semibold">
-                <RefreshCw className="w-4 h-4" /> New photo
-              </button>
-            </div>
-            {detectMsg && <p className="text-center text-sm text-emerald-600 dark:text-emerald-400">{detectMsg}</p>}
+          </div>
+        </div>
+      )}
 
-            {/* === LIVE EFFECT PREVIEW === */}
-            {livePreviewUrl && (
-              <div className="flex flex-col items-center gap-2 pt-3 border-t border-slate-200 dark:border-slate-700">
-                <div className="flex items-center gap-2 text-xs font-bold text-rose-600 dark:text-rose-400">
-                  <span className="w-2 h-2 bg-rose-500 rounded-full animate-pulse" />
-                  Live Effect Preview
-                </div>
-                <div className="relative rounded-xl overflow-hidden border-2 border-rose-200 dark:border-rose-800 shadow-lg bg-slate-100 dark:bg-slate-800">
-                  <img src={livePreviewUrl} alt="Live preview" className="max-w-[240px] max-h-[300px] object-contain" />
-                </div>
-                <p className="text-[10px] text-slate-400 italic">Effects update in real-time as you adjust sliders</p>
+      {/* ================= MAIN STUDIO WORKSPACE ================= */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+        {/* ================= LEFT CONTROLS (SECTIONS 1 - 4) ================= */}
+        <div className="lg:col-span-7 space-y-6">
+          {/* SECTION 1: PHOTO SOURCE & MULTI-PHOTO LIST */}
+          <div className="rounded-3xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 shadow-sm">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2.5">
+                <span className="w-7 h-7 rounded-full bg-indigo-600 text-white font-bold text-xs flex items-center justify-center">
+                  1
+                </span>
+                <h2 className="text-base font-bold text-slate-900 dark:text-white">
+                  Photo &amp; Biometric Studio
+                </h2>
               </div>
-            )}
-            {!livePreviewUrl && !isDefault(adjustments) && (
-              <p className="text-center text-xs text-slate-400 animate-pulse">Generating preview…</p>
-            )}
 
-            {/* Sheet preview (visible when tile preview exists) */}
-            {previewUrl && (
-              <div className="flex flex-col items-center gap-3 pt-4 border-t border-slate-200 dark:border-slate-700">
-                <div className="flex items-center gap-2 text-sm font-bold text-slate-700 dark:text-slate-300">
-                  <Eye className="w-4 h-4" />
-                  Sheet Layout Preview ({qty} photos on {pageSize.toUpperCase()}, gap {gapMm}mm)
-                </div>
-                <div className="bg-slate-100 dark:bg-slate-800 rounded-xl p-4 inline-block shadow-inner">
-                  <canvas ref={sheetCanvasRef} className="rounded border border-slate-300 dark:border-slate-600" style={{ maxHeight: 300 }} />
-                </div>
+              {photos.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-indigo-200 dark:border-indigo-900 bg-indigo-50 dark:bg-indigo-950/40 hover:bg-indigo-100 text-xs font-bold text-indigo-600 dark:text-indigo-400 transition-colors"
+                >
+                  <Plus className="w-3.5 h-3.5" /> + Add Another Photo
+                </button>
+              )}
+            </div>
+
+            {photos.length === 0 ? (
+              <FileDropzone
+                onDrop={addFilesToSession}
+                multiple={true}
+                accept={{ 'image/*': ['.jpg', '.jpeg', '.png', '.webp'] }}
+                title="Select or drop portrait photo"
+                subtitle="Passport photo, phone portrait selfie, or scan"
+                className="!border-dashed !border-slate-300 dark:!border-slate-700 p-8"
+              />
+            ) : (
+              <div className="space-y-3">
+                {photos.map((photo, idx) => (
+                  <div
+                    key={photo.id}
+                    className={`flex items-center justify-between p-3 rounded-2xl border transition-all ${
+                      activePhotoId === photo.id
+                        ? 'border-indigo-500 bg-indigo-50/40 dark:bg-indigo-950/20'
+                        : 'border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/40'
+                    }`}
+                  >
+                    <div
+                      className="flex items-center gap-3 cursor-pointer min-w-0"
+                      onClick={() => {
+                        setActivePhotoId(photo.id);
+                        setIsCropModalOpen(true);
+                      }}
+                    >
+                      <div className="w-12 h-14 rounded-xl overflow-hidden bg-slate-200 dark:bg-slate-700 shrink-0 border border-slate-300 dark:border-slate-600 relative group">
+                        <img
+                          src={photo.processedImg?.src || photo.objectUrl}
+                          alt={`Photo ${idx + 1}`}
+                          className="w-full h-full object-cover"
+                        />
+                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white text-[10px] font-bold transition-opacity">
+                          Edit
+                        </div>
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-xs font-bold text-slate-900 dark:text-white truncate">
+                          Photo {idx + 1}
+                        </p>
+                        <p className="text-[11px] text-indigo-600 dark:text-indigo-400 font-semibold flex items-center gap-1">
+                          <Camera className="w-3 h-3" /> Crop &amp; Face Lighting
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <div className="flex items-center bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-2 py-1">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            updatePhoto(photo.id, (p) => ({ ...p, copies: Math.max(1, p.copies - 1) }))
+                          }
+                          className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300"
+                        >
+                          <Minus className="w-3 h-3" />
+                        </button>
+                        <span className="text-xs font-bold text-slate-900 dark:text-white px-2">
+                          {photo.copies}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => updatePhoto(photo.id, (p) => ({ ...p, copies: p.copies + 1 }))}
+                          className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                        </button>
+                        <span className="text-[10px] text-slate-400 font-semibold ml-1">copies</span>
+                      </div>
+
+                      {photos.length > 1 && (
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => movePhoto(idx, idx - 1)}
+                            disabled={idx === 0}
+                            className="p-1 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-20 transition-colors"
+                            title="Move Photo Up"
+                          >
+                            <ChevronLeft className="w-3.5 h-3.5 rotate-90" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => movePhoto(idx, idx + 1)}
+                            disabled={idx === photos.length - 1}
+                            className="p-1 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-20 transition-colors"
+                            title="Move Photo Down"
+                          >
+                            <ChevronRight className="w-3.5 h-3.5 rotate-90" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => removePhoto(photo.id)}
+                            className="p-1 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/40 transition-colors"
+                            title="Remove Photo"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
           </div>
 
-          {/* RIGHT: Sidebar with Tabs */}
-          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden flex flex-col max-h-[calc(100vh-200px)]">
-            {/* Tab buttons */}
-            <div className="flex border-b border-slate-200 dark:border-slate-700 shrink-0">
-              {(['edit', 'layout', 'export'] as const).map(tab => (
-                <button key={tab} onClick={() => setSidebarTab(tab)}
-                  className={`flex-1 py-3 text-sm font-bold capitalize transition-colors ${sidebarTab === tab ? 'text-rose-600 border-b-2 border-rose-600 bg-rose-50 dark:bg-rose-950/30' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800'}`}>
-                  {tab === 'edit' ? '🎨 Edit' : tab === 'layout' ? '📐 Layout' : '📥 Export'}
-                </button>
-              ))}
+          {/* SECTION 2: QUANTITY & SMART GRID LAYOUT */}
+          <div className="rounded-3xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 shadow-sm space-y-5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <span className="w-7 h-7 rounded-full bg-indigo-600 text-white font-bold text-xs flex items-center justify-center">
+                  2
+                </span>
+                <h2 className="text-base font-bold text-slate-900 dark:text-white">
+                  Quantity &amp; Grid Layout
+                </h2>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleAutoFit}
+                className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-900 text-xs font-bold hover:bg-indigo-100"
+              >
+                <RefreshCw className="w-3.5 h-3.5" /> Auto-Fit Safe Grid
+              </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-5 space-y-4">
-              {/* ══════ EDIT TAB ══════ */}
-              {sidebarTab === 'edit' && (
-                <>
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Photo Adjustments</span>
-                    {!isDefault(adjustments) && (
-                      <button onClick={() => setAdjustments({ ...DEFAULT_ADJUSTMENTS })}
-                        className="inline-flex items-center gap-1 text-xs text-rose-500 hover:text-rose-700 font-semibold">
-                        <RotateCcw className="w-3 h-3" /> Reset all
-                      </button>
-                    )}
-                  </div>
-
-                  <button
-                    onClick={runAiEnhance}
-                    disabled={aiEnhancing || !img || !crop}
-                    className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-700 hover:to-fuchsia-700 text-white font-bold rounded-xl shadow-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {aiEnhancing ? <Loader2 className="w-5 h-5 animate-spin" /> : <Sparkles className="w-5 h-5" />}
-                    {aiEnhancing ? 'AI is analyzing & enhancing...' : 'Auto Enhance (AI)'}
-                  </button>
-
-                  <div className="space-y-2">
-                    <div className="grid grid-cols-2 gap-1.5">
-                      {Object.keys(PRESETS).filter(n => n !== 'None').map(name => (
-                        <button key={name} onClick={() => setAdjustments({ ...DEFAULT_ADJUSTMENTS, ...PRESETS[name] })}
-                          className="px-2 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 truncate dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-750">
-                          {name}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {ADJUSTMENT_GROUPS.map(group => (
-                    <div key={group.label} className="border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden">
-                      <button onClick={() => setOpenGroup(openGroup === group.label ? null : group.label)}
-                        className="w-full flex items-center justify-between px-3 py-2.5 bg-slate-50 dark:bg-slate-800 text-sm font-bold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-750">
-                        <span>{group.label}</span>
-                        <span className="text-xs text-slate-400">{openGroup === group.label ? '▼' : '▶'}</span>
-                      </button>
-                      {openGroup === group.label && (
-                        <div className="px-3 py-3 space-y-2.5 bg-white dark:bg-slate-900">
-                          {group.keys.map(key => adjSlider(key))}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-
-                  <p className="text-[10px] text-slate-400 text-center italic pt-2">
-                    Adjustments are applied to the cropped image before background removal and sharpening.
+            {/* Target Photo Quantity Input with Quick Chips (e.g. 28) */}
+            <div className="p-4 rounded-2xl bg-indigo-50/50 dark:bg-indigo-950/20 border border-indigo-200/80 dark:border-indigo-800/60">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <label className="text-xs font-black text-indigo-950 dark:text-indigo-200 uppercase tracking-wider block">
+                    Total Photos to Print
+                  </label>
+                  <p className="text-[11px] text-slate-500">
+                    Enter any number (e.g. 28). The engine auto-allocates grid &amp; sheets.
                   </p>
-                </>
-              )}
-
-              {/* ══════ LAYOUT TAB ══════ */}
-              {sidebarTab === 'layout' && (
-                <div className="space-y-4">
-                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-200">
-                    Copies on sheet: {qty}
-                    <input type="range" min={1} max={32} value={qty} onChange={(e) => setQty(Number(e.target.value))} className="mt-1 w-full" />
-                  </label>
-                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-200">
-                    Gap between photos (mm): {gapMm}
-                    <input type="range" min={1} max={12} value={gapMm} onChange={(e) => setGapMm(Number(e.target.value))} className="mt-1 w-full" />
-                  </label>
-                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-200">
-                    Page margin (mm): {marginMm}
-                    <input type="range" min={4} max={20} value={marginMm} onChange={(e) => setMarginMm(Number(e.target.value))} className="mt-1 w-full" />
-                  </label>
-                  {/* Auto-columns info */}
-                  <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-800 text-sm">
-                    <span className="text-rose-600 dark:text-rose-400 font-bold text-lg">{columns}</span>
-                    <span className="text-slate-700 dark:text-slate-300 font-medium">photos per row</span>
-                    <span className="text-slate-400 text-xs ml-auto">(auto-calculated)</span>
-                  </div>
-                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-200">
-                    Paper
-                    <select value={pageSize} onChange={(e) => setPageSize(e.target.value as SheetPageSize)} className="mt-1 w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-950 px-3 py-2">
-                      <option value="a4">A4</option>
-                      <option value="letter">US Letter</option>
-                      <option value="4x6">4×6 inch photo paper</option>
-                    </select>
-                  </label>
-                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-200">
-                    Export DPI: {exportDpi}
-                    <select value={exportDpi} onChange={(e) => setExportDpi(Number(e.target.value) as DpiChoice)} className="mt-1 w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-950 px-3 py-2">
-                      {DPI_OPTIONS.map(d => <option key={d} value={d}>{d} DPI{d === 600 ? ' (Ultra HD)' : ''}</option>)}
-                    </select>
-                  </label>
-                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-200">
-                    Sharpness: {Math.round(sharpenAmount * 100)}%
-                    <input type="range" min={0} max={100} value={Math.round(sharpenAmount * 100)} onChange={(e) => setSharpenAmount(Number(e.target.value) / 100)} className="mt-1 w-full" />
-                  </label>
-                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-200">
-                    Border (px): {borderPx}
-                    <input type="range" min={0} max={8} value={borderPx} onChange={(e) => setBorderPx(Number(e.target.value))} className="mt-1 w-full" />
-                  </label>
-                  <label className="flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-200">
-                    <input type="checkbox" checked={showFaceGuide} onChange={(e) => setShowFaceGuide(e.target.checked)} className="rounded" />
-                    Show face alignment guide
-                  </label>
                 </div>
-              )}
 
-              {/* ══════ EXPORT TAB ══════ */}
-              {sidebarTab === 'export' && (
-                <div className="space-y-4">
-                  <label className="flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-200">
-                    <input type="checkbox" checked={removeBg} onChange={(e) => setRemoveBg(e.target.checked)} className="rounded" />
-                    Remove background (AI)
-                  </label>
-                  {!bgModelReady && <p className="text-xs text-amber-600">{bgPreloadMsg || 'Preparing model…'}</p>}
-
-                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-200">
-                    Background
-                    <input type="color" value={bgColor} onChange={(e) => setBgColor(e.target.value)} className="mt-1 w-full h-10 rounded-lg border border-slate-300" />
-                  </label>
-                  <div className="flex gap-2">
-                    <button type="button" onClick={() => setBgColor('#ffffff')} className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-100 dark:bg-slate-800">White</button>
-                    <button type="button" onClick={() => setBgColor('#e8f0fe')} className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-100 dark:bg-slate-800">Light blue</button>
-                    <button type="button" onClick={() => setBgColor('#f5f5f4')} className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-100 dark:bg-slate-800">Off-white</button>
-                  </div>
-
-                  {error && <div className="p-3 text-sm rounded-lg bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-300 border border-red-200">{error}</div>}
-
-                  <div className="flex flex-col gap-3 pt-2">
-                    <button type="button" onClick={runPreview} disabled={busy || (removeBg && !bgModelReady)}
-                      className="w-full py-3 rounded-xl border border-slate-300 dark:border-slate-600 font-bold text-slate-800 dark:text-slate-100 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50 flex items-center justify-center gap-2">
-                      <Eye className="w-4 h-4" />
-                      {busy ? busyLabel || '…' : 'Preview tile + sheet'}
+                <div className="flex items-center gap-2">
+                  <div className="flex items-center bg-white dark:bg-slate-900 border border-indigo-300 dark:border-indigo-700 rounded-xl px-3 py-1.5 shadow-sm">
+                    <button
+                      type="button"
+                      onClick={() => handleTargetCountChange(targetPhotoCount - 1)}
+                      className="p-1 rounded text-slate-600 dark:text-slate-300 hover:bg-slate-100"
+                    >
+                      <Minus className="w-4 h-4" />
                     </button>
-                    <button type="button" onClick={runPdf} disabled={busy || (removeBg && !bgModelReady)}
-                      className="w-full py-3 rounded-xl bg-rose-600 text-white font-bold hover:bg-rose-700 disabled:opacity-50 inline-flex items-center justify-center gap-2">
-                      <FileImage className="w-5 h-5" />
-                      {busy ? busyLabel || '…' : 'Download PDF sheet'}
+                    <input
+                      type="number"
+                      min={1}
+                      max={120}
+                      value={targetPhotoCount}
+                      onChange={(e) => handleTargetCountChange(parseInt(e.target.value) || 1)}
+                      className="w-16 text-center text-sm font-black text-indigo-600 dark:text-indigo-400 bg-transparent border-none focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleTargetCountChange(targetPhotoCount + 1)}
+                      className="p-1 rounded text-slate-600 dark:text-slate-300 hover:bg-slate-100"
+                    >
+                      <Plus className="w-4 h-4" />
                     </button>
                   </div>
+                </div>
+              </div>
 
-                  {previewUrl && (
-                    <div className="pt-4 border-t border-slate-200 dark:border-slate-700">
-                      <p className="text-xs font-semibold text-slate-500 mb-2">Single tile preview ({EXPORT_W}×{EXPORT_H}px @ {exportDpi} DPI)</p>
-                      <img src={previewUrl} alt="Tile" className="max-w-[180px] rounded border border-slate-200 dark:border-slate-600" />
-                    </div>
-                  )}
-                  {pdfUrl && (
-                    <a href={pdfUrl} download="passport-photos-sheet.pdf" className="inline-flex items-center gap-2 text-rose-600 dark:text-rose-400 font-bold text-sm hover:underline">
-                      <Download className="w-4 h-4" /> Save PDF again
-                    </a>
-                  )}
+              {/* Quick Quantity Chips */}
+              <div className="flex flex-wrap items-center gap-1.5 mt-3 pt-3 border-t border-indigo-200/60 dark:border-indigo-800/40">
+                <span className="text-[10px] text-indigo-600 dark:text-indigo-400 font-bold uppercase mr-1">
+                  Popular:
+                </span>
+                {[4, 6, 8, 12, 16, 24, 28, 30, 32].map((num) => (
+                  <button
+                    key={num}
+                    type="button"
+                    onClick={() => handleTargetCountChange(num)}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
+                      targetPhotoCount === num
+                        ? 'bg-indigo-600 text-white shadow-xs'
+                        : 'bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-indigo-50'
+                    }`}
+                  >
+                    {num}
+                  </button>
+                ))}
+              </div>
+
+              {paperSizeId === 'a4' && targetPhotoCount === 28 && (
+                <div className="mt-3 p-2.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800 text-[11px] text-indigo-800 dark:text-indigo-300 flex flex-wrap items-center justify-between gap-2">
+                  <span>⚡ <strong>28 photos selected</strong> on 5×6 A4 sheet (2 blank slots remaining).</span>
+                  <button
+                    type="button"
+                    onClick={() => handleTargetCountChange(30)}
+                    className="font-bold underline hover:text-indigo-950 dark:hover:text-white cursor-pointer"
+                  >
+                    Fill full sheet (30 photos) →
+                  </button>
                 </div>
               )}
             </div>
+
+            {/* Paper Size & Orientation */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="text-xs font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider block mb-1.5">
+                  Paper Size
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  {PAPER_PRESETS.map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => {
+                        setPaperSizeId(p.id);
+                        handleAutoFit();
+                      }}
+                      className={`py-2 px-2 rounded-xl border text-center transition-all ${
+                        paperSizeId === p.id
+                          ? 'border-indigo-600 bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 font-bold ring-1 ring-indigo-500'
+                          : 'border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:border-slate-300'
+                      }`}
+                    >
+                      <div className="flex items-center justify-center gap-1.5">
+                        <FileText className="w-3.5 h-3.5 text-indigo-500" />
+                        <span className="text-xs font-bold">{p.name}</span>
+                      </div>
+                      <span className="text-[10px] text-slate-400 block mt-0.5">{p.wMm}×{p.hMm}mm</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider block mb-1.5">
+                  Orientation
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setOrientation('portrait')}
+                    className={`py-2 px-3 rounded-xl border flex items-center justify-center gap-1.5 text-xs font-bold transition-all ${
+                      orientation === 'portrait'
+                        ? 'border-indigo-600 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300'
+                        : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400'
+                    }`}
+                  >
+                    <span className="w-3 h-4 border-2 border-current rounded-xs" />
+                    <span>Portrait ↕</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setOrientation('landscape')}
+                    className={`py-2 px-3 rounded-xl border flex items-center justify-center gap-1.5 text-xs font-bold transition-all ${
+                      orientation === 'landscape'
+                        ? 'border-indigo-600 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300'
+                        : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400'
+                    }`}
+                  >
+                    <span className="w-4 h-3 border-2 border-current rounded-xs" />
+                    <span>Landscape ↔</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Rows × Columns Manual Steppers with Safety Cap */}
+            <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-xs font-bold text-slate-800 dark:text-white">
+                  Grid Matrix ({gridRows} rows × {gridCols} cols = {slotsPerSheet} slots/sheet)
+                </span>
+                <span className="text-[11px] text-slate-500">
+                  Safe Limit on {activePaper.name}: {safeLimits.maxRows}R × {safeLimits.maxCols}C
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-[11px] font-semibold text-slate-500 block mb-1">Rows</label>
+                  <div className="flex items-center bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-600 rounded-xl px-2 py-1">
+                    <button
+                      type="button"
+                      onClick={() => setGridRows((r) => Math.max(1, r - 1))}
+                      className="p-1 rounded hover:bg-slate-100 text-slate-600 dark:text-slate-300"
+                    >
+                      <Minus className="w-3.5 h-3.5" />
+                    </button>
+                    <input
+                      type="number"
+                      min={1}
+                      max={12}
+                      value={gridRows}
+                      onChange={(e) => setGridRows(Math.max(1, parseInt(e.target.value) || 1))}
+                      className="w-full text-center text-xs font-bold text-slate-900 dark:text-white bg-transparent border-none focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setGridRows((r) => r + 1)}
+                      className="p-1 rounded hover:bg-slate-100 text-slate-600 dark:text-slate-300"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-semibold text-slate-500 block mb-1">Columns</label>
+                  <div className="flex items-center bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-600 rounded-xl px-2 py-1">
+                    <button
+                      type="button"
+                      onClick={() => setGridCols((c) => Math.max(1, c - 1))}
+                      className="p-1 rounded hover:bg-slate-100 text-slate-600 dark:text-slate-300"
+                    >
+                      <Minus className="w-3.5 h-3.5" />
+                    </button>
+                    <input
+                      type="number"
+                      min={1}
+                      max={12}
+                      value={gridCols}
+                      onChange={(e) => setGridCols(Math.max(1, parseInt(e.target.value) || 1))}
+                      className="w-full text-center text-xs font-bold text-slate-900 dark:text-white bg-transparent border-none focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setGridCols((c) => c + 1)}
+                      className="p-1 rounded hover:bg-slate-100 text-slate-600 dark:text-slate-300"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Gap, Margins & Cut Lines */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+              <div>
+                <div className="flex justify-between font-semibold mb-1">
+                  <span>Photo Spacing Gap</span>
+                  <span>{gapMm} mm</span>
+                </div>
+                <input
+                  type="range"
+                  min={0}
+                  max={8}
+                  step={0.5}
+                  value={gapMm}
+                  onChange={(e) => setGapMm(Number(e.target.value))}
+                  className="w-full accent-indigo-600"
+                />
+              </div>
+
+              <div>
+                <div className="flex justify-between font-semibold mb-1">
+                  <span>Sheet Margins</span>
+                  <span>{noMargins ? '0 mm (Borderless)' : `${marginMm} mm`}</span>
+                </div>
+                <input
+                  type="range"
+                  min={0}
+                  max={15}
+                  disabled={noMargins}
+                  value={marginMm}
+                  onChange={(e) => setMarginMm(Number(e.target.value))}
+                  className="w-full accent-indigo-600 disabled:opacity-30"
+                />
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-100 dark:border-slate-800 text-xs">
+              <label className="flex items-center gap-2 font-bold cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={hasCutGuides}
+                  onChange={(e) => setHasCutGuides(e.target.checked)}
+                  className="rounded text-indigo-600 w-4 h-4"
+                />
+                <Scissors className="w-4 h-4 text-slate-500" />
+                <span>Draw scissor cut guides (dashed cutting lines)</span>
+              </label>
+
+              <label className="flex items-center gap-1.5 text-slate-500 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={noMargins}
+                  onChange={(e) => setNoMargins(e.target.checked)}
+                  className="rounded text-indigo-600 w-3.5 h-3.5"
+                />
+                <span>Borderless paper (0 mm margins)</span>
+              </label>
+            </div>
+          </div>
+
+          {/* SECTION 3: PHOTO APPEARANCE & EXAM TEXT (UNCHECKED BY DEFAULT) */}
+          <div className="rounded-3xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 shadow-sm space-y-5">
+            <div className="flex items-center gap-2.5">
+              <span className="w-7 h-7 rounded-full bg-indigo-600 text-white font-bold text-xs flex items-center justify-center">
+                3
+              </span>
+              <h2 className="text-base font-bold text-slate-900 dark:text-white">
+                Photo Standards &amp; Exam Settings
+              </h2>
+            </div>
+
+            <div>
+              <label className="text-xs font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider block mb-1.5">
+                Standard Photo Dimension
+              </label>
+              <select
+                value={photoPresetId}
+                onChange={(e) => {
+                  setPhotoPresetId(e.target.value);
+                  setTimeout(handleAutoFit, 10);
+                }}
+                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-sm font-semibold text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500"
+              >
+                {PHOTO_PRESETS.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Custom dimensions if chosen */}
+            {photoPresetId === 'custom' && (
+              <div className="grid grid-cols-2 gap-4 p-4 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700">
+                <div>
+                  <label className="text-xs font-semibold block mb-1">Width (mm)</label>
+                  <input
+                    type="number"
+                    min={20}
+                    max={120}
+                    value={customPhotoW}
+                    onChange={(e) => setCustomPhotoW(Number(e.target.value))}
+                    className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold block mb-1">Height (mm)</label>
+                  <input
+                    type="number"
+                    min={20}
+                    max={150}
+                    value={customPhotoH}
+                    onChange={(e) => setCustomPhotoH(Number(e.target.value))}
+                    className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 text-sm"
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Candidate Name & Date Text on Photo (DOP) — DEFAULT UNCHECKED */}
+            <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700 space-y-3">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold text-slate-800 dark:text-white flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={hasCandidateText}
+                    onChange={(e) => setHasCandidateText(e.target.checked)}
+                    className="rounded text-indigo-600 w-4 h-4"
+                  />
+                  <span>Print Candidate Name &amp; Date of Photo (DOP)</span>
+                </label>
+                <span className="text-[10px] font-semibold text-slate-500 bg-slate-200 dark:bg-slate-700 px-2 py-0.5 rounded-full">
+                  Optional • Tick if required
+                </span>
+              </div>
+
+              {hasCandidateText && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pl-6 pt-1">
+                  <div>
+                    <label className="text-[11px] font-semibold text-slate-500 block mb-1">Candidate Name</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. PARMAL SINGH"
+                      value={candidateName}
+                      onChange={(e) => setCandidateName(e.target.value)}
+                      className="w-full px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 text-xs font-bold uppercase"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-semibold text-slate-500 block mb-1">Date of Photo (DOP)</label>
+                    <input
+                      type="text"
+                      placeholder="DD-MM-YYYY"
+                      value={candidateDate}
+                      onChange={(e) => setCandidateDate(e.target.value)}
+                      className="w-full px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 text-xs font-bold"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Border & Background Color */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-xs font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider">
+                    Background Color
+                  </label>
+                  <span className="text-xs font-mono text-slate-400">{bgColor}</span>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  {['#ffffff', '#e0f2fe', '#bae6fd', '#2563eb', '#f1f5f9', '#fee2e2'].map((hex) => (
+                    <button
+                      key={hex}
+                      type="button"
+                      onClick={() => setBgColor(hex)}
+                      className={`w-7 h-7 rounded-full border-2 transition-transform hover:scale-110 flex items-center justify-center ${
+                        bgColor.toLowerCase() === hex.toLowerCase() ? 'border-indigo-600 ring-2 ring-indigo-500/30' : 'border-slate-300'
+                      }`}
+                      style={{ backgroundColor: hex }}
+                    >
+                      {bgColor.toLowerCase() === hex.toLowerCase() && (
+                        <Check className={`w-3.5 h-3.5 ${hex === '#ffffff' ? 'text-slate-800' : 'text-white'}`} />
+                      )}
+                    </button>
+                  ))}
+                  <input
+                    type="color"
+                    value={bgColor}
+                    onChange={(e) => setBgColor(e.target.value)}
+                    className="w-7 h-7 rounded-full cursor-pointer border-0 bg-transparent p-0"
+                    title="Custom color"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-xs font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                    <input
+                      type="checkbox"
+                      checked={hasBorder}
+                      onChange={(e) => setHasBorder(e.target.checked)}
+                      className="rounded text-indigo-600 w-3.5 h-3.5"
+                    />
+                    <span>Border Line</span>
+                  </label>
+                  {hasBorder && <span className="text-xs text-slate-500">{borderWidthMm} mm</span>}
+                </div>
+                {hasBorder && (
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="range"
+                      min={0.2}
+                      max={2.0}
+                      step={0.1}
+                      value={borderWidthMm}
+                      onChange={(e) => setBorderWidthMm(Number(e.target.value))}
+                      className="w-full accent-indigo-600"
+                    />
+                    <input
+                      type="color"
+                      value={borderColor}
+                      onChange={(e) => setBorderColor(e.target.value)}
+                      className="w-6 h-6 rounded-md cursor-pointer border-0 p-0"
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Studio Branding / Watermark in Non-Print Margin */}
+            <div className="pt-3 border-t border-slate-100 dark:border-slate-800">
+              <label className="text-xs font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider block mb-1">
+                Studio Footer Branding (Optional)
+              </label>
+              <input
+                type="text"
+                placeholder="e.g. Ramesh Photo Studio, Kota • Ph: 9876543210"
+                value={studioWatermark}
+                onChange={(e) => setStudioWatermark(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-indigo-500"
+              />
+              <span className="text-[10px] text-slate-400 block mt-1">
+                Prints at the bottom margin of the paper (non-print zone) without touching any passport photos.
+              </span>
+            </div>
+          </div>
+
+          {/* SECTION 4: EXPORT & PRINT HUB */}
+          <div className="rounded-3xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 shadow-sm space-y-5">
+            <div className="flex items-center gap-2.5">
+              <span className="w-7 h-7 rounded-full bg-indigo-600 text-white font-bold text-xs flex items-center justify-center">
+                4
+              </span>
+              <h2 className="text-base font-bold text-slate-900 dark:text-white">
+                Studio Export &amp; Print Hub
+              </h2>
+            </div>
+
+            {/* DPI Resolution */}
+            <div>
+              <label className="text-xs font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider block mb-2">
+                Output DPI Resolution
+              </label>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                {[
+                  { dpi: 72, label: '72 DPI', sub: 'Web / Screen' },
+                  { dpi: 150, label: '150 DPI', sub: 'Draft Print' },
+                  { dpi: 300, label: '300 DPI ★', sub: 'Studio Print' },
+                  { dpi: 600, label: '600 DPI', sub: 'Ultra HD' },
+                ].map((d) => (
+                  <button
+                    key={d.dpi}
+                    type="button"
+                    onClick={() => setExportDpi(d.dpi)}
+                    className={`py-2 px-2 rounded-xl border text-center transition-all ${
+                      exportDpi === d.dpi
+                        ? 'border-indigo-600 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 font-bold ring-1 ring-indigo-500'
+                        : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400'
+                    }`}
+                  >
+                    <div className="text-xs font-bold">{d.label}</div>
+                    <div className="text-[10px] text-slate-400">{d.sub}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Direct Print Button */}
+            <button
+              type="button"
+              onClick={handlePrint}
+              disabled={isGenerating || !photos.length}
+              className="w-full py-4 rounded-2xl bg-gradient-to-r from-indigo-600 via-purple-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white font-black text-sm sm:text-base shadow-lg shadow-indigo-600/25 flex items-center justify-center gap-2 disabled:opacity-50 transition-all cursor-pointer"
+            >
+              <Printer className="w-5 h-5" />
+              Direct Print Sheet(s) • Actual Size (100%)
+            </button>
+
+            {/* Download Grid */}
+            <div className="space-y-3 pt-2">
+              <span className="text-xs font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider block">
+                Download Complete Photo Sheets
+              </span>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                <button
+                  type="button"
+                  onClick={handleDownloadAllSheetsPdf}
+                  disabled={isGenerating || !photos.length}
+                  className="py-2.5 px-3 rounded-xl bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900 font-bold text-xs flex items-center justify-center gap-1.5 shadow-sm disabled:opacity-40"
+                >
+                  <FileImage className="w-3.5 h-3.5 text-indigo-400 dark:text-indigo-600" />
+                  <span>Download PDF {totalSheetsRequired > 1 ? `(${totalSheetsRequired} Pgs)` : ''}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleDownloadCurrentSheet('png')}
+                  disabled={isGenerating || !photos.length}
+                  className="py-2.5 px-3 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-800 dark:text-slate-200 font-bold text-xs flex items-center justify-center gap-1.5 disabled:opacity-40"
+                >
+                  <Download className="w-3.5 h-3.5 text-indigo-600" />
+                  <span>Current Sheet (PNG)</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleDownloadCurrentSheet('jpeg')}
+                  disabled={isGenerating || !photos.length}
+                  className="py-2.5 px-3 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-800 dark:text-slate-200 font-bold text-xs flex items-center justify-center gap-1.5 disabled:opacity-40"
+                >
+                  <Download className="w-3.5 h-3.5 text-indigo-600" />
+                  <span>Current Sheet (JPG)</span>
+                </button>
+              </div>
+
+              {totalSheetsRequired > 1 && (
+                <button
+                  type="button"
+                  onClick={() => handleDownloadAllSheetsZip('png')}
+                  disabled={isGenerating || !photos.length}
+                  className="w-full py-2 px-3 rounded-xl border border-indigo-200 dark:border-indigo-900 bg-indigo-50/50 dark:bg-indigo-950/30 text-indigo-700 dark:text-indigo-300 font-bold text-xs flex items-center justify-center gap-1.5 hover:bg-indigo-100"
+                >
+                  <Package className="w-3.5 h-3.5" /> Download All {totalSheetsRequired} Sheets as ZIP Package
+                </button>
+              )}
+            </div>
+
+            {/* Single Photo Downloads with Sarkari 20-50KB Pack */}
+            <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
+              <span className="text-xs font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider block mb-2">
+                Download Single Passport Photo Tile
+              </span>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                <button
+                  type="button"
+                  onClick={handleDownloadGovtPortalPhoto}
+                  disabled={isGenerating || !photos.length}
+                  className="py-2 px-3 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-sm disabled:opacity-40"
+                >
+                  <ShieldCheck className="w-3.5 h-3.5" /> Sarkari Portal Pack (20–50 KB JPG)
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleDownloadSinglePhoto('jpeg')}
+                  disabled={isGenerating || !photos.length}
+                  className="py-2 px-3 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-semibold hover:bg-slate-50 flex items-center justify-center gap-1.5 disabled:opacity-40"
+                >
+                  <Download className="w-3 h-3 text-slate-400" /> Single HD JPG
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleDownloadSinglePhoto('png')}
+                  disabled={isGenerating || !photos.length}
+                  className="py-2 px-3 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-semibold hover:bg-slate-50 flex items-center justify-center gap-1.5 disabled:opacity-40"
+                >
+                  <Download className="w-3 h-3 text-slate-400" /> Single PNG
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* ================= RIGHT LIVE WYSIWYG PREVIEW ================= */}
+        <div className="lg:col-span-5 sticky top-20 space-y-4">
+          <div className="rounded-3xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-sm">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <Eye className="w-4 h-4 text-indigo-600" />
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white uppercase tracking-wider">
+                  Live Sheet Preview
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setIsFullscreenPreview(true)}
+                  className="p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-indigo-600 transition-colors"
+                  title="Fullscreen HD Preview"
+                >
+                  <Maximize2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              {totalSheetsRequired > 1 && (
+                <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 rounded-xl p-0.5">
+                  <button
+                    type="button"
+                    onClick={() => setActiveSheetIndex((prev) => Math.max(0, prev - 1))}
+                    disabled={activeSheetIndex === 0}
+                    className="p-1 rounded-lg hover:bg-white dark:hover:bg-slate-700 disabled:opacity-30"
+                  >
+                    <ChevronLeft className="w-3.5 h-3.5" />
+                  </button>
+                  <span className="text-[11px] font-bold px-1.5 text-slate-700 dark:text-slate-300">
+                    Sheet {activeSheetIndex + 1} / {totalSheetsRequired}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setActiveSheetIndex((prev) => Math.min(totalSheetsRequired - 1, prev + 1))}
+                    disabled={activeSheetIndex >= totalSheetsRequired - 1}
+                    className="p-1 rounded-lg hover:bg-white dark:hover:bg-slate-700 disabled:opacity-30"
+                  >
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Paper Container Preview */}
+            <div className="relative w-full rounded-2xl bg-slate-100 dark:bg-slate-950 p-4 flex items-center justify-center border border-slate-200 dark:border-slate-800 min-h-[420px]">
+              <canvas
+                ref={previewCanvasRef}
+                className="max-w-full max-h-[520px] object-contain shadow-2xl rounded-sm border border-slate-300 dark:border-slate-700 bg-white"
+              />
+            </div>
+
+            {/* Spec Bar Summary */}
+            <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 mt-4 pt-4 border-t border-slate-100 dark:border-slate-800 text-center">
+              <div>
+                <span className="text-[10px] text-slate-400 uppercase font-bold block">PHOTO</span>
+                <span className="text-xs font-black text-slate-900 dark:text-white">
+                  {basePhotoWidthMm}×{basePhotoHeightMm}mm
+                </span>
+              </div>
+              <div>
+                <span className="text-[10px] text-slate-400 uppercase font-bold block">PAPER</span>
+                <span className="text-xs font-black text-slate-900 dark:text-white uppercase">
+                  {paperSizeId}
+                </span>
+              </div>
+              <div>
+                <span className="text-[10px] text-slate-400 uppercase font-bold block">GRID</span>
+                <span className="text-xs font-black text-slate-900 dark:text-white">
+                  {gridRows}×{gridCols}
+                </span>
+              </div>
+              <div>
+                <span className="text-[10px] text-slate-400 uppercase font-bold block">ORIENT</span>
+                <span className="text-xs font-black text-slate-900 dark:text-white capitalize">
+                  {orientation}
+                </span>
+              </div>
+              <div>
+                <span className="text-[10px] text-slate-400 uppercase font-bold block">TOTAL</span>
+                <span className="text-xs font-black text-indigo-600 dark:text-indigo-400">
+                  {targetPhotoCount} Photos
+                </span>
+              </div>
+              <div>
+                <span className="text-[10px] text-slate-400 uppercase font-bold block">DPI</span>
+                <span className="text-xs font-black text-slate-900 dark:text-white">
+                  {exportDpi}
+                </span>
+              </div>
+            </div>
+
+            <div className="mt-3 p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 text-[11px] text-amber-800 dark:text-amber-300 flex items-center justify-center gap-1.5">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>🖨️ In print dialog, choose <strong>"Actual Size (100%)"</strong>. Never scale to fit.</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ================= FULLSCREEN HD PREVIEW MODAL ================= */}
+      {isFullscreenPreview && (
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex flex-col items-center justify-center p-4">
+          <div className="w-full max-w-5xl bg-white dark:bg-slate-900 rounded-3xl overflow-hidden shadow-2xl border border-slate-200 dark:border-slate-800 flex flex-col max-h-[92vh]">
+            <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-800">
+              <div className="flex items-center gap-2">
+                <Eye className="w-5 h-5 text-indigo-600" />
+                <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                  High-Resolution Fullscreen Preview — {activePaper.name} ({activeSheetIndex + 1}/{totalSheetsRequired})
+                </h3>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handlePrint}
+                  className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Printer className="w-3.5 h-3.5" /> Print Now
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsFullscreenPreview(false)}
+                  className="p-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-slate-900 dark:hover:text-white text-xs font-bold px-3 cursor-pointer"
+                >
+                  Close ✕
+                </button>
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-auto p-6 bg-slate-950 flex items-center justify-center min-h-[380px]">
+              <canvas
+                ref={(el) => {
+                  if (el && previewCanvasRef.current) {
+                    el.width = previewCanvasRef.current.width;
+                    el.height = previewCanvasRef.current.height;
+                    const ctx = el.getContext('2d');
+                    if (ctx) ctx.drawImage(previewCanvasRef.current, 0, 0);
+                  }
+                }}
+                className="max-w-full max-h-[70vh] object-contain rounded-md shadow-2xl border border-slate-800 bg-white"
+              />
+            </div>
+
+            {totalSheetsRequired > 1 && (
+              <div className="flex items-center justify-center gap-3 p-3 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50">
+                <button
+                  type="button"
+                  onClick={() => setActiveSheetIndex((prev) => Math.max(0, prev - 1))}
+                  disabled={activeSheetIndex === 0}
+                  className="px-3 py-1 rounded-lg bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-xs font-bold disabled:opacity-30 cursor-pointer"
+                >
+                  ← Prev Sheet
+                </button>
+                <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                  Sheet {activeSheetIndex + 1} of {totalSheetsRequired}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setActiveSheetIndex((prev) => Math.min(totalSheetsRequired - 1, prev + 1))}
+                  disabled={activeSheetIndex >= totalSheetsRequired - 1}
+                  className="px-3 py-1 rounded-lg bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-xs font-bold disabled:opacity-30 cursor-pointer"
+                >
+                  Next Sheet →
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}
     </div>
   );
-}
-
-function clamp(n: number, lo: number, hi: number) {
-  return Math.min(hi, Math.max(lo, n));
 }

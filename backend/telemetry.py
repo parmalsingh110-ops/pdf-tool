@@ -294,6 +294,20 @@ def save_error(
         logger.error("Error saving error telemetry: %s", e)
         return -1
 
+    # Filter out client-side dynamic chunk refresh / deployment cache errors
+    lower_err = (error_message or "").lower()
+    if any(k in lower_err for k in [
+        "failed to fetch dynamically imported module",
+        "dynamically imported module",
+        "loading chunk",
+        "chunkloaderror",
+        "reading 'default'",
+        "_result.default",
+        "reading default",
+    ]):
+        logger.info("Suppressed deployment chunk reload alert from Discord/Telegram: %s", error_message)
+        return error_id
+
     # Send instant crash alert with high-visibility styling
     disc_fields = [
         {"name": "Tool", "value": f"`{tool_name}` ({tool_path})", "inline": True},

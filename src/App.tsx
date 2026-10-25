@@ -180,6 +180,8 @@ export default function App() {
         <Route path="privacy" element={<Privacy />} />
         <Route path="terms" element={<TermsOfService />} />
         <Route path="about" element={<About />} />
+        <Route path="team" element={<About />} />
+        <Route path="leadership" element={<About />} />
         <Route path="pricing" element={<Pricing />} />
         <Route path="contact" element={<Contact />} />
 

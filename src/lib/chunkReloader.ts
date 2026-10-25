@@ -6,9 +6,11 @@
  * Users with already-open browser tabs who navigate to lazy-loaded routes
  * request the old deleted chunk and trigger:
  * "TypeError: Failed to fetch dynamically imported module: https://www.pdfmediasuite.in/assets/..."
+ * Or in React lazy evaluation:
+ * "Cannot read properties of undefined (reading 'default')" / "undefined is not an object (evaluating 'H._result.default')"
  *
  * This layer:
- * 1. Catches Vite's `vite:preloadError` event and unhandled chunk errors.
+ * 1. Catches Vite's `vite:preloadError` event, window errors, and unhandled chunk rejections.
  * 2. Automatically and seamlessly reloads the page to load the latest deployment.
  * 3. Prevents reload loops using a sessionStorage timestamp throttle (at most 1 reload per 15s).
  * 4. Suppresses these non-crash deployment events from false-alarming Discord telemetry.
@@ -26,7 +28,11 @@ export function isChunkLoadError(err: any): boolean {
     msg.includes('error loading dynamically imported module') ||
     msg.includes('loading chunk') ||
     msg.includes('chunkloaderror') ||
-    msg.includes('failed to load module script')
+    msg.includes('failed to load module script') ||
+    msg.includes("reading 'default'") ||
+    msg.includes('_result.default') ||
+    msg.includes('reading default') ||
+    msg.includes('error resolving module')
   );
 }
 
@@ -59,5 +65,17 @@ export function initChunkReloader(): void {
       event?.preventDefault?.();
     } catch {}
     handleChunkLoadFailure('vite:preloadError');
+  });
+
+  // 2. Catch unhandled chunk rejection before it cascades
+  window.addEventListener('unhandledrejection', (event) => {
+    const reason = event.reason;
+    if (isChunkLoadError(reason)) {
+      try {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      } catch {}
+      handleChunkLoadFailure('unhandledrejection:chunk');
+    }
   });
 }
