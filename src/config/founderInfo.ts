@@ -63,7 +63,7 @@ export const TEAM_MEMBERS: TeamMember[] = [
     title: 'Co-founder & Head of Business, Strategy & Growth',
     location: 'Jaipur, Rajasthan, India',
     email: 'meenapankaj98@gmail.com',
-    linkedin: 'https://www.linkedin.com/in/pankaj-meena/',
+    linkedin: 'https://www.linkedin.com/in/pankaj-meena-925218447/',
     photo: '/images/pankaj-meena.jpg',
     initials: 'PM',
     colorGradient: 'from-blue-600 via-indigo-600 to-violet-700',
