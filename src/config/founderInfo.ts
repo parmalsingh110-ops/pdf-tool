@@ -90,7 +90,7 @@ export const TEAM_MEMBERS: TeamMember[] = [
     title: 'Co-founder & Core Systems Engineer',
     location: 'Jaipur, Rajasthan, India',
     email: 'sachinsainbharkokalan@gmail.com',
-    linkedin: 'https://www.linkedin.com/in/sachin-kumar-sain/',
+    linkedin: 'https://www.linkedin.com/in/sachin-kumar-sain-012123447/',
     photo: '/images/sachin-kumar-sain.jpg',
     initials: 'SS',
     colorGradient: 'from-emerald-600 via-teal-600 to-cyan-700',
