@@ -89,7 +89,7 @@ export const TEAM_MEMBERS: TeamMember[] = [
     role: 'Co-founder — Technical Development',
     title: 'Co-founder & Core Systems Engineer',
     location: 'Jaipur, Rajasthan, India',
-    email: 'sachin@pdfmediasuite.in',
+    email: 'sachinsainbharkokalan@gmail.com',
     linkedin: 'https://www.linkedin.com/in/sachin-kumar-sain/',
     photo: '/images/sachin-kumar-sain.jpg',
     initials: 'SS',
