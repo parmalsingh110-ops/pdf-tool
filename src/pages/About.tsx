@@ -28,10 +28,50 @@ import { useSEO } from '../hooks/useSEO';
 import { FOUNDER_INFO, TEAM_MEMBERS, TeamMember } from '../config/founderInfo';
 
 export default function About() {
-  useSEO(
-    'About & Leadership Team | PDF Media Suite',
-    'Meet the founding team behind PDF Media Suite: Parmal Singh Gurjar (Founder & Web Developer), Pankaj Meena (Co-founder — Business & Growth), and Sachin Kumar Sain (Co-founder — Technical Development). Discover our mission to build high-performance, privacy-first document productivity infrastructure.'
-  );
+  useSEO({
+    title: 'About & Leadership Team | PDF Media Suite',
+    description:
+      'Meet the founding team behind PDF Media Suite: Parmal Singh Gurjar (Founder, CEO & Lead Architect), Pankaj Meena (Co-founder & Head of Business & Growth), and Sachin Kumar Sain (Co-founder & Core Systems Engineer). Discover our mission to build high-performance, privacy-first document productivity infrastructure.',
+    structuredData: {
+      '@context': 'https://schema.org',
+      '@graph': [
+        {
+          '@type': 'AboutPage',
+          '@id': 'https://pdfmediasuite.in/about#webpage',
+          url: 'https://pdfmediasuite.in/about',
+          name: 'About & Leadership Team | PDF Media Suite',
+          description:
+            'Meet the founding team behind PDF Media Suite: Parmal Singh Gurjar, Pankaj Meena, and Sachin Kumar Sain.',
+          about: {
+            '@id': 'https://pdfmediasuite.in/#organization',
+          },
+        },
+        {
+          '@type': 'Organization',
+          '@id': 'https://pdfmediasuite.in/#organization',
+          name: 'PDF Media Suite',
+          url: 'https://pdfmediasuite.in/',
+          logo: 'https://pdfmediasuite.in/favicon.svg',
+          founder: TEAM_MEMBERS.map((m) => ({
+            '@type': 'Person',
+            name: m.name,
+            jobTitle: m.title,
+            email: m.email,
+            image: `https://pdfmediasuite.in${m.photo || '/images/founder.jpg'}`,
+            sameAs: [m.linkedin, ...(m.github ? [m.github] : [])],
+            description: m.bio,
+          })),
+        },
+        {
+          '@type': 'BreadcrumbList',
+          itemListElement: [
+            { '@type': 'ListItem', position: 1, name: 'Home', item: 'https://pdfmediasuite.in/' },
+            { '@type': 'ListItem', position: 2, name: 'About Leadership Team', item: 'https://pdfmediasuite.in/about' },
+          ],
+        },
+      ],
+    },
+  });
 
   const [imgErrors, setImgErrors] = useState<Record<string, boolean>>({});
 

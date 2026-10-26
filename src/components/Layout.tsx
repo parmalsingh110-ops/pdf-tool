@@ -43,7 +43,7 @@ import {
 import { useTheme } from '../context/ThemeContext';
 import { readRecentTools, recordToolVisit, type RecentEntry } from '../lib/recentFiles';
 import { getFavorites, toggleFavorite, type FavoriteItem } from '../lib/favorites';
-import { FOUNDER_INFO } from '../config/founderInfo';
+import { FOUNDER_INFO, TEAM_MEMBERS } from '../config/founderInfo';
 import KeyboardShortcutsModal from './KeyboardShortcutsModal';
 import ErrorBoundary from './ErrorBoundary';
 import GlobalSearch from './GlobalSearch';
@@ -571,61 +571,88 @@ export default function Layout() {
           </div>
         </div>
 
-        {/* Founder strip */}
+        {/* Founding Team & Leadership Strip */}
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-10">
-          <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/50 px-6 py-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <div className="w-12 h-12 rounded-xl overflow-hidden border border-rose-500/20 bg-slate-100 dark:bg-slate-800 shadow-sm shrink-0">
-                <img
-                  src={FOUNDER_INFO.photo}
-                  alt={FOUNDER_INFO.name}
-                  className="w-full h-full object-cover object-top"
-                />
+          <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/50 p-5 sm:p-6 shadow-xs">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between pb-4 mb-4 border-b border-slate-100 dark:border-slate-700/60 gap-2">
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-bold tracking-widest text-rose-600 dark:text-rose-400 uppercase">
+                  Founding Team &amp; Leadership
+                </span>
+                <span className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 rounded-full">
+                  Verified Founders (3)
+                </span>
               </div>
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-bold tracking-widest text-rose-600 dark:text-rose-400 uppercase">
-                    Founding Team & Leadership
-                  </span>
-                  <span className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-1.5 py-0.5 rounded">
-                    Verified
-                  </span>
-                </div>
-                <p className="text-sm font-bold text-slate-900 dark:text-white mt-0.5">
-                  {FOUNDER_INFO.name} — <span className="text-xs font-medium text-slate-500 dark:text-slate-400">{FOUNDER_INFO.title}</span>
-                </p>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                  Full-stack engineering & document infrastructure architect. Headquartered in {FOUNDER_INFO.location}.
-                </p>
-              </div>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2 shrink-0">
-              <a
-                href={FOUNDER_INFO.linkedin}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#0A66C2] hover:bg-[#004182] text-white text-xs font-bold transition-all shadow-sm"
-              >
-                <Linkedin className="w-3.5 h-3.5 fill-current" />
-                LinkedIn
-                <ExternalLink className="w-2.5 h-2.5 opacity-80" />
-              </a>
-              <a
-                href={FOUNDER_INFO.github}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white text-xs font-bold transition-all"
-              >
-                <Github className="w-3.5 h-3.5" />
-                GitHub
-              </a>
               <Link
                 to="/about"
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:border-rose-300 dark:hover:border-rose-600 text-slate-700 dark:text-slate-300 text-xs font-bold transition-all"
+                className="text-xs font-bold text-rose-600 dark:text-rose-400 hover:underline flex items-center gap-1 self-start sm:self-auto"
               >
-                About Team &rarr;
+                Meet All 3 Co-founders &amp; Leadership Story &rarr;
               </Link>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
+              {TEAM_MEMBERS.map((member) => (
+                <div
+                  key={member.id}
+                  className="flex items-center justify-between p-3 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200/60 dark:border-slate-700/60 hover:border-slate-300 dark:hover:border-slate-600 transition-all"
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-11 h-11 rounded-xl overflow-hidden border border-rose-500/20 bg-slate-200 dark:bg-slate-800 shadow-xs shrink-0 flex items-center justify-center font-bold text-xs text-white bg-gradient-to-br from-rose-500 to-indigo-600">
+                      {member.photo ? (
+                        <img
+                          src={member.photo}
+                          alt={member.name}
+                          className="w-full h-full object-cover object-top"
+                          onError={(e) => {
+                            (e.currentTarget as HTMLElement).style.display = 'none';
+                          }}
+                        />
+                      ) : (
+                        member.initials
+                      )}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold text-slate-900 dark:text-white truncate">
+                        {member.name}
+                      </p>
+                      <p className="text-[11px] font-medium text-rose-600 dark:text-rose-400 truncate">
+                        {member.role}
+                      </p>
+                      <p className="text-[10px] text-slate-500 dark:text-slate-400 truncate">
+                        {member.location}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-1 shrink-0 ml-2">
+                    {member.linkedin && (
+                      <a
+                        href={member.linkedin}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        aria-label={`${member.name} LinkedIn`}
+                        title="LinkedIn Profile"
+                        className="p-1.5 rounded-lg bg-[#0A66C2] hover:bg-[#004182] text-white transition-colors shadow-xs"
+                      >
+                        <Linkedin className="w-3.5 h-3.5 fill-current" />
+                      </a>
+                    )}
+                    {member.github && (
+                      <a
+                        href={member.github}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        aria-label={`${member.name} GitHub`}
+                        title="GitHub Profile"
+                        className="p-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white transition-colors"
+                      >
+                        <Github className="w-3.5 h-3.5" />
+                      </a>
+                    )}
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         </div>

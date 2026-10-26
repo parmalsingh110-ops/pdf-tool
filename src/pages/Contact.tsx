@@ -1,12 +1,12 @@
 import { Link } from 'react-router-dom';
-import { ArrowLeft, Mail, MessageSquare, MapPin, Linkedin, Clock, ShieldCheck, Building2, ExternalLink } from 'lucide-react';
+import { ArrowLeft, Mail, MessageSquare, MapPin, Linkedin, Clock, ShieldCheck, Building2, ExternalLink, Github } from 'lucide-react';
 import { useSEO } from '../hooks/useSEO';
-import { FOUNDER_INFO } from '../config/founderInfo';
+import { FOUNDER_INFO, TEAM_MEMBERS } from '../config/founderInfo';
 
 export default function Contact() {
   useSEO(
     'Contact & Support | PDF Media Suite',
-    'Get in touch with PDF Media Suite and founder Parmal Singh Gurjar for product support, bug reports, feature suggestions, or business inquiries.'
+    'Get in touch with PDF Media Suite and founding leadership team: Parmal Singh Gurjar (Founder), Pankaj Meena (Co-founder), and Sachin Kumar Sain (Co-founder) for product support, bug reports, or business inquiries.'
   );
 
   return (
@@ -32,79 +32,113 @@ export default function Contact() {
       </div>
       
       <div className="space-y-8 text-base leading-relaxed">
+        {/* Official Support */}
         <section>
-          <div className="grid md:grid-cols-2 gap-6">
-            {/* Official Support */}
-            <div className="p-8 rounded-3xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-center flex flex-col justify-between shadow-sm">
-              <div>
-                <div className="w-12 h-12 rounded-2xl bg-rose-50 dark:bg-rose-950/60 text-rose-600 flex items-center justify-center mx-auto mb-4">
-                  <Mail className="w-6 h-6" />
-                </div>
-                <div className="text-xs font-bold uppercase tracking-wider text-rose-600 dark:text-rose-400 mb-2">
-                  Official Support & Enquiries
-                </div>
-                <a 
-                  href={`mailto:${FOUNDER_INFO.supportEmail}`} 
-                  className="text-lg sm:text-xl font-bold text-slate-900 dark:text-white hover:text-rose-600 dark:hover:text-rose-400 transition-colors block mb-3"
-                >
-                  {FOUNDER_INFO.supportEmail}
-                </a>
-                <p className="text-xs text-slate-500 dark:text-slate-400">
-                  For technical feedback, tool issues, and feature requests. Typical response within 24 hours.
-                </p>
-              </div>
-
-              <div className="mt-6 pt-4 border-t border-slate-100 dark:border-slate-800 text-xs text-slate-400 flex items-center justify-center gap-1.5">
-                <Clock className="w-3.5 h-3.5" /> Response Window: Mon - Sat
-              </div>
+          <div className="p-8 rounded-3xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-center shadow-sm">
+            <div className="w-12 h-12 rounded-2xl bg-rose-50 dark:bg-rose-950/60 text-rose-600 flex items-center justify-center mx-auto mb-4">
+              <Mail className="w-6 h-6" />
             </div>
-
-            {/* Founder Direct Contact */}
-            <div className="p-8 rounded-3xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-center flex flex-col justify-between shadow-sm">
-              <div>
-                <div className="relative w-16 h-16 rounded-2xl overflow-hidden border-2 border-rose-500/20 bg-slate-100 dark:bg-slate-800 shadow-md mx-auto mb-3">
-                  <img
-                    src={FOUNDER_INFO.photo}
-                    alt={FOUNDER_INFO.name}
-                    className="w-full h-full object-cover object-top"
-                  />
-                </div>
-                <div className="text-xs font-bold uppercase tracking-wider text-rose-600 dark:text-rose-400 mb-1">
-                  Founder & Leadership Direct
-                </div>
-                <p className="font-extrabold text-lg text-slate-900 dark:text-white mb-1">
-                  {FOUNDER_INFO.name}
-                </p>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
-                  {FOUNDER_INFO.title}
-                </p>
-                <a 
-                  href={`mailto:${FOUNDER_INFO.email}`} 
-                  className="text-sm font-semibold text-rose-600 dark:text-rose-400 hover:underline block mb-3"
-                >
-                  {FOUNDER_INFO.email}
-                </a>
-              </div>
-
-              <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-center gap-2">
-                <a
-                  href={FOUNDER_INFO.linkedin}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#0A66C2] text-white text-xs font-bold hover:bg-[#004182] transition-colors"
-                >
-                  <Linkedin className="w-3.5 h-3.5 fill-current" />
-                  Connect on LinkedIn
-                  <ExternalLink className="w-2.5 h-2.5" />
-                </a>
-                <Link
-                  to="/about"
-                  className="text-xs font-bold text-slate-600 dark:text-slate-300 hover:text-rose-600 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700"
-                >
-                  About Team
-                </Link>
-              </div>
+            <div className="text-xs font-bold uppercase tracking-wider text-rose-600 dark:text-rose-400 mb-2">
+              Official Support &amp; Enquiries
             </div>
+            <a 
+              href={`mailto:${FOUNDER_INFO.supportEmail}`} 
+              className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white hover:text-rose-600 dark:hover:text-rose-400 transition-colors block mb-2"
+            >
+              {FOUNDER_INFO.supportEmail}
+            </a>
+            <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto mb-4">
+              For technical feedback, tool issues, and feature requests. Typical response within 24 hours.
+            </p>
+            <div className="text-xs text-slate-400 flex items-center justify-center gap-1.5">
+              <Clock className="w-3.5 h-3.5" /> Response Window: Monday – Saturday
+            </div>
+          </div>
+        </section>
+
+        {/* Founding Leadership Team Direct Contacts */}
+        <section>
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold uppercase tracking-wider text-rose-600 dark:text-rose-400">
+                Founding Leadership Direct Contacts
+              </span>
+              <span className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 rounded-full">
+                3 Co-founders
+              </span>
+            </div>
+            <Link
+              to="/about"
+              className="text-xs font-bold text-rose-600 dark:text-rose-400 hover:underline"
+            >
+              Full Leadership Story &rarr;
+            </Link>
+          </div>
+
+          <div className="grid md:grid-cols-3 gap-4">
+            {TEAM_MEMBERS.map((member) => (
+              <div
+                key={member.id}
+                className="p-6 rounded-3xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex flex-col justify-between text-center shadow-xs"
+              >
+                <div>
+                  <div className="relative w-16 h-16 rounded-2xl overflow-hidden border-2 border-rose-500/20 bg-slate-100 dark:bg-slate-800 shadow-xs mx-auto mb-3 flex items-center justify-center font-bold text-white bg-gradient-to-br from-rose-500 to-indigo-600">
+                    {member.photo ? (
+                      <img
+                        src={member.photo}
+                        alt={member.name}
+                        className="w-full h-full object-cover object-top"
+                        onError={(e) => {
+                          (e.currentTarget as HTMLElement).style.display = 'none';
+                        }}
+                      />
+                    ) : (
+                      member.initials
+                    )}
+                  </div>
+                  <h3 className="font-extrabold text-base text-slate-900 dark:text-white mb-0.5">
+                    {member.name}
+                  </h3>
+                  <p className="text-xs font-semibold text-rose-600 dark:text-rose-400 mb-1">
+                    {member.role}
+                  </p>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mb-3">
+                    {member.location}
+                  </p>
+                  <a
+                    href={`mailto:${member.email}`}
+                    className="text-xs font-semibold text-slate-700 dark:text-slate-300 hover:text-rose-600 dark:hover:text-rose-400 break-all block mb-4"
+                  >
+                    {member.email}
+                  </a>
+                </div>
+
+                <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-center gap-2">
+                  {member.linkedin && (
+                    <a
+                      href={member.linkedin}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#0A66C2] text-white text-xs font-bold hover:bg-[#004182] transition-colors shadow-xs"
+                    >
+                      <Linkedin className="w-3.5 h-3.5 fill-current" />
+                      LinkedIn
+                    </a>
+                  )}
+                  {member.github && (
+                    <a
+                      href={member.github}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 text-white text-xs font-bold hover:bg-slate-800 transition-colors"
+                    >
+                      <Github className="w-3.5 h-3.5" />
+                      GitHub
+                    </a>
+                  )}
+                </div>
+              </div>
+            ))}
           </div>
         </section>
 
