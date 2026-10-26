@@ -91,6 +91,7 @@ export const TEAM_MEMBERS: TeamMember[] = [
     location: 'Jaipur, Rajasthan, India',
     email: 'sachin@pdfmediasuite.in',
     linkedin: 'https://www.linkedin.com/in/sachin-kumar-sain/',
+    photo: '/images/sachin-kumar-sain.jpg',
     initials: 'SS',
     colorGradient: 'from-emerald-600 via-teal-600 to-cyan-700',
     badge: 'Co-founder & Tech Systems',
