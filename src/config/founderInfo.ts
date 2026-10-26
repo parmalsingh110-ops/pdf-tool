@@ -64,6 +64,7 @@ export const TEAM_MEMBERS: TeamMember[] = [
     location: 'Jaipur, Rajasthan, India',
     email: 'meenapankaj98@gmail.com',
     linkedin: 'https://www.linkedin.com/in/pankaj-meena/',
+    photo: '/images/pankaj-meena.jpg',
     initials: 'PM',
     colorGradient: 'from-blue-600 via-indigo-600 to-violet-700',
     badge: 'Co-founder & Growth Strategy',
