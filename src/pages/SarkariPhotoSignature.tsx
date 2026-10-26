@@ -365,13 +365,13 @@ export default function SarkariPhotoSignature() {
     <div className="flex-1 max-w-6xl mx-auto px-4 py-8 w-full">
       {/* Title */}
       <div className="text-center mb-8">
-        <div className="inline-flex items-center gap-2 px-3 py-1 bg-amber-50 text-amber-800 rounded-full text-xs font-semibold mb-3 border border-amber-200">
-          <Sparkles className="w-3.5 h-3.5 text-amber-600" /> SSC, UPSC, IBPS, Railway & State Exam Format
+        <div className="inline-flex items-center gap-2 px-3 py-1 bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 rounded-full text-xs font-semibold mb-3 border border-amber-200 dark:border-amber-800">
+          <Sparkles className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" /> SSC, UPSC, IBPS, Railway & State Exam Format
         </div>
-        <h1 className="text-3xl sm:text-4xl font-extrabold text-gray-900 mb-3 tracking-tight">
+        <h1 className="text-3xl sm:text-4xl font-extrabold text-gray-900 dark:text-white mb-3 tracking-tight">
           Sarkari Photo & Signature Joiner (With Name & DOP)
         </h1>
-        <p className="text-base sm:text-lg text-gray-600 max-w-2xl mx-auto">
+        <p className="text-base sm:text-lg text-gray-600 dark:text-slate-300 max-w-2xl mx-auto">
           Add Candidate Name & Date of Photo (DOP) at bottom of passport photo, join signature, and compress strictly within required file size (20 KB – 50 KB).
         </p>
       </div>
@@ -382,14 +382,14 @@ export default function SarkariPhotoSignature() {
           {/* Upload Cards */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {/* Photo Card */}
-            <div className="p-4 bg-white border border-gray-200 rounded-2xl shadow-xs">
-              <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-2 flex items-center justify-between">
+            <div className="p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xs">
+              <label className="block text-xs font-bold text-gray-700 dark:text-slate-200 uppercase tracking-wider mb-2 flex items-center justify-between">
                 <span>1. Passport Photo</span>
-                {photoFile && <span className="text-emerald-600 font-semibold lowercase">selected</span>}
+                {photoFile && <span className="text-emerald-600 dark:text-emerald-400 font-semibold lowercase">selected</span>}
               </label>
-              <label className="flex flex-col items-center justify-center border-2 border-dashed border-gray-300 hover:border-blue-500 rounded-xl p-4 cursor-pointer transition-colors bg-gray-50/50 hover:bg-blue-50/20">
+              <label className="flex flex-col items-center justify-center border-2 border-dashed border-gray-300 dark:border-slate-700 hover:border-blue-500 rounded-xl p-4 cursor-pointer transition-colors bg-gray-50/50 dark:bg-slate-800/40 hover:bg-blue-50/20">
                 <Upload className="w-6 h-6 text-gray-400 mb-1" />
-                <span className="text-xs font-medium text-gray-600 text-center">
+                <span className="text-xs font-medium text-gray-600 dark:text-slate-300 text-center">
                   {photoFile ? photoFile.name : 'Upload Candidate Photo'}
                 </span>
                 <span className="text-[10px] text-gray-400 mt-0.5">JPG / PNG</span>
@@ -398,14 +398,14 @@ export default function SarkariPhotoSignature() {
             </div>
 
             {/* Signature Card */}
-            <div className="p-4 bg-white border border-gray-200 rounded-2xl shadow-xs">
-              <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-2 flex items-center justify-between">
+            <div className="p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xs">
+              <label className="block text-xs font-bold text-gray-700 dark:text-slate-200 uppercase tracking-wider mb-2 flex items-center justify-between">
                 <span>2. Signature</span>
-                {signFile && <span className="text-emerald-600 font-semibold lowercase">selected</span>}
+                {signFile && <span className="text-emerald-600 dark:text-emerald-400 font-semibold lowercase">selected</span>}
               </label>
-              <label className="flex flex-col items-center justify-center border-2 border-dashed border-gray-300 hover:border-blue-500 rounded-xl p-4 cursor-pointer transition-colors bg-gray-50/50 hover:bg-blue-50/20">
+              <label className="flex flex-col items-center justify-center border-2 border-dashed border-gray-300 dark:border-slate-700 hover:border-blue-500 rounded-xl p-4 cursor-pointer transition-colors bg-gray-50/50 dark:bg-slate-800/40 hover:bg-blue-50/20">
                 <Upload className="w-6 h-6 text-gray-400 mb-1" />
-                <span className="text-xs font-medium text-gray-600 text-center">
+                <span className="text-xs font-medium text-gray-600 dark:text-slate-300 text-center">
                   {signFile ? signFile.name : 'Upload Candidate Sign'}
                 </span>
                 <span className="text-[10px] text-gray-400 mt-0.5">JPG / PNG</span>

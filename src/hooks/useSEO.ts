@@ -88,6 +88,8 @@ export function useSEO(titleOrOptions: string | SEOOptions, descriptionArg?: str
     // Remove any previously injected per-page LD+JSON
     const existingLd = document.querySelector('script[data-seo-ld="page"]');
     if (existingLd) existingLd.remove();
+    const legacyLd = document.querySelector('#page-jsonld-schema');
+    if (legacyLd) legacyLd.remove();
 
     // Build the LD+JSON graph: WebPage/SoftwareApplication + BreadcrumbList
     const isHomePage = canonicalPath === '/';

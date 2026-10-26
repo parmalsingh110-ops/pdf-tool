@@ -77,7 +77,11 @@ export async function encodeCanvasUnderByteBudget(
   let scaled = false;
   let note: string | undefined;
 
-  const { blob: first, q: q0 } = await bestQualityUnderCap(source, mime, maxBytes);
+  // Strict safety ceiling: keep output safely ~150-300 bytes under maxBytes
+  // so exam portals calculating in decimal KB (1000 bytes) or strict boundary never reject
+  const safeCap = Math.max(1024, maxBytes - Math.min(300, Math.max(120, Math.floor(maxBytes * 0.015))));
+
+  const { blob: first, q: q0 } = await bestQualityUnderCap(source, mime, safeCap);
   if (first.size <= maxBytes) {
     return { blob: first, qualityUsed: q0, scaled: false };
   }
@@ -100,7 +104,7 @@ export async function encodeCanvasUnderByteBudget(
     tmp.width = w;
     tmp.height = h;
     tctx.drawImage(source, 0, 0, w, h);
-    const { blob, q } = await bestQualityUnderCap(tmp, mime, maxBytes);
+    const { blob, q } = await bestQualityUnderCap(tmp, mime, safeCap);
     lastBlob = blob;
     scaled = true;
     note = 'Dimensions were reduced automatically to meet the target file size.';

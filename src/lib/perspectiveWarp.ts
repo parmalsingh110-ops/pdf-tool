@@ -20,20 +20,30 @@ export function wrapPerspective(
   img: HTMLImageElement | HTMLCanvasElement,
   pts: [Point, Point, Point, Point],
   width: number,
-  height: number
+  height: number,
+  maxDim = 2048
 ): HTMLCanvasElement {
+  // Cap max output dimension to prevent CPU lockup on 12-48MP smartphone photos
+  const currentMax = Math.max(width, height);
+  const outScale = currentMax > maxDim ? maxDim / currentMax : 1.0;
+
   const canvas = document.createElement('canvas');
-  canvas.width = Math.round(width);
-  canvas.height = Math.round(height);
+  canvas.width = Math.max(1, Math.round(width * outScale));
+  canvas.height = Math.max(1, Math.round(height * outScale));
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   if (!ctx) return canvas;
 
-  // Draw source image to an offscreen canvas to get its ImageData
+  // Source image bounds - cap source to max 2400px for huge camera photos
+  const rawW = img.width || (img as HTMLCanvasElement).width;
+  const rawH = img.height || (img as HTMLCanvasElement).height;
+  const srcMax = Math.max(rawW, rawH);
+  const srcScale = srcMax > 2400 ? 2400 / srcMax : 1.0;
+
   const srcCv = document.createElement('canvas');
-  srcCv.width = img.width || (img as HTMLCanvasElement).width;
-  srcCv.height = img.height || (img as HTMLCanvasElement).height;
+  srcCv.width = Math.max(1, Math.round(rawW * srcScale));
+  srcCv.height = Math.max(1, Math.round(rawH * srcScale));
   const srcCtx = srcCv.getContext('2d', { willReadFrequently: true })!;
-  srcCtx.drawImage(img, 0, 0);
+  srcCtx.drawImage(img, 0, 0, srcCv.width, srcCv.height);
   const srcImgData = srcCtx.getImageData(0, 0, srcCv.width, srcCv.height);
   const srcData = srcImgData.data;
 
@@ -41,31 +51,42 @@ export function wrapPerspective(
   const dstImgData = ctx.createImageData(canvas.width, canvas.height);
   const dstData = dstImgData.data;
 
-  // Dest bounds
+  // Dest and source bounds
   const dw = canvas.width;
   const dh = canvas.height;
   const sw = srcCv.width;
   const sh = srcCv.height;
 
+  // Scale destination quad coordinates to match srcCv scaling
+  const scaledDstPts: [Point, Point, Point, Point] = [
+    { x: pts[0].x * srcScale, y: pts[0].y * srcScale },
+    { x: pts[1].x * srcScale, y: pts[1].y * srcScale },
+    { x: pts[2].x * srcScale, y: pts[2].y * srcScale },
+    { x: pts[3].x * srcScale, y: pts[3].y * srcScale },
+  ];
+
   // Perspective Matrix Math
-  // We want a matrix M that maps (0,0)->pts[0], (w,0)->pts[1], (w,h)->pts[2], (0,h)->pts[3]
-  // Then for each dest pixel (x,y), we transform back to (u,v) = M * (x,y,1)
   const srcPts = [
     { x: 0, y: 0 },
     { x: dw, y: 0 },
     { x: dw, y: dh },
     { x: 0, y: dh },
   ];
-  const dstPts = pts; // We are mapping Dst->Src mathematically, so src=Rectangle, dst=Quad bounds
   
-  const hMat = getTransformMatrix(srcPts, dstPts);
+  const hMat = getTransformMatrix(srcPts, scaledDstPts);
 
   for (let y = 0; y < dh; y++) {
+    // Hoist y-invariant terms out of inner loop
+    const h01y2 = hMat[1] * y + hMat[2];
+    const h34y5 = hMat[4] * y + hMat[5];
+    const h67y8 = hMat[7] * y + hMat[8];
+    let dstIdx = y * dw * 4;
+
     for (let x = 0; x < dw; x++) {
-      // Map (x, y) back to source image coordinates (u, v) using homography matrix
-      const denom = hMat[6] * x + hMat[7] * y + hMat[8];
-      const u = (hMat[0] * x + hMat[1] * y + hMat[2]) / denom;
-      const v = (hMat[3] * x + hMat[4] * y + hMat[5]) / denom;
+      const denom = hMat[6] * x + h67y8;
+      const invDenom = denom !== 0 ? 1.0 / denom : 0;
+      const u = (hMat[0] * x + h01y2) * invDenom;
+      const v = (hMat[3] * x + h34y5) * invDenom;
 
       // Bilinear interpolation
       const ui = Math.floor(u);
@@ -80,23 +101,22 @@ export function wrapPerspective(
         const idx01 = ((vi + 1) * sw + ui) * 4;
         const idx11 = idx01 + 4;
 
-        for (let c = 0; c < 3; c++) {
-          const val00 = srcData[idx00 + c];
-          const val10 = srcData[idx10 + c];
-          const val01 = srcData[idx01 + c];
-          const val11 = srcData[idx11 + c];
+        const ufrac1 = 1 - ufrac;
+        const vfrac1 = 1 - vfrac;
 
-          const top = val00 + (val10 - val00) * ufrac;
-          const bot = val01 + (val11 - val01) * ufrac;
-          const val = top + (bot - top) * vfrac;
+        const w00 = ufrac1 * vfrac1;
+        const w10 = ufrac * vfrac1;
+        const w01 = ufrac1 * vfrac;
+        const w11 = ufrac * vfrac;
 
-          dstData[(y * dw + x) * 4 + c] = val;
-        }
-        dstData[(y * dw + x) * 4 + 3] = 255; // Alpha
+        dstData[dstIdx] = srcData[idx00] * w00 + srcData[idx10] * w10 + srcData[idx01] * w01 + srcData[idx11] * w11;
+        dstData[dstIdx + 1] = srcData[idx00 + 1] * w00 + srcData[idx10 + 1] * w10 + srcData[idx01 + 1] * w01 + srcData[idx11 + 1] * w11;
+        dstData[dstIdx + 2] = srcData[idx00 + 2] * w00 + srcData[idx10 + 2] * w10 + srcData[idx01 + 2] * w01 + srcData[idx11 + 2] * w11;
+        dstData[dstIdx + 3] = 255;
       } else {
-        // Transparent out of bounds
-        dstData[(y * dw + x) * 4 + 3] = 0;
+        dstData[dstIdx + 3] = 0;
       }
+      dstIdx += 4;
     }
   }
 

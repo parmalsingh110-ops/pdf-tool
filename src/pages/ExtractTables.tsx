@@ -10,8 +10,7 @@ import '../lib/pdfWorker';
 import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
-
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
+import { apiFetch } from '../lib/api';
 
 interface ExtractedTable {
   id: string;
@@ -113,9 +112,10 @@ export default function ExtractTables() {
           const fd = new FormData();
           fd.append('file', f);
 
-          const res = await fetch(`${API_BASE}/extract-tables`, {
+          const res = await apiFetch('/extract-tables', {
             method: 'POST',
-            body: fd
+            body: fd,
+            timeoutMs: 60000,
           });
 
           if (res.ok) {

@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { FileText, CheckCircle2, Download, RotateCcw, AlertTriangle } from 'lucide-react';
 import FileDropzone from '../components/FileDropzone';
 import BackendLoader from '../components/BackendLoader';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
+import { apiFetch } from '../lib/api';
 
 type Stage = 'idle' | 'processing' | 'done' | 'error';
 
@@ -20,6 +21,12 @@ export default function WordToPdfExact() {
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState('');
 
+  useEffect(() => {
+    return () => {
+      if (resultUrl) URL.revokeObjectURL(resultUrl);
+    };
+  }, [resultUrl]);
+
   const handleDrop = async (files: File[]) => {
     if (!files.length) return;
     const f = files[0];
@@ -33,6 +40,7 @@ export default function WordToPdfExact() {
       return;
     }
 
+    if (resultUrl) URL.revokeObjectURL(resultUrl);
     setFile(f);
     setResultUrl(null);
     setErrorMsg('');
@@ -42,10 +50,10 @@ export default function WordToPdfExact() {
       const formData = new FormData();
       formData.append('file', f);
 
-      const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-      const res = await fetch(`${API_BASE_URL}/convert/office-to-pdf`, {
+      const res = await apiFetch('/convert/office-to-pdf', {
         method: 'POST',
         body: formData,
+        timeoutMs: 90000,
       });
 
       if (!res.ok) {

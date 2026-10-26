@@ -54,6 +54,15 @@ export default function MaskedAadhaar() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [exportUrl, setExportUrl] = useState<string | null>(null);
 
+  // Auto-cleanup blob URL on unmount or URL change
+  useEffect(() => {
+    return () => {
+      if (renderedImageUrl && renderedImageUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(renderedImageUrl);
+      }
+    };
+  }, [renderedImageUrl]);
+
   const imageContainerRef = useRef<HTMLDivElement | null>(null);
   const draggingMaskId = useRef<string | null>(null);
   const dragStartPos = useRef<{ x: number; y: number } | null>(null);
@@ -162,105 +171,120 @@ export default function MaskedAadhaar() {
     if (!renderedImageUrl) return;
 
     setIsProcessing(true);
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
+    try {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
 
-    await new Promise((resolve) => {
-      img.onload = resolve;
-      img.src = renderedImageUrl;
-    });
-
-    const canvas = document.createElement('canvas');
-    canvas.width = img.width;
-    canvas.height = img.height;
-    const ctx = canvas.getContext('2d')!;
-
-    // 1. Draw original base image
-    ctx.drawImage(img, 0, 0);
-
-    // 2. Render Masks
-    masks.forEach((mask) => {
-      const rx = (mask.xPercent / 100) * canvas.width;
-      const ry = (mask.yPercent / 100) * canvas.height;
-      const rw = (mask.wPercent / 100) * canvas.width;
-      const rh = (mask.hPercent / 100) * canvas.height;
-
-      if (mask.style === 'uidai_xxxx') {
-        // UIDAI official masked overlay
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(rx, ry, rw, rh);
-        ctx.strokeStyle = '#e2e8f0';
-        ctx.lineWidth = 1;
-        ctx.strokeRect(rx, ry, rw, rh);
-
-        // Draw "XXXX XXXX " text centered
-        ctx.fillStyle = '#0f172a';
-        ctx.font = `bold ${Math.round(rh * 0.7)}px Arial, sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText('XXXX  XXXX', rx + rw / 2, ry + rh / 2);
-      } else if (mask.style === 'black_bar') {
-        ctx.fillStyle = '#000000';
-        ctx.fillRect(rx, ry, rw, rh);
-      } else if (mask.style === 'white_bar') {
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(rx, ry, rw, rh);
-      } else if (mask.style === 'qr_mask') {
-        // QR Code redaction
-        ctx.fillStyle = '#0f172a';
-        ctx.fillRect(rx, ry, rw, rh);
-        ctx.fillStyle = '#ffffff';
-        ctx.font = `bold ${Math.round(rh * 0.12)}px sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText('QR CODE REDACTED', rx + rw / 2, ry + rh / 2 - 10);
-        ctx.fillText('(UIDAI COMPLIANT)', rx + rw / 2, ry + rh / 2 + 10);
-      }
-    });
-
-    // 3. Optional KYC Protection Watermark
-    if (includeKycWatermark && kycPurposeText) {
-      ctx.save();
-      ctx.translate(canvas.width / 2, canvas.height / 2);
-      ctx.rotate((-25 * Math.PI) / 180);
-      ctx.fillStyle = 'rgba(239, 68, 68, 0.28)'; // translucent red
-      ctx.font = `bold ${Math.round(canvas.width * 0.045)}px sans-serif`;
-      ctx.textAlign = 'center';
-      const dateStr = new Date().toLocaleDateString('en-IN');
-      ctx.fillText(`${kycPurposeText} - ${dateStr}`, 0, 0);
-      ctx.restore();
-    }
-
-    if (format === 'jpg') {
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
-      const a = document.createElement('a');
-      a.href = dataUrl;
-      a.download = `masked_aadhaar_${Date.now()}.jpg`;
-      a.click();
-    } else {
-      const pdfDoc = await PDFDocument.create();
-      const page = pdfDoc.addPage([canvas.width * 0.5, canvas.height * 0.5]);
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
-      const imgBytes = dataUrlToBytes(dataUrl);
-      const jpgImg = await pdfDoc.embedJpg(imgBytes);
-
-      page.drawImage(jpgImg, {
-        x: 0,
-        y: 0,
-        width: canvas.width * 0.5,
-        height: canvas.height * 0.5,
+      await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = () => reject(new Error('Failed to load image for masking'));
+        img.src = renderedImageUrl;
       });
 
-      const pdfBytes = await pdfDoc.save();
-      const blob = new Blob([pdfBytes as any], { type: 'application/pdf' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `masked_aadhaar_${Date.now()}.pdf`;
-      a.click();
-    }
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext('2d')!;
 
-    setIsProcessing(false);
+      // 1. Draw original base image
+      ctx.drawImage(img, 0, 0);
+
+      // 2. Render Masks
+      masks.forEach((mask) => {
+        const rx = (mask.xPercent / 100) * canvas.width;
+        const ry = (mask.yPercent / 100) * canvas.height;
+        const rw = (mask.wPercent / 100) * canvas.width;
+        const rh = (mask.hPercent / 100) * canvas.height;
+
+        if (mask.style === 'uidai_xxxx') {
+          // UIDAI official masked overlay
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(rx, ry, rw, rh);
+          ctx.strokeStyle = '#e2e8f0';
+          ctx.lineWidth = 1;
+          ctx.strokeRect(rx, ry, rw, rh);
+
+          // Draw "XXXX XXXX " text centered
+          ctx.fillStyle = '#0f172a';
+          ctx.font = `bold ${Math.round(rh * 0.7)}px Arial, sans-serif`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText('XXXX  XXXX', rx + rw / 2, ry + rh / 2);
+        } else if (mask.style === 'black_bar') {
+          ctx.fillStyle = '#000000';
+          ctx.fillRect(rx, ry, rw, rh);
+        } else if (mask.style === 'white_bar') {
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(rx, ry, rw, rh);
+        } else if (mask.style === 'qr_mask') {
+          // QR Code redaction
+          ctx.fillStyle = '#0f172a';
+          ctx.fillRect(rx, ry, rw, rh);
+          ctx.fillStyle = '#ffffff';
+          ctx.font = `bold ${Math.round(rh * 0.12)}px sans-serif`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText('QR CODE REDACTED', rx + rw / 2, ry + rh / 2 - 10);
+          ctx.fillText('(UIDAI COMPLIANT)', rx + rw / 2, ry + rh / 2 + 10);
+        }
+      });
+
+      // 3. Optional KYC Protection Watermark
+      if (includeKycWatermark && kycPurposeText) {
+        ctx.save();
+        ctx.translate(canvas.width / 2, canvas.height / 2);
+        ctx.rotate((-25 * Math.PI) / 180);
+        ctx.fillStyle = 'rgba(239, 68, 68, 0.28)'; // translucent red
+        ctx.font = `bold ${Math.round(canvas.width * 0.045)}px sans-serif`;
+        ctx.textAlign = 'center';
+        const dateStr = new Date().toLocaleDateString('en-IN');
+        ctx.fillText(`${kycPurposeText} - ${dateStr}`, 0, 0);
+        ctx.restore();
+      }
+
+      if (format === 'jpg') {
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
+        const a = document.createElement('a');
+        a.href = dataUrl;
+        a.download = `masked_aadhaar_${Date.now()}.jpg`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+      } else {
+        const pdfDoc = await PDFDocument.create();
+        const page = pdfDoc.addPage([canvas.width * 0.5, canvas.height * 0.5]);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+        const imgBytes = dataUrlToBytes(dataUrl);
+        const jpgImg = await pdfDoc.embedJpg(imgBytes);
+
+        page.drawImage(jpgImg, {
+          x: 0,
+          y: 0,
+          width: canvas.width * 0.5,
+          height: canvas.height * 0.5,
+        });
+
+        const pdfBytes = await pdfDoc.save();
+        const blob = new Blob([pdfBytes as any], { type: 'application/pdf' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `masked_aadhaar_${Date.now()}.pdf`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => {
+          try {
+            URL.revokeObjectURL(url);
+          } catch {}
+        }, 15000);
+      }
+    } catch (err: any) {
+      console.error('[MaskedAadhaar] Export failed:', err);
+      alert('Could not export masked Aadhaar: ' + (err?.message || 'Unknown error'));
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   const selectedMask = masks.find((m) => m.id === selectedMaskId);
@@ -269,25 +293,25 @@ export default function MaskedAadhaar() {
     <div className="flex-1 max-w-6xl mx-auto px-4 py-8 w-full">
       {/* Title */}
       <div className="text-center mb-8">
-        <div className="inline-flex items-center gap-2 px-3 py-1 bg-emerald-50 text-emerald-800 rounded-full text-xs font-semibold mb-3 border border-emerald-200">
-          <Shield className="w-3.5 h-3.5 text-emerald-600" /> UIDAI & RBI Compliant Masking
+        <div className="inline-flex items-center gap-2 px-3 py-1 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 rounded-full text-xs font-semibold mb-3 border border-emerald-200 dark:border-emerald-800">
+          <Shield className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" /> UIDAI & RBI Compliant Masking
         </div>
-        <h1 className="text-3xl sm:text-4xl font-extrabold text-gray-900 mb-3 tracking-tight">
+        <h1 className="text-3xl sm:text-4xl font-extrabold text-gray-900 dark:text-white mb-3 tracking-tight">
           Masked Aadhaar Card Maker (Mask First 8 Digits)
         </h1>
-        <p className="text-base sm:text-lg text-gray-600 max-w-2xl mx-auto">
+        <p className="text-base sm:text-lg text-gray-600 dark:text-slate-300 max-w-2xl mx-auto">
           Hide first 8 digits (XXXX-XXXX-1234) and QR code on Aadhaar image or PDF. Safe for hotels, SIM verification, and exam KYC without exposing full Aadhaar number.
         </p>
       </div>
 
       {!renderedImageUrl ? (
-        <div className="max-w-xl mx-auto p-8 bg-white border border-gray-200 rounded-2xl shadow-xs text-center">
-          <label className="flex flex-col items-center justify-center border-2 border-dashed border-emerald-300 hover:border-emerald-500 rounded-2xl p-10 cursor-pointer transition-colors bg-emerald-50/20 hover:bg-emerald-50/40">
+        <div className="max-w-xl mx-auto p-8 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xs text-center">
+          <label className="flex flex-col items-center justify-center border-2 border-dashed border-emerald-300 dark:border-emerald-700 hover:border-emerald-500 rounded-2xl p-10 cursor-pointer transition-colors bg-emerald-50/20 dark:bg-emerald-950/20 hover:bg-emerald-50/40">
             <Lock className="w-12 h-12 text-emerald-600 mb-3" />
-            <span className="text-base font-bold text-gray-800">
+            <span className="text-base font-bold text-gray-800 dark:text-slate-100">
               Upload Aadhaar Card (Image or PDF)
             </span>
-            <span className="text-xs text-gray-500 mt-1">
+            <span className="text-xs text-gray-500 dark:text-slate-400 mt-1">
               Supports JPG, PNG, PDF • 100% Client-Side Privacy Guarantee
             </span>
             <input

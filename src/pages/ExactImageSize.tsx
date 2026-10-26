@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Download, ImageMinus, Image as ImageIcon } from 'lucide-react';
 import FileDropzone from '../components/FileDropzone';
 import imageCompression from 'browser-image-compression';
@@ -14,6 +14,27 @@ export default function ExactImageSize() {
   const [compressedUrl, setCompressedUrl] = useState<string | null>(null);
   const [stats, setStats] = useState<{original: number, compressed: number} | null>(null);
   const [compressedFile, setCompressedFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!file) {
+      setPreviewUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(file);
+    setPreviewUrl(url);
+    return () => {
+      URL.revokeObjectURL(url);
+    };
+  }, [file]);
+
+  useEffect(() => {
+    return () => {
+      if (compressedUrl) {
+        URL.revokeObjectURL(compressedUrl);
+      }
+    };
+  }, [compressedUrl]);
 
   const handleDrop = (acceptedFiles: File[]) => {
     if (acceptedFiles.length > 0) {
@@ -184,9 +205,9 @@ export default function ExactImageSize() {
           <div className="flex-1 flex flex-col items-center justify-center bg-gray-100 rounded-xl border border-gray-200 p-4 overflow-hidden">
             {compressedUrl ? (
               <img src={compressedUrl} alt="Compressed preview" className="max-w-full max-h-[400px] object-contain" />
-            ) : (
-              <img src={URL.createObjectURL(file)} alt="Original preview" className="max-w-full max-h-[400px] object-contain opacity-50" />
-            )}
+            ) : previewUrl ? (
+              <img src={previewUrl} alt="Original preview" className="max-w-full max-h-[400px] object-contain opacity-50" />
+            ) : null}
           </div>
         </div>
       )}

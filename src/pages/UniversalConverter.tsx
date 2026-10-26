@@ -16,6 +16,7 @@ import { extractTextRegions, extractTableData } from '../lib/advancedVisionEngin
 import { extractDocxContent, DocxElement, DocxParagraph, DocxTable as DTable, DocxTableRow as DRow, safeStr } from '../lib/docxExtractor';
 import { useSEO } from '../hooks/useSEO';
 import { dataUrlToBytes } from '../lib/utils';
+import { apiFetch } from '../lib/api';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
@@ -1884,13 +1885,12 @@ export default function UniversalConverter() {
     // ── Backend helper — tries server API, returns null on failure ──
     const tryBackend = async (endpoint: string, extraFields?: Record<string, string>): Promise<Blob | null> => {
       try {
-        const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
         const form = new FormData();
         form.append('file', file);
         if (extraFields) {
           for (const [k, v] of Object.entries(extraFields)) form.append(k, v);
         }
-        const res = await fetch(`${API_BASE}${endpoint}`, { method: 'POST', body: form });
+        const res = await apiFetch(endpoint, { method: 'POST', body: form });
         if (!res.ok) return null;
         return await res.blob();
       } catch {

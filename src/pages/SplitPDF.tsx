@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { PDFDocument } from 'pdf-lib';
 import { Download, Scissors, FileText, CheckSquare, Square, Layers, LayoutGrid, Archive } from 'lucide-react';
 import JSZip from 'jszip';
@@ -61,9 +61,23 @@ export default function SplitPDF() {
     }
   }, []);
 
+  useEffect(() => {
+    return () => {
+      splitUrls.forEach(u => {
+        try { URL.revokeObjectURL(u.url); } catch {}
+      });
+    };
+  }, [splitUrls]);
+
   const handleDrop = async (acceptedFiles: File[]) => {
     if (!acceptedFiles.length) return;
     const f = acceptedFiles[0];
+
+    // Revoke previous URLs
+    splitUrls.forEach(u => {
+      try { URL.revokeObjectURL(u.url); } catch {}
+    });
+
     setFile(f);
     setSplitUrls([]);
     setSelectedPages(new Set());
@@ -73,10 +87,19 @@ export default function SplitPDF() {
       const count = pdf.getPageCount();
       setPageCount(count);
       setRanges(`1-${count}`);
-    } catch (e) {
+      generateThumbs(f);
+    } catch (e: any) {
       console.error('Error loading PDF:', e);
+      const errMsg = e?.message?.toLowerCase() || '';
+      if (errMsg.includes('encrypt') || errMsg.includes('password')) {
+        alert('This PDF is password-protected. Please unlock it using our Unlock PDF tool first.');
+      } else {
+        alert('Could not read this PDF. The file may be damaged.');
+      }
+      setFile(null);
+      setPageCount(0);
+      setThumbs([]);
     }
-    generateThumbs(f);
   };
 
   const togglePage = (n: number) => {
@@ -93,10 +116,25 @@ export default function SplitPDF() {
   const splitPdf = async () => {
     if (!file) return;
     setIsProcessing(true);
+
+    // Revoke previous URLs
+    splitUrls.forEach(u => {
+      try { URL.revokeObjectURL(u.url); } catch {}
+    });
     setSplitUrls([]);
+
     try {
       const arrayBuffer = await file.arrayBuffer();
-      const sourcePdf = await PDFDocument.load(arrayBuffer);
+      let sourcePdf: PDFDocument;
+      try {
+        sourcePdf = await PDFDocument.load(arrayBuffer);
+      } catch (loadErr: any) {
+        const errMsg = loadErr?.message?.toLowerCase() || '';
+        if (errMsg.includes('encrypt') || errMsg.includes('password')) {
+          throw new Error('This PDF is password-protected. Please unlock it with our Unlock PDF tool first.');
+        }
+        throw new Error('Could not read the PDF file. It may be corrupted.');
+      }
       const results: { url: string; name: string; pages: string }[] = [];
 
       if (splitMode === 'all') {
@@ -159,9 +197,9 @@ export default function SplitPDF() {
       }
 
       setSplitUrls(results);
-    } catch (e) {
+    } catch (e: any) {
       console.error('Split error:', e);
-      alert('An error occurred while splitting the PDF.');
+      alert(e?.message || 'An error occurred while splitting the PDF.');
     } finally {
       setIsProcessing(false);
       setProcessStep('');

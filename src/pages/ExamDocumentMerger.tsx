@@ -105,10 +105,10 @@ export default function ExamDocumentMerger() {
 
     try {
       const pdfjsLib = await import('pdfjs-dist');
-      pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-        'pdfjs-dist/build/pdf.worker.mjs',
-        import.meta.url
-      ).toString();
+      if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
+        const workerModule = await import('pdfjs-dist/build/pdf.worker.min.mjs?url');
+        pdfjsLib.GlobalWorkerOptions.workerSrc = workerModule.default;
+      }
 
       // Extract all pages from all items into rendered image canvases
       interface ExtractedPage {
@@ -236,22 +236,22 @@ export default function ExamDocumentMerger() {
     <div className="flex-1 max-w-5xl mx-auto px-4 py-8 w-full">
       {/* Title */}
       <div className="text-center mb-8">
-        <div className="inline-flex items-center gap-2 px-3 py-1 bg-blue-50 text-blue-700 rounded-full text-xs font-semibold mb-3 border border-blue-200">
-          <Sparkles className="w-3.5 h-3.5" /> Exam Portal Compliant Bundle Maker
+        <div className="inline-flex items-center gap-2 px-3 py-1 bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 rounded-full text-xs font-semibold mb-3 border border-blue-200 dark:border-blue-800">
+          <Sparkles className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" /> Exam Portal Compliant Bundle Maker
         </div>
-        <h1 className="text-3xl sm:text-4xl font-extrabold text-gray-900 mb-3 tracking-tight">
+        <h1 className="text-3xl sm:text-4xl font-extrabold text-gray-900 dark:text-white mb-3 tracking-tight">
           All Documents to Single PDF Under 1 MB (Exam Bundle Merger)
         </h1>
-        <p className="text-base sm:text-lg text-gray-600 max-w-2xl mx-auto">
+        <p className="text-base sm:text-lg text-gray-600 dark:text-slate-300 max-w-2xl mx-auto">
           Merge all your educational certificates, marksheets, caste & domicile proof into ONE single PDF strictly under 1 MB or 500 KB with guaranteed portal acceptance.
         </p>
       </div>
 
       {/* Target Size Presets Header */}
-      <div className="p-4 bg-white border border-gray-200 rounded-2xl shadow-xs mb-6">
+      <div className="p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xs mb-6">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="text-xs font-bold text-gray-800 uppercase tracking-wider flex items-center gap-2">
-            <Layers className="w-4 h-4 text-blue-600" /> Target PDF Size Limit:
+          <div className="text-xs font-bold text-gray-800 dark:text-slate-200 uppercase tracking-wider flex items-center gap-2">
+            <Layers className="w-4 h-4 text-blue-600 dark:text-blue-400" /> Target PDF Size Limit:
           </div>
 
           <div className="flex flex-wrap gap-2">

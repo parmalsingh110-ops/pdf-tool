@@ -55,6 +55,12 @@ export default function PdfStamp() {
   const [busy, setBusy] = useState(false);
   const [resultUrl, setResultUrl] = useState<string | null>(null);
 
+  useEffect(() => {
+    return () => {
+      if (resultUrl) URL.revokeObjectURL(resultUrl);
+    };
+  }, [resultUrl]);
+
   // Live Canvas Preview
   const [pageThumbUrl, setPageThumbUrl] = useState<string | null>(null);
   const [previewW, setPreviewW] = useState(400);

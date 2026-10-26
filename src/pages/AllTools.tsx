@@ -130,6 +130,7 @@ const categories = [
       // New Tools
       { title: 'Reading Progress Tracker', path: '/reading-tracker', icon: BookMarked, color: 'text-orange-600', bg: 'bg-orange-50' },
       { title: 'Handwriting PDF Generator', path: '/handwriting-pdf', icon: Pen, color: 'text-amber-600', bg: 'bg-amber-50' },
+      { title: 'AI PDF Summarizer', path: '/ai-pdf-summarizer', icon: Sparkles, color: 'text-violet-600', bg: 'bg-violet-50' },
     ]
   },
   {

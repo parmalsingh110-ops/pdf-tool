@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { PDFDocument } from 'pdf-lib';
 import { Download, FileText, Minimize2, Check, Zap, Gauge, Shield, Target } from 'lucide-react';
@@ -8,6 +8,7 @@ import '../lib/pdfWorker';
 import BackendLoader from '../components/BackendLoader';
 import ToolSEOSection from '../components/ToolSEOSection';
 import { useSEO } from '../hooks/useSEO';
+import { apiFetch } from '../lib/api';
 
 type CompressionLevel = 'backend-high-quality' | 'extreme' | 'recommended' | 'low';
 
@@ -28,6 +29,18 @@ export default function CompressPDF() {
   const [stats, setStats] = useState<{original: number, compressed: number, method?: string} | null>(null);
   const [usedFallback, setUsedFallback] = useState(false);
   const [comparisonView, setComparisonView] = useState<'side-by-side' | 'compressed' | 'original'>('side-by-side');
+
+  const previewUrlRef = useRef<string | null>(null);
+  const compressedUrlRef = useRef<string | null>(null);
+  previewUrlRef.current = previewUrl;
+  compressedUrlRef.current = compressedUrl;
+
+  useEffect(() => {
+    return () => {
+      if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
+      if (compressedUrlRef.current) URL.revokeObjectURL(compressedUrlRef.current);
+    };
+  }, []);
 
   const handleDrop = (acceptedFiles: File[]) => {
     if (acceptedFiles.length > 0) {
@@ -55,8 +68,7 @@ export default function CompressPDF() {
         setProcessingStep('Uploading to server for high-quality vector compression...');
         const formData = new FormData();
         formData.append('file', file);
-        const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-        const res = await fetch(`${API_BASE_URL}/compress-pdf`, {
+        const res = await apiFetch('/compress-pdf', {
           method: 'POST',
           body: formData,
         });
@@ -80,7 +92,7 @@ export default function CompressPDF() {
         pdfDoc.setProducer('');
         pdfDoc.setCreator('');
         
-        const pdfBytes = await pdfDoc.save({ useObjectStreams: false });
+        const pdfBytes = await pdfDoc.save({ useObjectStreams: true });
         setUsedFallback(false);
         finishCompression(pdfBytes);
       } else {

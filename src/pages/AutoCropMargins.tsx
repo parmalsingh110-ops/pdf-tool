@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Crop, Download, Loader2, Sparkles, Sliders, ChevronLeft, ChevronRight, 
   Check, FileText, ArrowRight, Eye, Server, Cpu
@@ -9,8 +9,7 @@ import '../lib/pdfWorker';
 import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
-
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
+import { apiFetch } from '../lib/api';
 
 export default function AutoCropMargins() {
   useSEO(
@@ -36,9 +35,16 @@ export default function AutoCropMargins() {
   const [resultFileName, setResultFileName] = useState('');
   const [engineUsed, setEngineUsed] = useState<'backend' | 'client-vector'>('backend');
 
+  useEffect(() => {
+    return () => {
+      if (resultUrl) URL.revokeObjectURL(resultUrl);
+    };
+  }, [resultUrl]);
+
   const handleDrop = async (files: File[]) => {
     if (!files[0]) return;
     const f = files[0];
+    if (resultUrl) URL.revokeObjectURL(resultUrl);
     setFile(f);
     setResultUrl(null);
     setCurrentPage(0);
@@ -82,9 +88,10 @@ export default function AutoCropMargins() {
         fd.append('file', file);
         fd.append('padding_pt', paddingPt.toString());
 
-        const res = await fetch(`${API_BASE}/convert/auto-crop`, {
+        const res = await apiFetch('/convert/auto-crop', {
           method: 'POST',
           body: fd,
+          timeoutMs: 60000,
         });
 
         if (res.ok) {

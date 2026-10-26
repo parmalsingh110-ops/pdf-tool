@@ -21,9 +21,19 @@ export default function PdfToAudio() {
   const utterRef = useRef<SpeechSynthesisUtterance | null>(null);
 
   useEffect(() => {
-    const load = () => { const v = speechSynthesis.getVoices(); setVoices(v); if (v.length && !voice) setVoice(v[0].name); };
-    speechSynthesis.onvoiceschanged = load; load();
-    return () => { speechSynthesis.cancel(); };
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+    const load = () => {
+      const v = window.speechSynthesis.getVoices();
+      setVoices(v);
+      if (v.length && !voice) setVoice(v[0].name);
+    };
+    window.speechSynthesis.onvoiceschanged = load;
+    load();
+    return () => {
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+      }
+    };
   }, []);
 
   const extract = async () => {
@@ -44,9 +54,21 @@ export default function PdfToAudio() {
   };
 
   const speak = (pageIdx: number) => {
-    speechSynthesis.cancel();
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
+      alert("Text-to-speech is not supported on this device/browser.");
+      return;
+    }
+    window.speechSynthesis.cancel();
     const text = pages[pageIdx];
-    if (!text) return;
+    if (!text || !text.trim()) {
+      if (pageIdx < pages.length - 1) {
+        setCurrentPage(pageIdx + 1);
+        speak(pageIdx + 1);
+      } else {
+        setPlaying(false);
+      }
+      return;
+    }
     const u = new SpeechSynthesisUtterance(text);
     u.rate = rate;
     const v = voices.find(v => v.name === voice);
@@ -54,7 +76,7 @@ export default function PdfToAudio() {
     u.onend = () => { if (pageIdx < pages.length - 1) { setCurrentPage(pageIdx + 1); speak(pageIdx + 1); } else { setPlaying(false); } };
     u.onerror = () => setPlaying(false);
     utterRef.current = u;
-    speechSynthesis.speak(u);
+    window.speechSynthesis.speak(u);
     setPlaying(true); setCurrentPage(pageIdx);
   };
 

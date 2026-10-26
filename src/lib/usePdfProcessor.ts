@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 
 interface PdfProcessorOptions {
   onSuccess?: (url: string) => void;
@@ -18,29 +18,47 @@ interface UsePdfProcessorResult {
 
 /**
  * Shared hook for PDF tool pages.
- * Manages: file selection, loading state, result URL, error handling.
- *
- * Usage:
- *   const { file, busy, resultUrl, run, reset, handleDrop } = usePdfProcessor({
- *     onError: (msg) => toast.error(msg),
- *   });
- *
- *   const process = () => run(async () => {
- *     // ... your processing logic ...
- *     return URL.createObjectURL(blob);
- *   });
+ * Manages: file selection, loading state, result URL, error handling, and memory cleanup.
  */
 export function usePdfProcessor(options: PdfProcessorOptions = {}): UsePdfProcessorResult {
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [resultUrl, setResultUrl] = useState<string | null>(null);
 
+  const resultUrlRef = useRef<string | null>(null);
+  useEffect(() => {
+    resultUrlRef.current = resultUrl;
+  }, [resultUrl]);
+
+  // Auto revoke object URL on unmount to prevent browser memory leaks
+  useEffect(() => {
+    return () => {
+      if (resultUrlRef.current && resultUrlRef.current.startsWith('blob:')) {
+        URL.revokeObjectURL(resultUrlRef.current);
+      }
+    };
+  }, []);
+
+  const clearResultUrl = useCallback(() => {
+    setResultUrl((prev) => {
+      if (prev && prev.startsWith('blob:')) {
+        URL.revokeObjectURL(prev);
+      }
+      return null;
+    });
+  }, []);
+
   const run = useCallback(
     async (fn: () => Promise<string>) => {
       setBusy(true);
       try {
         const url = await fn();
-        setResultUrl(url);
+        setResultUrl((prev) => {
+          if (prev && prev.startsWith('blob:') && prev !== url) {
+            URL.revokeObjectURL(prev);
+          }
+          return url;
+        });
         options.onSuccess?.(url);
       } catch (e: any) {
         const msg = e?.message || 'Something went wrong. Please try again.';
@@ -54,16 +72,16 @@ export function usePdfProcessor(options: PdfProcessorOptions = {}): UsePdfProces
 
   const reset = useCallback(() => {
     setFile(null);
-    setResultUrl(null);
+    clearResultUrl();
     setBusy(false);
-  }, []);
+  }, [clearResultUrl]);
 
   const handleDrop = useCallback((files: File[]) => {
     if (files[0]) {
       setFile(files[0]);
-      setResultUrl(null);
+      clearResultUrl();
     }
-  }, []);
+  }, [clearResultUrl]);
 
   return { file, setFile, busy, resultUrl, setResultUrl, run, reset, handleDrop };
 }

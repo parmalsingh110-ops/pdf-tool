@@ -137,23 +137,40 @@ export default function MergePDF() {
     setTimeout(() => setOrderHint(null), 3000);
   }, []);
 
+  useEffect(() => {
+    return () => {
+      if (mergedPdfUrl) URL.revokeObjectURL(mergedPdfUrl);
+    };
+  }, [mergedPdfUrl]);
+
   const mergePdfs = async () => {
     if (entries.length < 2) return;
     setIsProcessing(true);
+    if (mergedPdfUrl) URL.revokeObjectURL(mergedPdfUrl);
+    setMergedPdfUrl(null);
     try {
       const mergedPdf = await PDFDocument.create();
       for (const entry of entries) {
         const ab = await entry.file.arrayBuffer();
-        const pdf = await PDFDocument.load(ab);
+        let pdf: PDFDocument;
+        try {
+          pdf = await PDFDocument.load(ab);
+        } catch (loadErr: any) {
+          const errMsg = loadErr?.message?.toLowerCase() || '';
+          if (errMsg.includes('encrypt') || errMsg.includes('password')) {
+            throw new Error(`"${entry.file.name}" is password-protected. Please unlock it with our Unlock PDF tool before merging.`);
+          }
+          throw new Error(`Could not read "${entry.file.name}". The file may be damaged.`);
+        }
         const copied = await mergedPdf.copyPages(pdf, pdf.getPageIndices());
         copied.forEach(p => mergedPdf.addPage(p));
       }
       const bytes = await mergedPdf.save();
       const blob = new Blob([bytes as any], { type: 'application/pdf' });
       setMergedPdfUrl(URL.createObjectURL(blob));
-    } catch (e) {
+    } catch (e: any) {
       console.error('Merge error:', e);
-      alert('An error occurred while merging. Please try again.');
+      alert(e?.message || 'An error occurred while merging. Please try again.');
     } finally {
       setIsProcessing(false);
     }

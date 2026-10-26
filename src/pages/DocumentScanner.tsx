@@ -37,10 +37,15 @@ export default function DocumentScanner() {
   const [useCamera, setUseCamera] = useState(false);
   const [stream, setStream] = useState<MediaStream | null>(null);
 
+  const pagesRef = useRef<ScannedPage[]>(pages);
+  useEffect(() => {
+    pagesRef.current = pages;
+  }, [pages]);
+
   useEffect(() => {
     return () => {
       // Cleanup URLs on unmount
-      pages.forEach(p => {
+      pagesRef.current.forEach(p => {
         URL.revokeObjectURL(p.originalUrl);
         if (p.croppedUrl) URL.revokeObjectURL(p.croppedUrl);
         if (p.resultUrl) URL.revokeObjectURL(p.resultUrl);
@@ -141,6 +146,12 @@ export default function DocumentScanner() {
   };
 
   const deletePage = (id: string) => {
+    const pageToDelete = pages.find(p => p.id === id);
+    if (pageToDelete) {
+      URL.revokeObjectURL(pageToDelete.originalUrl);
+      if (pageToDelete.croppedUrl) URL.revokeObjectURL(pageToDelete.croppedUrl);
+      if (pageToDelete.resultUrl) URL.revokeObjectURL(pageToDelete.resultUrl);
+    }
     const newPages = pages.filter(p => p.id !== id);
     setPages(newPages);
     if (newPages.length === 0) {

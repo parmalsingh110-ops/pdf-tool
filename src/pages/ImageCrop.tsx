@@ -28,31 +28,46 @@ export default function ImageCrop() {
   const [resultUrl, setResultUrl] = useState<string|null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
+  useEffect(() => {
+    return () => {
+      if (imgUrl) URL.revokeObjectURL(imgUrl);
+    };
+  }, [imgUrl]);
+
+  useEffect(() => {
+    return () => {
+      if (resultUrl) URL.revokeObjectURL(resultUrl);
+    };
+  }, [resultUrl]);
+
   const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
-    if (f) { setFile(f); setImgUrl(URL.createObjectURL(f)); setResultUrl(null); setCrop({x:10,y:10,w:80,h:80}); }
+    if (f) {
+      if (imgUrl) URL.revokeObjectURL(imgUrl);
+      setFile(f);
+      setImgUrl(URL.createObjectURL(f));
+      setResultUrl(null);
+      setCrop({x:10,y:10,w:80,h:80});
+    }
   };
 
-  const getRelCoords = (e: React.MouseEvent) => {
+  const getRelCoords = (clientX: number, clientY: number) => {
     if (!containerRef.current) return {x:0,y:0};
     const r = containerRef.current.getBoundingClientRect();
-    return { x: ((e.clientX - r.left)/r.width)*100, y: ((e.clientY - r.top)/r.height)*100 };
+    return { x: ((clientX - r.left)/r.width)*100, y: ((clientY - r.top)/r.height)*100 };
   };
 
-  const onMouseDown = (e: React.MouseEvent, type: string) => {
-    e.preventDefault(); e.stopPropagation();
+  const onStartDrag = (clientX: number, clientY: number, type: string) => {
     setDragging(type);
-    setStartMouse(getRelCoords(e));
+    setStartMouse(getRelCoords(clientX, clientY));
     setStartCrop({...crop});
   };
 
-  const onMouseMove = useCallback((e: MouseEvent) => {
+  const onDragMove = useCallback((clientX: number, clientY: number) => {
     if (!dragging || !containerRef.current) return;
-    const r = containerRef.current.getBoundingClientRect();
-    const mx = ((e.clientX - r.left)/r.width)*100;
-    const my = ((e.clientY - r.top)/r.height)*100;
-    const dx = mx - startMouse.x;
-    const dy = my - startMouse.y;
+    const cur = getRelCoords(clientX, clientY);
+    const dx = cur.x - startMouse.x;
+    const dy = cur.y - startMouse.y;
     let {x,y,w,h} = startCrop;
     if (dragging === 'move') { x += dx; y += dy; }
     else if (dragging === 'se') { w += dx; h += dy; }
@@ -65,12 +80,27 @@ export default function ImageCrop() {
     setCrop({x,y,w,h});
   }, [dragging, startMouse, startCrop, ratio]);
 
-  const onMouseUp = useCallback(() => setDragging(null), []);
+  const onEndDrag = useCallback(() => setDragging(null), []);
 
   useEffect(() => {
-    if (dragging) { window.addEventListener('mousemove', onMouseMove); window.addEventListener('mouseup', onMouseUp); }
-    return () => { window.removeEventListener('mousemove', onMouseMove); window.removeEventListener('mouseup', onMouseUp); };
-  }, [dragging, onMouseMove, onMouseUp]);
+    if (!dragging) return;
+    const handleMouseMove = (e: MouseEvent) => onDragMove(e.clientX, e.clientY);
+    const handleTouchMove = (e: TouchEvent) => {
+      if (e.touches.length > 0) onDragMove(e.touches[0].clientX, e.touches[0].clientY);
+    };
+    const handleUp = () => onEndDrag();
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleUp);
+    window.addEventListener('touchmove', handleTouchMove, { passive: false });
+    window.addEventListener('touchend', handleUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleUp);
+      window.removeEventListener('touchmove', handleTouchMove);
+      window.removeEventListener('touchend', handleUp);
+    };
+  }, [dragging, onDragMove, onEndDrag]);
 
   const applyCrop = async () => {
     if (!imgUrl) return;
@@ -120,10 +150,21 @@ export default function ImageCrop() {
             <div className="absolute pointer-events-none" style={{left:`${crop.x}%`,top:0,width:`${crop.w}%`,height:`${crop.y}%`,background:'rgba(0,0,0,0.5)'}} />
             <div className="absolute pointer-events-none" style={{left:`${crop.x}%`,top:`${crop.y+crop.h}%`,width:`${crop.w}%`,bottom:0,background:'rgba(0,0,0,0.5)'}} />
             {/* Crop area */}
-            <div className="absolute border-2 border-white" style={{left:`${crop.x}%`,top:`${crop.y}%`,width:`${crop.w}%`,height:`${crop.h}%`}} onMouseDown={e=>onMouseDown(e,'move')}>
+            <div
+              className="absolute border-2 border-white select-none touch-none"
+              style={{left:`${crop.x}%`,top:`${crop.y}%`,width:`${crop.w}%`,height:`${crop.h}%`}}
+              onMouseDown={e => { e.preventDefault(); onStartDrag(e.clientX, e.clientY, 'move'); }}
+              onTouchStart={e => { e.stopPropagation(); if (e.touches.length > 0) onStartDrag(e.touches[0].clientX, e.touches[0].clientY, 'move'); }}
+            >
               {/* Corner handles */}
               {['nw','ne','sw','se'].map(c => (
-                <div key={c} onMouseDown={e=>onMouseDown(e,c)} className="absolute w-4 h-4 bg-white border-2 border-emerald-500 rounded-full z-10" style={{...(c.includes('n')?{top:'-8px'}:{bottom:'-8px'}),...(c.includes('w')?{left:'-8px'}:{right:'-8px'}),cursor:`${c}-resize`}} />
+                <div
+                  key={c}
+                  onMouseDown={e => { e.preventDefault(); e.stopPropagation(); onStartDrag(e.clientX, e.clientY, c); }}
+                  onTouchStart={e => { e.stopPropagation(); if (e.touches.length > 0) onStartDrag(e.touches[0].clientX, e.touches[0].clientY, c); }}
+                  className="absolute w-5 h-5 bg-white border-2 border-emerald-500 rounded-full z-10 select-none touch-none"
+                  style={{...(c.includes('n')?{top:'-10px'}:{bottom:'-10px'}),...(c.includes('w')?{left:'-10px'}:{right:'-10px'}),cursor:`${c}-resize`}}
+                />
               ))}
               {/* Grid lines */}
               <div className="absolute inset-0 pointer-events-none"><div className="absolute left-1/3 top-0 bottom-0 w-px bg-white/40"/><div className="absolute left-2/3 top-0 bottom-0 w-px bg-white/40"/><div className="absolute top-1/3 left-0 right-0 h-px bg-white/40"/><div className="absolute top-2/3 left-0 right-0 h-px bg-white/40"/></div>

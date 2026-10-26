@@ -422,10 +422,10 @@ export default function UnlockPDF() {
 
       // Dynamic import pdfjs-dist
       const pdfjsLib = await import('pdfjs-dist');
-      pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-        'pdfjs-dist/build/pdf.worker.mjs',
-        import.meta.url
-      ).toString();
+      if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
+        const workerModule = await import('pdfjs-dist/build/pdf.worker.min.mjs?url');
+        pdfjsLib.GlobalWorkerOptions.workerSrc = workerModule.default;
+      }
 
       let pdfjsDoc: any = null;
       let successfulPassword = '';
@@ -533,13 +533,13 @@ export default function UnlockPDF() {
     <div className="flex-1 flex flex-col items-center justify-center p-4 sm:p-8 max-w-5xl mx-auto w-full">
       {/* Page Title & Intro */}
       <div className="text-center mb-8">
-        <div className="inline-flex items-center gap-2 px-3 py-1 bg-purple-50 text-purple-700 rounded-full text-xs font-semibold mb-3 border border-purple-200">
+        <div className="inline-flex items-center gap-2 px-3 py-1 bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 rounded-full text-xs font-semibold mb-3 border border-purple-200 dark:border-purple-800">
           <Sparkles className="w-3.5 h-3.5" /> Smart Document Password Helper Included
         </div>
-        <h1 className="text-3xl sm:text-4xl font-extrabold text-gray-900 mb-3 tracking-tight">
+        <h1 className="text-3xl sm:text-4xl font-extrabold text-gray-900 dark:text-white mb-3 tracking-tight">
           Unlock PDF & Remove Password
         </h1>
-        <p className="text-base sm:text-lg text-gray-600 max-w-2xl mx-auto">
+        <p className="text-base sm:text-lg text-gray-600 dark:text-slate-300 max-w-2xl mx-auto">
           Direct password pata hai ya nahi? Select your document (Aadhaar, SBI, HDFC, Jan Aadhaar, Form 16) aur hamara smart helper khud password banakar unlock karega!
         </p>
       </div>

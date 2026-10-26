@@ -40,6 +40,7 @@ import {
 import SignatureCanvas from 'react-signature-canvas';
 import FileDropzone from '../components/FileDropzone';
 import { useSEO } from '../hooks/useSEO';
+import { apiFetch } from '../lib/api';
 
 // Initialize pdf.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
@@ -374,11 +375,10 @@ export default function AdvancedEditor() {
   const fetchTextLayout = async (pdfFile: File, pageIndex: number) => {
     setLayoutFetching(true);
     try {
-      const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
       const formData = new FormData();
       formData.append('file', pdfFile);
       formData.append('page', String(pageIndex));
-      const res = await fetch(`${API_BASE_URL}/analyze/text-layout`, {
+      const res = await apiFetch('/analyze/text-layout', {
         method: 'POST',
         body: formData,
       });
@@ -1270,8 +1270,7 @@ export default function AdvancedEditor() {
           formData.append('file', new File([currentFileBuffer], file.name, { type: file.type }));
           formData.append('edits', JSON.stringify(editPayload));
 
-          const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-          const res = await fetch(`${API_BASE_URL}/edit-pdf`, {
+          const res = await apiFetch('/edit-pdf', {
             method: 'POST',
             body: formData,
           });

@@ -9,8 +9,7 @@ import '../lib/pdfWorker';
 import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
-
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
+import { apiFetch } from '../lib/api';
 
 interface SearchMatch {
   pageIndex: number;
@@ -51,11 +50,25 @@ export default function SearchReplace() {
   const [resultFileName, setResultFileName] = useState('');
   const [engineUsed, setEngineUsed] = useState<'backend' | 'client'>('backend');
 
+  const resultUrlRef = useRef<string | null>(null);
+  useEffect(() => {
+    resultUrlRef.current = resultUrl;
+  }, [resultUrl]);
+
+  useEffect(() => {
+    return () => {
+      if (resultUrlRef.current) URL.revokeObjectURL(resultUrlRef.current);
+    };
+  }, []);
+
   const handleDrop = async (files: File[]) => {
     if (!files[0]) return;
     const f = files[0];
+    if (resultUrlRef.current) {
+      URL.revokeObjectURL(resultUrlRef.current);
+      setResultUrl(null);
+    }
     setFile(f);
-    setResultUrl(null);
     setMatches([]);
     setCurrentPage(0);
 
@@ -194,7 +207,7 @@ export default function SearchReplace() {
         fd.append('search_term', searchTerm);
         fd.append('replace_term', replaceTerm);
 
-        const res = await fetch(`${API_BASE}/search-replace`, {
+        const res = await apiFetch('/search-replace', {
           method: 'POST',
           body: fd,
         });

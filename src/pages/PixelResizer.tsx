@@ -17,6 +17,27 @@ export default function PixelResizer() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [resizedUrl, setResizedUrl] = useState<string | null>(null);
   const [resizedFile, setResizedFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!file) {
+      setPreviewUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(file);
+    setPreviewUrl(url);
+    return () => {
+      URL.revokeObjectURL(url);
+    };
+  }, [file]);
+
+  useEffect(() => {
+    return () => {
+      if (resizedUrl) {
+        URL.revokeObjectURL(resizedUrl);
+      }
+    };
+  }, [resizedUrl]);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -29,12 +50,17 @@ export default function PixelResizer() {
       
       // Get original dimensions
       const img = new Image();
+      const tempUrl = URL.createObjectURL(selectedFile);
       img.onload = () => {
         setOriginalDimensions({ w: img.width, h: img.height });
         setWidth(img.width);
         setHeight(img.height);
+        URL.revokeObjectURL(tempUrl);
       };
-      img.src = URL.createObjectURL(selectedFile);
+      img.onerror = () => {
+        URL.revokeObjectURL(tempUrl);
+      };
+      img.src = tempUrl;
     }
   };
 
@@ -272,9 +298,9 @@ export default function PixelResizer() {
           <div className="flex-1 flex flex-col items-center justify-center bg-gray-100 rounded-xl border border-gray-200 p-4 overflow-hidden">
             {resizedUrl ? (
               <img src={resizedUrl} alt="Resized preview" className="max-w-full max-h-[400px] object-contain" />
-            ) : (
-              <img src={URL.createObjectURL(file)} alt="Original preview" className="max-w-full max-h-[400px] object-contain opacity-50" />
-            )}
+            ) : previewUrl ? (
+              <img src={previewUrl} alt="Original preview" className="max-w-full max-h-[400px] object-contain opacity-50" />
+            ) : null}
           </div>
         </div>
       )}

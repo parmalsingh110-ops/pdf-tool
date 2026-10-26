@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   Presentation, Zap, CheckCircle2, Download, RotateCcw,
   AlertTriangle, Cpu, Image, ChevronRight, Layers
@@ -9,6 +9,7 @@ import FileDropzone from '../components/FileDropzone';
 import BackendLoader from '../components/BackendLoader';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
+import { apiFetch } from '../lib/api';
 import '../lib/pdfWorker';
 
 type Stage = 'idle' | 'analyzing' | 'converting' | 'backend' | 'done' | 'error';
@@ -167,8 +168,7 @@ async function convertBackend(file: File, dpi: number): Promise<Blob> {
   const formData = new FormData();
   formData.append('file', file);
   formData.append('dpi', String(dpi));
-  const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-  const res = await fetch(`${API_BASE_URL}/convert/pdf-to-ppt`, { method: 'POST', body: formData });
+  const res = await apiFetch('/convert/pdf-to-ppt', { method: 'POST', body: formData });
   if (!res.ok) throw new Error(await res.text() || 'Backend conversion failed.');
   return res.blob();
 }
@@ -194,11 +194,25 @@ export default function PdfToPpt() {
   const [dpi, setDpi] = useState(150);
   const [slideMode, setSlideMode] = useState<SlideMode>('hybrid');
 
+  const resultUrlRef = useRef<string | null>(null);
+  useEffect(() => {
+    resultUrlRef.current = resultUrl;
+  }, [resultUrl]);
+
+  useEffect(() => {
+    return () => {
+      if (resultUrlRef.current) URL.revokeObjectURL(resultUrlRef.current);
+    };
+  }, []);
+
   const handleDrop = useCallback(async (files: File[]) => {
     if (!files.length) return;
     const f = files[0];
+    if (resultUrlRef.current) {
+      URL.revokeObjectURL(resultUrlRef.current);
+      setResultUrl(null);
+    }
     setFile(f);
-    setResultUrl(null);
     setErrorMsg('');
     setStats(null);
 
@@ -231,6 +245,7 @@ export default function PdfToPpt() {
   }, [method, dpi, slideMode]);
 
   const reset = () => {
+    if (resultUrlRef.current) URL.revokeObjectURL(resultUrlRef.current);
     setFile(null);
     setStage('idle');
     setResultUrl(null);

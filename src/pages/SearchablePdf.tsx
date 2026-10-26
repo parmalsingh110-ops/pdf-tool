@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Search, Scan, Globe, Zap, CheckCircle2, Download, RotateCcw, AlertTriangle } from 'lucide-react';
 import FileDropzone from '../components/FileDropzone';
 import BackendLoader from '../components/BackendLoader';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
+import { apiFetch } from '../lib/api';
 
 type Stage = 'idle' | 'processing' | 'done' | 'error';
 type Lang = 'eng' | 'hin' | 'hin+eng';
@@ -24,11 +25,25 @@ export default function SearchablePdf() {
   const [deskew, setDeskew] = useState(true);
   const [forceOcr, setForceOcr] = useState(true);
 
+  const resultUrlRef = useRef<string | null>(null);
+  useEffect(() => {
+    resultUrlRef.current = resultUrl;
+  }, [resultUrl]);
+
+  useEffect(() => {
+    return () => {
+      if (resultUrlRef.current) URL.revokeObjectURL(resultUrlRef.current);
+    };
+  }, []);
+
   const handleDrop = async (files: File[]) => {
     if (!files.length) return;
     const f = files[0];
+    if (resultUrl) {
+      URL.revokeObjectURL(resultUrl);
+      setResultUrl(null);
+    }
     setFile(f);
-    setResultUrl(null);
     setErrorMsg('');
     setStage('processing');
 
@@ -40,8 +55,7 @@ export default function SearchablePdf() {
       formData.append('rotate', 'true');
       formData.append('force_ocr', forceOcr ? 'true' : 'false');
 
-      const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-      const res = await fetch(`${API_BASE_URL}/convert/make-searchable`, {
+      const res = await apiFetch('/convert/make-searchable', {
         method: 'POST',
         body: formData,
       });
@@ -61,6 +75,7 @@ export default function SearchablePdf() {
   };
 
   const reset = () => {
+    if (resultUrl) URL.revokeObjectURL(resultUrl);
     setFile(null);
     setStage('idle');
     setResultUrl(null);

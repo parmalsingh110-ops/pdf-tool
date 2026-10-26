@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   FileText, Scan, Zap, CheckCircle2, Download, RotateCcw,
   AlertTriangle, Cpu, Globe, ChevronRight, Eye, Sparkles,
@@ -13,6 +13,7 @@ import FileDropzone from '../components/FileDropzone';
 import BackendLoader from '../components/BackendLoader';
 import ToolSEOSection from '../components/ToolSEOSection';
 import { useSEO } from '../hooks/useSEO';
+import { apiFetch } from '../lib/api';
 import '../lib/pdfWorker';
 
 type Stage = 'idle' | 'analyzing' | 'converting' | 'backend' | 'done' | 'error';
@@ -341,8 +342,7 @@ async function convertBackend(file: File, forceOcr: boolean): Promise<Blob> {
   const formData = new FormData();
   formData.append('file', file);
   formData.append('force_ocr', forceOcr ? 'true' : 'false');
-  const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-  const res = await fetch(`${API_BASE_URL}/convert/pdf-to-word`, {
+  const res = await apiFetch('/convert/pdf-to-word', {
     method: 'POST',
     body: formData
   });
@@ -369,11 +369,25 @@ export default function PdfToWord() {
   const [engineMode, setEngineMode] = useState<EngineMode>('precision');
   const [fallbackNotice, setFallbackNotice] = useState<string | null>(null);
 
+  const resultUrlRef = useRef<string | null>(null);
+  useEffect(() => {
+    resultUrlRef.current = resultUrl;
+  }, [resultUrl]);
+
+  useEffect(() => {
+    return () => {
+      if (resultUrlRef.current) URL.revokeObjectURL(resultUrlRef.current);
+    };
+  }, []);
+
   const handleDrop = useCallback(async (files: File[]) => {
     if (!files.length) return;
     const f = files[0];
+    if (resultUrlRef.current) {
+      URL.revokeObjectURL(resultUrlRef.current);
+      setResultUrl(null);
+    }
     setFile(f);
-    setResultUrl(null);
     setErrorMsg('');
     setStats(null);
     setFallbackNotice(null);
@@ -436,6 +450,7 @@ export default function PdfToWord() {
   }, [engineMode]);
 
   const reset = () => {
+    if (resultUrlRef.current) URL.revokeObjectURL(resultUrlRef.current);
     setFile(null);
     setStage('idle');
     setResultUrl(null);

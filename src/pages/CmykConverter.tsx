@@ -1,10 +1,9 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Palette, Download, AlertTriangle, Loader2, FileText, CheckCircle } from "lucide-react";
 import FileDropzone from "../components/FileDropzone";
 import { usePageSEO } from "../lib/usePageSEO";
 import { useSEO } from '../hooks/useSEO';
-
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
+import { apiFetch } from "../lib/api";
 
 export default function CmykConverter() {
   useSEO('Cmyk Converter Online Free | PDF Media Suite', 'Free online Cmyk Converter tool. No signup or installation required.');
@@ -16,17 +15,30 @@ export default function CmykConverter() {
   const [resultName, setResultName] = useState("");
   const [error, setError] = useState<string | null>(null);
 
+  useEffect(() => {
+    return () => {
+      if (resultUrl) URL.revokeObjectURL(resultUrl);
+    };
+  }, [resultUrl]);
+
   const handleDrop = (files: File[]) => {
-    if (files[0]) { setFile(files[0]); setResultUrl(null); setError(null); }
+    if (files[0]) {
+      if (resultUrl) URL.revokeObjectURL(resultUrl);
+      setFile(files[0]);
+      setResultUrl(null);
+      setError(null);
+    }
   };
 
   const convert = async () => {
     if (!file) return;
     setBusy(true); setError(null);
+    if (resultUrl) URL.revokeObjectURL(resultUrl);
+    setResultUrl(null);
     try {
       const fd = new FormData();
       fd.append("file", file);
-      const res = await fetch(`${API_BASE}/convert/cmyk`, { method: "POST", body: fd });
+      const res = await apiFetch('/convert/cmyk', { method: "POST", body: fd, timeoutMs: 60000 });
       if (!res.ok) {
         const err = await res.json().catch(() => ({ detail: "Conversion failed." }));
         throw new Error(err.detail || "Conversion failed.");

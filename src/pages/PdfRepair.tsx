@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Wrench, Download, AlertTriangle, Loader2, FileText, 
   CheckCircle, RefreshCw, ShieldCheck, Activity, ArrowRight, Sparkles
@@ -10,8 +10,7 @@ import FileDropzone from '../components/FileDropzone';
 import ToolSEOSection from '../components/ToolSEOSection';
 import { useSEO } from '../hooks/useSEO';
 import { dataUrlToBytes } from '../lib/utils';
-
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
+import { apiFetch } from '../lib/api';
 
 interface DiagnosticItem {
   name: string;
@@ -33,6 +32,12 @@ export default function PdfRepair() {
   const [strategyUsed, setStrategyUsed] = useState<string>('');
   const [salvagedPages, setSalvagedPages] = useState<number>(0);
   const [diagnostics, setDiagnostics] = useState<DiagnosticItem[]>([]);
+
+  useEffect(() => {
+    return () => {
+      if (resultUrl) URL.revokeObjectURL(resultUrl);
+    };
+  }, [resultUrl]);
 
   const handleDrop = (files: File[]) => {
     if (files[0]) {
@@ -155,10 +160,9 @@ export default function PdfRepair() {
 
       // Strategy 3: Server-side Ghostscript fallback if available
       try {
-        setProgressMsg('Strategy 3: Dispatching to low-level Ghostscript / mutool server engine...');
         const fd = new FormData();
         fd.append('file', file);
-        const res = await fetch(`${API_BASE}/repair-pdf`, { method: 'POST', body: fd });
+        const res = await apiFetch('/repair-pdf', { method: 'POST', body: fd, timeoutMs: 60000 });
         if (res.ok) {
           const blob = await res.blob();
           const strat = res.headers.get('X-Repair-Strategy') || 'Ghostscript Deep Rebuild';

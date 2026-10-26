@@ -1,10 +1,9 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Type, Download, AlertTriangle, Loader2, FileText, CheckCircle } from "lucide-react";
 import FileDropzone from "../components/FileDropzone";
 import { usePageSEO } from "../lib/usePageSEO";
 import { useSEO } from '../hooks/useSEO';
-
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
+import { apiFetch } from "../lib/api";
 
 const FONTS = [
   { key: "helv", name: "Helvetica", desc: "Clean sans-serif — modern, widely used" },
@@ -23,14 +22,22 @@ export default function PdfFontReplacer() {
   const [resultName, setResultName] = useState("");
   const [error, setError] = useState<string | null>(null);
 
+  useEffect(() => {
+    return () => {
+      if (resultUrl) URL.revokeObjectURL(resultUrl);
+    };
+  }, [resultUrl]);
+
   const process = async () => {
     if (!file) return;
     setBusy(true); setError(null);
+    if (resultUrl) URL.revokeObjectURL(resultUrl);
+    setResultUrl(null);
     try {
       const fd = new FormData();
       fd.append("file", file); fd.append("font_name", font);
-      const res = await fetch(`${API_BASE}/convert/replace-font`, { method: "POST", body: fd });
-      if (!res.ok) { const e = await res.json().catch(() => ({ detail: "Failed." })); throw new Error(e.detail); }
+      const res = await apiFetch('/convert/replace-font', { method: "POST", body: fd, timeoutMs: 60000 });
+      if (!res.ok) { const e = await res.json().catch(() => ({ detail: "Failed." })); throw new Error(e.detail || "Processing failed."); }
       const blob = await res.blob();
       const fn = FONTS.find(f => f.key === font)!;
       setResultName(`${file.name.replace(/\.pdf$/i,"")}_${fn.name.replace(" ","_")}.pdf`);

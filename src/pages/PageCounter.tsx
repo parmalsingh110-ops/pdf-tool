@@ -4,7 +4,7 @@ import { PDFDocument } from 'pdf-lib';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 
-interface PageInfo { name: string; pages: number; size: string; }
+interface PageInfo { name: string; pages: number; size: string; errorReason?: string; }
 
 export default function PageCounter() {
   useSEO('Page Counter Online Free | PDF Media Suite', 'Free online Page Counter tool. No signup or installation required.');
@@ -28,8 +28,14 @@ export default function PageCounter() {
           const buf = await f.arrayBuffer();
           const pdf = await PDFDocument.load(buf, { ignoreEncryption: true });
           infos.push({ name: f.name, pages: pdf.getPageCount(), size: (f.size / 1024 / 1024).toFixed(2) + ' MB' });
-        } catch {
-          infos.push({ name: f.name, pages: -1, size: (f.size / 1024 / 1024).toFixed(2) + ' MB' });
+        } catch (err: any) {
+          const isEncrypted = err?.message?.toLowerCase().includes('encrypt') || err?.name === 'EncryptedPDFError';
+          infos.push({
+            name: f.name,
+            pages: -1,
+            size: (f.size / 1024 / 1024).toFixed(2) + ' MB',
+            errorReason: isEncrypted ? 'Encrypted (Locked)' : 'Corrupt / Unsupported',
+          });
         }
       }
       setResults(infos);
@@ -70,7 +76,13 @@ export default function PageCounter() {
                 {results.map((r, i) => (
                   <tr key={i} className="border-t border-gray-100 dark:border-slate-800">
                     <td className="px-4 py-3 text-gray-900 dark:text-white truncate max-w-[300px]">{r.name}</td>
-                    <td className="px-4 py-3 text-right font-bold text-gray-900 dark:text-white">{r.pages > 0 ? r.pages : <span className="text-red-500">Error</span>}</td>
+                    <td className="px-4 py-3 text-right font-bold text-gray-900 dark:text-white">
+                      {r.pages >= 0 ? (
+                        r.pages
+                      ) : (
+                        <span className="text-amber-500 font-semibold text-xs">{r.errorReason || 'Error'}</span>
+                      )}
+                    </td>
                     <td className="px-4 py-3 text-right text-gray-500 dark:text-slate-400">{r.size}</td>
                   </tr>
                 ))}

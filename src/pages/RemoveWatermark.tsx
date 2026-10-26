@@ -11,8 +11,7 @@ import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { dataUrlToBytes } from '../lib/utils';
-
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
+import { apiFetch } from '../lib/api';
 
 type RemovalMode = 'bottom-crop' | 'box-erase' | 'contrast-cleaner' | 'backend-vector';
 
@@ -57,9 +56,16 @@ export default function RemoveWatermark() {
 
   const imgRef = useRef<HTMLImageElement>(null);
 
+  useEffect(() => {
+    return () => {
+      if (resultUrl) URL.revokeObjectURL(resultUrl);
+    };
+  }, [resultUrl]);
+
   const handleDrop = async (files: File[]) => {
     if (!files[0]) return;
     const f = files[0];
+    if (resultUrl) URL.revokeObjectURL(resultUrl);
     setFile(f);
     setResultUrl(null);
     setBoxes([]);
@@ -139,9 +145,10 @@ export default function RemoveWatermark() {
           fd.append('bottom_percentage', bottomCropPercent.toString());
           fd.append('remove_background', removeBackgroundAnnots ? 'true' : 'false');
 
-          const res = await fetch(`${API_BASE}/remove-watermark`, {
+          const res = await apiFetch('/remove-watermark', {
             method: 'POST',
-            body: fd
+            body: fd,
+            timeoutMs: 60000,
           });
 
           if (res.ok) {

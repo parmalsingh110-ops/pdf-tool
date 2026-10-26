@@ -29,6 +29,7 @@ export default function CleanSignature() {
   const [inkColor, setInkColor] = useState<InkColorChoice>('black');
   const [autoCrop, setAutoCrop] = useState<boolean>(true);
   const [rotation, setRotation] = useState<number>(0);
+  const [removeRuledLines, setRemoveRuledLines] = useState<boolean>(true);
 
   // Target size
   const [targetKb, setTargetKb] = useState<number>(20); // 20 KB default for exam portals
@@ -37,9 +38,16 @@ export default function CleanSignature() {
 
   const sourceImgRef = useRef<HTMLImageElement | null>(null);
 
+  useEffect(() => {
+    return () => {
+      if (imageUrl) URL.revokeObjectURL(imageUrl);
+    };
+  }, [imageUrl]);
+
   const handleUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      if (imageUrl) URL.revokeObjectURL(imageUrl);
       setImageFile(file);
       const url = URL.createObjectURL(file);
       setImageUrl(url);
@@ -101,8 +109,14 @@ export default function CleanSignature() {
         // Grayscale luminance
         const lum = 0.299 * r + 0.587 * g + 0.114 * b;
 
-        // If luminance > threshold, it's paper background
-        if (lum > threshold) {
+        // Ruled line detection: notebook lines are faint blue/gray lines
+        const isRuledLine = removeRuledLines && (
+          (b - r > 14 && lum > 130) || // faint blue/cyan notebook ruled line
+          (lum > threshold * 0.82 && Math.abs(r - g) < 14 && Math.abs(g - b) < 14) // faint ruled line
+        );
+
+        // If luminance > threshold or detected as notebook ruled line, it's paper background
+        if (lum > threshold || isRuledLine) {
           if (makeTransparent) {
             d[i + 3] = 0; // Alpha 0 (Transparent)
           } else {
@@ -189,7 +203,7 @@ export default function CleanSignature() {
       setPreviewUrl(dataUrl);
     };
     img.src = imageUrl;
-  }, [imageUrl, threshold, contrastBoost, makeTransparent, inkColor, autoCrop, rotation, targetKb]);
+  }, [imageUrl, threshold, contrastBoost, makeTransparent, inkColor, autoCrop, rotation, targetKb, removeRuledLines]);
 
   useEffect(() => {
     processSignature();
@@ -206,10 +220,12 @@ export default function CleanSignature() {
     } else if (format === 'svg') {
       const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 200" width="100%" height="100%"><image href="${previewUrl}" width="500" height="200" /></svg>`;
       const blob = new Blob([svg], { type: 'image/svg+xml' });
+      const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
+      a.href = url;
       a.download = 'signature_vector.svg';
       a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
     } else if (format === 'pdf') {
       const pdfDoc = await PDFDocument.create();
       const page = pdfDoc.addPage([500, 300]);
@@ -237,6 +253,7 @@ export default function CleanSignature() {
       a.href = url;
       a.download = 'clean_signature.pdf';
       a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
     }
   };
 
@@ -244,37 +261,37 @@ export default function CleanSignature() {
     <div className="flex-1 max-w-6xl mx-auto px-4 py-8 w-full">
       {/* Title */}
       <div className="text-center mb-8">
-        <div className="inline-flex items-center gap-2 px-3 py-1 bg-indigo-50 text-indigo-700 rounded-full text-xs font-semibold mb-3 border border-indigo-200">
+        <div className="inline-flex items-center gap-2 px-3 py-1 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 rounded-full text-xs font-semibold mb-3 border border-indigo-200 dark:border-indigo-800">
           <Sparkles className="w-3.5 h-3.5" /> Paper Photo to Clean Digital Signature
         </div>
-        <h1 className="text-3xl sm:text-4xl font-extrabold text-gray-900 mb-3 tracking-tight">
+        <h1 className="text-3xl sm:text-4xl font-extrabold text-gray-900 dark:text-white mb-3 tracking-tight">
           Clean Paper Signature (White / Transparent Sign)
         </h1>
-        <p className="text-base sm:text-lg text-gray-600 max-w-2xl mx-auto">
+        <p className="text-base sm:text-lg text-gray-600 dark:text-slate-300 max-w-2xl mx-auto">
           Apne phone se kagaz par ki gayi signature ki photo upload karein — shadows, wrinkles aur yellow background hatakar pure white ya transparent digital sign banayein.
         </p>
       </div>
 
       {!imageUrl ? (
-        <div className="max-w-xl mx-auto p-8 bg-white border border-gray-200 rounded-2xl shadow-xs text-center">
-          <label className="flex flex-col items-center justify-center border-2 border-dashed border-indigo-300 hover:border-indigo-500 rounded-2xl p-10 cursor-pointer transition-colors bg-indigo-50/20 hover:bg-indigo-50/40">
+        <div className="max-w-xl mx-auto p-8 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xs text-center">
+          <label className="flex flex-col items-center justify-center border-2 border-dashed border-indigo-300 dark:border-indigo-700 hover:border-indigo-500 rounded-2xl p-10 cursor-pointer transition-colors bg-indigo-50/20 dark:bg-indigo-950/20 hover:bg-indigo-50/40">
             <Upload className="w-12 h-12 text-indigo-500 mb-3" />
-            <span className="text-base font-bold text-gray-800">
+            <span className="text-base font-bold text-gray-800 dark:text-slate-100">
               Upload Phone Photo of Signature
             </span>
-            <span className="text-xs text-gray-500 mt-1">
+            <span className="text-xs text-gray-500 dark:text-slate-400 mt-1">
               Supports JPG, PNG, WEBP (Photo taken on paper / notebook)
             </span>
             <input type="file" accept="image/*" onChange={handleUpload} className="hidden" />
           </label>
 
-          <div className="mt-6 grid grid-cols-2 gap-3 text-left text-xs text-gray-600">
-            <div className="p-3 bg-gray-50 rounded-xl border border-gray-200">
-              <span className="font-bold text-gray-800 block mb-1">✅ Transparent PNG:</span>
+          <div className="mt-6 grid grid-cols-2 gap-3 text-left text-xs text-gray-600 dark:text-slate-300">
+            <div className="p-3 bg-gray-50 dark:bg-slate-800/60 rounded-xl border border-gray-200 dark:border-slate-700">
+              <span className="font-bold text-gray-800 dark:text-slate-100 block mb-1">✅ Transparent PNG:</span>
               Use directly on official letters, invoices, and PDF documents.
             </div>
-            <div className="p-3 bg-gray-50 rounded-xl border border-gray-200">
-              <span className="font-bold text-gray-800 block mb-1">✅ Pure White Background:</span>
+            <div className="p-3 bg-gray-50 dark:bg-slate-800/60 rounded-xl border border-gray-200 dark:border-slate-700">
+              <span className="font-bold text-gray-800 dark:text-slate-100 block mb-1">✅ Pure White Background:</span>
               Perfect for SSC, UPSC, and Bank exam upload portals (10KB - 20KB).
             </div>
           </div>
@@ -283,15 +300,15 @@ export default function CleanSignature() {
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
           {/* Controls Column (6 cols) */}
           <div className="lg:col-span-6 space-y-6">
-            <div className="p-5 bg-white border border-gray-200 rounded-2xl shadow-xs space-y-5">
+            <div className="p-5 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xs space-y-5">
               <div className="flex items-center justify-between">
-                <h2 className="text-sm font-bold text-gray-900 flex items-center gap-2">
-                  <Sliders className="w-4 h-4 text-indigo-600" /> Signature Enhancement Controls
+                <h2 className="text-sm font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                  <Sliders className="w-4 h-4 text-indigo-600 dark:text-indigo-400" /> Signature Enhancement Controls
                 </h2>
                 <button
                   type="button"
                   onClick={() => setRotation((r) => (r + 90) % 360)}
-                  className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold text-gray-700 dark:text-slate-200 bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700 rounded-lg transition-colors"
                 >
                   <RotateCw className="w-3.5 h-3.5" /> Rotate 90°
                 </button>
@@ -407,6 +424,22 @@ export default function CleanSignature() {
                     type="checkbox"
                     checked={autoCrop}
                     onChange={(e) => setAutoCrop(e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <div className="w-10 h-5 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600"></div>
+                </label>
+              </div>
+
+              {/* Strip Notebook Ruled Lines */}
+              <div className="flex items-center justify-between pt-2 border-t border-gray-100">
+                <span className="text-xs font-medium text-gray-700 flex items-center gap-1.5">
+                  <Sparkles className="w-4 h-4 text-indigo-500" /> Strip Notebook Lines (Copy Ruled Paper)
+                </span>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={removeRuledLines}
+                    onChange={(e) => setRemoveRuledLines(e.target.checked)}
                     className="sr-only peer"
                   />
                   <div className="w-10 h-5 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600"></div>

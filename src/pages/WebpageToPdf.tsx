@@ -1,9 +1,8 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Globe, Download, AlertTriangle, Loader2, Settings, CheckCircle } from "lucide-react";
 import { usePageSEO } from "../lib/usePageSEO";
 import { useSEO } from '../hooks/useSEO';
-
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
+import { apiFetch } from "../lib/api";
 
 export default function WebpageToPdf() {
   useSEO('Webpage To Pdf Online Free | PDF Media Suite', 'Free online Webpage To Pdf tool. No signup or installation required.');
@@ -20,17 +19,25 @@ export default function WebpageToPdf() {
   const [error, setError] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
 
+  useEffect(() => {
+    return () => {
+      if (resultUrl) URL.revokeObjectURL(resultUrl);
+    };
+  }, [resultUrl]);
+
   const convert = async () => {
     if (!url.trim()) return;
     let fullUrl = url.trim();
     if (!fullUrl.startsWith("http://") && !fullUrl.startsWith("https://")) fullUrl = "https://" + fullUrl;
-    setBusy(true); setError(null); setResultUrl(null);
+    setBusy(true); setError(null);
+    if (resultUrl) URL.revokeObjectURL(resultUrl);
+    setResultUrl(null);
     try {
       const fd = new FormData();
       fd.append("url", fullUrl); fd.append("paper_format", format);
       fd.append("landscape", String(landscape)); fd.append("margin", margin);
       fd.append("background", String(printBg));
-      const res = await fetch(`${API_BASE}/convert/webpage-to-pdf`, { method: "POST", body: fd });
+      const res = await apiFetch('/convert/webpage-to-pdf', { method: "POST", body: fd, timeoutMs: 90000 });
       if (!res.ok) {
         const err = await res.json().catch(() => ({ detail: "Conversion failed." }));
         throw new Error(err.detail || "Conversion failed.");

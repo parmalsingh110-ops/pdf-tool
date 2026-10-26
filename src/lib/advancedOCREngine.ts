@@ -442,35 +442,38 @@ export async function ocrScannedPages(
     },
   });
 
-  for (let pi = 0; pi < scanned.length; pi++) {
-    const pa = scanned[pi];
-    onProgress?.(`Running local OCR on page ${pa.pageIndex + 1}…`, 45 + (pi / scanned.length) * 40);
-    const { data } = await worker.recognize(pa.imageDataUrl!, {}, { blocks: true });
+  try {
+    for (let pi = 0; pi < scanned.length; pi++) {
+      const pa = scanned[pi];
+      onProgress?.(`Running local OCR on page ${pa.pageIndex + 1}…`, 45 + (pi / scanned.length) * 40);
+      const { data } = await worker.recognize(pa.imageDataUrl!, {}, { blocks: true });
 
-    for (const block of (data as any).blocks ?? []) {
-      for (const para of block.paragraphs ?? []) {
-        for (const line of para.lines ?? []) {
-          // Collect whole line as one run (better than word-by-word for layout)
-          if (!line.text?.trim()) continue;
-          const bbox = line.bbox;
-          const x = bbox.x0 / OCR_SCALE;
-          const y = bbox.y0 / OCR_SCALE;
-          const w = (bbox.x1 - bbox.x0) / OCR_SCALE;
-          const h = (bbox.y1 - bbox.y0) / OCR_SCALE;
-          runs.push({
-            text: line.text.trim(),
-            x, y, w, h,
-            fontSize: Math.max(8, Math.round(h * 0.75)),
-            bold: false, italic: false, fontName: '',
-            pageIndex: pa.pageIndex,
-            pageW: pa.width, pageH: pa.height,
-            leftMargin: pa.leftMargin, rightMargin: pa.rightMargin,
-          });
+      for (const block of (data as any).blocks ?? []) {
+        for (const para of block.paragraphs ?? []) {
+          for (const line of para.lines ?? []) {
+            // Collect whole line as one run (better than word-by-word for layout)
+            if (!line.text?.trim()) continue;
+            const bbox = line.bbox;
+            const x = bbox.x0 / OCR_SCALE;
+            const y = bbox.y0 / OCR_SCALE;
+            const w = (bbox.x1 - bbox.x0) / OCR_SCALE;
+            const h = (bbox.y1 - bbox.y0) / OCR_SCALE;
+            runs.push({
+              text: line.text.trim(),
+              x, y, w, h,
+              fontSize: Math.max(8, Math.round(h * 0.75)),
+              bold: false, italic: false, fontName: '',
+              pageIndex: pa.pageIndex,
+              pageW: pa.width, pageH: pa.height,
+              leftMargin: pa.leftMargin, rightMargin: pa.rightMargin,
+            });
+          }
         }
       }
     }
+  } finally {
+    await worker.terminate();
   }
-  await worker.terminate();
   return runs;
 }
 
