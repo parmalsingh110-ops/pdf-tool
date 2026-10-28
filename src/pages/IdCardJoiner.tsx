@@ -184,7 +184,7 @@ export default function IdCardJoiner() {
     for (const [url, setter] of updates) {
       if (url) {
         const fu = await processImage(url, mode);
-        (setter as any)(p => ({ ...p, filteredUrl: fu }));
+        (setter as any)((p: any) => ({ ...p, filteredUrl: fu }));
       }
     }
   }, [front.url, back.url]);

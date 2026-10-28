@@ -424,6 +424,7 @@ async def run_hybrid_ocr(inp_path: Path, out_path: Path, lang: str = "eng+hin", 
             deskew=deskew, rotate_pages=rotate,
             skip_text=not force_ocr, force_ocr=force_ocr,
             output_type="pdf",
+            optimize=1,
             progress_bar=False
         )
     await run_in_threadpool(run_ocrmypdf)

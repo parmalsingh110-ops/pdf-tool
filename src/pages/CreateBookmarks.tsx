@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Download, FileText, CheckCircle2, Eye, Loader2, Sparkles, Bookmark, Plus, Trash2, ArrowUp, ArrowDown, BookOpen, Edit3, Layers } from 'lucide-react';
+import { Download, FileText, CheckCircle2, Eye, Loader2, Sparkles, Bookmark, Plus, Trash2, ArrowUp, ArrowDown, Edit3 } from 'lucide-react';
 import { PDFDocument, PDFName, PDFDict, PDFRef, PDFNumber, PDFHexString } from 'pdf-lib';
 import * as pdfjsLib from 'pdfjs-dist';
 import '../lib/pdfWorker';
@@ -68,7 +68,7 @@ export default function CreateBookmarks() {
           let destPage = 1;
           if (item.dest) {
             try {
-              let destRef = item.dest;
+              let destRef: any = item.dest;
               if (typeof destRef === 'string') {
                 destRef = await pdf.getDestination(destRef);
               }
