@@ -276,6 +276,50 @@ export default function AddMargins() {
               </button>
             </div>
 
+            {/* Paper Size / Resize Conversion */}
+            <div>
+              <div className="flex justify-between items-center mb-2">
+                <label className="block text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-slate-400">
+                  Resize Page Paper Size (Optional)
+                </label>
+                <span className="text-[11px] text-slate-400 font-mono">
+                  Original: {Math.round(origW)}×{Math.round(origH)} pt
+                </span>
+              </div>
+              <div className="grid grid-cols-3 sm:grid-cols-6 gap-1.5">
+                {[
+                  { label: 'Custom', w: 0, h: 0 },
+                  { label: 'A4', w: 595.28, h: 841.89 },
+                  { label: 'Letter', w: 612, h: 792 },
+                  { label: 'Legal', w: 612, h: 1008 },
+                  { label: 'A3', w: 841.89, h: 1190.55 },
+                  { label: 'A5', w: 419.53, h: 595.28 },
+                ].map((paper) => (
+                  <button
+                    key={paper.label}
+                    type="button"
+                    onClick={() => {
+                      if (paper.w > 0) {
+                        const padX = Math.max(0, Math.round((paper.w - origW) / 2));
+                        const padY = Math.max(0, Math.round((paper.h - origH) / 2));
+                        setLeftMargin(padX);
+                        setRightMargin(padX);
+                        setTopMargin(padY);
+                        setBottomMargin(padY);
+                        setLinkAll(false);
+                      }
+                    }}
+                    className="py-1.5 px-2 text-xs font-bold rounded-lg border border-slate-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-800 hover:border-sky-500 text-slate-700 dark:text-slate-300 transition-colors"
+                  >
+                    {paper.label}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[11px] text-slate-400 mt-1">
+                Click a standard size to automatically center content on A4, Letter, Legal, or A3.
+              </p>
+            </div>
+
             {/* Presets */}
             <div>
               <label className="block text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-slate-400 mb-2">

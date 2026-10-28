@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { PDFDocument } from 'pdf-lib';
 import { Download, Scissors, FileText, CheckSquare, Square, Layers, LayoutGrid, Archive } from 'lucide-react';
 import JSZip from 'jszip';
@@ -263,7 +264,15 @@ export default function SplitPDF() {
           <Scissors className="w-7 h-7 text-orange-600" />
         </div>
         <h1 className="text-4xl font-extrabold text-gray-900 mb-3">Split PDF File</h1>
-        <p className="text-lg text-gray-500">Extract pages visually. Select individually, by range, or split into chunks.</p>
+        <p className="text-lg text-gray-500 mb-3">Extract pages visually. Select individually, by range, or split into chunks.</p>
+        <div className="flex flex-wrap items-center justify-center gap-2">
+          <Link
+            to="/split-in-half"
+            className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-orange-100 text-orange-800 hover:bg-orange-200 transition-colors shadow-xs"
+          >
+            ✂ Need to split 2-page book spreads in half? Try Split In Half →
+          </Link>
+        </div>
       </div>
 
       {!file ? (

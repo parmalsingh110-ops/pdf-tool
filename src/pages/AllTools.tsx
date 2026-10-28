@@ -12,6 +12,7 @@ import {
   Info, Zap, ScanSearch, Star,
   // New icons for 13 new tools
   Shield, Wrench, Globe, FileCode2, Type, Accessibility, Volume2, Link as LinkIcon, BookMarked, Eraser,
+  Shuffle, FlipHorizontal, Compass, Bookmark,
 } from 'lucide-react';
 import { toggleFavorite, isFavorite } from '../lib/favorites';
 import { useSEO } from '../hooks/useSEO';
@@ -32,7 +33,14 @@ const categories = [
     title: "Currently Available Tools",
     tools: [
       { title: 'Merge PDF', path: '/merge', icon: Combine, color: 'text-red-500', bg: 'bg-red-50' },
+      { title: 'Alternate & Mix (Duplex)', path: '/alternate-mix', icon: Shuffle, color: 'text-teal-600', bg: 'bg-teal-50' },
       { title: 'Split PDF', path: '/split', icon: Scissors, color: 'text-orange-500', bg: 'bg-orange-50' },
+      { title: 'Split PDF in Half', path: '/split-in-half', icon: Scissors, color: 'text-orange-600', bg: 'bg-orange-50' },
+      { title: 'Flip PDF (Mirror)', path: '/flip', icon: FlipHorizontal, color: 'text-violet-600', bg: 'bg-violet-50' },
+      { title: 'Remove Annotations', path: '/remove-annotations', icon: Trash2, color: 'text-rose-600', bg: 'bg-rose-50' },
+      { title: 'Deskew PDF', path: '/deskew', icon: Compass, color: 'text-amber-600', bg: 'bg-amber-50' },
+      { title: 'Rename PDF by Text', path: '/rename-pdf', icon: Tag, color: 'text-indigo-600', bg: 'bg-indigo-50' },
+      { title: 'Create Bookmarks', path: '/create-bookmarks', icon: Bookmark, color: 'text-cyan-600', bg: 'bg-cyan-50' },
       { title: 'Compress PDF', path: '/compress', icon: Minimize2, color: 'text-green-500', bg: 'bg-green-50' },
       { title: 'Increase PDF Size', path: '/increase-size', icon: Maximize, color: 'text-blue-600', bg: 'bg-blue-50' },
       { title: 'ID Card Front & Back (Aadhaar/PAN)', path: '/id-card-joiner', icon: ContactRound, color: 'text-orange-600', bg: 'bg-orange-50' },

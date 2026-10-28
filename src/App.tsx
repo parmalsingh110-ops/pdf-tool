@@ -132,6 +132,13 @@ const CleanSignature = lazy(() => import('./pages/CleanSignature'));
 const MaskedAadhaar = lazy(() => import('./pages/MaskedAadhaar'));
 const ExamDocumentMerger = lazy(() => import('./pages/ExamDocumentMerger'));
 const AiPdfSummarizer = lazy(() => import('./pages/AiPdfSummarizer'));
+const SplitInHalf = lazy(() => import('./pages/SplitInHalf'));
+const AlternateMix = lazy(() => import('./pages/AlternateMix'));
+const FlipPDF = lazy(() => import('./pages/FlipPDF'));
+const RemoveAnnotations = lazy(() => import('./pages/RemoveAnnotations'));
+const DeskewPDF = lazy(() => import('./pages/DeskewPDF'));
+const RenamePDF = lazy(() => import('./pages/RenamePDF'));
+const CreateBookmarks = lazy(() => import('./pages/CreateBookmarks'));
 const NotFound = lazy(() => import('./pages/NotFound'));
 
 export default function App() {
@@ -285,6 +292,18 @@ export default function App() {
         {/* AI Tools */}
         <Route path="ai-summarizer" element={<AiPdfSummarizer />} />
         <Route path="ai-pdf-summarizer" element={<AiPdfSummarizer />} />
+
+        {/* Advanced PDF Power Suite */}
+        <Route path="split-in-half" element={<SplitInHalf />} />
+        <Route path="alternate-mix" element={<AlternateMix />} />
+        <Route path="flip" element={<FlipPDF />} />
+        <Route path="flip-pdf" element={<FlipPDF />} />
+        <Route path="remove-annotations" element={<RemoveAnnotations />} />
+        <Route path="deskew" element={<DeskewPDF />} />
+        <Route path="rename-pdf" element={<RenamePDF />} />
+        <Route path="rename" element={<RenamePDF />} />
+        <Route path="create-bookmarks" element={<CreateBookmarks />} />
+        <Route path="bookmarks" element={<CreateBookmarks />} />
 
         {/* Admin Telemetry Dashboard */}
         <Route path="admin" element={<AdminDashboard />} />

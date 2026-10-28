@@ -8,6 +8,7 @@ import {
   Layers, RefreshCw, Code, ShieldCheck, FileX, MonitorSmartphone,
   Images, Copy, Info, Download, ScanSearch, Clock3, Maximize, Pen,
   Linkedin, Github, Mail, ExternalLink, Award, CheckCircle2,
+  Shuffle, FlipHorizontal, Compass, Trash2, Tag, Bookmark,
 } from 'lucide-react';
 import { readRecentTools, type RecentEntry } from '../lib/recentFiles';
 import { usePageSEO } from '../lib/usePageSEO';
@@ -26,7 +27,14 @@ const TOOL_GROUPS = [
     color: 'rose',
     tools: [
       { title: 'Merge PDF', desc: 'Combine multiple PDFs into one.', path: '/merge', icon: Combine },
+      { title: 'Alternate & Mix', desc: 'Mix odd & even duplex scanned pages.', path: '/alternate-mix', icon: Shuffle },
       { title: 'Split PDF', desc: 'Separate PDF into pages.', path: '/split', icon: Scissors },
+      { title: 'Split in Half', desc: 'Cut 2-page book scans down the center.', path: '/split-in-half', icon: Scissors },
+      { title: 'Flip PDF', desc: 'Mirror pages for T-shirt transfers & scans.', path: '/flip', icon: FlipHorizontal },
+      { title: 'Remove Annotations', desc: 'Batch strip highlights, comments & stamps.', path: '/remove-annotations', icon: Trash2 },
+      { title: 'Deskew PDF', desc: 'Auto-straighten crooked scanned pages.', path: '/deskew', icon: Compass },
+      { title: 'Rename by Content', desc: 'Auto-rename PDFs from invoice/page text.', path: '/rename-pdf', icon: Tag },
+      { title: 'Create Bookmarks', desc: 'Add Table of Contents outline bookmarks.', path: '/create-bookmarks', icon: Bookmark },
       { title: 'Compress PDF', desc: 'Reduce file size instantly.', path: '/compress', icon: Minimize2 },
       { title: 'Edit PDF', desc: 'Annotate, edit text & layout.', path: '/edit', icon: Edit3 },
       { title: 'Protect PDF', desc: 'Add password encryption.', path: '/protect', icon: Lock },

@@ -73,6 +73,14 @@ const ROUTE_TITLES: Record<string, string> = {
   '/clean-signature': 'Clean Signature',
   '/masked-aadhaar': 'Masked Aadhaar',
   '/exam-document-merger': 'Exam Bundle Merger',
+  '/split-in-half': 'Split in Half',
+  '/alternate-mix': 'Alternate & Mix',
+  '/flip': 'Flip PDF (Mirror)',
+  '/flip-pdf': 'Flip PDF (Mirror)',
+  '/remove-annotations': 'Remove Annotations',
+  '/deskew': 'Deskew PDF',
+  '/rename-pdf': 'Rename PDF',
+  '/create-bookmarks': 'Create Bookmarks',
 };
 
 interface NavGroup { label: string; items: { to: string; label: string; icon: any }[]; }

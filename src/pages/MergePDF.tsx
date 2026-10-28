@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { Link } from 'react-router-dom';
 import { PDFDocument } from 'pdf-lib';
 import { Download, Trash2, GripVertical, FileText, ListRestart, ChevronUp, ChevronDown, Plus, Layers } from 'lucide-react';
 import FileDropzone from '../components/FileDropzone';
@@ -183,7 +184,15 @@ export default function MergePDF() {
           <Layers className="w-7 h-7 text-red-600" />
         </div>
         <h1 className="text-4xl font-extrabold text-gray-900 mb-3">Merge PDF Files</h1>
-        <p className="text-lg text-gray-500">Combine multiple PDFs into one. See thumbnail previews, drag to reorder.</p>
+        <p className="text-lg text-gray-500 mb-3">Combine multiple PDFs into one. See thumbnail previews, drag to reorder.</p>
+        <div className="flex flex-wrap items-center justify-center gap-2">
+          <Link
+            to="/alternate-mix"
+            className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-teal-100 text-teal-800 hover:bg-teal-200 transition-colors shadow-xs"
+          >
+            🔀 Need to interleave duplex odd/even pages? Try Alternate & Mix →
+          </Link>
+        </div>
       </div>
 
       {entries.length === 0 ? (

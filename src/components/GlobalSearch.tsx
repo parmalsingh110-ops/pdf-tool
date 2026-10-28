@@ -7,6 +7,7 @@ import { Search, ArrowRight, X, Combine, Scissors, Minimize2, FileText, Image as
   Search as SearchIcon, Trash2, Contrast, Sparkles, LayoutGrid, QrCode, Pen, ScanLine,
   GitCompare, FormInput, Copy, MonitorSmartphone, Wand2, Globe, Volume2, Link as LinkIcon,
   Shield, Wrench, FileCode2, Type, BookMarked, Accessibility, Tag, BarChart2,
+  Shuffle, FlipHorizontal, Compass, Bookmark,
 } from 'lucide-react';
 
 interface ToolEntry {
@@ -20,7 +21,14 @@ interface ToolEntry {
 const ALL_TOOLS: ToolEntry[] = [
   // PDF Essentials
   { title: 'Merge PDF', path: '/merge', icon: Combine, category: 'PDF Tools', keywords: 'combine join' },
+  { title: 'Alternate & Mix PDF', path: '/alternate-mix', icon: Shuffle, category: 'PDF Tools', keywords: 'duplex scanner interleave odd even mix alternate' },
   { title: 'Split PDF', path: '/split', icon: Scissors, category: 'PDF Tools', keywords: 'separate divide' },
+  { title: 'Split PDF in Half', path: '/split-in-half', icon: Scissors, category: 'PDF Tools', keywords: '2-page spread book scan cut center horizontal vertical a3 a4 a5' },
+  { title: 'Flip PDF (Mirror)', path: '/flip', icon: FlipHorizontal, category: 'PDF Tools', keywords: 'mirror horizontally vertically t-shirt transfer paper reflect' },
+  { title: 'Remove Annotations', path: '/remove-annotations', icon: Trash2, category: 'PDF Tools', keywords: 'clean highlights comments notes markup stamps drawings' },
+  { title: 'Deskew PDF', path: '/deskew', icon: Compass, category: 'PDF Tools', keywords: 'straighten crooked tilted scanned pages tilt angle' },
+  { title: 'Rename PDF by Text', path: '/rename-pdf', icon: Tag, category: 'PDF Tools', keywords: 'auto rename batch invoices dates content change name' },
+  { title: 'Create PDF Bookmarks', path: '/create-bookmarks', icon: Bookmark, category: 'PDF Tools', keywords: 'table of contents outline bookmarks add edit chapters' },
   { title: 'Compress PDF', path: '/compress', icon: Minimize2, category: 'PDF Tools', keywords: 'reduce size shrink' },
   { title: 'Edit PDF', path: '/edit', icon: Edit3, category: 'PDF Tools', keywords: 'annotate text editor' },
   { title: 'Protect PDF', path: '/protect', icon: Lock, category: 'PDF Tools', keywords: 'password encrypt' },

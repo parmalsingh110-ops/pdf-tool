@@ -4,6 +4,7 @@ import FileDropzone from '../components/FileDropzone';
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import JSZip from 'jszip';
+import * as UTIF from 'utif';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { dataUrlToBytes } from '../lib/utils';
@@ -11,7 +12,7 @@ import { dataUrlToBytes } from '../lib/utils';
 // Initialize pdf.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
-type ImageFormat = 'jpg' | 'png' | 'webp';
+type ImageFormat = 'jpg' | 'png' | 'webp' | 'tiff';
 type DpiPreset = { label: string; scale: number; desc: string };
 
 const DPI_PRESETS: Record<string, DpiPreset> = {
@@ -177,9 +178,19 @@ export default function PDFToJPG() {
 
         await page.render({ canvasContext: ctx, viewport: vp, canvas }).promise;
 
-        const dataUrl = canvas.toDataURL(mime, format === 'png' ? undefined : quality);
-        const bytes = dataUrlToBytes(dataUrl);
-        const blob = new Blob([bytes as any], { type: mime });
+        let blob: Blob;
+        let dataUrl: string;
+
+        if (format === 'tiff') {
+          const imgData = ctx.getImageData(0, 0, Math.round(vp.width), Math.round(vp.height));
+          const tiffBuf = (UTIF as any).encodeImage(imgData.data, Math.round(vp.width), Math.round(vp.height));
+          blob = new Blob([tiffBuf], { type: 'image/tiff' });
+          dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+        } else {
+          dataUrl = canvas.toDataURL(mime, format === 'png' ? undefined : quality);
+          const bytes = dataUrlToBytes(dataUrl);
+          blob = new Blob([bytes as any], { type: mime });
+        }
 
         outputList.push({
           pageNum: item.pageNum,
@@ -209,8 +220,7 @@ export default function PDFToJPG() {
     try {
       const zip = new JSZip();
       for (const img of convertedImages) {
-        const bytes = dataUrlToBytes(img.dataUrl);
-        zip.file(img.name, bytes);
+        zip.file(img.name, img.blob);
       }
       const zipBlob = await zip.generateAsync({ type: 'blob' });
       const baseName = file.name.replace(/\.[^/.]+$/, '');
@@ -334,13 +344,19 @@ export default function PDFToJPG() {
                   <span className="text-xs font-semibold text-gray-700 dark:text-slate-300 truncate" title={img.name}>
                     {img.name}
                   </span>
-                  <a
-                    href={img.dataUrl}
-                    download={img.name}
-                    className="inline-flex items-center gap-1 px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold rounded-lg transition-colors shrink-0 shadow-sm"
+                  <button
+                    onClick={() => {
+                      const dlUrl = URL.createObjectURL(img.blob);
+                      const a = document.createElement('a');
+                      a.href = dlUrl;
+                      a.download = img.name;
+                      a.click();
+                      URL.revokeObjectURL(dlUrl);
+                    }}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold rounded-lg transition-colors shrink-0 shadow-sm cursor-pointer"
                   >
                     <Download className="w-3.5 h-3.5" /> Save
-                  </a>
+                  </button>
                 </div>
               </div>
             ))}
@@ -403,8 +419,8 @@ export default function PDFToJPG() {
                 <label className="block text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-slate-400 mb-2">
                   Image Format
                 </label>
-                <div className="grid grid-cols-3 gap-2">
-                  {(['jpg', 'png', 'webp'] as ImageFormat[]).map((fmt) => (
+                <div className="grid grid-cols-4 gap-2">
+                  {(['jpg', 'png', 'webp', 'tiff'] as ImageFormat[]).map((fmt) => (
                     <button
                       key={fmt}
                       onClick={() => setFormat(fmt)}
@@ -419,7 +435,13 @@ export default function PDFToJPG() {
                   ))}
                 </div>
                 <p className="text-[11px] text-gray-400 dark:text-slate-500 mt-1.5">
-                  {format === 'jpg' ? 'Standard photo format, small file size' : format === 'png' ? 'Lossless quality, sharpest text' : 'Next-gen compact web format'}
+                  {format === 'jpg'
+                    ? 'Standard photo format, small file size'
+                    : format === 'png'
+                    ? 'Lossless quality, sharpest text'
+                    : format === 'tiff'
+                    ? 'Lossless high-depth print archival standard'
+                    : 'Next-gen compact web format'}
                 </p>
               </div>
 
