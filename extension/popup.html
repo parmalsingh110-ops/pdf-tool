@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PDF Media Suite</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="popup-container">
+    <!-- Header -->
+    <header class="popup-header">
+      <div class="brand">
+        <img src="icons/icon32.png" alt="PDF Media Suite" class="brand-logo">
+        <div class="brand-text">
+          <h1 class="brand-title">PDF Media Suite</h1>
+          <span class="brand-sub">110+ Free Tools</span>
+        </div>
+      </div>
+      <a href="https://www.pdfmediasuite.in?utm_source=chrome_extension_popup" target="_blank" class="header-link" title="Open PDF Media Suite in new tab">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+          <polyline points="15 3 21 3 21 9"></polyline>
+          <line x1="10" y1="14" x2="21" y2="3"></line>
+        </svg>
+      </a>
+    </header>
+
+    <!-- Search Input -->
+    <div class="search-box">
+      <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="11" cy="11" r="8"></circle>
+        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+      </svg>
+      <input type="text" id="tool-search" placeholder="Search 110+ tools (e.g. compress, word, merge)..." autocomplete="off" autofocus>
+      <button id="clear-search" class="clear-search-btn" style="display:none;">&times;</button>
+    </div>
+
+    <!-- Category Tabs -->
+    <div class="tabs-bar">
+      <button class="tab-btn active" data-category="popular">⭐ Popular</button>
+      <button class="tab-btn" data-category="pdf">📄 PDF</button>
+      <button class="tab-btn" data-category="convert">🔄 Convert</button>
+      <button class="tab-btn" data-category="sarkari">🇮🇳 Sarkari</button>
+      <button class="tab-btn" data-category="security">🔒 Security</button>
+      <button class="tab-btn" data-category="all">✨ All (110+)</button>
+    </div>
+
+    <!-- Quick Dropzone Banner -->
+    <div class="quick-dropzone" id="quick-dropzone">
+      <div class="drop-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+          <polyline points="17 8 12 3 7 8"></polyline>
+          <line x1="12" y1="3" x2="12" y2="15"></line>
+        </svg>
+      </div>
+      <div class="drop-text">
+        <span class="drop-title">Drop PDF to Quick Launch</span>
+        <span class="drop-sub">Compress, Convert, or Merge instantly</span>
+      </div>
+      <input type="file" id="drop-file-input" accept=".pdf,image/*" style="display:none;">
+    </div>
+
+    <!-- Tool Grid / Results -->
+    <div class="tools-list" id="tools-list">
+      <!-- Injected dynamically by popup.js -->
+    </div>
+
+    <!-- Footer -->
+    <footer class="popup-footer">
+      <span class="footer-privacy">🔒 100% Free & Private</span>
+      <div class="footer-links">
+        <a href="https://www.pdfmediasuite.in/all-tools?utm_source=chrome_extension_popup" target="_blank">All 110+ Tools</a>
+        <span>&bull;</span>
+        <a href="https://www.pdfmediasuite.in/privacy?utm_source=chrome_extension_popup" target="_blank">Privacy</a>
+      </div>
+    </footer>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
+

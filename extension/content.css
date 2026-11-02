@@ -1,0 +1,256 @@
+/* PDF Media Suite — Google Search Injected Widget Styles */
+
+.pms-search-widget {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  padding: 16px 20px;
+  margin: 14px 0 20px 0;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.05);
+  box-sizing: border-box;
+  max-width: 652px;
+  transition: all 0.2s ease;
+}
+
+.pms-search-widget:hover {
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.08);
+  border-color: #cbd5e1;
+}
+
+/* Header */
+.pms-widget-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.pms-widget-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.pms-brand-icon {
+  width: 28px;
+  height: 28px;
+  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+  color: #ffffff;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.pms-brand-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.pms-brand-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.pms-brand-tag {
+  font-size: 11px;
+  color: #64748b;
+  margin-left: 6px;
+  background: #f1f5f9;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-weight: 600;
+}
+
+.pms-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pms-badge {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  background: #ecfdf5;
+  color: #059669;
+  border: 1px solid #a7f3d0;
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+
+.pms-close-btn {
+  background: transparent;
+  border: none;
+  font-size: 20px;
+  color: #94a3b8;
+  cursor: pointer;
+  line-height: 1;
+  padding: 0 4px;
+  transition: color 0.15s;
+}
+
+.pms-close-btn:hover {
+  color: #334155;
+}
+
+/* Tool Card Body */
+.pms-widget-body {
+  padding: 14px 0 10px 0;
+}
+
+.pms-tool-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #f8fafc;
+  border: 1px solid #edf2f7;
+  border-radius: 12px;
+  padding: 12px 16px;
+  gap: 16px;
+}
+
+.pms-tool-title {
+  margin: 0 0 3px 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: #1e293b;
+}
+
+.pms-tool-desc {
+  margin: 0;
+  font-size: 12px;
+  color: #64748b;
+  line-height: 1.4;
+}
+
+.pms-action-btn {
+  background: #ef4444;
+  color: #ffffff !important;
+  text-decoration: none !important;
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  box-shadow: 0 2px 8px rgba(239, 68, 68, 0.25);
+  transition: all 0.15s ease;
+}
+
+.pms-action-btn:hover {
+  background: #dc2626;
+  box-shadow: 0 4px 12px rgba(220, 38, 38, 0.35);
+  transform: translateY(-1px);
+}
+
+/* Quick Pills */
+.pms-quick-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.pms-pill {
+  font-size: 11px;
+  font-weight: 600;
+  color: #475569 !important;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  padding: 5px 10px;
+  border-radius: 20px;
+  text-decoration: none !important;
+  transition: all 0.15s ease;
+}
+
+.pms-pill:hover {
+  background: #f1f5f9;
+  color: #0f172a !important;
+  border-color: #cbd5e1;
+}
+
+.pms-pill-accent {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+  color: #2563eb !important;
+}
+
+.pms-pill-accent:hover {
+  background: #dbeafe;
+  color: #1d4ed8 !important;
+}
+
+/* Footer */
+.pms-widget-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  color: #94a3b8;
+  padding-top: 10px;
+  border-top: 1px solid #f8fafc;
+}
+
+.pms-footer-link {
+  color: #ef4444 !important;
+  text-decoration: none !important;
+  font-weight: 600;
+}
+
+.pms-footer-link:hover {
+  text-decoration: underline !important;
+}
+
+/* Dark mode for users who use dark Google Search */
+@media (prefers-color-scheme: dark) {
+  .pms-search-widget {
+    background: #202124;
+    border-color: #3c4043;
+    color: #e8eaed;
+  }
+  .pms-widget-header {
+    border-color: #303134;
+  }
+  .pms-brand-title {
+    color: #e8eaed;
+  }
+  .pms-brand-tag {
+    background: #303134;
+    color: #9aa0a6;
+  }
+  .pms-tool-card {
+    background: #303134;
+    border-color: #3c4043;
+  }
+  .pms-tool-title {
+    color: #e8eaed;
+  }
+  .pms-tool-desc {
+    color: #9aa0a6;
+  }
+  .pms-pill {
+    background: #303134;
+    border-color: #3c4043;
+    color: #bdc1c6 !important;
+  }
+  .pms-pill:hover {
+    background: #3c4043;
+    color: #ffffff !important;
+  }
+  .pms-pill-accent {
+    background: #1e3a5f;
+    border-color: #2a5a9c;
+    color: #8ab4f8 !important;
+  }
+  .pms-widget-footer {
+    border-color: #303134;
+    color: #9aa0a6;
+  }
+}
+
