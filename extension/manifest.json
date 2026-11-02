@@ -45,10 +45,5 @@
     "activeTab",
     "storage",
     "tabs"
-  ],
-  "host_permissions": [
-    "*://*.google.com/*",
-    "https://www.pdfmediasuite.in/*",
-    "https://pdfmediasuite.in/*"
   ]
 }
