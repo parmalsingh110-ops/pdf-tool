@@ -2,8 +2,8 @@
   "manifest_version": 3,
   "name": "PDF Media Suite — 110+ Free PDF & Image Tools",
   "short_name": "PDF Media Suite",
-  "version": "1.0.0",
-  "description": "All-in-one PDF & Image Toolsuite. Compress, Merge, Convert PDF to Word/Excel, Sarkari Photo Sheet, Scan & Edit in 1-Click.",
+  "version": "2.0.0",
+  "description": "All-in-one PDF & Image Toolsuite. Compress, Merge, Convert PDF to Word/Excel, Sarkari Photo Sheet, Scan & Edit in 1-Click. 100% Free & Private.",
   "icons": {
     "16": "icons/icon16.png",
     "32": "icons/icon32.png",
@@ -31,10 +31,20 @@
       "run_at": "document_end"
     }
   ],
+  "commands": {
+    "_execute_action": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+P",
+        "mac": "Command+Shift+P"
+      },
+      "description": "Open PDF Media Suite"
+    }
+  },
   "permissions": [
     "contextMenus",
     "activeTab",
-    "storage"
+    "storage",
+    "tabs"
   ],
   "host_permissions": [
     "*://*.google.com/*",
@@ -43,4 +53,3 @@
     "http://localhost:8000/*"
   ]
 }
-

@@ -8,6 +8,7 @@
 </head>
 <body>
   <div class="popup-container">
+
     <!-- Header -->
     <header class="popup-header">
       <div class="brand">
@@ -17,14 +18,49 @@
           <span class="brand-sub">110+ Free Tools</span>
         </div>
       </div>
-      <a href="https://www.pdfmediasuite.in?utm_source=chrome_extension_popup" target="_blank" class="header-link" title="Open PDF Media Suite in new tab">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
-          <polyline points="15 3 21 3 21 9"></polyline>
-          <line x1="10" y1="14" x2="21" y2="3"></line>
-        </svg>
-      </a>
+      <div class="header-actions">
+        <button class="icon-btn" id="btn-history" title="Recent Files (History)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"></circle>
+            <polyline points="12 6 12 12 16 14"></polyline>
+          </svg>
+        </button>
+        <a href="https://www.pdfmediasuite.in?utm_source=chrome_extension_popup" target="_blank" class="icon-btn" title="Open PDF Media Suite website">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+            <polyline points="15 3 21 3 21 9"></polyline>
+            <line x1="10" y1="14" x2="21" y2="3"></line>
+          </svg>
+        </a>
+      </div>
     </header>
+
+    <!-- PDF Detected Banner (hidden by default, shown dynamically) -->
+    <div class="pdf-detected-banner" id="pdf-detected-banner" style="display:none;">
+      <div class="pdf-banner-left">
+        <span class="pdf-banner-icon">📄</span>
+        <div>
+          <span class="pdf-banner-title">PDF Detected!</span>
+          <span class="pdf-banner-sub" id="pdf-banner-filename">PDF file is open in this tab</span>
+        </div>
+      </div>
+      <div class="pdf-banner-actions">
+        <button class="banner-btn" id="banner-compress" title="Compress this PDF">⚡ Compress</button>
+        <button class="banner-btn" id="banner-convert" title="Convert PDF to Word">📝 Word</button>
+        <button class="banner-btn banner-btn-red" id="banner-all" title="All PDF tools">More →</button>
+      </div>
+    </div>
+
+    <!-- Recent Files Panel (hidden by default) -->
+    <div class="recent-panel" id="recent-panel" style="display:none;">
+      <div class="recent-header">
+        <span class="recent-title">🕐 Recently Used Tools</span>
+        <button class="recent-clear" id="clear-recent">Clear</button>
+      </div>
+      <div class="recent-list" id="recent-list">
+        <!-- Injected by popup.js -->
+      </div>
+    </div>
 
     <!-- Search Input -->
     <div class="search-box">
@@ -32,7 +68,7 @@
         <circle cx="11" cy="11" r="8"></circle>
         <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
       </svg>
-      <input type="text" id="tool-search" placeholder="Search 110+ tools (e.g. compress, word, merge)..." autocomplete="off" autofocus>
+      <input type="text" id="tool-search" placeholder="Search 110+ tools — compress, merge, word, sarkari..." autocomplete="off" autofocus>
       <button id="clear-search" class="clear-search-btn" style="display:none;">&times;</button>
     </div>
 
@@ -41,12 +77,13 @@
       <button class="tab-btn active" data-category="popular">⭐ Popular</button>
       <button class="tab-btn" data-category="pdf">📄 PDF</button>
       <button class="tab-btn" data-category="convert">🔄 Convert</button>
+      <button class="tab-btn" data-category="image">🖼️ Image</button>
       <button class="tab-btn" data-category="sarkari">🇮🇳 Sarkari</button>
       <button class="tab-btn" data-category="security">🔒 Security</button>
       <button class="tab-btn" data-category="all">✨ All (110+)</button>
     </div>
 
-    <!-- Quick Dropzone Banner -->
+    <!-- Quick Dropzone -->
     <div class="quick-dropzone" id="quick-dropzone">
       <div class="drop-icon">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -56,24 +93,31 @@
         </svg>
       </div>
       <div class="drop-text">
-        <span class="drop-title">Drop PDF to Quick Launch</span>
-        <span class="drop-sub">Compress, Convert, or Merge instantly</span>
+        <span class="drop-title">Drop File Here or Click to Choose</span>
+        <span class="drop-sub">PDF, JPG, PNG — instantly opens best tool</span>
       </div>
-      <input type="file" id="drop-file-input" accept=".pdf,image/*" style="display:none;">
+      <input type="file" id="drop-file-input" accept=".pdf,.jpg,.jpeg,.png,.webp,.tiff,.docx,.xlsx,.pptx" style="display:none;">
     </div>
 
     <!-- Tool Grid / Results -->
     <div class="tools-list" id="tools-list">
-      <!-- Injected dynamically by popup.js -->
+      <!-- Skeleton loaders while loading -->
+      <div class="skeleton-item"></div>
+      <div class="skeleton-item"></div>
+      <div class="skeleton-item"></div>
+      <div class="skeleton-item"></div>
+      <div class="skeleton-item"></div>
     </div>
 
     <!-- Footer -->
     <footer class="popup-footer">
-      <span class="footer-privacy">🔒 100% Free & Private</span>
+      <span class="footer-privacy">🔒 100% Free &amp; Private</span>
       <div class="footer-links">
-        <a href="https://www.pdfmediasuite.in/all-tools?utm_source=chrome_extension_popup" target="_blank">All 110+ Tools</a>
+        <a href="https://www.pdfmediasuite.in/all-tools?utm_source=chrome_extension_popup" target="_blank">All Tools</a>
         <span>&bull;</span>
         <a href="https://www.pdfmediasuite.in/privacy?utm_source=chrome_extension_popup" target="_blank">Privacy</a>
+        <span>&bull;</span>
+        <span class="footer-shortcut">⌘⇧P</span>
       </div>
     </footer>
   </div>
@@ -81,4 +125,3 @@
   <script src="popup.js"></script>
 </body>
 </html>
-

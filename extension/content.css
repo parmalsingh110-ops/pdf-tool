@@ -1,21 +1,24 @@
-/* PDF Media Suite — Google Search Injected Widget Styles */
+/* PDF Media Suite — Google Search Widget Styles v2.0 */
 
-.pms-search-widget {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  background: #ffffff;
+#pdf-media-suite-search-widget {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+  margin-bottom: 20px;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.1);
   border: 1px solid #e2e8f0;
-  border-radius: 16px;
-  padding: 16px 20px;
-  margin: 14px 0 20px 0;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.05);
-  box-sizing: border-box;
-  max-width: 652px;
-  transition: all 0.2s ease;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  animation: pmsSlideIn 0.3s ease;
 }
 
-.pms-search-widget:hover {
-  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.08);
-  border-color: #cbd5e1;
+@keyframes pmsSlideIn {
+  from { opacity: 0; transform: translateY(-8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.pms-widget-inner {
+  background: #ffffff;
+  padding: 0;
 }
 
 /* Header */
@@ -23,7 +26,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding-bottom: 12px;
+  padding: 12px 16px 10px 16px;
   border-bottom: 1px solid #f1f5f9;
 }
 
@@ -34,38 +37,40 @@
 }
 
 .pms-brand-icon {
-  width: 28px;
-  height: 28px;
-  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
-  color: #ffffff;
+  width: 36px;
+  height: 36px;
   border-radius: 8px;
+  background: linear-gradient(135deg, #ef4444, #b91c1c);
+  color: white;
   display: flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
 }
 
 .pms-brand-icon svg {
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
+}
+
+.pms-brand-info {
+  display: flex;
+  flex-direction: column;
 }
 
 .pms-brand-title {
   font-size: 14px;
   font-weight: 700;
   color: #0f172a;
+  line-height: 1.2;
 }
 
-.pms-brand-tag {
+.pms-brand-sub {
   font-size: 11px;
   color: #64748b;
-  margin-left: 6px;
-  background: #f1f5f9;
-  padding: 2px 8px;
-  border-radius: 12px;
-  font-weight: 600;
 }
 
-.pms-header-actions {
+.pms-header-right {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -74,79 +79,86 @@
 .pms-badge {
   font-size: 10px;
   font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  background: #ecfdf5;
-  color: #059669;
-  border: 1px solid #a7f3d0;
   padding: 2px 8px;
-  border-radius: 10px;
+  border-radius: 12px;
+  background: #fef2f2;
+  color: #ef4444;
+  border: 1px solid #fecaca;
+  white-space: nowrap;
 }
 
 .pms-close-btn {
-  background: transparent;
+  background: none;
   border: none;
-  font-size: 20px;
   color: #94a3b8;
+  font-size: 20px;
   cursor: pointer;
   line-height: 1;
-  padding: 0 4px;
+  padding: 0;
   transition: color 0.15s;
+  border-radius: 50%;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .pms-close-btn:hover {
-  color: #334155;
+  color: #ef4444;
+  background: #fef2f2;
 }
 
-/* Tool Card Body */
-.pms-widget-body {
-  padding: 14px 0 10px 0;
-}
-
-.pms-tool-card {
+/* Tool Row */
+.pms-tool-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: #f8fafc;
-  border: 1px solid #edf2f7;
-  border-radius: 12px;
-  padding: 12px 16px;
   gap: 16px;
+  padding: 12px 16px;
+  background: #fafafa;
+}
+
+.pms-tool-info {
+  flex: 1;
 }
 
 .pms-tool-title {
-  margin: 0 0 3px 0;
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 700;
-  color: #1e293b;
+  color: #0f172a;
+  margin: 0 0 3px 0;
 }
 
 .pms-tool-desc {
-  margin: 0;
   font-size: 12px;
   color: #64748b;
+  margin: 0;
   line-height: 1.4;
 }
 
 .pms-action-btn {
-  background: #ef4444;
-  color: #ffffff !important;
-  text-decoration: none !important;
-  padding: 8px 16px;
-  border-radius: 8px;
-  font-size: 13px;
-  font-weight: 600;
-  white-space: nowrap;
   display: inline-flex;
   align-items: center;
-  box-shadow: 0 2px 8px rgba(239, 68, 68, 0.25);
-  transition: all 0.15s ease;
+  white-space: nowrap;
+  padding: 8px 16px;
+  background: linear-gradient(135deg, #ef4444, #dc2626);
+  color: #ffffff !important;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  text-decoration: none;
+  transition: all 0.15s;
+  box-shadow: 0 2px 6px rgba(239,68,68,0.35);
+  flex-shrink: 0;
 }
 
 .pms-action-btn:hover {
-  background: #dc2626;
-  box-shadow: 0 4px 12px rgba(220, 38, 38, 0.35);
+  background: linear-gradient(135deg, #dc2626, #b91c1c);
   transform: translateY(-1px);
+  box-shadow: 0 4px 10px rgba(239,68,68,0.45);
+  text-decoration: none !important;
+  color: #fff !important;
 }
 
 /* Quick Pills */
@@ -154,36 +166,39 @@
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  margin-top: 12px;
+  padding: 10px 16px;
+  border-top: 1px solid #f1f5f9;
 }
 
 .pms-pill {
   font-size: 11px;
   font-weight: 600;
-  color: #475569 !important;
-  background: #ffffff;
+  padding: 4px 10px;
+  border-radius: 14px;
   border: 1px solid #e2e8f0;
-  padding: 5px 10px;
-  border-radius: 20px;
-  text-decoration: none !important;
-  transition: all 0.15s ease;
+  background: #ffffff;
+  color: #475569;
+  text-decoration: none;
+  transition: all 0.15s;
+  white-space: nowrap;
 }
 
 .pms-pill:hover {
-  background: #f1f5f9;
-  color: #0f172a !important;
-  border-color: #cbd5e1;
+  border-color: #ef4444;
+  color: #ef4444;
+  background: #fef2f2;
+  text-decoration: none;
 }
 
-.pms-pill-accent {
-  background: #eff6ff;
-  border-color: #bfdbfe;
-  color: #2563eb !important;
+.pms-pill.pms-pill-accent {
+  background: #ef4444;
+  color: #ffffff;
+  border-color: #ef4444;
 }
 
-.pms-pill-accent:hover {
-  background: #dbeafe;
-  color: #1d4ed8 !important;
+.pms-pill.pms-pill-accent:hover {
+  background: #dc2626;
+  color: #ffffff;
 }
 
 /* Footer */
@@ -191,66 +206,44 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  padding: 8px 16px;
+  border-top: 1px solid #f1f5f9;
+  background: #f8fafc;
+}
+
+.pms-footer-left {
   font-size: 11px;
-  color: #94a3b8;
-  padding-top: 10px;
-  border-top: 1px solid #f8fafc;
+  color: #64748b;
 }
 
 .pms-footer-link {
-  color: #ef4444 !important;
-  text-decoration: none !important;
+  font-size: 11px;
   font-weight: 600;
+  color: #ef4444;
+  text-decoration: none;
 }
 
 .pms-footer-link:hover {
-  text-decoration: underline !important;
+  text-decoration: underline;
 }
 
-/* Dark mode for users who use dark Google Search */
+/* Dark mode Google */
 @media (prefers-color-scheme: dark) {
-  .pms-search-widget {
-    background: #202124;
-    border-color: #3c4043;
-    color: #e8eaed;
+  #pdf-media-suite-search-widget {
+    border-color: #334155;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.4);
   }
-  .pms-widget-header {
-    border-color: #303134;
-  }
-  .pms-brand-title {
-    color: #e8eaed;
-  }
-  .pms-brand-tag {
-    background: #303134;
-    color: #9aa0a6;
-  }
-  .pms-tool-card {
-    background: #303134;
-    border-color: #3c4043;
-  }
-  .pms-tool-title {
-    color: #e8eaed;
-  }
-  .pms-tool-desc {
-    color: #9aa0a6;
-  }
-  .pms-pill {
-    background: #303134;
-    border-color: #3c4043;
-    color: #bdc1c6 !important;
-  }
-  .pms-pill:hover {
-    background: #3c4043;
-    color: #ffffff !important;
-  }
-  .pms-pill-accent {
-    background: #1e3a5f;
-    border-color: #2a5a9c;
-    color: #8ab4f8 !important;
-  }
-  .pms-widget-footer {
-    border-color: #303134;
-    color: #9aa0a6;
-  }
+  .pms-widget-inner { background: #1e293b; }
+  .pms-widget-header { border-bottom-color: #334155; }
+  .pms-brand-title { color: #f8fafc; }
+  .pms-brand-sub { color: #94a3b8; }
+  .pms-tool-row { background: #0f172a; }
+  .pms-tool-title { color: #f8fafc; }
+  .pms-tool-desc { color: #94a3b8; }
+  .pms-badge { background: #1c0a0a; border-color: #7f1d1d; }
+  .pms-quick-pills { border-top-color: #334155; }
+  .pms-pill { background: #1e293b; border-color: #334155; color: #cbd5e1; }
+  .pms-pill:hover { border-color: #ef4444; color: #ef4444; background: #1c0a0a; }
+  .pms-widget-footer { background: #0f172a; border-top-color: #334155; }
+  .pms-footer-left { color: #94a3b8; }
 }
-
