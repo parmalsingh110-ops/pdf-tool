@@ -49,7 +49,6 @@
   "host_permissions": [
     "*://*.google.com/*",
     "https://www.pdfmediasuite.in/*",
-    "https://pdfmediasuite.in/*",
-    "http://localhost:8000/*"
+    "https://pdfmediasuite.in/*"
   ]
 }
