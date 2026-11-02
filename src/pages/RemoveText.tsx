@@ -4,7 +4,7 @@ import {
   Check, Trash2, Sliders, Eye, Sparkles, ArrowRight
 } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
-import { PDFDocument } from 'pdf-lib';
+import { PDFDocument, rgb } from 'pdf-lib';
 import '../lib/pdfWorker';
 import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
@@ -152,48 +152,71 @@ export default function RemoveText() {
 
     try {
       const buf = await file.arrayBuffer();
+
+      // ── Vector path: pdf-lib drawRectangle (preserves searchable text, links, vectors) ──
+      if (scope !== 'all-text') {
+        const pdfDoc = await PDFDocument.load(buf, { ignoreEncryption: true });
+        const pages = pdfDoc.getPages();
+
+        // Parse erase color hex -> rgb components (0–1 range)
+        const hex = eraseColor.replace('#', '');
+        const cr = parseInt(hex.substring(0, 2), 16) / 255;
+        const cg = parseInt(hex.substring(2, 4), 16) / 255;
+        const cb = parseInt(hex.substring(4, 6), 16) / 255;
+        const fillColor = rgb(cr, cg, cb);
+
+        for (const m of matches) {
+          const page = pages[m.pageIndex];
+          if (!page) continue;
+          const { width, height } = page.getSize();
+          const rx = (m.x / 100) * width - 1;
+          const ry = height - ((m.y + m.h) / 100) * height - 1;
+          const rw = (m.w / 100) * width + 2;
+          const rh = (m.h / 100) * height + 2;
+          page.drawRectangle({
+            x: rx,
+            y: Math.max(ry, 0),
+            width: rw,
+            height: Math.max(rh, 1),
+            color: fillColor,
+            borderWidth: 0,
+          });
+        }
+
+        const finalBytes = await pdfDoc.save();
+        const blob = new Blob([finalBytes as any], { type: 'application/pdf' });
+        if (resultUrl) URL.revokeObjectURL(resultUrl);
+        setResultUrl(URL.createObjectURL(blob));
+        setResultFileName(`${file.name.replace(/\.pdf$/i, '')}_Text_Removed.pdf`);
+        return;
+      }
+
+      // ── Raster path: only for "all-text" scope (wipe entire page content) ──
       const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buf) }).promise;
       const newDoc = await PDFDocument.create();
 
       for (let p = 1; p <= pdf.numPages; p++) {
         const page = await pdf.getPage(p);
-        const vp = page.getViewport({ scale: 2.0 }); // High-res 2x
+        const origVp = page.getViewport({ scale: 1.0 });
         const canvas = document.createElement('canvas');
-        canvas.width = vp.width;
-        canvas.height = vp.height;
+        canvas.width = Math.round(origVp.width * 2);
+        canvas.height = Math.round(origVp.height * 2);
         const ctx = canvas.getContext('2d')!;
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        await page.render({ canvasContext: ctx, viewport: vp, canvas }).promise;
-
-        const pageMatches = matches.filter(m => m.pageIndex === p - 1);
         ctx.fillStyle = eraseColor;
-
-        for (const m of pageMatches) {
-          const rx = (m.x / 100) * canvas.width;
-          const ry = (m.y / 100) * canvas.height;
-          const rw = (m.w / 100) * canvas.width;
-          const rh = (m.h / 100) * canvas.height;
-          ctx.fillRect(rx - 1, ry - 1, rw + 2, rh + 2);
-        }
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
 
         const imgData = canvas.toDataURL('image/jpeg', 0.94);
         const imgBytes = dataUrlToBytes(imgData);
         const pdfImg = await newDoc.embedJpg(imgBytes);
-        const origVp = page.getViewport({ scale: 1.0 });
         const newPage = newDoc.addPage([origVp.width, origVp.height]);
-        newPage.drawImage(pdfImg, {
-          x: 0,
-          y: 0,
-          width: origVp.width,
-          height: origVp.height
-        });
+        newPage.drawImage(pdfImg, { x: 0, y: 0, width: origVp.width, height: origVp.height });
         canvas.width = 0;
         canvas.height = 0;
       }
 
       const finalBytes = await newDoc.save();
       const blob = new Blob([finalBytes as any], { type: 'application/pdf' });
+      if (resultUrl) URL.revokeObjectURL(resultUrl);
       setResultUrl(URL.createObjectURL(blob));
       setResultFileName(`${file.name.replace(/\.pdf$/i, '')}_Text_Removed.pdf`);
     } catch (err: any) {

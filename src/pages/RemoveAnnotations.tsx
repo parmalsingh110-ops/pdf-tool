@@ -7,6 +7,7 @@ import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
+import { useToast } from '../components/Toast';
 
 interface AnnotationStats {
   highlights: number;
@@ -58,6 +59,8 @@ export default function RemoveAnnotations() {
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [resultName, setResultName] = useState('');
   const [removedCount, setRemovedCount] = useState(0);
+
+  const toast = useToast();
 
   useEffect(() => {
     return () => {
@@ -122,7 +125,7 @@ export default function RemoveAnnotations() {
       setStats(counts);
     } catch (err: any) {
       console.error(err);
-      alert('Could not parse PDF annotations: ' + (err?.message || 'Unknown error'));
+      toast.error('Could not parse PDF annotations: ' + (err?.message || 'Unknown error'));
       setFile(null);
     } finally {
       setAnalyzing(false);
@@ -200,9 +203,10 @@ export default function RemoveAnnotations() {
       setResultUrl(url);
       setResultName(`${file.name.replace(/\.pdf$/i, '')}_cleaned.pdf`);
       setRemovedCount(totalRemoved);
+      toast.success(`Removed ${totalRemoved} annotation(s) successfully!`);
     } catch (e: any) {
       console.error(e);
-      alert('Error stripping annotations: ' + (e?.message || 'Unknown error'));
+      toast.error('Error stripping annotations: ' + (e?.message || 'Unknown error'));
     } finally {
       setBusy(false);
     }

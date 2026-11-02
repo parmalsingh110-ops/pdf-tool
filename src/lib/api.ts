@@ -61,6 +61,15 @@ export async function apiFetch(endpoint: string, options: ApiFetchOptions = {}):
     });
     return response;
   } catch (err: any) {
+    if (!endpoint.includes('/api/telemetry')) {
+      try {
+        const { reportToolError } = await import('./telemetry');
+        void reportToolError({
+          toolPath: typeof window !== 'undefined' ? window.location.pathname : endpoint,
+          errorMessage: err?.message || 'API Fetch Failed',
+        });
+      } catch {}
+    }
     if (err?.name === 'AbortError') {
       throw new Error(`Request timed out after ${Math.round(timeoutMs / 1000)}s. The backend may be waking up or processing a heavy task. Please try again.`);
     }

@@ -1,10 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { 
   GitCompare, Download, Loader2, SplitSquareVertical, SlidersHorizontal, 
-  FileText, ArrowRight, CheckCircle2, AlertCircle, ChevronLeft, ChevronRight, Layers, Eye
+  FileText, ArrowRight, CheckCircle2, AlertCircle, ChevronLeft, ChevronRight, Layers, Eye,
+  ZoomIn, ZoomOut, RotateCcw
 } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
-import { PDFDocument } from 'pdf-lib';
+import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 import '../lib/pdfWorker';
 import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
@@ -42,6 +43,7 @@ export default function PdfComparison() {
   const [currentPage, setCurrentPage] = useState(0);
   const [viewMode, setViewMode] = useState<ViewMode>('slider');
   const [sliderPos, setSliderPos] = useState(50); // percentage
+  const [zoomLevel, setZoomLevel] = useState<number>(100); // 50% - 250% zoom
 
   const sliderRef = useRef<HTMLDivElement>(null);
   const isDraggingRef = useRef(false);
@@ -141,23 +143,40 @@ export default function PdfComparison() {
                 const idxB = (y * canvasB.width + x) * 4;
                 const idxD = (y * w + x) * 4;
 
+                const lumA = 0.299 * dataA.data[idxA] + 0.587 * dataA.data[idxA + 1] + 0.114 * dataA.data[idxA + 2];
+                const lumB = 0.299 * dataB.data[idxB] + 0.587 * dataB.data[idxB + 1] + 0.114 * dataB.data[idxB + 2];
+
                 const diffR = Math.abs(dataA.data[idxA] - dataB.data[idxB]);
                 const diffG = Math.abs(dataA.data[idxA + 1] - dataB.data[idxB + 1]);
                 const diffB = Math.abs(dataA.data[idxA + 2] - dataB.data[idxB + 2]);
 
                 if (diffR + diffG + diffB > 35) {
-                  // Bright neon red highlight for differences
-                  dd[idxD] = 239;
-                  dd[idxD + 1] = 68;
-                  dd[idxD + 2] = 68;
-                  dd[idxD + 3] = 220;
                   diffPixels++;
+                  if (lumA < 200 && lumB > 220) {
+                    // Deleted text (present in A, blank in B) -> RED
+                    dd[idxD] = 239;
+                    dd[idxD + 1] = 68;
+                    dd[idxD + 2] = 68;
+                    dd[idxD + 3] = 230;
+                  } else if (lumB < 200 && lumA > 220) {
+                    // Inserted text (present in B, blank in A) -> GREEN
+                    dd[idxD] = 16;
+                    dd[idxD + 1] = 185;
+                    dd[idxD + 2] = 129;
+                    dd[idxD + 3] = 230;
+                  } else {
+                    // Modified / shifted text -> AMBER
+                    dd[idxD] = 245;
+                    dd[idxD + 1] = 158;
+                    dd[idxD + 2] = 11;
+                    dd[idxD + 3] = 230;
+                  }
                 } else {
-                  // Desaturate matching background slightly
+                  // Desaturate matching background slightly so colored diff pops
                   const gray = (dataA.data[idxA] + dataA.data[idxA + 1] + dataA.data[idxA + 2]) / 3;
-                  dd[idxD] = Math.round(dataA.data[idxA] * 0.7 + gray * 0.3);
-                  dd[idxD + 1] = Math.round(dataA.data[idxA + 1] * 0.7 + gray * 0.3);
-                  dd[idxD + 2] = Math.round(dataA.data[idxA + 2] * 0.7 + gray * 0.3);
+                  dd[idxD] = Math.round(dataA.data[idxA] * 0.75 + gray * 0.25);
+                  dd[idxD + 1] = Math.round(dataA.data[idxA + 1] * 0.75 + gray * 0.25);
+                  dd[idxD + 2] = Math.round(dataA.data[idxA + 2] * 0.75 + gray * 0.25);
                   dd[idxD + 3] = 255;
                 }
               }
@@ -222,23 +241,135 @@ export default function PdfComparison() {
   };
 
   const exportDiffPdf = async () => {
-    if (diffImages.length === 0) return;
+    if (diffImages.length === 0 || !fileA || !fileB) return;
     try {
       const pdfDoc = await PDFDocument.create();
+      const helvetica = await pdfDoc.embedFont(StandardFonts.Helvetica);
+      const helveticaBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+
+      // 1. Audit Summary Cover Page
+      const summaryPage = pdfDoc.addPage([595.28, 841.89]); // A4 in points
+      const { width, height } = summaryPage.getSize();
+
+      // Header Banner
+      summaryPage.drawRectangle({
+        x: 0,
+        y: height - 80,
+        width,
+        height: 80,
+        color: rgb(0.09, 0.13, 0.24)
+      });
+
+      summaryPage.drawText('PDF Comparison & Audit Report', {
+        x: 40,
+        y: height - 48,
+        size: 20,
+        font: helveticaBold,
+        color: rgb(1, 1, 1)
+      });
+
+      summaryPage.drawText(`Generated on ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`, {
+        x: 40,
+        y: height - 68,
+        size: 10,
+        font: helvetica,
+        color: rgb(0.7, 0.75, 0.85)
+      });
+
+      // Comparison Metadata Box
+      let curY = height - 120;
+      summaryPage.drawText('Document Comparison Overview', {
+        x: 40,
+        y: curY,
+        size: 14,
+        font: helveticaBold,
+        color: rgb(0.1, 0.1, 0.1)
+      });
+
+      curY -= 25;
+      summaryPage.drawText(`Original (Document A): ${fileA.name.slice(0, 65)}`, {
+        x: 40,
+        y: curY,
+        size: 10,
+        font: helvetica,
+        color: rgb(0.2, 0.3, 0.8)
+      });
+
+      curY -= 18;
+      summaryPage.drawText(`Revised (Document B):  ${fileB.name.slice(0, 65)}`, {
+        x: 40,
+        y: curY,
+        size: 10,
+        font: helvetica,
+        color: rgb(0.1, 0.5, 0.3)
+      });
+
+      curY -= 18;
+      const totalDiffs = diffStats.reduce((acc, s) => acc + s.diffPixels, 0);
+      const avgDiff = (diffStats.reduce((acc, s) => acc + s.diffPercent, 0) / Math.max(diffStats.length, 1)).toFixed(1);
+      summaryPage.drawText(`Total Pages: ${diffImages.length} | Average Difference: ${avgDiff}% | Changed Pixels: ${totalDiffs.toLocaleString()}`, {
+        x: 40,
+        y: curY,
+        size: 10,
+        font: helveticaBold,
+        color: rgb(0.3, 0.3, 0.3)
+      });
+
+      // Legend
+      curY -= 35;
+      summaryPage.drawRectangle({ x: 40, y: curY - 2, width: 12, height: 12, color: rgb(0.94, 0.27, 0.27) });
+      summaryPage.drawText('Red: Removed Content', { x: 58, y: curY, size: 9, font: helvetica, color: rgb(0.2, 0.2, 0.2) });
+
+      summaryPage.drawRectangle({ x: 180, y: curY - 2, width: 12, height: 12, color: rgb(0.06, 0.72, 0.51) });
+      summaryPage.drawText('Green: Added Content', { x: 198, y: curY, size: 9, font: helvetica, color: rgb(0.2, 0.2, 0.2) });
+
+      summaryPage.drawRectangle({ x: 310, y: curY - 2, width: 12, height: 12, color: rgb(0.96, 0.62, 0.04) });
+      summaryPage.drawText('Amber: Modified / Shifted', { x: 328, y: curY, size: 9, font: helvetica, color: rgb(0.2, 0.2, 0.2) });
+
+      // Page by Page Table
+      curY -= 30;
+      summaryPage.drawText('Page-by-Page Audit Breakdown', { x: 40, y: curY, size: 12, font: helveticaBold, color: rgb(0.1, 0.1, 0.1) });
+
+      curY -= 20;
+      summaryPage.drawRectangle({ x: 40, y: curY - 6, width: width - 80, height: 22, color: rgb(0.94, 0.95, 0.98) });
+      summaryPage.drawText('Page', { x: 50, y: curY, size: 9, font: helveticaBold, color: rgb(0.2, 0.2, 0.2) });
+      summaryPage.drawText('Difference %', { x: 140, y: curY, size: 9, font: helveticaBold, color: rgb(0.2, 0.2, 0.2) });
+      summaryPage.drawText('Changed Pixels', { x: 260, y: curY, size: 9, font: helveticaBold, color: rgb(0.2, 0.2, 0.2) });
+      summaryPage.drawText('Audit Status', { x: 400, y: curY, size: 9, font: helveticaBold, color: rgb(0.2, 0.2, 0.2) });
+
+      for (const stat of diffStats) {
+        curY -= 20;
+        if (curY < 60) break;
+        summaryPage.drawText(`Page ${stat.page}`, { x: 50, y: curY, size: 9, font: helvetica, color: rgb(0.2, 0.2, 0.2) });
+        summaryPage.drawText(`${stat.diffPercent}%`, { x: 140, y: curY, size: 9, font: helvetica, color: rgb(0.2, 0.2, 0.2) });
+        summaryPage.drawText(`${stat.diffPixels.toLocaleString()} px`, { x: 260, y: curY, size: 9, font: helvetica, color: rgb(0.2, 0.2, 0.2) });
+        const statusText = stat.diffPercent > 0.05 ? 'MODIFIED' : 'IDENTICAL';
+        summaryPage.drawText(statusText, {
+          x: 400,
+          y: curY,
+          size: 9,
+          font: helveticaBold,
+          color: stat.diffPercent > 0.05 ? rgb(0.85, 0.2, 0.2) : rgb(0.1, 0.6, 0.2)
+        });
+      }
+
+      // 2. High-res Visual Difference Pages
       for (const imgUrl of diffImages) {
         const bytes = dataUrlToBytes(imgUrl);
         const img = await pdfDoc.embedJpg(bytes);
         const page = pdfDoc.addPage([img.width, img.height]);
         page.drawImage(img, { x: 0, y: 0, width: img.width, height: img.height });
       }
+
       const finalBytes = await pdfDoc.save();
       const blob = new Blob([finalBytes as any], { type: 'application/pdf' });
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
-      a.download = `PDF_Comparison_Report_${fileA?.name.replace(/\.pdf$/i, '')}_vs_${fileB?.name.replace(/\.pdf$/i, '')}.pdf`;
+      a.download = `PDF_Audit_Report_${fileA.name.replace(/\.pdf$/i, '')}_vs_${fileB.name.replace(/\.pdf$/i, '')}.pdf`;
       a.click();
     } catch (err) {
-      console.error('Export error:', err);
+      console.error('Export report error:', err);
+      alert('Failed to generate audit report.');
     }
   };
 
@@ -350,13 +481,38 @@ export default function PdfComparison() {
               })}
             </div>
 
-            {/* Metrics & Page Flipping */}
-            <div className="flex items-center gap-3">
+            {/* Metrics, Zoom & Page Flipping */}
+            <div className="flex flex-wrap items-center gap-3">
               {currentStat && (
                 <span className="text-xs font-bold px-3 py-1 bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 rounded-full border border-rose-200 dark:border-rose-900">
                   {currentStat.diffPercent}% Changed ({currentStat.diffPixels.toLocaleString()} px)
                 </span>
               )}
+
+              {/* Synchronized Zoom Controls */}
+              <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl text-xs">
+                <button
+                  onClick={() => setZoomLevel(z => Math.max(50, z - 25))}
+                  className="p-1.5 hover:bg-white dark:hover:bg-slate-700 rounded-lg text-slate-700 dark:text-slate-300 transition-colors"
+                  title="Zoom Out"
+                >
+                  <ZoomOut className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  onClick={() => setZoomLevel(100)}
+                  className="px-2 py-1 font-mono font-bold text-[11px] text-slate-700 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-700 rounded-lg transition-colors"
+                  title="Reset Zoom to 100%"
+                >
+                  {zoomLevel}%
+                </button>
+                <button
+                  onClick={() => setZoomLevel(z => Math.min(250, z + 25))}
+                  className="p-1.5 hover:bg-white dark:hover:bg-slate-700 rounded-lg text-slate-700 dark:text-slate-300 transition-colors"
+                  title="Zoom In"
+                >
+                  <ZoomIn className="w-3.5 h-3.5" />
+                </button>
+              </div>
 
               <div className="flex items-center gap-1 text-xs font-bold text-slate-600 dark:text-slate-400">
                 <button
@@ -381,7 +537,7 @@ export default function PdfComparison() {
                 className="py-2 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-sm"
               >
                 <Download className="w-3.5 h-3.5" />
-                Export Diff PDF
+                Export Audit Report PDF
               </button>
               <button onClick={reset} className="text-xs text-slate-400 hover:text-slate-600 underline">Change</button>
             </div>
@@ -392,7 +548,8 @@ export default function PdfComparison() {
             /* Mode 1: Swipe Slider */
             <div 
               ref={sliderRef}
-              className="relative border shadow-xl bg-white select-none overflow-hidden rounded-2xl mx-auto cursor-ew-resize max-w-full"
+              className="relative border shadow-xl bg-white select-none overflow-hidden rounded-2xl mx-auto cursor-ew-resize max-w-full transition-transform"
+              style={{ transform: `scale(${zoomLevel / 100})`, transformOrigin: 'top center' }}
               onMouseDown={onMouseDown}
               onMouseUp={onMouseUp}
               onMouseMove={onMouseMove}
@@ -433,29 +590,56 @@ export default function PdfComparison() {
               </div>
             </div>
           ) : viewMode === 'side-by-side' ? (
-            /* Mode 2: Side by Side */
+            /* Mode 2: Side by Side with Synchronized Zoom */
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="bg-white dark:bg-slate-900 p-3 rounded-2xl border shadow-md space-y-2">
                 <span className="text-xs font-bold text-blue-600 block text-center">Document A (Original)</span>
-                <img src={pagesA[currentPage]} alt="Doc A" className="max-h-[68vh] object-contain mx-auto border" />
+                <div className="overflow-auto max-h-[70vh] flex justify-center">
+                  <img
+                    src={pagesA[currentPage]}
+                    alt="Doc A"
+                    className="max-h-[68vh] object-contain border transition-transform"
+                    style={{ transform: `scale(${zoomLevel / 100})`, transformOrigin: 'top center' }}
+                  />
+                </div>
               </div>
               <div className="bg-white dark:bg-slate-900 p-3 rounded-2xl border shadow-md space-y-2">
                 <span className="text-xs font-bold text-indigo-600 block text-center">Document B (Revised)</span>
-                <img src={pagesB[currentPage]} alt="Doc B" className="max-h-[68vh] object-contain mx-auto border" />
+                <div className="overflow-auto max-h-[70vh] flex justify-center">
+                  <img
+                    src={pagesB[currentPage]}
+                    alt="Doc B"
+                    className="max-h-[68vh] object-contain border transition-transform"
+                    style={{ transform: `scale(${zoomLevel / 100})`, transformOrigin: 'top center' }}
+                  />
+                </div>
               </div>
             </div>
           ) : viewMode === 'diff-overlay' ? (
-            /* Mode 3: Pixel Diff Heatmap */
-            <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border shadow-lg text-center space-y-3">
-              <div className="inline-flex items-center gap-2 px-3 py-1 bg-red-100 text-red-700 text-xs font-bold rounded-full">
-                <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse"></span>
-                Red Pixels Indicate Changed or Replaced Content
+            /* Mode 3: Pixel Diff Heatmap with 3-Color Legend */
+            <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border shadow-lg text-center space-y-4">
+              <div className="flex flex-wrap items-center justify-center gap-3 text-xs font-bold">
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-300 rounded-full border border-red-200 dark:border-red-900">
+                  <span className="w-2.5 h-2.5 rounded-full bg-red-500"></span>
+                  🔴 Red: Removed / Deleted
+                </span>
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 rounded-full border border-emerald-200 dark:border-emerald-900">
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+                  🟢 Green: Added / Inserted
+                </span>
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300 rounded-full border border-amber-200 dark:border-amber-900">
+                  <span className="w-2.5 h-2.5 rounded-full bg-amber-500"></span>
+                  🟡 Amber: Modified / Shifted
+                </span>
               </div>
-              <img
-                src={diffImages[currentPage]}
-                alt="Diff Heatmap"
-                className="max-h-[75vh] object-contain mx-auto border shadow-md rounded"
-              />
+              <div className="overflow-auto max-h-[75vh] flex justify-center">
+                <img
+                  src={diffImages[currentPage]}
+                  alt="Diff Heatmap"
+                  className="max-h-[75vh] object-contain border shadow-md rounded transition-transform"
+                  style={{ transform: `scale(${zoomLevel / 100})`, transformOrigin: 'top center' }}
+                />
+              </div>
             </div>
           ) : (
             /* Mode 4: Semantic Text Diff */

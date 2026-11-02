@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { FileText, Download, Loader2, Check, ExternalLink, Eye, CheckCircle2, Sparkles, Filter, Archive, Layers } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
 import { PDFDocument } from 'pdf-lib';
@@ -7,6 +7,7 @@ import '../lib/pdfWorker';
 import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
+import { useToast } from '../components/Toast';
 
 interface PageThumb {
   index: number; // 1-based
@@ -38,6 +39,14 @@ export default function ExtractPages() {
   const [resultIsZip, setResultIsZip] = useState(false);
   const [showPreview, setShowPreview] = useState(true);
 
+  const toast = useToast();
+
+  useEffect(() => {
+    return () => {
+      if (resultUrl) URL.revokeObjectURL(resultUrl);
+    };
+  }, [resultUrl]);
+
   const handleDrop = async (files: File[]) => {
     if (!files[0]) return;
     const selectedFile = files[0];
@@ -68,7 +77,7 @@ export default function ExtractPages() {
       }
       setPages(thumbs);
     } catch (e: any) {
-      alert(e?.message || 'Failed to load PDF thumbnails.');
+      toast.error(e?.message || 'Failed to load PDF thumbnails.');
     } finally {
       setLoadingThumbs(false);
     }
@@ -122,7 +131,7 @@ export default function ExtractPages() {
     if (selectedIndices.size > 0) {
       setPages((p) => p.map((pg) => ({ ...pg, selected: selectedIndices.has(pg.index) })));
     } else {
-      alert(`No valid pages found in range "${rangeInput}". Document has ${total} pages.`);
+      toast.error(`No valid pages found in range "${rangeInput}". Document has ${total} pages.`);
     }
   };
 
@@ -130,7 +139,7 @@ export default function ExtractPages() {
     if (!file) return;
     const selectedPages = pages.filter((p) => p.selected);
     if (selectedPages.length === 0) {
-      alert('Please select at least one page to extract.');
+      toast.error('Please select at least one page to extract.');
       return;
     }
 
@@ -174,9 +183,10 @@ export default function ExtractPages() {
         setResultUrl(URL.createObjectURL(zipBlob));
         setResultIsZip(true);
       }
+      toast.success(`Successfully extracted ${selectedPages.length} page(s)!`);
     } catch (e: any) {
       console.error('Extraction failed:', e);
-      alert(e?.message || 'Extraction failed. Please try again.');
+      toast.error(e?.message || 'Extraction failed. Please try again.');
     } finally {
       setBusy(false);
       setProgressMsg('');

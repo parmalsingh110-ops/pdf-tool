@@ -466,7 +466,31 @@ export default function UnlockPDF() {
       }
 
       const numPages = pdfjsDoc.numPages;
-      setProgress(`Verified password "${successfulPassword}"! Rebuilding clean ${numPages} page(s)...`);
+      setProgress(`Verified password "${successfulPassword}"! Trying lossless backend unlock...`);
+
+      // ── Step 1: Try backend lossless unlock (preserves text/links/vectors) ──
+      try {
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('password', successfulPassword);
+        const backendResp = await fetch('http://127.0.0.1:8000/unlock-pdf', {
+          method: 'POST',
+          body: formData,
+        });
+        if (backendResp.ok) {
+          const blob = await backendResp.blob();
+          const url = URL.createObjectURL(blob);
+          setUnlockedUrl(url);
+          setProgress('');
+          return;
+        }
+      } catch (_backendErr) {
+        // Backend offline or failed — fall through to client-side raster path
+        console.warn('Backend unlock unavailable, using client raster fallback.');
+      }
+
+      // ── Step 2: Client-side raster fallback (canvas PNG embed) ──
+      setProgress(`Backend offline — rebuilding ${numPages} page(s) locally...`);
 
       // Render each page into a brand new clean unencrypted PDF
       const newPdfDoc = await PDFDocument.create();

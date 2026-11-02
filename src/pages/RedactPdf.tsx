@@ -10,6 +10,7 @@ import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { dataUrlToBytes } from '../lib/utils';
+import { useToast } from '../components/Toast';
 
 type RedactStyle = 'blackout' | 'whiteout' | 'confidential' | 'pixelate';
 
@@ -25,6 +26,7 @@ interface RedactRect {
 }
 
 interface DetectedPii {
+  id: string;
   type: string;
   text: string;
   pageIndex: number;
@@ -32,6 +34,7 @@ interface DetectedPii {
   y: number;
   w: number;
   h: number;
+  selected?: boolean;
 }
 
 export default function RedactPdf() {
@@ -56,14 +59,24 @@ export default function RedactPdf() {
   const [customSearchTerm, setCustomSearchTerm] = useState('');
 
   const [isScanningPii, setIsScanningPii] = useState(false);
+  const [ocrStatus, setOcrStatus] = useState<string | null>(null);
   const [detectedPiiList, setDetectedPiiList] = useState<DetectedPii[]>([]);
   const [showPiiModal, setShowPiiModal] = useState(false);
+  const [selectedPiiFilter, setSelectedPiiFilter] = useState<string>('all');
 
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const imgRef = useRef<HTMLImageElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  const toast = useToast();
+
+  useEffect(() => {
+    return () => {
+      if (resultUrl) URL.revokeObjectURL(resultUrl);
+    };
+  }, [resultUrl]);
 
   const handleDrop = async (files: File[]) => {
     if (!files[0]) return;
@@ -100,7 +113,7 @@ export default function RedactPdf() {
       setPageImages(imgs);
       setPageSizes(sizes);
     } catch (e: any) {
-      alert(`Failed to load PDF: ${e?.message || 'Unknown error'}`);
+      toast.error(`Failed to load PDF: ${e?.message || 'Unknown error'}`);
     } finally {
       setLoading(false);
     }
@@ -146,43 +159,39 @@ export default function RedactPdf() {
     setStartPt(null);
   };
 
+  const PII_PATTERNS = [
+    { type: 'Aadhaar Card', regex: /\b\d{4}[-\s]?\d{4}[-\s]?\d{4}\b/g },
+    { type: 'PAN Number', regex: /\b[A-Z]{5}[0-9]{4}[A-Z]{1}\b/gi },
+    { type: 'Phone Number', regex: /\b(?:\+91[-\s]?)?[6-9]\d{9}\b|\b\d{3}[-.\s]\d{3}[-.\s]\d{4}\b/g },
+    { type: 'Email Address', regex: /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/gi },
+    { type: 'Voter ID (EPIC)', regex: /\b[A-Z]{3}[0-9]{7}\b/gi },
+    { type: 'Credit Card', regex: /\b(?:\d{4}[-\s]?){3}\d{4}\b/g },
+    { type: 'US SSN', regex: /\b\d{3}-\d{2}-\d{4}\b/g }
+  ];
+
   // Scan for Sensitive PII & Patterns (Aadhaar, PAN, Emails, Phones, Credit Cards)
   const scanForPii = async () => {
     if (!file) return;
     setIsScanningPii(true);
+    setOcrStatus(null);
     const detected: DetectedPii[] = [];
 
     try {
       const buf = await file.arrayBuffer();
       const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buf) }).promise;
 
-      // Regex patterns
-      const emailRegex = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/g;
-      const phoneRegex = /\b(?:\+91[-\s]?)?[6789]\d{9}\b|\b\d{3}[-.\s]\d{3}[-.\s]\d{4}\b/g;
-      const aadhaarRegex = /\b\d{4}\s\d{4}\s\d{4}\b/g;
-      const panRegex = /\b[A-Z]{5}[0-9]{4}[A-Z]{1}\b/g;
-      const ssnRegex = /\b\d{3}-\d{2}-\d{4}\b/g;
-      const ccRegex = /\b(?:\d{4}[-\s]?){3}\d{4}\b/g;
-
       for (let p = 1; p <= pdf.numPages; p++) {
         const page = await pdf.getPage(p);
         const vp = page.getViewport({ scale: 1.5 });
         const textContent = await page.getTextContent();
+        const items = textContent.items as any[];
 
-        for (const item of textContent.items as any[]) {
+        // 1. Single span item check
+        for (const item of items) {
           const str = item.str || '';
           if (!str.trim()) continue;
 
-          const patterns: { type: string; regex: RegExp }[] = [
-            { type: 'Aadhaar Card', regex: aadhaarRegex },
-            { type: 'PAN Number', regex: panRegex },
-            { type: 'Email Address', regex: emailRegex },
-            { type: 'Phone Number', regex: phoneRegex },
-            { type: 'SSN', regex: ssnRegex },
-            { type: 'Credit Card', regex: ccRegex }
-          ];
-
-          for (const { type, regex } of patterns) {
+          for (const { type, regex } of PII_PATTERNS) {
             regex.lastIndex = 0;
             if (regex.test(str)) {
               const tx = pdfjsLib.Util.transform(vp.transform, item.transform);
@@ -192,13 +201,69 @@ export default function RedactPdf() {
               const hRel = ((item.height * vp.scale * 1.3) / vp.height) * 100;
 
               detected.push({
+                id: `${p}_${type}_${Math.random()}`,
                 type,
-                text: str,
+                text: str.trim(),
                 pageIndex: p - 1,
                 x: Math.max(xRel - 0.5, 0),
                 y: Math.max(yRel - 0.5, 0),
                 w: Math.min(wRel + 1, 100),
-                h: Math.min(hRel + 1, 100)
+                h: Math.min(hRel + 1, 100),
+                selected: true
+              });
+            }
+          }
+        }
+
+        // 2. Line grouping for split spans (e.g., Aadhaar split into 3 spans)
+        const lineGroups: { [yKey: number]: { str: string; x: number; y: number; w: number; h: number }[] } = {};
+        for (const item of items) {
+          const str = item.str || '';
+          if (!str) continue;
+          const tx = pdfjsLib.Util.transform(vp.transform, item.transform);
+          const yApprox = Math.round(tx[5] / 8) * 8;
+          if (!lineGroups[yApprox]) lineGroups[yApprox] = [];
+          lineGroups[yApprox].push({
+            str,
+            x: tx[4],
+            y: tx[5] - item.height * vp.scale,
+            w: item.width * vp.scale,
+            h: item.height * vp.scale
+          });
+        }
+
+        for (const yKey of Object.keys(lineGroups)) {
+          const spans = lineGroups[Number(yKey)].sort((a, b) => a.x - b.x);
+          const fullLine = spans.map(s => s.str).join('');
+          
+          for (const { type, regex } of PII_PATTERNS) {
+            regex.lastIndex = 0;
+            let m;
+            while ((m = regex.exec(fullLine)) !== null) {
+              const matchStr = m[0];
+              const alreadyFound = detected.some(d => d.pageIndex === p - 1 && d.text.includes(matchStr));
+              if (alreadyFound) continue;
+
+              const minX = Math.min(...spans.map(s => s.x));
+              const maxX = Math.max(...spans.map(s => s.x + s.w));
+              const minY = Math.min(...spans.map(s => s.y));
+              const maxY = Math.max(...spans.map(s => s.y + s.h));
+
+              const xRel = (minX / vp.width) * 100;
+              const yRel = (minY / vp.height) * 100;
+              const wRel = ((maxX - minX) / vp.width) * 100;
+              const hRel = ((maxY - minY) / vp.height) * 100;
+
+              detected.push({
+                id: `${p}_${type}_${Math.random()}`,
+                type,
+                text: matchStr,
+                pageIndex: p - 1,
+                x: Math.max(xRel - 0.5, 0),
+                y: Math.max(yRel - 0.5, 0),
+                w: Math.min(wRel + 1, 100),
+                h: Math.min(hRel + 1, 100),
+                selected: true
               });
             }
           }
@@ -209,14 +274,84 @@ export default function RedactPdf() {
       setShowPiiModal(true);
     } catch (err) {
       console.error('PII scan error:', err);
-      alert('Error scanning text content.');
+      toast.error('Error scanning text content.');
     } finally {
       setIsScanningPii(false);
     }
   };
 
+  // OCR Deep Scan for Scanned / Image PDFs
+  const scanWithOcr = async () => {
+    if (!pageImages.length) return;
+    setIsScanningPii(true);
+    setOcrStatus('Initializing OCR engine...');
+    const detected: DetectedPii[] = [];
+
+    try {
+      const { createWorker } = await import('tesseract.js');
+      const worker = await createWorker('eng');
+
+      for (let p = 0; p < pageImages.length; p++) {
+        setOcrStatus(`OCR scanning page ${p + 1} of ${pageImages.length}...`);
+        const res = await worker.recognize(pageImages[p]);
+        const lines = (res.data as any).lines || [];
+        const imgSize = pageSizes[p] || { w: 1000, h: 1400 };
+
+        for (const line of lines) {
+          const text = line.text || '';
+          for (const { type, regex } of PII_PATTERNS) {
+            regex.lastIndex = 0;
+            let m;
+            while ((m = regex.exec(text)) !== null) {
+              const bbox = line.bbox;
+              const xRel = (bbox.x0 / imgSize.w) * 100;
+              const yRel = (bbox.y0 / imgSize.h) * 100;
+              const wRel = ((bbox.x1 - bbox.x0) / imgSize.w) * 100;
+              const hRel = ((bbox.y1 - bbox.y0) / imgSize.h) * 100;
+
+              detected.push({
+                id: `ocr_${p}_${Math.random()}`,
+                type: `OCR: ${type}`,
+                text: m[0],
+                pageIndex: p,
+                x: Math.max(0, xRel - 0.5),
+                y: Math.max(yRel - 0.5),
+                w: Math.min(100, wRel + 1),
+                h: Math.min(100, hRel + 1),
+                selected: true
+              });
+            }
+          }
+        }
+      }
+      await worker.terminate();
+
+      if (detected.length === 0) {
+        toast.info('OCR Scan Complete: No sensitive patterns found in scanned images.');
+      } else {
+        setDetectedPiiList(prev => [...prev, ...detected]);
+        setShowPiiModal(true);
+      }
+    } catch (err: any) {
+      console.error('OCR scan failed:', err);
+      toast.error('OCR error: ' + (err?.message || 'Failed to scan'));
+    } finally {
+      setIsScanningPii(false);
+      setOcrStatus(null);
+    }
+  };
+
+  const togglePiiItem = (id: string) => {
+    setDetectedPiiList(prev => prev.map(item => item.id === id ? { ...item, selected: !item.selected } : item));
+  };
+
+  const toggleAllPii = (select: boolean) => {
+    setDetectedPiiList(prev => prev.map(item => ({ ...item, selected: select })));
+  };
+
   const applyDetectedPii = () => {
-    const newRects: RedactRect[] = detectedPiiList.map(item => ({
+    const toApply = detectedPiiList.filter(item => item.selected !== false);
+    const newRects: RedactRect[] = toApply.map(item => ({
       id: Date.now().toString() + Math.random(),
       x: item.x,
       y: item.y,
@@ -271,10 +406,11 @@ export default function RedactPdf() {
       }
 
       if (newRects.length === 0) {
-        alert(`No occurrences of "${customSearchTerm}" found.`);
+        toast.info(`No occurrences of "${customSearchTerm}" found.`);
       } else {
         setRects(prev => [...prev, ...newRects]);
         setCustomSearchTerm('');
+        toast.success(`Found and marked ${newRects.length} occurrence(s) for redaction.`);
       }
     } catch (err) {
       console.error('Keyword redaction error:', err);
@@ -366,9 +502,11 @@ export default function RedactPdf() {
       }
 
       const bytes = await newDoc.save();
+      if (resultUrl) URL.revokeObjectURL(resultUrl);
       setResultUrl(URL.createObjectURL(new Blob([bytes as any], { type: 'application/pdf' })));
+      toast.success(`Successfully redacted ${rects.length} region(s)!`);
     } catch (e: any) {
-      alert(`Redaction failed: ${e?.message || 'Unknown error'}`);
+      toast.error(`Redaction failed: ${e?.message || 'Unknown error'}`);
     } finally {
       setBusy(false);
     }
@@ -488,14 +626,24 @@ export default function RedactPdf() {
             </div>
 
             {/* Smart Tools: Auto PII & Search */}
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <button
                 onClick={scanForPii}
                 disabled={isScanningPii}
                 className="py-2 px-3.5 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-sm transition-all disabled:opacity-50"
               >
-                {isScanningPii ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-                Auto-Detect Sensitive PII
+                {isScanningPii && !ocrStatus ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                Auto PII Scanner
+              </button>
+
+              <button
+                onClick={scanWithOcr}
+                disabled={isScanningPii}
+                className="py-2 px-3 bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-sm transition-all disabled:opacity-50"
+                title="Scan document images via Tesseract OCR for scanned/paper PDFs"
+              >
+                {ocrStatus ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileText className="w-4 h-4" />}
+                OCR Deep Scan
               </button>
 
               <div className="flex items-center gap-1">
@@ -608,53 +756,123 @@ export default function RedactPdf() {
           {/* Detected PII Modal */}
           {showPiiModal && (
             <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-              <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-lg w-full p-6 border border-slate-200 dark:border-slate-800 shadow-2xl space-y-4">
+              <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-xl w-full p-6 border border-slate-200 dark:border-slate-800 shadow-2xl space-y-4">
                 <div className="flex items-center justify-between border-b pb-3 dark:border-slate-800">
                   <div className="flex items-center gap-2">
                     <Sparkles className="w-5 h-5 text-red-600" />
-                    <h3 className="font-bold text-base text-slate-900 dark:text-white">Detected Sensitive Information</h3>
+                    <h3 className="font-bold text-base text-slate-900 dark:text-white">Smart PII Auto-Detection</h3>
                   </div>
                   <button onClick={() => setShowPiiModal(false)} className="text-xs text-slate-400 hover:text-slate-600">✕</button>
                 </div>
 
                 {detectedPiiList.length === 0 ? (
-                  <p className="text-xs text-slate-500 py-4 text-center">No common PII patterns (Aadhaar, PAN, SSN, Credit Cards) were detected in this document.</p>
+                  <div className="text-center py-6 space-y-3">
+                    <p className="text-sm text-slate-500">No common PII patterns (Aadhaar, PAN, SSN, Credit Cards) detected in text layers.</p>
+                    <p className="text-xs text-slate-400">If this is a scanned document photo, try using <strong>OCR Deep Scan</strong> on the toolbar.</p>
+                  </div>
                 ) : (
                   <>
-                    <p className="text-xs text-slate-600 dark:text-slate-400">
-                      Found <strong className="text-red-600">{detectedPiiList.length}</strong> sensitive data items across the document:
-                    </p>
-                    <div className="max-h-60 overflow-y-auto space-y-2 pr-1">
-                      {detectedPiiList.map((item, idx) => (
-                        <div key={idx} className="p-2.5 bg-slate-50 dark:bg-slate-800/60 rounded-xl border flex items-center justify-between text-xs">
-                          <div>
-                            <span className="font-bold text-slate-800 dark:text-slate-200">{item.type}</span>
-                            <p className="font-mono text-[11px] text-slate-500 truncate max-w-xs">{item.text}</p>
-                          </div>
-                          <span className="text-[10px] bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-bold">
-                            Page {item.pageIndex + 1}
-                          </span>
-                        </div>
-                      ))}
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-xs text-slate-600 dark:text-slate-400">
+                        Found <strong className="text-red-600">{detectedPiiList.length}</strong> items across document:
+                      </p>
+                      <div className="flex items-center gap-2 text-xs">
+                        <button onClick={() => toggleAllPii(true)} className="text-indigo-600 hover:underline font-semibold">Select All</button>
+                        <span>•</span>
+                        <button onClick={() => toggleAllPii(false)} className="text-slate-500 hover:underline">Unselect All</button>
+                      </div>
+                    </div>
+
+                    {/* Filter Pills */}
+                    <div className="flex flex-wrap gap-1.5 pb-1">
+                      <button
+                        onClick={() => setSelectedPiiFilter('all')}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-semibold ${selectedPiiFilter === 'all' ? 'bg-red-600 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'}`}
+                      >
+                        All ({detectedPiiList.length})
+                      </button>
+                      {Array.from(new Set(detectedPiiList.map(d => d.type))).map(cat => {
+                        const count = detectedPiiList.filter(d => d.type === cat).length;
+                        return (
+                          <button
+                            key={cat}
+                            onClick={() => setSelectedPiiFilter(cat)}
+                            className={`px-2.5 py-1 rounded-lg text-xs font-semibold ${selectedPiiFilter === cat ? 'bg-red-600 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'}`}
+                          >
+                            {cat} ({count})
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    <div className="max-h-64 overflow-y-auto space-y-2 pr-1">
+                      {detectedPiiList
+                        .filter(item => selectedPiiFilter === 'all' || item.type === selectedPiiFilter)
+                        .map((item) => {
+                          const maskText = (type: string, text: string) => {
+                            if (type.includes('Aadhaar')) return `•••• •••• ${text.slice(-4)}`;
+                            if (type.includes('PAN')) return `${text.slice(0, 3)}•••••${text.slice(-1)}`;
+                            if (type.includes('Phone')) return `+91 ••••• ${text.slice(-4)}`;
+                            if (type.includes('Email')) {
+                              const parts = text.split('@');
+                              return `${parts[0].slice(0, 2)}••••@${parts[1] || ''}`;
+                            }
+                            if (text.length > 8) return `${text.slice(0, 3)}••••${text.slice(-3)}`;
+                            return '••••••••';
+                          };
+
+                          return (
+                            <label
+                              key={item.id}
+                              className={`p-2.5 rounded-xl border flex items-center justify-between text-xs cursor-pointer transition-colors ${
+                                item.selected !== false
+                                  ? 'bg-red-50/50 dark:bg-red-950/20 border-red-200 dark:border-red-900/50'
+                                  : 'bg-slate-50 dark:bg-slate-800/40 border-slate-200 dark:border-slate-800 opacity-60'
+                              }`}
+                            >
+                              <div className="flex items-center gap-3">
+                                <input
+                                  type="checkbox"
+                                  checked={item.selected !== false}
+                                  onChange={() => togglePiiItem(item.id)}
+                                  className="w-4 h-4 rounded text-red-600 accent-red-600 cursor-pointer"
+                                />
+                                <div>
+                                  <span className="font-bold text-slate-800 dark:text-slate-200">{item.type}</span>
+                                  <p className="font-mono text-[11px] text-slate-500">{maskText(item.type, item.text)}</p>
+                                </div>
+                              </div>
+                              <span className="text-[10px] bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300 px-2 py-0.5 rounded-full font-bold">
+                                Page {item.pageIndex + 1}
+                              </span>
+                            </label>
+                          );
+                        })}
                     </div>
                   </>
                 )}
 
-                <div className="flex items-center justify-end gap-2 pt-2 border-t dark:border-slate-800">
-                  <button
-                    onClick={() => setShowPiiModal(false)}
-                    className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl"
-                  >
-                    Cancel
-                  </button>
-                  {detectedPiiList.length > 0 && (
+                <div className="flex items-center justify-between pt-2 border-t dark:border-slate-800">
+                  <span className="text-xs text-slate-500">
+                    Selected: <strong>{detectedPiiList.filter(d => d.selected !== false).length}</strong> / {detectedPiiList.length}
+                  </span>
+                  <div className="flex items-center gap-2">
                     <button
-                      onClick={applyDetectedPii}
-                      className="px-5 py-2 text-xs font-bold bg-red-600 hover:bg-red-700 text-white rounded-xl shadow-md"
+                      onClick={() => setShowPiiModal(false)}
+                      className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl"
                     >
-                      Redact All ({detectedPiiList.length}) Items
+                      Cancel
                     </button>
-                  )}
+                    {detectedPiiList.length > 0 && (
+                      <button
+                        onClick={applyDetectedPii}
+                        disabled={detectedPiiList.filter(d => d.selected !== false).length === 0}
+                        className="px-5 py-2 text-xs font-bold bg-red-600 hover:bg-red-700 text-white rounded-xl shadow-md disabled:opacity-40"
+                      >
+                        Redact Selected ({detectedPiiList.filter(d => d.selected !== false).length}) Items
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>

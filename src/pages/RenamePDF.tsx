@@ -7,6 +7,7 @@ import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
+import { useToast } from '../components/Toast';
 
 interface FileItem {
   id: string;
@@ -36,6 +37,8 @@ export default function RenamePDF() {
   const [customRegex, setCustomRegex] = useState<string>('INV-[0-9]+');
 
   const [zipUrl, setZipUrl] = useState<string | null>(null);
+
+  const toast = useToast();
 
   useEffect(() => {
     return () => {
@@ -181,8 +184,9 @@ export default function RenamePDF() {
       a.href = url;
       a.download = `renamed_documents_${Date.now()}.zip`;
       a.click();
+      toast.success(`Successfully downloaded ${files.length} renamed documents as ZIP!`);
     } catch (e) {
-      alert('Error creating ZIP bundle');
+      toast.error('Error creating ZIP bundle');
     } finally {
       setBusy(false);
     }

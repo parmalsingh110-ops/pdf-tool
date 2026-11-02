@@ -8,6 +8,7 @@ import * as pdfjsLib from 'pdfjs-dist';
 import '../lib/pdfWorker';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
+import { useToast } from '../components/Toast';
 
 type SplitMode = 'all' | 'ranges' | 'selection' | 'every';
 
@@ -34,6 +35,17 @@ export default function SplitPDF() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [processStep, setProcessStep] = useState('');
   const [splitUrls, setSplitUrls] = useState<{ url: string; name: string; pages: string }[]>([]);
+
+  const toast = useToast();
+
+  // Cleanup object URLs on unmount
+  useEffect(() => {
+    return () => {
+      splitUrls.forEach(u => {
+        try { URL.revokeObjectURL(u.url); } catch {}
+      });
+    };
+  }, [splitUrls]);
 
   const generateThumbs = useCallback(async (pdfFile: File) => {
     setLoadingThumbs(true);
@@ -93,9 +105,9 @@ export default function SplitPDF() {
       console.error('Error loading PDF:', e);
       const errMsg = e?.message?.toLowerCase() || '';
       if (errMsg.includes('encrypt') || errMsg.includes('password')) {
-        alert('This PDF is password-protected. Please unlock it using our Unlock PDF tool first.');
+        toast.error('This PDF is password-protected. Please unlock it using our Unlock PDF tool first.');
       } else {
-        alert('Could not read this PDF. The file may be damaged.');
+        toast.error('Could not read this PDF. The file may be damaged.');
       }
       setFile(null);
       setPageCount(0);
@@ -150,7 +162,7 @@ export default function SplitPDF() {
         }
       } else if (splitMode === 'selection') {
         const sorted = Array.from(selectedPages).sort((a, b) => a - b);
-        if (!sorted.length) { alert('Please select at least one page.'); return; }
+        if (!sorted.length) { toast.error('Please select at least one page.'); return; }
         setProcessStep('Extracting selected pages...');
         const newPdf = await PDFDocument.create();
         const copied = await newPdf.copyPages(sourcePdf, sorted.map(p => p - 1));
@@ -198,9 +210,12 @@ export default function SplitPDF() {
       }
 
       setSplitUrls(results);
+      if (results.length > 0) {
+        toast.success(`Generated ${results.length} split PDF file(s)!`);
+      }
     } catch (e: any) {
       console.error('Split error:', e);
-      alert(e?.message || 'An error occurred while splitting the PDF.');
+      toast.error(e?.message || 'An error occurred while splitting the PDF.');
     } finally {
       setIsProcessing(false);
       setProcessStep('');

@@ -7,6 +7,7 @@ import '../lib/pdfWorker';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { dataUrlToBytes } from '../lib/utils';
+import { useToast } from '../components/Toast';
 
 type WatermarkType = 'text' | 'image';
 type Position = 'center' | 'diagonal' | 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' | 'top-center' | 'bottom-center';
@@ -25,6 +26,8 @@ const POSITIONS: { id: Position; label: string }[] = [
 export default function WatermarkPDF() {
   useSEO('Add Watermark to PDF Online Free | PDF Media Suite', 'Add text or image watermarks to PDF with opacity, position, color and size controls. Free, browser-based, no upload.');
   usePageSEO('Add Watermark to PDF', 'Add custom text or image watermarks to PDF pages. Control opacity, position, font size, color, and rotation. Free online PDF watermark tool.');
+
+  const toast = useToast();
 
   const [file, setFile] = useState<File | null>(null);
   const [type, setType] = useState<WatermarkType>('text');
@@ -49,6 +52,11 @@ export default function WatermarkPDF() {
   const [loadingPreview, setLoadingPreview] = useState(false);
   const previewCanvasRef = useRef<HTMLCanvasElement>(null);
   const imgInputRef = useRef<HTMLInputElement>(null);
+
+  // Cleanup blob URL on unmount / result change
+  useEffect(() => {
+    return () => { if (resultUrl) URL.revokeObjectURL(resultUrl); };
+  }, [resultUrl]);
 
   // Generate preview thumbnail on first page
   const generatePreview = async () => {
@@ -215,10 +223,12 @@ export default function WatermarkPDF() {
 
       const bytes = await pdfDoc.save();
       const blob = new Blob([bytes as any], { type: 'application/pdf' });
+      if (resultUrl) URL.revokeObjectURL(resultUrl);
       setResultUrl(URL.createObjectURL(blob));
+      toast.success('Watermark added successfully!');
     } catch (e) {
       console.error('Watermark error:', e);
-      alert('Failed to add watermark. Please try again.');
+      toast.error('Failed to add watermark. Please try again.');
     } finally {
       setIsProcessing(false);
     }

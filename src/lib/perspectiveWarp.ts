@@ -175,3 +175,107 @@ function solveLinearSystem(A: number[][], B: number[]) {
   }
   return x;
 }
+
+/**
+ * Automatically detects the 4 corners of a document in an image.
+ * Returns normalized points [TL, TR, BR, BL] in percentages (0-100).
+ */
+export function detectDocumentCorners(
+  img: HTMLImageElement | HTMLCanvasElement
+): [Point, Point, Point, Point] {
+  const rawW = img.width || (img as HTMLCanvasElement).width;
+  const rawH = img.height || (img as HTMLCanvasElement).height;
+  if (!rawW || !rawH) {
+    return [{ x: 5, y: 5 }, { x: 95, y: 5 }, { x: 95, y: 95 }, { x: 5, y: 95 }];
+  }
+
+  // Work on a small downsampled canvas for ultra-fast <15ms processing
+  const maxDim = 320;
+  const scale = Math.min(maxDim / rawW, maxDim / rawH, 1.0);
+  const w = Math.round(rawW * scale);
+  const h = Math.round(rawH * scale);
+
+  const cv = document.createElement('canvas');
+  cv.width = w;
+  cv.height = h;
+  const ctx = cv.getContext('2d', { willReadFrequently: true });
+  if (!ctx) {
+    return [{ x: 5, y: 5 }, { x: 95, y: 5 }, { x: 95, y: 95 }, { x: 5, y: 95 }];
+  }
+
+  ctx.drawImage(img, 0, 0, w, h);
+  const imgData = ctx.getImageData(0, 0, w, h);
+  const d = imgData.data;
+
+  // Grayscale & Luminance
+  const gray = new Uint8Array(w * h);
+  for (let i = 0, j = 0; i < d.length; i += 4, j++) {
+    gray[j] = Math.round(0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]);
+  }
+
+  // Sobel Edge Detection
+  const edgePts: { x: number; y: number; grad: number }[] = [];
+
+  for (let y = 2; y < h - 2; y += 2) {
+    for (let x = 2; x < w - 2; x += 2) {
+      const idx = y * w + x;
+      const gx =
+        -gray[idx - w - 1] + gray[idx - w + 1] +
+        -2 * gray[idx - 1] + 2 * gray[idx + 1] +
+        -gray[idx + w - 1] + gray[idx + w + 1];
+
+      const gy =
+        -gray[idx - w - 1] - 2 * gray[idx - w] - gray[idx - w + 1] +
+         gray[idx + w - 1] + 2 * gray[idx + w] + gray[idx + w + 1];
+
+      const g = Math.abs(gx) + Math.abs(gy);
+      if (g > 80) {
+        edgePts.push({ x, y, grad: g });
+      }
+    }
+  }
+
+  // If insufficient strong edges, default to clean 5% inset margins
+  if (edgePts.length < 20) {
+    return [{ x: 5, y: 5 }, { x: 95, y: 5 }, { x: 95, y: 95 }, { x: 5, y: 95 }];
+  }
+
+  // Find extreme bounding points:
+  let tl = edgePts[0];
+  let tr = edgePts[0];
+  let br = edgePts[0];
+  let bl = edgePts[0];
+
+  let minSum = tl.x + tl.y;
+  let maxDiff = tr.x - tr.y;
+  let maxSum = br.x + br.y;
+  let minDiff = bl.x - bl.y;
+
+  for (const pt of edgePts) {
+    const sum = pt.x + pt.y;
+    const diff = pt.x - pt.y;
+
+    if (sum < minSum) { minSum = sum; tl = pt; }
+    if (diff > maxDiff) { maxDiff = diff; tr = pt; }
+    if (sum > maxSum) { maxSum = sum; br = pt; }
+    if (diff < minDiff) { minDiff = diff; bl = pt; }
+  }
+
+  const pTL: Point = { x: Math.max(0, Math.min(90, Math.round((tl.x / w) * 100))), y: Math.max(0, Math.min(90, Math.round((tl.y / h) * 100))) };
+  const pTR: Point = { x: Math.max(10, Math.min(100, Math.round((tr.x / w) * 100))), y: Math.max(0, Math.min(90, Math.round((tr.y / h) * 100))) };
+  const pBR: Point = { x: Math.max(10, Math.min(100, Math.round((br.x / w) * 100))), y: Math.max(10, Math.min(100, Math.round((br.y / h) * 100))) };
+  const pBL: Point = { x: Math.max(0, Math.min(90, Math.round((bl.x / w) * 100))), y: Math.max(10, Math.min(100, Math.round((bl.y / h) * 100))) };
+
+  const widthA = Math.hypot(pTR.x - pTL.x, pTR.y - pTL.y);
+  const widthB = Math.hypot(pBR.x - pBL.x, pBR.y - pBL.y);
+  const heightA = Math.hypot(pBL.x - pTL.x, pBL.y - pTL.y);
+  const heightB = Math.hypot(pBR.x - pTR.x, pBR.y - pTR.y);
+  const avgW = (widthA + widthB) / 2;
+  const avgH = (heightA + heightB) / 2;
+
+  if (avgW < 30 || avgH < 30) {
+    return [{ x: 5, y: 5 }, { x: 95, y: 5 }, { x: 95, y: 95 }, { x: 5, y: 95 }];
+  }
+
+  return [pTL, pTR, pBR, pBL];
+}

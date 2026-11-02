@@ -148,7 +148,7 @@ export default function CompressPDF() {
             let hi = 0.92;
             let best = await rasterize(scale, 0.5);
             let bestQ = 0.5;
-            for (let k = 0; k < 18 && hi - lo > 0.015; k++) {
+            for (let k = 0; k < 5 && hi - lo > 0.02; k++) {
               const mid = (lo + hi) / 2;
               const candidate = await rasterize(scale, mid);
               if (candidate.length <= targetBytes) {
@@ -161,7 +161,7 @@ export default function CompressPDF() {
             }
             if (best.length < targetBytes * 0.82) {
               let q = bestQ;
-              for (let k = 0; k < 12; k++) {
+              for (let k = 0; k < 4; k++) {
                 const tryQ = Math.min(0.95, q + 0.03);
                 if (tryQ <= q + 0.005) break;
                 const candidate = await rasterize(scale, tryQ);

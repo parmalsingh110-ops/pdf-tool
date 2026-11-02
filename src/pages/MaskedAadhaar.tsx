@@ -5,6 +5,7 @@ import { useSEO } from '../hooks/useSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
 import { PDFDocument } from 'pdf-lib';
 import { dataUrlToBytes } from '../lib/utils';
+import { useToast } from '../components/Toast';
 
 import * as pdfjsLib from 'pdfjs-dist';
 import '../lib/pdfWorker';
@@ -32,6 +33,8 @@ export default function MaskedAadhaar() {
   const [file, setFile] = useState<File | null>(null);
   const [renderedImageUrl, setRenderedImageUrl] = useState<string | null>(null);
   const [isPdf, setIsPdf] = useState(false);
+
+  const toast = useToast();
   const [pdfPageCount, setPdfPageCount] = useState(1);
   const [currentPage, setCurrentPage] = useState(1);
 
@@ -92,7 +95,7 @@ export default function MaskedAadhaar() {
         await page.render({ canvasContext: ctx, viewport, canvas } as any).promise;
         setRenderedImageUrl(canvas.toDataURL('image/jpeg', 0.95));
       } catch (err) {
-        alert('Could not render PDF. If it is password protected, please unlock it first using our Unlock PDF tool.');
+        toast.error('Could not render PDF. If it is password protected, please unlock it first using our Unlock PDF tool.');
       }
     } else {
       setIsPdf(false);
@@ -273,6 +276,7 @@ export default function MaskedAadhaar() {
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
+        toast.success('Masked Aadhaar exported successfully!');
         setTimeout(() => {
           try {
             URL.revokeObjectURL(url);
@@ -281,7 +285,7 @@ export default function MaskedAadhaar() {
       }
     } catch (err: any) {
       console.error('[MaskedAadhaar] Export failed:', err);
-      alert('Could not export masked Aadhaar: ' + (err?.message || 'Unknown error'));
+      toast.error('Could not export masked Aadhaar: ' + (err?.message || 'Unknown error'));
     } finally {
       setIsProcessing(false);
     }

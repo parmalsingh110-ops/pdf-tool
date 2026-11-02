@@ -195,7 +195,7 @@ export default function ValidateSignatures() {
           PDF Digital Signature Validator
         </h1>
         <p className="text-base sm:text-lg text-slate-600 dark:text-slate-400 max-w-xl mx-auto">
-          Inspect digital signatures, verify document integrity, validate signer identities, and detect tampering.
+          Inspect PDF signature structures, detect signing metadata, and generate SHA-256 fingerprints. Note: Structural inspection only — not cryptographic certificate verification.
         </p>
       </div>
 
@@ -258,16 +258,16 @@ export default function ValidateSignatures() {
                   ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-300'
                   : 'bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300'
               }`}>
-                {result.integrityStatus === 'VALID' ? 'Verified Document' : 'Standard Document (Unsigned)'}
+                {result.integrityStatus === 'VALID' ? 'Signature Structure Found' : 'Standard Document (Unsigned)'}
               </span>
               <h2 className="text-xl sm:text-2xl font-extrabold text-slate-900 dark:text-white">
                 {result.integrityStatus === 'VALID'
-                  ? 'Valid Digital Signature & Seal Detected'
+                  ? 'Signature Structure Detected'
                   : 'No Cryptographic Digital Signatures Found'}
               </h2>
               <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-400 mt-1">
                 {result.integrityStatus === 'VALID'
-                  ? 'The document contains authentic cryptographic signing structures and has intact integrity.'
+                  ? 'Signature dictionary structures found. Note: Structural detection only — cryptographic certificate chain was NOT verified.'
                   : 'This is a standard PDF without embedded cryptographic X.509 signatures or digital certification seals.'}
               </p>
             </div>
@@ -299,7 +299,7 @@ export default function ValidateSignatures() {
           <div className="p-5 bg-slate-50 dark:bg-slate-800/30 rounded-2xl border border-slate-100 dark:border-slate-800 space-y-3">
             <h3 className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-2">
               <ShieldCheck className="w-4 h-4 text-blue-600" />
-              Cryptographic Inspector Findings
+              Structural Inspector Findings
             </h3>
             <ul className="space-y-2 text-xs text-slate-700 dark:text-slate-300">
               {result.details.map((detail, idx) => (
@@ -317,6 +317,17 @@ export default function ValidateSignatures() {
             <p className="font-mono text-[11px] text-slate-600 dark:text-slate-400 break-all bg-slate-50 dark:bg-slate-800 p-2 rounded-lg">
               {result.sha256}
             </p>
+          </div>
+
+          {/* Structural Inspector Disclaimer */}
+          <div className="p-4 bg-amber-50 dark:bg-amber-950/30 rounded-2xl border border-amber-200 dark:border-amber-800/60 flex items-start gap-3">
+            <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
+            <div>
+              <p className="font-bold text-sm text-amber-800 dark:text-amber-300">Structural Inspector — Not Cryptographic Verification</p>
+              <p className="text-xs text-amber-700 dark:text-amber-400 mt-1">
+                This tool detects the <em>presence</em> of signature structures in the PDF byte stream. It does <strong>not</strong> validate the cryptographic certificate chain, check against a Certificate Authority (CA), or confirm the signature has not been tampered with. For legally binding verification, use Adobe Acrobat or a certified PKI validator.
+              </p>
+            </div>
           </div>
 
           {/* Actions */}

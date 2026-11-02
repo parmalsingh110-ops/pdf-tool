@@ -1,11 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { ScanLine, Download, Loader2, RotateCw, Crop, Activity, Plus, Trash2, CheckCircle2, FileImage } from 'lucide-react';
-import { wrapPerspective, type Point } from '../lib/perspectiveWarp';
+import { ScanLine, Download, Loader2, RotateCw, Crop, Activity, Plus, Trash2, CheckCircle2, FileImage, Sparkles, Maximize2, Archive } from 'lucide-react';
+import { wrapPerspective, detectDocumentCorners, type Point } from '../lib/perspectiveWarp';
 import { PDFDocument } from 'pdf-lib';
+import JSZip from 'jszip';
 import { useSEO } from '../hooks/useSEO';
 import { dataUrlToBytes } from '../lib/utils';
 
-type EnhanceMode = 'document' | 'photo' | 'bw' | 'screen';
+type EnhanceMode = 'magic_color' | 'document' | 'bw' | 'screen' | 'photo';
 
 interface ScannedPage {
   id: string;
@@ -66,9 +67,9 @@ export default function DocumentScanner() {
         originalUrl: url,
         croppedUrl: null,
         resultUrl: null,
-        enhanceMode: 'document' as EnhanceMode,
+        enhanceMode: 'magic_color' as EnhanceMode,
         rotation: 0,
-        corners: [{x: 10, y: 10}, {x: 90, y: 10}, {x: 90, y: 90}, {x: 10, y: 90}] as [Point, Point, Point, Point]
+        corners: [{x: 5, y: 5}, {x: 95, y: 5}, {x: 95, y: 95}, {x: 5, y: 95}] as [Point, Point, Point, Point]
       };
     });
 
@@ -76,9 +77,17 @@ export default function DocumentScanner() {
     setActivePageId(newPages[0].id);
     setStep('crop');
     
-    // Load size for active page
+    // Load size for active page and run automatic edge detection
     const img = new Image();
-    img.onload = () => setOriginalSize({ w: img.naturalWidth, h: img.naturalHeight });
+    img.onload = () => {
+      setOriginalSize({ w: img.naturalWidth, h: img.naturalHeight });
+      try {
+        const detected = detectDocumentCorners(img);
+        setPages(prev => prev.map(p => p.id === newPages[0].id ? { ...p, corners: detected } : p));
+      } catch (err) {
+        console.warn('Auto corner detection fallback:', err);
+      }
+    };
     img.src = newPages[0].originalUrl;
   };
 
@@ -116,9 +125,9 @@ export default function DocumentScanner() {
         originalUrl: URL.createObjectURL(f),
         croppedUrl: null,
         resultUrl: null,
-        enhanceMode: 'document',
+        enhanceMode: 'magic_color',
         rotation: 0,
-        corners: [{x: 10, y: 10}, {x: 90, y: 10}, {x: 90, y: 90}, {x: 10, y: 90}]
+        corners: [{x: 5, y: 5}, {x: 95, y: 5}, {x: 95, y: 95}, {x: 5, y: 95}]
       };
       
       setPages(prev => [...prev, newPage]);
@@ -126,7 +135,15 @@ export default function DocumentScanner() {
       setStep('crop');
       
       const img = new Image();
-      img.onload = () => setOriginalSize({ w: img.naturalWidth, h: img.naturalHeight });
+      img.onload = () => {
+        setOriginalSize({ w: img.naturalWidth, h: img.naturalHeight });
+        try {
+          const detected = detectDocumentCorners(img);
+          setPages(prev => prev.map(p => p.id === newPage.id ? { ...p, corners: detected } : p));
+        } catch (err) {
+          console.warn('Auto corner detection fallback:', err);
+        }
+      };
       img.src = newPage.originalUrl;
     }, 'image/jpeg', 0.95);
   };
@@ -164,6 +181,24 @@ export default function DocumentScanner() {
 
   const updateActivePage = (updates: Partial<ScannedPage>) => {
     setPages(prev => prev.map(p => p.id === activePageId ? { ...p, ...updates } : p));
+  };
+
+  const handleAutoDetect = () => {
+    if (!activePage) return;
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      const corners = detectDocumentCorners(img);
+      updateActivePage({ corners });
+    };
+    img.src = activePage.originalUrl;
+  };
+
+  const handleResetCorners = () => {
+    if (!activePage) return;
+    updateActivePage({
+      corners: [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }, { x: 0, y: 100 }]
+    });
   };
 
   const handleMove = (e: React.PointerEvent) => {
@@ -241,7 +276,51 @@ export default function DocumentScanner() {
       const imageData = ctx.getImageData(0, 0, w, h);
       const d = imageData.data;
 
-      if (mode === 'document' || mode === 'screen') {
+      if (mode === 'magic_color') {
+        // CamScanner Pro Magic Color: removes desk shadows, cleans paper to white while keeping vivid stamp/ink color
+        let minL = 255, maxL = 0;
+        for (let i = 0; i < d.length; i += 16) {
+          const l = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+          if (l < minL) minL = l;
+          if (l > maxL) maxL = l;
+        }
+
+        const whiteThresh = Math.max(160, maxL * 0.82);
+        const blackPoint = minL * 1.15;
+        const range = Math.max(1, whiteThresh - blackPoint);
+
+        for (let i = 0; i < d.length; i += 4) {
+          const r = d[i], g = d[i + 1], b = d[i + 2];
+          const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+          const maxC = Math.max(r, g, b);
+          const minC = Math.min(r, g, b);
+          const sat = maxC === 0 ? 0 : (maxC - minC) / maxC;
+
+          if (lum >= whiteThresh && sat < 0.2) {
+            d[i] = 255;
+            d[i + 1] = 255;
+            d[i + 2] = 255;
+          } else {
+            let nr = ((r - blackPoint) / range) * 255;
+            let ng = ((g - blackPoint) / range) * 255;
+            let nb = ((b - blackPoint) / range) * 255;
+
+            // Preserve colored signatures, seals, and stamps
+            if (sat > 0.22) {
+              nr = r * 1.08;
+              ng = g * 1.08;
+              nb = b * 1.08;
+            }
+
+            d[i]     = Math.min(255, Math.max(0, nr));
+            d[i + 1] = Math.min(255, Math.max(0, ng));
+            d[i + 2] = Math.min(255, Math.max(0, nb));
+          }
+        }
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.putImageData(new ImageData(d, w, h), 0, 0);
+
+      } else if (mode === 'document' || mode === 'screen') {
         let minL = 255, maxL = 0;
         for (let i = 0; i < d.length; i += 16) {
           const l = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
@@ -288,7 +367,6 @@ export default function DocumentScanner() {
 
         if (mode === 'screen') {
           ctx.putImageData(new ImageData(d, w, h), 0, 0);
-          // Unsharp mask via blending duplicate layer
           ctx.globalCompositeOperation = 'overlay';
           ctx.globalAlpha = 0.3;
           ctx.drawImage(canvas, 0, 0);
@@ -370,6 +448,32 @@ export default function DocumentScanner() {
     }
   };
 
+  const downloadAllAsZip = async () => {
+    const readyPages = pages.filter(p => p.resultUrl);
+    if (readyPages.length === 0) return alert('No processed pages to download.');
+
+    setBusy(true);
+    try {
+      const zip = new JSZip();
+      for (let i = 0; i < readyPages.length; i++) {
+        const p = readyPages[i];
+        const bytes = p.resultUrl!.startsWith('data:')
+          ? dataUrlToBytes(p.resultUrl!)
+          : await fetch(p.resultUrl!).then(res => res.arrayBuffer());
+        zip.file(`Page_${i + 1}_scanned.jpg`, bytes);
+      }
+      const zipBlob = await zip.generateAsync({ type: 'blob' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(zipBlob);
+      a.download = `Scanned_Pages_${Date.now()}.zip`;
+      a.click();
+    } catch {
+      alert('Error creating ZIP archive');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const downloadCurrentAsJpg = () => {
     if (!activePage?.resultUrl) return;
     const a = document.createElement('a');
@@ -416,9 +520,14 @@ export default function DocumentScanner() {
           </div>
           
           {pages.length > 0 && (
-            <button onClick={downloadAllAsPdf} disabled={busy} className="w-full py-3 bg-slate-800 text-white rounded-xl font-bold shadow hover:bg-slate-900 mt-2 flex items-center justify-center gap-2">
-              <Download className="w-4 h-4"/> Save All PDF
-            </button>
+            <div className="space-y-2 mt-2">
+              <button onClick={downloadAllAsPdf} disabled={busy} className="w-full py-2.5 bg-slate-800 text-white rounded-xl font-bold shadow hover:bg-slate-900 flex items-center justify-center gap-2 text-sm">
+                <Download className="w-4 h-4"/> Save All as PDF
+              </button>
+              <button onClick={downloadAllAsZip} disabled={busy} className="w-full py-2.5 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-xl font-bold hover:bg-indigo-100 flex items-center justify-center gap-2 text-sm">
+                <Archive className="w-4 h-4"/> Download All (ZIP)
+              </button>
+            </div>
           )}
         </div>
 
@@ -496,9 +605,17 @@ export default function DocumentScanner() {
                       ))}
                     </div>
 
-                    <div className="flex gap-4">
-                      <button onClick={applyCrop} disabled={busy} className="px-8 py-3 bg-indigo-600 text-white font-bold rounded-xl shadow-md hover:bg-indigo-700 flex gap-2 items-center notranslate" translate="no">
-                         {busy ? <Loader2 className="w-5 h-5 animate-spin"/> : <Crop className="w-5 h-5"/>}
+                    <div className="flex flex-wrap items-center justify-center gap-3">
+                      <button onClick={handleAutoDetect} className="px-4 py-2.5 bg-amber-500/10 border border-amber-300 text-amber-800 font-bold rounded-xl hover:bg-amber-500/20 flex items-center gap-2 text-sm shadow-sm">
+                        <Sparkles className="w-4 h-4 text-amber-600" />
+                        <span>✨ Auto Detect Edges</span>
+                      </button>
+                      <button onClick={handleResetCorners} className="px-4 py-2.5 bg-slate-100 border border-slate-300 text-slate-700 font-bold rounded-xl hover:bg-slate-200 flex items-center gap-2 text-sm shadow-sm">
+                        <Maximize2 className="w-4 h-4 text-slate-600" />
+                        <span>Full Image</span>
+                      </button>
+                      <button onClick={applyCrop} disabled={busy} className="px-6 py-2.5 bg-indigo-600 text-white font-bold rounded-xl shadow-md hover:bg-indigo-700 flex gap-2 items-center notranslate text-sm" translate="no">
+                         {busy ? <Loader2 className="w-4 h-4 animate-spin"/> : <Crop className="w-4 h-4"/>}
                          <span>Align &amp; Process</span>
                       </button>
                     </div>
@@ -519,17 +636,19 @@ export default function DocumentScanner() {
                     <div className="w-full lg:w-80 space-y-6">
                       <div className="bg-slate-50 p-5 rounded-xl border border-slate-200 shadow-sm space-y-5">
                          <h3 className="font-bold text-slate-800 uppercase text-sm tracking-wider">Enhancement</h3>
-                         <div className="grid grid-cols-2 gap-3">
+                         <div className="grid grid-cols-2 gap-2.5">
                            {[
-                             { id: 'document', label: 'Magic Clean', icon: '📄' },
-                             { id: 'bw', label: 'B&W Text', icon: '⬛' },
-                             { id: 'screen', label: 'Screen/Monitor', icon: '💻' },
-                             { id: 'photo', label: 'Original Photo', icon: '🖼️' },
+                             { id: 'magic_color', label: 'Magic Color', icon: '✨', desc: 'CamScanner Pro' },
+                             { id: 'document', label: 'Magic Clean', icon: '📄', desc: 'Whitened' },
+                             { id: 'bw', label: 'B&W Text', icon: '⬛', desc: 'High Contrast' },
+                             { id: 'screen', label: 'Screen/Monitor', icon: '💻', desc: 'Anti-Moiré' },
+                             { id: 'photo', label: 'Original Photo', icon: '🖼️', desc: 'Untouched' },
                            ].map(f => (
                              <button key={f.id} onClick={() => changeFilter(f.id as EnhanceMode)}
-                               className={`p-3 rounded-lg flex flex-col items-center gap-1 text-sm font-semibold transition-all ${activePage.enhanceMode === f.id ? 'bg-indigo-600 text-white shadow border-transparent' : 'bg-white text-slate-600 border border-slate-200 hover:border-indigo-300'}`}>
-                               <span className="text-xl">{f.icon}</span>
-                               {f.label}
+                               className={`p-2.5 rounded-lg flex flex-col items-center gap-0.5 text-xs font-semibold transition-all ${activePage.enhanceMode === f.id ? 'bg-indigo-600 text-white shadow border-transparent' : 'bg-white text-slate-600 border border-slate-200 hover:border-indigo-300'}`}>
+                               <span className="text-lg">{f.icon}</span>
+                               <span className="font-bold">{f.label}</span>
+                               <span className={`text-[10px] ${activePage.enhanceMode === f.id ? 'text-indigo-200' : 'text-slate-400'}`}>{f.desc}</span>
                              </button>
                            ))}
                          </div>

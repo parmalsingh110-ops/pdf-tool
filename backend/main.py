@@ -247,10 +247,25 @@ def safe_filename(user_filename: str | None, fallback: str = "output") -> str:
 
 def safe_error(e: Exception, endpoint: str = "") -> HTTPException:
     """
-    Logs the real exception server-side (including stack details).
+    Logs the real exception server-side (including stack details) and dispatches
+    alerts to Discord and Telegram via telemetry.
     Returns a generic HTTP 500 that does NOT expose internal state to the user.
     """
-    logger.error(f"[ERROR] endpoint={endpoint} type={type(e).__name__} msg={str(e)[:500]}")
+    err_type = type(e).__name__
+    err_msg = str(e)[:500]
+    logger.error(f"[ERROR] endpoint={endpoint} type={err_type} msg={err_msg}")
+
+    try:
+        import telemetry
+        telemetry.save_error(
+            tool_path=f"/{endpoint.lstrip('/')}",
+            tool_name=f"Backend: {endpoint}",
+            error_message=f"[{err_type}] {err_msg}",
+            error_stack=str(e)
+        )
+    except Exception as tel_err:
+        logger.error(f"[TELEMETRY] Failed to dispatch error alert: {tel_err}")
+
     return HTTPException(
         status_code=500,
         detail="Unable to process this file. Please try again. If the problem persists, try a different or smaller file."
@@ -3460,6 +3475,61 @@ async def repair_pdf(request: Request, file: UploadFile = File(...)):
     except Exception as e:
         cleanup(inp, out)
         raise safe_error(e, "repair-pdf")
+
+
+# ─── Unlock PDF (Lossless Decrypt via PyMuPDF) ─────────────────
+# Removes password protection from an encrypted PDF without
+# rasterizing — preserves all text, links, and vector content.
+
+@app.post("/unlock-pdf")
+@limiter.limit("10/minute")
+async def unlock_pdf(
+    request: Request,
+    file: UploadFile = File(...),
+    password: str = Form(...)
+):
+    """
+    Losslessly decrypt a password-protected PDF using PyMuPDF.
+    Preserves full vector content, text selectability, and metadata.
+    """
+    import fitz  # PyMuPDF
+    inp = temp_path(".pdf")
+    out = temp_path("_unlocked.pdf")
+    try:
+        raw_data = await safe_read_upload(file)
+        inp.write_bytes(raw_data)
+
+        doc = fitz.open(str(inp))
+
+        if not doc.is_encrypted:
+            doc.close()
+            cleanup(inp, out)
+            raise HTTPException(400, "PDF is not encrypted.")
+
+        authenticated = doc.authenticate(password)
+        if not authenticated:
+            doc.close()
+            cleanup(inp, out)
+            raise HTTPException(403, "Incorrect password. Could not unlock PDF.")
+
+        # Save with no encryption — lossless vector preservation
+        doc.save(str(out), encryption=fitz.PDF_ENCRYPT_NONE, garbage=1, deflate=True)
+        doc.close()
+
+        stem = safe_filename(file.filename or "document", "document")
+        out_name = Path(stem).stem + "_unlocked.pdf"
+        return FileResponse(
+            str(out),
+            media_type="application/pdf",
+            filename=out_name,
+            background=BackgroundTask(cleanup, inp, out)
+        )
+    except HTTPException:
+        cleanup(inp, out)
+        raise
+    except Exception as e:
+        cleanup(inp, out)
+        raise safe_error(e, "unlock-pdf")
 
 
 # ─── 11. Webpage to PDF (Playwright) ───────────────────────────

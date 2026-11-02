@@ -10,6 +10,7 @@ import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { apiFetch } from '../lib/api';
+import { useToast } from '../components/Toast';
 
 interface SearchMatch {
   pageIndex: number;
@@ -49,6 +50,8 @@ export default function SearchReplace() {
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [resultFileName, setResultFileName] = useState('');
   const [engineUsed, setEngineUsed] = useState<'backend' | 'client'>('backend');
+
+  const toast = useToast();
 
   const resultUrlRef = useRef<string | null>(null);
   useEffect(() => {
@@ -218,6 +221,7 @@ export default function SearchReplace() {
           setResultFileName(`replaced_${file.name}`);
           setEngineUsed('backend');
           setIsReplacing(false);
+          toast.success('Replaced text successfully using high-precision backend engine!');
           return;
         }
       } catch (backendErr) {
@@ -267,9 +271,10 @@ export default function SearchReplace() {
       setResultUrl(URL.createObjectURL(new Blob([bytes as any], { type: 'application/pdf' })));
       setResultFileName(`replaced_${file.name}`);
       setEngineUsed('client');
+      toast.success(`Replaced ${matches.length} occurrence(s) in browser!`);
     } catch (err: any) {
       console.error('Replace error:', err);
-      alert(`Text replacement failed: ${err?.message || 'Unknown error'}`);
+      toast.error(`Text replacement failed: ${err?.message || 'Unknown error'}`);
     } finally {
       setIsReplacing(false);
     }

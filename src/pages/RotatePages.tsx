@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { RotateCw, RotateCcw, Download, Check, RefreshCcw, Layers, Undo2, ZoomIn, X, CheckSquare, Square } from 'lucide-react';
 import { PDFDocument, degrees } from 'pdf-lib';
 import * as pdfjsLib from 'pdfjs-dist';
@@ -6,6 +6,7 @@ import '../lib/pdfWorker';
 import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
+import { useToast } from '../components/Toast';
 
 interface PageInfo {
   index: number;
@@ -25,6 +26,16 @@ export default function RotatePages() {
   const [busy, setBusy] = useState(false);
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [zoomPage, setZoomPage] = useState<PageInfo | null>(null);
+
+  const toast = useToast();
+
+  // Cleanup blob URLs for pages and result on unmount
+  useEffect(() => {
+    return () => {
+      pages.forEach(p => { try { URL.revokeObjectURL(p.url); } catch {} });
+      if (resultUrl) URL.revokeObjectURL(resultUrl);
+    };
+  }, []);
 
   const handleDrop = useCallback(async (files: File[]) => {
     if (!files[0]) return;
@@ -62,7 +73,7 @@ export default function RotatePages() {
       setPages(items);
     } catch (e: any) {
       console.error('Failed to load PDF pages:', e);
-      alert(e?.message || 'Failed to load PDF.');
+      toast.error(e?.message || 'Failed to load PDF.');
     } finally {
       setLoading(false);
     }
@@ -131,10 +142,12 @@ export default function RotatePages() {
 
       const bytes = await doc.save();
       const blob = new Blob([bytes as any], { type: 'application/pdf' });
+      if (resultUrl) URL.revokeObjectURL(resultUrl);
       setResultUrl(URL.createObjectURL(blob));
+      toast.success(`Rotated ${pages.filter(p => p.rotation !== 0).length || pages.length} page(s) successfully!`);
     } catch (e: any) {
       console.error('Error saving rotated PDF:', e);
-      alert(e?.message || 'Failed to rotate PDF.');
+      toast.error(e?.message || 'Failed to rotate PDF.');
     } finally {
       setBusy(false);
     }

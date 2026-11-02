@@ -7,6 +7,7 @@ import '../lib/pdfWorker';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { dataUrlToBytes } from '../lib/utils';
+import { useToast } from '../components/Toast';
 
 export default function FlattenPDF() {
   useSEO(
@@ -34,6 +35,15 @@ export default function FlattenPDF() {
   const [progressPercent, setProgressPercent] = useState(0);
   const [flattenedUrl, setFlattenedUrl] = useState<string | null>(null);
   const [showPreview, setShowPreview] = useState(true);
+
+  const toast = useToast();
+
+  useEffect(() => {
+    return () => {
+      if (flattenedUrl) URL.revokeObjectURL(flattenedUrl);
+      if (thumbUrl) URL.revokeObjectURL(thumbUrl);
+    };
+  }, [flattenedUrl, thumbUrl]);
 
   const handleDrop = async (acceptedFiles: File[]) => {
     if (acceptedFiles.length === 0) return;
@@ -159,9 +169,10 @@ export default function FlattenPDF() {
 
       setProgressPercent(100);
       setProgressText('Done!');
+      toast.success('PDF flattened successfully!');
     } catch (error) {
       console.error('Error flattening PDF:', error);
-      alert('An error occurred while flattening the PDF. Please try again.');
+      toast.error('An error occurred while flattening the PDF. Please try again.');
     } finally {
       setIsProcessing(false);
     }

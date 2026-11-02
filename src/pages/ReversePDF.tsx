@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Download, FileText, ArrowUpDown, CheckCircle2, RotateCw, ExternalLink, Eye, Loader2, Sparkles } from 'lucide-react';
 import FileDropzone from '../components/FileDropzone';
 import { PDFDocument } from 'pdf-lib';
@@ -6,6 +6,7 @@ import * as pdfjsLib from 'pdfjs-dist';
 import '../lib/pdfWorker';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
+import { useToast } from '../components/Toast';
 
 interface PageThumbnail {
   originalIndex: number; // 1-based
@@ -35,6 +36,14 @@ export default function ReversePDF() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [reversedUrl, setReversedUrl] = useState<string | null>(null);
   const [showPreview, setShowPreview] = useState(true);
+
+  const toast = useToast();
+
+  useEffect(() => {
+    return () => {
+      if (reversedUrl) URL.revokeObjectURL(reversedUrl);
+    };
+  }, [reversedUrl]);
 
   const handleDrop = async (acceptedFiles: File[]) => {
     if (acceptedFiles.length === 0) return;
@@ -75,7 +84,7 @@ export default function ReversePDF() {
       setThumbnails(loadedThumbs);
     } catch (err) {
       console.error('Error loading PDF pages:', err);
-      alert('Could not render document thumbnails. You can still proceed with reversing.');
+      toast.error('Could not render document thumbnails. You can still proceed with reversing.');
     } finally {
       setIsLoadingPages(false);
     }
@@ -124,10 +133,12 @@ export default function ReversePDF() {
 
       const pdfBytes = await newPdf.save();
       const blob = new Blob([pdfBytes as any], { type: 'application/pdf' });
+      if (reversedUrl) URL.revokeObjectURL(reversedUrl);
       setReversedUrl(URL.createObjectURL(blob));
+      toast.success('PDF page order reversed successfully!');
     } catch (error) {
       console.error('Error reversing PDF:', error);
-      alert('An error occurred while reversing the PDF. Please try again.');
+      toast.error('An error occurred while reversing the PDF. Please try again.');
     } finally {
       setIsProcessing(false);
     }

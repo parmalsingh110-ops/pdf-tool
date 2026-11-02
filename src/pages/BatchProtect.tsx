@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Lock, Download, Loader2, Package } from 'lucide-react';
 import { PDFDocument } from 'pdf-lib';
 import JSZip from 'jszip';
 import FileDropzone from '../components/FileDropzone';
 import { useSEO } from '../hooks/useSEO';
+import { useToast } from '../components/Toast';
 
 export default function BatchProtect() {
   useSEO('Batch Protect Online Free | PDF Media Suite', 'Free online Batch Protect tool. No signup or installation required.');
@@ -13,6 +14,14 @@ export default function BatchProtect() {
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState('');
   const [resultUrl, setResultUrl] = useState<string | null>(null);
+
+  const toast = useToast();
+
+  useEffect(() => {
+    return () => {
+      if (resultUrl) URL.revokeObjectURL(resultUrl);
+    };
+  }, [resultUrl]);
 
   const handleDrop = (acceptedFiles: File[]) => {
     setFiles(acceptedFiles);
@@ -49,10 +58,12 @@ export default function BatchProtect() {
       
       setProgress('Creating ZIP archive…');
       const blob = await zip.generateAsync({ type: 'blob' });
+      if (resultUrl) URL.revokeObjectURL(resultUrl);
       setResultUrl(URL.createObjectURL(blob));
       setProgress(`Done! ${files.length} file(s) protected.`);
+      toast.success(`Successfully password-protected ${files.length} file(s)!`);
     } catch (e: any) {
-      alert(e?.message || 'Batch protection failed.');
+      toast.error(e?.message || 'Batch protection failed.');
     } finally {
       setBusy(false);
     }

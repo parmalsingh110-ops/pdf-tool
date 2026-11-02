@@ -7,6 +7,7 @@ import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
+import { useToast } from '../components/Toast';
 
 interface BookmarkEntry {
   id: string;
@@ -40,6 +41,8 @@ export default function CreateBookmarks() {
 
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [resultName, setResultName] = useState('');
+
+  const toast = useToast();
 
   useEffect(() => {
     return () => {
@@ -95,7 +98,7 @@ export default function CreateBookmarks() {
 
       await renderPageThumb(pdf, 1);
     } catch (err: any) {
-      alert('Could not load PDF: ' + (err?.message || 'Invalid file'));
+      toast.error('Could not load PDF: ' + (err?.message || 'Invalid file'));
       setFile(null);
     } finally {
       setBusy(false);
@@ -175,6 +178,17 @@ export default function CreateBookmarks() {
       page: i + 1,
     }));
     setBookmarks(list);
+    toast.success(`Generated bookmarks for all ${pageCount} pages!`);
+  };
+
+  const sortByPage = () => {
+    setBookmarks((prev) => [...prev].sort((a, b) => a.page - b.page));
+    toast.info('Bookmarks sorted by page number.');
+  };
+
+  const clearAll = () => {
+    setBookmarks([]);
+    toast.info('Cleared all bookmarks.');
   };
 
   const processSaveBookmarks = async () => {
@@ -228,12 +242,14 @@ export default function CreateBookmarks() {
 
       const outBytes = await doc.save();
       const blob = new Blob([outBytes as any], { type: 'application/pdf' });
+      if (resultUrl) URL.revokeObjectURL(resultUrl);
       const url = URL.createObjectURL(blob);
       setResultUrl(url);
       setResultName(`${file.name.replace(/\.pdf$/i, '')}_with_bookmarks.pdf`);
+      toast.success(`Saved ${bookmarks.length} bookmark(s) into PDF!`);
     } catch (e: any) {
       console.error(e);
-      alert('Error saving bookmarks: ' + (e?.message || 'Unknown error'));
+      toast.error('Error saving bookmarks: ' + (e?.message || 'Unknown error'));
     } finally {
       setBusy(false);
     }
@@ -348,9 +364,39 @@ export default function CreateBookmarks() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4 border-t border-slate-100 dark:border-slate-800">
                 {/* Bookmarks List */}
                 <div className="space-y-2 max-h-96 overflow-y-auto pr-1">
-                  <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
-                    Bookmark Tree ({bookmarks.length})
-                  </h4>
+                  <div className="flex items-center justify-between mb-2">
+                    <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                      Bookmark Tree ({bookmarks.length})
+                    </h4>
+                    <div className="flex items-center gap-1.5 text-xs">
+                      <button
+                        type="button"
+                        onClick={generatePageByPage}
+                        className="px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 hover:bg-cyan-50 dark:hover:bg-cyan-900/30 text-slate-600 dark:text-slate-300 hover:text-cyan-600 text-[11px] font-medium transition-colors"
+                        title="Generate a bookmark for each page"
+                      >
+                        Auto 1..{pageCount}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={sortByPage}
+                        className="px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 hover:bg-cyan-50 dark:hover:bg-cyan-900/30 text-slate-600 dark:text-slate-300 hover:text-cyan-600 text-[11px] font-medium transition-colors"
+                        title="Sort bookmarks in ascending page order"
+                      >
+                        Sort
+                      </button>
+                      {bookmarks.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={clearAll}
+                          className="px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 hover:bg-red-50 dark:hover:bg-red-900/30 text-slate-600 dark:text-slate-300 hover:text-red-600 text-[11px] font-medium transition-colors"
+                          title="Clear all bookmarks"
+                        >
+                          Clear
+                        </button>
+                      )}
+                    </div>
+                  </div>
 
                   {bookmarks.length === 0 ? (
                     <p className="text-xs text-slate-400 py-6 text-center">

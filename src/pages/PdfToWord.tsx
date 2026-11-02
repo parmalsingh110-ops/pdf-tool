@@ -272,7 +272,10 @@ async function convertFrontend(
           italics: sp.italic,
           font: mapWordFont(sp.fontName),
           size: Math.round(Math.max(16, Math.min(sp.fontSize * 2, 72))),
-          color: sp.color?.replace('#', '') || undefined,
+          // For headings: force black color to prevent Word's default blue heading theme
+          color: (isHeading1 || isHeading2)
+            ? (sp.color?.replace('#', '') || '000000')
+            : (sp.color?.replace('#', '') || undefined),
         });
       });
 

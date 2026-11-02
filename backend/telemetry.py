@@ -15,6 +15,7 @@ import urllib.parse
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, Any, List
+from dotenv import load_dotenv
 
 logger = logging.getLogger("pdf_tool.telemetry")
 
@@ -24,15 +25,36 @@ DATA_DIR = BACKEND_DIR / "data"
 DATA_DIR.mkdir(exist_ok=True)
 DB_PATH = DATA_DIR / "telemetry.db"
 
+# Ensure environment variables are loaded from backend/.env or root .env
+load_dotenv(BACKEND_DIR / ".env")
+load_dotenv(BACKEND_DIR.parent / ".env")
+
 # Admin Secret Key (from env or default)
 ADMIN_SECRET_KEY = os.environ.get("ADMIN_SECRET_KEY", "pdfadmin2026")
 
-# Webhook URLs (optional - if set, sends instant alerts)
-DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL", "")
-DISCORD_FEEDBACK_WEBHOOK_URL = os.environ.get("DISCORD_FEEDBACK_WEBHOOK_URL", "") or DISCORD_WEBHOOK_URL
-DISCORD_CRASH_WEBHOOK_URL = os.environ.get("DISCORD_CRASH_WEBHOOK_URL", "") or DISCORD_WEBHOOK_URL
-TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
+def get_discord_webhook(webhook_url: Optional[str] = None) -> str:
+    """Return configured Discord webhook URL dynamically."""
+    if webhook_url and webhook_url.strip():
+        return webhook_url.strip()
+    return (
+        os.environ.get("DISCORD_CRASH_WEBHOOK_URL") or
+        os.environ.get("DISCORD_WEBHOOK_URL") or
+        ""
+    ).strip().strip('"').strip("'")
+
+def get_discord_feedback_webhook() -> str:
+    """Return configured Discord feedback webhook URL dynamically."""
+    return (
+        os.environ.get("DISCORD_FEEDBACK_WEBHOOK_URL") or
+        os.environ.get("DISCORD_WEBHOOK_URL") or
+        ""
+    ).strip().strip('"').strip("'")
+
+def get_telegram_creds() -> tuple[str, str]:
+    """Return (bot_token, chat_id) dynamically."""
+    token = (os.environ.get("TELEGRAM_BOT_TOKEN") or "").strip().strip('"').strip("'")
+    chat_id = (os.environ.get("TELEGRAM_CHAT_ID") or "").strip().strip('"').strip("'")
+    return token, chat_id
 
 
 def get_db_connection() -> sqlite3.Connection:
@@ -146,7 +168,7 @@ def send_discord_alert(
     webhook_url: Optional[str] = None
 ):
     """Send formatted embed message to Discord webhook if configured."""
-    target_url = (webhook_url or DISCORD_WEBHOOK_URL).strip()
+    target_url = get_discord_webhook(webhook_url)
     if not target_url:
         return
     try:
@@ -173,12 +195,13 @@ def send_discord_alert(
 
 def send_telegram_alert(text: str):
     """Send message to Telegram chat if bot token and chat ID are configured."""
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+    token, chat_id = get_telegram_creds()
+    if not token or not chat_id:
         return
     try:
-        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+        url = f"https://api.telegram.org/bot{token}/sendMessage"
         payload = {
-            "chat_id": TELEGRAM_CHAT_ID,
+            "chat_id": chat_id,
             "text": text[:4000],
             "parse_mode": "Markdown"
         }
@@ -249,7 +272,7 @@ def save_feedback(
         description=f"User submitted a review for **{tool_name}**",
         fields=disc_fields,
         color=color,
-        webhook_url=DISCORD_FEEDBACK_WEBHOOK_URL
+        webhook_url=get_discord_feedback_webhook()
     )
 
     tg_msg = (
@@ -322,7 +345,7 @@ def save_error(
         description=f"Error triggered in `{tool_path}`",
         fields=disc_fields,
         color=0xE74C3C,
-        webhook_url=DISCORD_CRASH_WEBHOOK_URL
+        webhook_url=get_discord_webhook()
     )
 
     tg_msg = (
@@ -411,8 +434,9 @@ def get_telemetry_summary() -> Dict[str, Any]:
             recent_errors = [dict(r) for r in cursor.fetchall()]
 
             # Webhook status
-            has_discord = bool(DISCORD_WEBHOOK_URL)
-            has_telegram = bool(TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID)
+            has_discord = bool(get_discord_webhook())
+            token, chat_id = get_telegram_creds()
+            has_telegram = bool(token and chat_id)
 
             return {
                 "success": True,

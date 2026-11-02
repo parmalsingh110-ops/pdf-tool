@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Download, FileText, Tag, ShieldCheck, Trash2, Calendar, User, Info, CheckCircle2, Sparkles, RefreshCw, Layers } from 'lucide-react';
 import FileDropzone from '../components/FileDropzone';
 import { PDFDocument } from 'pdf-lib';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
+import { useToast } from '../components/Toast';
 
 interface MetaState {
   title: string;
@@ -32,6 +33,14 @@ export default function EditMetadata() {
   const [editedUrl, setEditedUrl] = useState<string | null>(null);
   const [pageCount, setPageCount] = useState<number>(0);
   const [updateModDate, setUpdateModDate] = useState(true);
+
+  const toast = useToast();
+
+  useEffect(() => {
+    return () => {
+      if (editedUrl) URL.revokeObjectURL(editedUrl);
+    };
+  }, [editedUrl]);
 
   const [metadata, setMetadata] = useState<MetaState>({
     title: '',
@@ -121,11 +130,13 @@ export default function EditMetadata() {
 
       const pdfBytes = await pdfDoc.save();
       const blob = new Blob([pdfBytes as any], { type: 'application/pdf' });
+      if (editedUrl) URL.revokeObjectURL(editedUrl);
       const url = URL.createObjectURL(blob);
       setEditedUrl(url);
+      toast.success('Metadata updated successfully!');
     } catch (error) {
       console.error('Error saving metadata:', error);
-      alert('An error occurred while saving the PDF metadata.');
+      toast.error('An error occurred while saving the PDF metadata.');
     } finally {
       setIsProcessing(false);
     }

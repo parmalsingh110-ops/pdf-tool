@@ -7,6 +7,7 @@ import * as pdfjsLib from 'pdfjs-dist';
 import '../lib/pdfWorker';
 import { useSEO } from '../hooks/useSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
+import { useToast } from '../components/Toast';
 
 const ORDER_KEY = 'mergePdfOrderV1';
 type OrderEntry = { name: string; size: number; lastModified: number };
@@ -71,6 +72,13 @@ export default function MergePDF() {
   const [orderHint, setOrderHint] = useState<string | null>(null);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [dragOver, setDragOver] = useState<number | null>(null);
+
+  const toast = useToast();
+
+  // Cleanup merged blob URL on unmount
+  useEffect(() => {
+    return () => { if (mergedPdfUrl) URL.revokeObjectURL(mergedPdfUrl); };
+  }, [mergedPdfUrl]);
 
   useEffect(() => {
     if (entries.length > 0) saveOrderToSession(entries);
@@ -168,10 +176,12 @@ export default function MergePDF() {
       }
       const bytes = await mergedPdf.save();
       const blob = new Blob([bytes as any], { type: 'application/pdf' });
+      if (mergedPdfUrl) URL.revokeObjectURL(mergedPdfUrl);
       setMergedPdfUrl(URL.createObjectURL(blob));
+      toast.success(`Merged ${entries.length} files (${totalPages} pages) successfully!`);
     } catch (e: any) {
       console.error('Merge error:', e);
-      alert(e?.message || 'An error occurred while merging. Please try again.');
+      toast.error(e?.message || 'An error occurred while merging. Please try again.');
     } finally {
       setIsProcessing(false);
     }
