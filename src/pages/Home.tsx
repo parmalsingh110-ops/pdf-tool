@@ -25,10 +25,14 @@ import { FOUNDER_INFO, TEAM_MEMBERS } from '../config/founderInfo';
 const TOOL_GROUPS = [
   {
     title: 'Most Popular PDF Tools',
-    desc: 'The essentials — merge, split, compress, edit, and protect your PDFs.',
+    desc: 'The essentials — merge, compress, edit, scan to print, and passport photo sheets.',
     color: 'rose',
     tools: [
+      { title: 'Scan to Print QR', desc: 'Beam mobile files to PC queue without WhatsApp.', path: '/scan-to-print', icon: Printer },
+      { title: 'Passport Photo Sheet', desc: 'Print-ready photo grid on A4 & 4x6.', path: '/passport-photo-sheet', icon: ContactRound },
       { title: 'Merge PDF', desc: 'Combine multiple PDFs into one.', path: '/merge', icon: Combine },
+      { title: 'Compress PDF', desc: 'Reduce file size instantly.', path: '/compress', icon: Minimize2 },
+      { title: 'Edit PDF', desc: 'Annotate, edit text & layout.', path: '/edit', icon: Edit3 },
       { title: 'Alternate & Mix', desc: 'Mix odd & even duplex scanned pages.', path: '/alternate-mix', icon: Shuffle },
       { title: 'Split PDF', desc: 'Separate PDF into pages.', path: '/split', icon: Scissors },
       { title: 'Split in Half', desc: 'Cut 2-page book scans down the center.', path: '/split-in-half', icon: Scissors },
@@ -37,8 +41,6 @@ const TOOL_GROUPS = [
       { title: 'Deskew PDF', desc: 'Auto-straighten crooked scanned pages.', path: '/deskew', icon: Compass },
       { title: 'Rename by Content', desc: 'Auto-rename PDFs from invoice/page text.', path: '/rename-pdf', icon: Tag },
       { title: 'Create Bookmarks', desc: 'Add Table of Contents outline bookmarks.', path: '/create-bookmarks', icon: Bookmark },
-      { title: 'Compress PDF', desc: 'Reduce file size instantly.', path: '/compress', icon: Minimize2 },
-      { title: 'Edit PDF', desc: 'Annotate, edit text & layout.', path: '/edit', icon: Edit3 },
       { title: 'Protect PDF', desc: 'Add password encryption.', path: '/protect', icon: Lock },
       { title: 'Unlock PDF', desc: 'Auto password helper for Aadhaar, Bank & Tax.', path: '/unlock', icon: Unlock },
       { title: 'Watermark', desc: 'Add text watermarks to PDF.', path: '/watermark', icon: Droplet },
