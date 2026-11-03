@@ -14,6 +14,7 @@ import {
   Shield, Wrench, Globe, FileCode2, Type, Accessibility, Volume2, Link as LinkIcon, BookMarked, Eraser,
   Shuffle, FlipHorizontal, Compass, Bookmark, FileCheck2, Printer, Grid,
   Briefcase, GraduationCap, Building2, Award, X,
+  Calculator, Monitor, Scale, Megaphone,
 } from 'lucide-react';
 import { toggleFavorite, isFavorite } from '../lib/favorites';
 import { useSEO } from '../hooks/useSEO';
@@ -66,6 +67,14 @@ const categories = [
       { title: 'Classroom Board Notes Cleaner', path: '/board-notes-cleaner', icon: Sparkles, color: 'text-cyan-600', bg: 'bg-cyan-50' },
       { title: 'Strict 1-Page Resume Compactor', path: '/resume-compactor', icon: FileText, color: 'text-blue-600', bg: 'bg-blue-50' },
       { title: 'Project Report Header & Watermark Swapper', path: '/report-header-swapper', icon: BookMarked, color: 'text-rose-600', bg: 'bg-rose-50' },
+      { title: 'Print Cost & Dynamic UPI QR Generator', path: '/print-cost-calculator', icon: Calculator, color: 'text-emerald-600', bg: 'bg-emerald-50' },
+      { title: 'Confidential Zero-Trace Print Tunnel', path: '/zero-trace-print', icon: ShieldCheck, color: 'text-rose-600', bg: 'bg-rose-50' },
+      { title: 'Fullscreen Counter Self-Service Kiosk', path: '/counter-kiosk', icon: Monitor, color: 'text-emerald-600', bg: 'bg-emerald-50' },
+      { title: 'Talking Notes Audio QR Handout Maker', path: '/talking-notes', icon: Volume2, color: 'text-indigo-600', bg: 'bg-indigo-50' },
+      { title: 'Smart Admit Card 1-Page Optimizer + GPS QR', path: '/admit-card-optimizer', icon: GraduationCap, color: 'text-blue-600', bg: 'bg-blue-50' },
+      { title: 'WhatsApp Chat to Court Evidence Formatter', path: '/court-evidence-formatter', icon: Scale, color: 'text-amber-600', bg: 'bg-amber-50' },
+      { title: 'Smart KYC OCR & Customer Slip Generator', path: '/smart-kyc-slip', icon: ScanLine, color: 'text-cyan-600', bg: 'bg-cyan-50' },
+      { title: 'Instant Coaching & Shop Pamphlet Maker', path: '/pamphlet-maker', icon: Megaphone, color: 'text-violet-600', bg: 'bg-violet-50' },
       { title: 'PDF to JPG', path: '/pdf-to-jpg', icon: ImageIcon, color: 'text-yellow-500', bg: 'bg-yellow-50' },
       { title: 'JPG to PDF', path: '/jpg-to-pdf', icon: FileImage, color: 'text-yellow-500', bg: 'bg-yellow-50' },
       { title: 'Organize PDF', path: '/organize', icon: Layers, color: 'text-blue-500', bg: 'bg-blue-50' },
@@ -251,6 +260,10 @@ const ROLE_PROFILES: RoleProfile[] = [
     themeColor: 'from-blue-600 to-cyan-600',
     bannerBg: 'bg-gradient-to-r from-blue-50 to-cyan-50 dark:from-blue-950/40 dark:to-cyan-950/40 border-blue-200 dark:border-blue-800',
     tools: [
+      { title: 'Print Cost & Dynamic UPI QR Generator', path: '/print-cost-calculator', desc: 'Auto count B&W/Color pages & create exact UPI QR bill.', icon: Calculator, color: 'text-emerald-600', bg: 'bg-emerald-50', badge: 'UPI Bill' },
+      { title: 'Fullscreen Counter Self-Print Kiosk', path: '/counter-kiosk', desc: 'Customer self-order terminal with digital token queue.', icon: Monitor, color: 'text-emerald-600', bg: 'bg-emerald-50', badge: 'Kiosk Queue' },
+      { title: 'Smart KYC OCR & Customer Slip', path: '/smart-kyc-slip', desc: '1-click copy Aadhaar/PAN details & print receipt slip.', icon: ScanLine, color: 'text-cyan-600', bg: 'bg-cyan-50', badge: 'OCR Slip' },
+      { title: 'Instant Coaching & Shop Pamphlet Maker', path: '/pamphlet-maker', desc: '4-in-1 mass photocopy flyer layout on single A4 sheet.', icon: Megaphone, color: 'text-violet-600', bg: 'bg-violet-50', badge: '4-in-1 Flyer' },
       { title: 'Scan to Print QR Web-Drop', path: '/scan-to-print', desc: 'Beam mobile files to PC queue without saving WhatsApp numbers.', icon: Printer, color: 'text-rose-600', bg: 'bg-rose-50', badge: 'Viral' },
       { title: 'Multi-Customer Gang-Print Sheet', path: '/gang-print-sheet', desc: 'Combine 2-8 customer ID cards onto A4 or 4×6 photo sheet.', icon: Layers, color: 'text-emerald-600', bg: 'bg-emerald-50', badge: 'Paper Saver' },
       { title: 'Faint Land Record Darkener', path: '/land-record-darkener', desc: 'Darken faint survey lines on Bhu-Naksha & Jamabandi maps.', icon: FileCheck2, color: 'text-amber-600', bg: 'bg-amber-50', badge: 'Revenue' },
@@ -275,6 +288,8 @@ const ROLE_PROFILES: RoleProfile[] = [
     themeColor: 'from-violet-600 to-indigo-600',
     bannerBg: 'bg-gradient-to-r from-violet-50 to-indigo-50 dark:from-violet-950/40 dark:to-indigo-950/40 border-violet-200 dark:border-violet-800',
     tools: [
+      { title: 'Talking Notes Audio QR Handouts', path: '/talking-notes', desc: 'Embed teacher voice explanation QR codes directly on notes.', icon: Volume2, color: 'text-indigo-600', bg: 'bg-indigo-50', badge: 'Audio Notes' },
+      { title: 'Smart Admit Card 1-Page Optimizer', path: '/admit-card-optimizer', desc: '1-page hall ticket with Google Maps exam center GPS QR.', icon: GraduationCap, color: 'text-blue-600', bg: 'bg-blue-50', badge: 'GPS Center' },
       { title: 'Micro-Pocket Notes Maker', path: '/micro-pocket-notes', desc: '4-in-1, 8-in-1, 16-in-1 pocket revision booklets with cut marks.', icon: BookOpen, color: 'text-violet-600', bg: 'bg-violet-50', badge: 'Paper Saver' },
       { title: 'Lab Journal & Practical Formatter', path: '/lab-journal-formatter', desc: 'Left 1cm Graph sheet, Right ruled notebook page with header.', icon: Grid, color: 'text-indigo-600', bg: 'bg-indigo-50', badge: 'Practical' },
       { title: 'Classroom Board Notes Cleaner', path: '/board-notes-cleaner', desc: 'De-glare whiteboard photos & invert blackboard to black ink.', icon: Sparkles, color: 'text-cyan-600', bg: 'bg-cyan-50', badge: 'De-Glare' },
@@ -300,6 +315,9 @@ const ROLE_PROFILES: RoleProfile[] = [
     themeColor: 'from-emerald-600 to-teal-600',
     bannerBg: 'bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-950/40 dark:to-teal-950/40 border-emerald-200 dark:border-emerald-800',
     tools: [
+      { title: 'Court Evidence Formatter (Sec 63 BSA)', path: '/court-evidence-formatter', desc: 'WhatsApp chat to legal petition annexure with 65B certificate.', icon: Scale, color: 'text-amber-600', bg: 'bg-amber-50', badge: 'Sec 63 BSA' },
+      { title: 'Confidential Zero-Trace Print Tunnel', path: '/zero-trace-print', desc: 'Print confidential salary/bank slips in RAM with zero disk trace.', icon: ShieldCheck, color: 'text-rose-600', bg: 'bg-rose-50', badge: 'RAM Wipe' },
+      { title: 'Print Cost & Dynamic UPI QR', path: '/print-cost-calculator', desc: 'Auto count B&W/color pages and create dynamic UPI QR bill.', icon: Calculator, color: 'text-emerald-600', bg: 'bg-emerald-50', badge: 'UPI Bill' },
       { title: 'Scan to Print QR Web-Drop', path: '/scan-to-print', desc: 'Instant counter print queue without saving WhatsApp numbers.', icon: Printer, color: 'text-rose-600', bg: 'bg-rose-50', badge: 'Instant Queue' },
       { title: 'Strict 1-Page Resume Compactor', path: '/resume-compactor', desc: 'Fit corporate CV strictly onto 1 page without text loss.', icon: FileText, color: 'text-blue-600', bg: 'bg-blue-50', badge: '1-Page CV' },
       { title: 'Expense Bills 4-in-1 Consolidator', path: '/bill-consolidator', desc: 'Combine petrol slips with audited claim table.', icon: LayoutGrid, color: 'text-emerald-600', bg: 'bg-emerald-50', badge: 'Reimbursement' },
@@ -323,6 +341,7 @@ const ROLE_PROFILES: RoleProfile[] = [
     themeColor: 'from-amber-600 to-rose-600',
     bannerBg: 'bg-gradient-to-r from-amber-50 to-rose-50 dark:from-amber-950/40 dark:to-rose-950/40 border-amber-200 dark:border-amber-800',
     tools: [
+      { title: 'Smart Admit Card 1-Page + GPS QR', path: '/admit-card-optimizer', desc: '1-page hall ticket with Google Maps exam center GPS QR.', icon: GraduationCap, color: 'text-blue-600', bg: 'bg-blue-50', badge: 'GPS Center' },
       { title: 'Sarkari Photo & Sign (Name & DOP)', path: '/sarkari-photo-signature', desc: 'Format photo with name & DOP + 20-50KB size.', icon: ContactRound, color: 'text-amber-600', bg: 'bg-amber-50', badge: 'Mandatory' },
       { title: 'Clean Paper Signature', path: '/clean-signature', desc: 'Whiten mobile photo background to pure white.', icon: Pen, color: 'text-indigo-600', bg: 'bg-indigo-50', badge: 'Online Forms' },
       { title: 'Masked Aadhaar Maker (XXXX-XXXX)', path: '/masked-aadhaar', desc: 'Mask first 8 digits according to UIDAI rules.', icon: ShieldCheck, color: 'text-emerald-600', bg: 'bg-emerald-50', badge: 'UIDAI Safe' },

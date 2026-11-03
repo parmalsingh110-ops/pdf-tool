@@ -8,6 +8,7 @@ import { Search, ArrowRight, X, Combine, Scissors, Minimize2, FileText, Image as
   GitCompare, FormInput, Copy, MonitorSmartphone, Wand2, Globe, Volume2, Link as LinkIcon,
   Shield, Wrench, FileCode2, Type, BookMarked, Accessibility, Tag, BarChart2,
   Shuffle, FlipHorizontal, Compass, Bookmark, FileCheck2, Printer, Grid,
+  Calculator, Monitor, Scale, GraduationCap, Megaphone,
 } from 'lucide-react';
 
 interface ToolEntry {
@@ -53,6 +54,14 @@ const ALL_TOOLS: ToolEntry[] = [
   { title: 'Classroom Board Notes Cleaner', path: '/board-notes-cleaner', icon: Sparkles, category: 'Image Tools', keywords: 'blackboard photo to pdf whiteboard notes de-glare deskew chalk to ink inverter lecture notes' },
   { title: 'Strict 1-Page Resume Compactor', path: '/resume-compactor', icon: FileText, category: 'PDF Tools', keywords: 'resume 1 page compactor shrink cv to one page fit placement single page hr ats' },
   { title: 'Project Report Header & Watermark Swapper', path: '/report-header-swapper', icon: BookMarked, category: 'PDF Tools', keywords: 'project report header swapper thesis watermark remover college logo roll no page numbers' },
+  { title: 'Print Cost & Dynamic UPI QR Generator', path: '/print-cost-calculator', icon: Calculator, category: 'PDF Tools', keywords: 'print cost calculator xerox bill dynamic upi qr payment color count emitra' },
+  { title: 'Confidential Zero-Trace Print Tunnel', path: '/zero-trace-print', icon: ShieldCheck, category: 'Security', keywords: 'zero trace print ephemeral ram private bank statement salary slip shred' },
+  { title: 'Fullscreen Counter Self-Service Kiosk', path: '/counter-kiosk', icon: Monitor, category: 'Pro Tools', keywords: 'counter kiosk customer self order print queue token system cyber cafe xerox' },
+  { title: 'Talking Notes Audio QR Handout Maker', path: '/talking-notes', icon: Volume2, category: 'PDF Tools', keywords: 'talking notes audio qr voice explanation coaching handout printed paper scan' },
+  { title: 'Smart Admit Card 1-Page Optimizer + GPS QR', path: '/admit-card-optimizer', icon: GraduationCap, category: 'PDF Tools', keywords: 'admit card optimizer 1 page print exam center google maps gps qr ssc neet upsc' },
+  { title: 'WhatsApp Chat to Court Evidence Formatter', path: '/court-evidence-formatter', icon: Scale, category: 'PDF Tools', keywords: 'court evidence whatsapp chat sec 63 bsa 65b certificate legal exhibit advocate' },
+  { title: 'Smart KYC OCR & Customer Slip Generator', path: '/smart-kyc-slip', icon: ScanLine, category: 'Pro Tools', keywords: 'smart kyc ocr slip aadhaar pan voter copy details emitra csc receipt' },
+  { title: 'Instant Coaching & Shop Pamphlet Maker', path: '/pamphlet-maker', icon: Megaphone, category: 'Creative', keywords: 'pamphlet maker coaching flyer parcha 4 in 1 2 in 1 a4 mass xerox print' },
   { title: 'All Documents to Single PDF (<1 MB)', path: '/exam-document-merger', icon: Combine, category: 'PDF Tools', keywords: 'single pdf under 1mb 500kb exam bundle merger combine marksheet certificates upsc ssc' },
   { title: 'Watermark PDF', path: '/watermark', icon: Droplet, category: 'PDF Tools', keywords: 'stamp brand' },
   { title: 'Remove Watermark', path: '/remove-watermark', icon: Droplet, category: 'PDF Tools', keywords: 'erase delete' },

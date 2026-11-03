@@ -13,7 +13,7 @@ This document serves as the "Graph" context for the `pdf-tool` project, giving A
   - `main.py`: The core backend file containing all API routes and logic.
   - `requirements.txt`: Python dependencies.
 - **`src/`**: Contains the React + TypeScript frontend.
-  - **`pages/`**: Contains 127 page components (e.g., AdvancedEditor.tsx, AllTools.tsx, ScanToPrint.tsx, GangPrintSheet.tsx, LandRecordDarkener.tsx, MicroPocketNotes.tsx, LabJournalFormatter.tsx, BoardNotesCleaner.tsx, ResumeCompactor.tsx, ReportHeaderSwapper.tsx).
+  - **`pages/`**: Contains 135 page components (e.g., AdvancedEditor.tsx, AllTools.tsx, ScanToPrint.tsx, PrintCostCalculator.tsx, ZeroTracePrint.tsx, CounterKiosk.tsx, TalkingNotes.tsx, AdmitCardOptimizer.tsx, CourtEvidenceFormatter.tsx, SmartKycSlip.tsx, PamphletMaker.tsx).
   - **`components/`**: Contains shared UI components (e.g., Layout.tsx, FileDropzone.tsx).
 - **`public/`**: Static assets.
 

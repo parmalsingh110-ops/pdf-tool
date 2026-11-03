@@ -552,6 +552,14 @@ export default function Layout() {
               <li><Link to="/board-notes-cleaner" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Board Notes Cleaner</Link></li>
               <li><Link to="/resume-compactor" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Resume 1-Page Compactor</Link></li>
               <li><Link to="/report-header-swapper" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Report Header Swapper</Link></li>
+              <li><Link to="/print-cost-calculator" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Print Cost &amp; UPI QR</Link></li>
+              <li><Link to="/zero-trace-print" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Zero-Trace Print</Link></li>
+              <li><Link to="/counter-kiosk" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Counter Print Kiosk</Link></li>
+              <li><Link to="/talking-notes" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Talking Notes Audio QR</Link></li>
+              <li><Link to="/admit-card-optimizer" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Admit Card 1-Page + GPS</Link></li>
+              <li><Link to="/court-evidence-formatter" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Court Evidence Formatter</Link></li>
+              <li><Link to="/smart-kyc-slip" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Smart KYC OCR Slip</Link></li>
+              <li><Link to="/pamphlet-maker" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Pamphlet &amp; Flyer Maker</Link></li>
               <li><Link to="/edit" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Edit PDF</Link></li>
               <li><Link to="/protect" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Protect PDF</Link></li>
               <li><Link to="/rotate-pages" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Rotate PDF</Link></li>

@@ -156,6 +156,14 @@ const LabJournalFormatter = lazy(() => import('./pages/LabJournalFormatter'));
 const BoardNotesCleaner = lazy(() => import('./pages/BoardNotesCleaner'));
 const ResumeCompactor = lazy(() => import('./pages/ResumeCompactor'));
 const ReportHeaderSwapper = lazy(() => import('./pages/ReportHeaderSwapper'));
+const PrintCostCalculator = lazy(() => import('./pages/PrintCostCalculator'));
+const ZeroTracePrint = lazy(() => import('./pages/ZeroTracePrint'));
+const CounterKiosk = lazy(() => import('./pages/CounterKiosk'));
+const TalkingNotes = lazy(() => import('./pages/TalkingNotes'));
+const AdmitCardOptimizer = lazy(() => import('./pages/AdmitCardOptimizer'));
+const CourtEvidenceFormatter = lazy(() => import('./pages/CourtEvidenceFormatter'));
+const SmartKycSlip = lazy(() => import('./pages/SmartKycSlip'));
+const PamphletMaker = lazy(() => import('./pages/PamphletMaker'));
 const NotFound = lazy(() => import('./pages/NotFound'));
 
 export default function App() {
@@ -343,6 +351,14 @@ export default function App() {
         <Route path="board-notes-cleaner" element={<BoardNotesCleaner />} />
         <Route path="resume-compactor" element={<ResumeCompactor />} />
         <Route path="report-header-swapper" element={<ReportHeaderSwapper />} />
+        <Route path="print-cost-calculator" element={<PrintCostCalculator />} />
+        <Route path="zero-trace-print" element={<ZeroTracePrint />} />
+        <Route path="counter-kiosk" element={<CounterKiosk />} />
+        <Route path="talking-notes" element={<TalkingNotes />} />
+        <Route path="admit-card-optimizer" element={<AdmitCardOptimizer />} />
+        <Route path="court-evidence-formatter" element={<CourtEvidenceFormatter />} />
+        <Route path="smart-kyc-slip" element={<SmartKycSlip />} />
+        <Route path="pamphlet-maker" element={<PamphletMaker />} />
 
         {/* 404 Catch-All Route: Eliminates Soft-404 Errors in Google Search Console */}
         <Route path="*" element={<NotFound />} />

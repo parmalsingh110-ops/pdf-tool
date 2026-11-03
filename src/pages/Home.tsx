@@ -10,6 +10,7 @@ import {
   Linkedin, Github, Mail, ExternalLink, Award, CheckCircle2,
   Shuffle, FlipHorizontal, Compass, Trash2, Tag, Bookmark,
   ScanLine, FileCheck, Receipt, BookMarked, Printer, Grid,
+  Calculator, Monitor, Scale, GraduationCap, Megaphone,
 } from 'lucide-react';
 import { readRecentTools, type RecentEntry } from '../lib/recentFiles';
 import { usePageSEO } from '../lib/usePageSEO';
@@ -113,6 +114,14 @@ const TOOL_GROUPS = [
       { title: 'Board Notes Cleaner', desc: 'De-glare whiteboard & invert chalk to black ink.', path: '/board-notes-cleaner', icon: Sparkles },
       { title: 'Resume 1-Page Compactor', desc: 'Fit 2-page CV strictly into 1 page.', path: '/resume-compactor', icon: FileText },
       { title: 'Project Report Header Swapper', desc: 'Mask senior headers, stamp your college info.', path: '/report-header-swapper', icon: BookMarked },
+      { title: 'Print Cost & UPI QR', desc: 'Auto count B&W/Color pages & create exact UPI QR bill.', path: '/print-cost-calculator', icon: Calculator },
+      { title: 'Zero-Trace Print Tunnel', desc: 'Print confidential salary/bank slips in RAM with zero disk trace.', path: '/zero-trace-print', icon: ShieldCheck },
+      { title: 'Counter Print Kiosk', desc: 'Customer self-order terminal with digital token queue.', path: '/counter-kiosk', icon: Monitor },
+      { title: 'Talking Notes Audio QR', desc: 'Embed teacher voice explanation QR codes directly on notes.', path: '/talking-notes', icon: Zap },
+      { title: 'Admit Card 1-Page + GPS QR', desc: '1-page hall ticket with Google Maps exam center GPS QR.', path: '/admit-card-optimizer', icon: GraduationCap },
+      { title: 'Court Evidence Formatter', desc: 'WhatsApp chat to legal petition annexure with 65B certificate.', path: '/court-evidence-formatter', icon: Scale },
+      { title: 'Smart KYC OCR Slip', desc: '1-click copy Aadhaar/PAN details & print receipt slip.', path: '/smart-kyc-slip', icon: ScanLine },
+      { title: 'Pamphlet & Flyer Maker', desc: '4-in-1 mass photocopy flyer layout on single A4 sheet.', path: '/pamphlet-maker', icon: Megaphone },
       { title: 'Exam Bundle PDF', desc: 'All documents in single PDF under 1 MB.', path: '/exam-document-merger', icon: Layers2 },
       { title: 'Handwriting PDF', desc: 'Convert text to real handwritten notes.', path: '/handwriting-pdf', icon: Pen },
       { title: 'File Hash', desc: 'SHA-256 verify integrity.', path: '/file-hash', icon: ShieldCheck },
