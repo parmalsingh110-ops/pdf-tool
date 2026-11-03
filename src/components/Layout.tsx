@@ -233,10 +233,15 @@ export default function Layout() {
   const recentRef = useRef<HTMLDivElement>(null);
   const favRef = useRef<HTMLDivElement>(null);
 
-  // Close mobile menu & dropdowns on route change
+  // Close mobile menu & dropdowns and ensure scroll resets on route change
   useEffect(() => {
     setMobileOpen(false);
     setOpenDropdown(null);
+    try {
+      window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+    } catch {
+      window.scrollTo(0, 0);
+    }
   }, [location.pathname]);
 
   useEffect(() => {
