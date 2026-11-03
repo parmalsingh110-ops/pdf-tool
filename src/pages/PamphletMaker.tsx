@@ -114,6 +114,18 @@ const PRESET_TEMPLATES: PresetTemplate[] = [
   },
 ];
 
+function cleanWinAnsi(str: string): string {
+  if (!str) return '';
+  return str
+    .replace(/₹/g, 'Rs. ')
+    .replace(/[—–]/g, '-')
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .replace(/[•·]/g, '*')
+    .replace(/…/g, '...')
+    .replace(/[^\x00-\x7F]/g, ' ');
+}
+
 export default function PamphletMaker() {
   useSEO(
     'Instant Pamphlet & Flyer Maker — 4-in-1 Mass Xerox Print Layout | PDF Media Suite',
@@ -195,9 +207,10 @@ export default function PamphletMaker() {
         });
 
         // Title
+        const safeTitle = cleanWinAnsi(title);
         const titleFontSize = Math.min(13, bw / 22);
-        const titleWidth = fontBold.widthOfTextAtSize(title, titleFontSize);
-        page.drawText(title, {
+        const titleWidth = fontBold.widthOfTextAtSize(safeTitle, titleFontSize);
+        page.drawText(safeTitle, {
           x: bx + (bw - titleWidth) / 2,
           y: by + bh - headerH / 2 - 12,
           size: titleFontSize,
@@ -206,9 +219,10 @@ export default function PamphletMaker() {
         });
 
         // Punchline
+        const safePunchline = cleanWinAnsi(punchline);
         const punchFontSize = Math.min(8.5, bw / 32);
-        const punchWidth = fontBold.widthOfTextAtSize(punchline, punchFontSize);
-        page.drawText(punchline, {
+        const punchWidth = fontBold.widthOfTextAtSize(safePunchline, punchFontSize);
+        page.drawText(safePunchline, {
           x: bx + (bw - punchWidth) / 2,
           y: by + bh - headerH - 24,
           size: punchFontSize,
@@ -217,9 +231,10 @@ export default function PamphletMaker() {
         });
 
         // Badge pill
-        if (badge) {
+        const safeBadge = cleanWinAnsi(badge);
+        if (safeBadge) {
           const badgeFontSize = Math.min(8, bw / 34);
-          const badgeWidth = fontBold.widthOfTextAtSize(badge, badgeFontSize);
+          const badgeWidth = fontBold.widthOfTextAtSize(safeBadge, badgeFontSize);
           const pillW = badgeWidth + 14;
           const pillH = 16;
           const pillX = bx + (bw - pillW) / 2;
@@ -235,7 +250,7 @@ export default function PamphletMaker() {
             borderWidth: 1,
           });
 
-          page.drawText(badge, {
+          page.drawText(safeBadge, {
             x: pillX + 7,
             y: pillY + 4,
             size: badgeFontSize,
@@ -245,7 +260,7 @@ export default function PamphletMaker() {
         }
 
         // Bullets
-        const bullets = [bullet1, bullet2, bullet3, bullet4].filter(Boolean);
+        const bullets = [bullet1, bullet2, bullet3, bullet4].filter(Boolean).map(cleanWinAnsi);
         let curY = by + bh - headerH - 65;
         const bulletFontSize = Math.min(7.5, bw / 35);
 
@@ -272,8 +287,9 @@ export default function PamphletMaker() {
           borderWidth: 1,
         });
 
+        const safeContact = cleanWinAnsi(contact);
         const contactFontSize = Math.min(8.5, bw / 30);
-        page.drawText(contact, {
+        page.drawText(safeContact, {
           x: bx + 16,
           y: by + footerH - 4,
           size: contactFontSize,
@@ -281,8 +297,9 @@ export default function PamphletMaker() {
           color: rgb(0.1, 0.1, 0.1),
         });
 
+        const safeAddress = cleanWinAnsi(address);
         const addrFontSize = Math.min(7, bw / 36);
-        page.drawText(address, {
+        page.drawText(safeAddress, {
           x: bx + 16,
           y: by + 16,
           size: addrFontSize,

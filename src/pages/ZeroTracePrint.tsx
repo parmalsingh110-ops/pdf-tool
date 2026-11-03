@@ -184,9 +184,73 @@ export default function ZeroTracePrint() {
     setIsTimerRunning(false);
   };
 
-  const handlePrint = () => {
-    window.print();
-    // After user initiates print, suggest immediate shred
+  const [isPrinting, setIsPrinting] = useState(false);
+
+  const handlePrint = async () => {
+    if (!pdfDoc || isDestroyed || isPrinting) return;
+    setIsPrinting(true);
+
+    try {
+      const pageImages: string[] = [];
+      const numPages = pdfDoc.numPages;
+
+      for (let p = 1; p <= numPages; p++) {
+        const page = await pdfDoc.getPage(p);
+        const viewport = page.getViewport({ scale: 2.0 }); // 200 DPI crisp print
+        const canvas = document.createElement('canvas');
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          await page.render({ canvasContext: ctx, viewport, canvas } as any).promise;
+          pageImages.push(canvas.toDataURL('image/jpeg', 0.95));
+        }
+      }
+
+      const printWin = window.open('', '_blank');
+      if (!printWin) {
+        alert('Please allow popups to open the confidential print dialog.');
+        setIsPrinting(false);
+        return;
+      }
+
+      printWin.document.write(`
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <title>Confidential Print - ${fileName}</title>
+            <style>
+              @page { size: auto; margin: 0; }
+              body { margin: 0; padding: 0; background: #fff; }
+              .page-item { width: 100%; page-break-after: always; display: flex; justify-content: center; align-items: center; }
+              .page-item:last-child { page-break-after: avoid; }
+              img { width: 100%; height: auto; display: block; }
+            </style>
+          </head>
+          <body>
+            ${pageImages.map((src) => `<div class="page-item"><img src="${src}" /></div>`).join('')}
+            <script>
+              window.onload = function() {
+                window.focus();
+                window.print();
+                window.onafterprint = function() { window.close(); };
+              };
+            </script>
+          </body>
+        </html>
+      `);
+      printWin.document.close();
+
+      // Trigger automatic cryptographic memory wipe after sending to printer
+      setTimeout(() => {
+        handleShredMemory();
+      }, 1200);
+    } catch (e) {
+      console.error('Confidential print error:', e);
+      window.print();
+    } finally {
+      setIsPrinting(false);
+    }
   };
 
   return (
@@ -307,9 +371,10 @@ export default function ZeroTracePrint() {
               <div className="flex items-center gap-2">
                 <button
                   onClick={handlePrint}
-                  className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold bg-slate-900 dark:bg-white text-white dark:text-slate-900 hover:opacity-90 shadow-sm"
+                  disabled={isPrinting}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold bg-slate-900 dark:bg-white text-white dark:text-slate-900 hover:opacity-90 shadow-sm disabled:opacity-50"
                 >
-                  <Printer className="w-4 h-4" /> Send to Printer (Ctrl+P)
+                  <Printer className="w-4 h-4" /> {isPrinting ? 'Rendering High-DPI Print...' : 'Send to Printer (1-Click)'}
                 </button>
                 <button
                   onClick={handleShredMemory}

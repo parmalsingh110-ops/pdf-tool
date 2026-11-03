@@ -221,6 +221,114 @@ export default function PrintCostCalculator() {
       .catch(() => setUpiQrDataUrl(upiQrUrlFallback));
   }, [upiPayString, upiQrUrlFallback]);
 
+  // Clean 80mm POS Thermal / Laser Bill Receipt Printer
+  const handlePrintBillSlip = () => {
+    const printWin = window.open('', '_blank');
+    if (!printWin) {
+      alert('Please allow popups to print the bill receipt.');
+      return;
+    }
+
+    const receiptNo = `INV-${Date.now().toString(36).toUpperCase().slice(-5)}`;
+    const now = new Date().toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' });
+
+    printWin.document.write(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Bill Receipt - ${shopName}</title>
+          <style>
+            @page { size: 80mm auto; margin: 4mm; }
+            body {
+              font-family: monospace, -apple-system, sans-serif;
+              font-size: 12px;
+              color: #000;
+              margin: 0;
+              padding: 6px;
+              max-width: 300px;
+            }
+            .center { text-align: center; }
+            .bold { font-weight: bold; }
+            .header { border-bottom: 1px dashed #000; padding-bottom: 6px; margin-bottom: 8px; }
+            .title { font-size: 16px; font-weight: 900; margin-bottom: 2px; }
+            .row { display: flex; justify-content: space-between; margin-bottom: 4px; }
+            .divider { border-top: 1px dashed #000; margin: 8px 0; }
+            .total-row { font-size: 15px; font-weight: 900; border-top: 1px solid #000; border-bottom: 1px solid #000; padding: 6px 0; margin: 8px 0; }
+            .qr-box { text-align: center; margin: 10px 0; }
+            .qr-box img { width: 140px; height: 140px; }
+            .footer { font-size: 10px; text-align: center; color: #444; margin-top: 10px; }
+          </style>
+        </head>
+        <body>
+          <div class="header center">
+            <div class="title">${shopName}</div>
+            <div>Photo State, Print &amp; E-Mitra Services</div>
+            <div style="font-size: 10px; margin-top: 3px;">Date: ${now} | ${receiptNo}</div>
+          </div>
+
+          <div class="row">
+            <span>Doc / File:</span>
+            <span class="bold">${file ? file.name.slice(0, 18) : 'Direct Print'}</span>
+          </div>
+          <div class="row">
+            <span>Pages &amp; Copies:</span>
+            <span>${totalPages} Pages x ${copies} Copy</span>
+          </div>
+          <div class="row">
+            <span>Mode / Paper:</span>
+            <span>${printMode.toUpperCase()} (${paperType})</span>
+          </div>
+
+          <div class="divider"></div>
+
+          ${pricingSummary.bwCount > 0 ? `
+          <div class="row">
+            <span>B&amp;W Pages (${pricingSummary.bwCount}p):</span>
+            <span>₹${pricingSummary.bwTotal}</span>
+          </div>` : ''}
+
+          ${pricingSummary.colorCount > 0 ? `
+          <div class="row">
+            <span>Color Pages (${pricingSummary.colorCount}p):</span>
+            <span>₹${pricingSummary.colorTotal}</span>
+          </div>` : ''}
+
+          ${pricingSummary.addOns > 0 ? `
+          <div class="row">
+            <span>Add-ons (Lamination/Spiral):</span>
+            <span>₹${pricingSummary.addOns}</span>
+          </div>` : ''}
+
+          <div class="row total-row">
+            <span>GRAND TOTAL:</span>
+            <span>₹${pricingSummary.grandTotal}</span>
+          </div>
+
+          ${upiQrDataUrl ? `
+          <div class="qr-box">
+            <img src="${upiQrDataUrl}" />
+            <div style="font-size: 10px; font-weight: bold; margin-top: 2px;">SCAN TO PAY VIA UPI</div>
+            <div style="font-size: 9px; color: #555;">${upiId}</div>
+          </div>` : ''}
+
+          <div class="footer">
+            <div>*** Thank You! Visit Again ***</div>
+            <div style="font-size: 8px; margin-top: 4px; color: #888;">Powered by PDF Media Suite</div>
+          </div>
+
+          <script>
+            window.onload = function() {
+              window.focus();
+              window.print();
+              window.onafterprint = function() { window.close(); };
+            };
+          </script>
+        </body>
+      </html>
+    `);
+    printWin.document.close();
+  };
+
   return (
     <div className="w-full min-h-screen bg-slate-50 dark:bg-slate-950 py-10 px-4 sm:px-6 lg:px-8">
       <div className="max-w-6xl mx-auto space-y-8">
@@ -659,7 +767,7 @@ export default function PrintCostCalculator() {
 
                 <div className="grid grid-cols-2 gap-3 pt-2">
                   <button
-                    onClick={() => window.print()}
+                    onClick={handlePrintBillSlip}
                     className="flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-xs font-bold bg-white/10 hover:bg-white/20 text-white transition-colors"
                   >
                     <Printer className="w-4 h-4" /> Print Bill Slip

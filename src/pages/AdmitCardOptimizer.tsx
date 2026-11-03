@@ -14,6 +14,7 @@ import {
   Navigation,
 } from 'lucide-react';
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
+import QRCode from 'qrcode';
 import * as pdfjsLib from 'pdfjs-dist';
 import '../lib/pdfWorker';
 import { useSEO } from '../hooks/useSEO';
@@ -95,14 +96,19 @@ export default function AdmitCardOptimizer() {
       const font = await outDoc.embedFont(StandardFonts.HelveticaBold);
       const fontReg = await outDoc.embedFont(StandardFonts.Helvetica);
 
-      // 1. Embed Google Maps GPS QR Code in top right if selected
+      // 1. Embed 100% Offline Google Maps GPS QR Code in top right if selected
       if (includeGpsQr && examCenterAddress.trim()) {
         const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(examCenterAddress.trim())}`;
-        const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&margin=4&data=${encodeURIComponent(mapsUrl)}`;
 
         try {
-          const qrResp = await fetch(qrUrl);
-          const qrBytes = await qrResp.arrayBuffer();
+          // Instant 100% Local In-Browser QR Generation
+          const qrDataUrl = await QRCode.toDataURL(mapsUrl, { width: 180, margin: 1 });
+          const base64Data = qrDataUrl.split(',')[1];
+          const rawBinary = atob(base64Data);
+          const qrBytes = new Uint8Array(rawBinary.length);
+          for (let i = 0; i < rawBinary.length; i++) {
+            qrBytes[i] = rawBinary.charCodeAt(i);
+          }
           const qrImg = await outDoc.embedPng(qrBytes);
 
           const qrSize = 55;

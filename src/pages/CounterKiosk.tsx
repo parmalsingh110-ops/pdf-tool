@@ -95,10 +95,21 @@ export default function CounterKiosk() {
 
   const saveQueue = (newQueue: KioskJob[]) => {
     setQueue(newQueue);
-    localStorage.setItem('pms_kiosk_queue', JSON.stringify(newQueue));
-    const channel = new BroadcastChannel('pms_kiosk_sync');
-    channel.postMessage({ type: 'QUEUE_UPDATE', queue: newQueue });
-    channel.close();
+    try {
+      // Store lightweight metadata in localStorage (exclude heavy fileDataUrl to avoid 5MB quota crash)
+      const safeQueue = newQueue.slice(0, 50).map(({ fileDataUrl, ...meta }) => ({
+        ...meta,
+        fileDataUrl: fileDataUrl.length < 2000 ? fileDataUrl : '',
+      }));
+      localStorage.setItem('pms_kiosk_queue', JSON.stringify(safeQueue));
+    } catch (e) {
+      console.warn('LocalStorage quota guard protected kiosk queue', e);
+    }
+    try {
+      const channel = new BroadcastChannel('pms_kiosk_sync');
+      channel.postMessage({ type: 'QUEUE_UPDATE', queue: newQueue });
+      channel.close();
+    } catch {}
   };
 
   const toggleFullscreen = () => {
@@ -179,9 +190,23 @@ export default function CounterKiosk() {
   };
 
   const handleShopkeeperPrint = (job: KioskJob) => {
-    const printWindow = window.open(job.fileDataUrl, '_blank');
-    if (printWindow) {
-      printWindow.focus();
+    try {
+      if (job.fileDataUrl.startsWith('data:') || job.fileDataUrl.startsWith('blob:')) {
+        let blobUrl = job.fileDataUrl;
+        if (job.fileDataUrl.startsWith('data:')) {
+          const parts = job.fileDataUrl.split(';base64,');
+          const mime = parts[0]?.split(':')[1] || 'application/pdf';
+          const raw = atob(parts[1] || '');
+          const arr = new Uint8Array(raw.length);
+          for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+          blobUrl = URL.createObjectURL(new Blob([arr], { type: mime }));
+        }
+        window.open(blobUrl, '_blank');
+      } else {
+        window.open(job.fileDataUrl, '_blank');
+      }
+    } catch {
+      window.open(job.fileDataUrl, '_blank');
     }
     const updated = queue.map((j) => (j.id === job.id ? { ...j, status: 'printed' as const } : j));
     saveQueue(updated);

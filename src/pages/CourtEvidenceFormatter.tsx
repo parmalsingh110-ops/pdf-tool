@@ -25,6 +25,18 @@ interface ChatMessage {
   text: string;
 }
 
+function cleanWinAnsi(str: string): string {
+  if (!str) return '';
+  return str
+    .replace(/₹/g, 'Rs. ')
+    .replace(/[—–]/g, '-')
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .replace(/[•·]/g, '*')
+    .replace(/…/g, '...')
+    .replace(/[^\x00-\x7F]/g, ' ');
+}
+
 export default function CourtEvidenceFormatter() {
   useSEO(
     'Court Evidence Formatter — Section 63 BSA / 65B WhatsApp Chat to PDF | PDF Media Suite',
@@ -278,18 +290,31 @@ export default function CourtEvidenceFormatter() {
         curY -= 15;
 
         // Message Body
-        const words = msg.text.split(' ');
+        const sanitizedText = cleanWinAnsi(msg.text);
+        const words = sanitizedText.split(' ');
         let line = '';
         for (const w of words) {
           if (fontRegular.widthOfTextAtSize(`${line} ${w}`, 10) < contentWidth - 20) {
             line = `${line} ${w}`.trim();
           } else {
+            if (curY < 70) {
+              chatPage = doc.addPage([pageWidth, pageHeight]);
+              exhibitIndex++;
+              drawExhibitHeader(chatPage, exhibitIndex);
+              curY = pageHeight - 70;
+            }
             chatPage.drawText(line, { x: leftMargin + 10, y: curY, size: 10, font: fontRegular });
             curY -= 14;
             line = w;
           }
         }
         if (line) {
+          if (curY < 70) {
+            chatPage = doc.addPage([pageWidth, pageHeight]);
+            exhibitIndex++;
+            drawExhibitHeader(chatPage, exhibitIndex);
+            curY = pageHeight - 70;
+          }
           chatPage.drawText(line, { x: leftMargin + 10, y: curY, size: 10, font: fontRegular });
           curY -= 20;
         }

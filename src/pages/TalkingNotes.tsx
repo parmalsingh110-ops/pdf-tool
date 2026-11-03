@@ -17,6 +17,7 @@ import {
   BookOpen,
 } from 'lucide-react';
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
+import QRCode from 'qrcode';
 import * as pdfjsLib from 'pdfjs-dist';
 import '../lib/pdfWorker';
 import { useSEO } from '../hooks/useSEO';
@@ -205,11 +206,16 @@ export default function TalkingNotes() {
 
           // Standard QR Code encoding link (Audio note player or data link)
           const targetUrl = `https://pdfmediasuite.in/audio-note?id=${anno.id}&note=${encodeURIComponent(anno.label)}`;
-          const qrApiUrl = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&margin=4&data=${encodeURIComponent(targetUrl)}`;
 
           try {
-            const qrResp = await fetch(qrApiUrl);
-            const qrBytes = await qrResp.arrayBuffer();
+            // Instant 100% Local In-Browser QR Generation
+            const qrDataUrl = await QRCode.toDataURL(targetUrl, { width: 180, margin: 1 });
+            const base64Data = qrDataUrl.split(',')[1];
+            const rawBinary = atob(base64Data);
+            const qrBytes = new Uint8Array(rawBinary.length);
+            for (let b = 0; b < rawBinary.length; b++) {
+              qrBytes[b] = rawBinary.charCodeAt(b);
+            }
             const qrImg = await doc.embedPng(qrBytes);
 
             // Stamp dimensions
