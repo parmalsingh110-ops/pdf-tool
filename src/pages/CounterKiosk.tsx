@@ -582,3 +582,4 @@ export default function CounterKiosk() {
     </div>
   );
 }
+

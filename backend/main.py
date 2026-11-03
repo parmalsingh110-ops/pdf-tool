@@ -4463,4 +4463,68 @@ async def test_webhook(request: Request):
     return {"success": True, "message": "Test notifications triggered."}
 
 
+# ============================================================================
+# SCAN-TO-PRINT IN-MEMORY CLOUD RELAY FOR CROSS-DEVICE (MOBILE -> PC) TRANSFER
+# ============================================================================
+
+PRINT_DROP_ROOMS: dict = {}
+PRINT_DROP_ROOM_TIMESTAMPS: dict = {}
+
+@app.post("/api/print-drop/upload")
+@limiter.limit("60/minute")
+async def print_drop_upload(
+    request: Request,
+    session_id: str = Form(...),
+    file: UploadFile = File(...),
+    copies: int = Form(1),
+    color_mode: str = Form("bw"),
+):
+    """Ephemeral in-memory relay for customer mobile upload to counter PC."""
+    import time
+    import base64
+    clean_session = session_id.strip().upper()
+    file_bytes = await file.read()
+
+    if len(file_bytes) > 30 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="File too large (max 30MB)")
+
+    mime = file.content_type or "application/pdf"
+    b64_data = f"data:{mime};base64,{base64.b64encode(file_bytes).decode('utf-8')}"
+
+    job = {
+        "id": f"job_{int(time.time() * 1000)}_{len(file_bytes)}",
+        "name": file.filename or "Document.pdf",
+        "size": len(file_bytes),
+        "type": mime,
+        "dataUrl": b64_data,
+        "timestamp": time.strftime("%I:%M:%S %p"),
+        "copies": copies,
+        "colorMode": color_mode,
+    }
+
+    if clean_session not in PRINT_DROP_ROOMS:
+        PRINT_DROP_ROOMS[clean_session] = []
+
+    PRINT_DROP_ROOMS[clean_session].append(job)
+    PRINT_DROP_ROOM_TIMESTAMPS[clean_session] = time.time()
+
+    # Prune old rooms older than 30 minutes
+    now = time.time()
+    expired = [k for k, v in PRINT_DROP_ROOM_TIMESTAMPS.items() if now - v > 1800]
+    for k in expired:
+        PRINT_DROP_ROOMS.pop(k, None)
+        PRINT_DROP_ROOM_TIMESTAMPS.pop(k, None)
+
+    return {"success": True, "job_id": job["id"], "session_id": clean_session}
+
+
+@app.get("/api/print-drop/jobs/{session_id}")
+async def print_drop_poll(session_id: str):
+    """Retrieve and clear new jobs for the counter PC queue."""
+    clean_session = session_id.strip().upper()
+    jobs = PRINT_DROP_ROOMS.pop(clean_session, [])
+    return {"success": True, "jobs": jobs}
+
+
+
 

@@ -42,7 +42,7 @@ export default defineConfig(() => {
           "font-src    'self' https://fonts.gstatic.com data:",
           "img-src     'self' data: blob: https:",
           "media-src   'self' blob:",
-          "connect-src 'self' https://*.onrender.com https://pdfmediasuite.in https://www.pdfmediasuite.in https://generativelanguage.googleapis.com https://cdn.jsdelivr.net https://tessdata.projectnaptha.com https://staticimgly.com https://tfhub.dev https://storage.googleapis.com http://localhost:8000 http://127.0.0.1:8000",
+          "connect-src 'self' wss: https://*.peerjs.com wss://*.peerjs.com https://api.qrserver.com https://*.onrender.com https://pdfmediasuite.in https://www.pdfmediasuite.in https://generativelanguage.googleapis.com https://cdn.jsdelivr.net https://tessdata.projectnaptha.com https://staticimgly.com https://tfhub.dev https://storage.googleapis.com http://localhost:8000 http://127.0.0.1:8000",
           "worker-src  'self' blob: https://cdn.jsdelivr.net https://pdfmediasuite.in https://www.pdfmediasuite.in",
           "object-src  'none'",
           "frame-src   'none'",
