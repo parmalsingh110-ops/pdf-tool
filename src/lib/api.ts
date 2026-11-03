@@ -47,7 +47,7 @@ export async function apiFetch(endpoint: string, options: ApiFetchOptions = {}):
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => {
-    controller.abort();
+    controller.abort(new DOMException('Request timeout', 'AbortError'));
   }, timeoutMs);
 
   const signal = fetchOptions.signal
@@ -61,7 +61,13 @@ export async function apiFetch(endpoint: string, options: ApiFetchOptions = {}):
     });
     return response;
   } catch (err: any) {
-    if (!endpoint.includes('/api/telemetry')) {
+    const isAborted =
+      err?.name === 'AbortError' ||
+      err?.message?.toLowerCase().includes('abort') ||
+      err?.message?.toLowerCase().includes('aborted');
+
+    // Never log normal client timeouts or routine poll aborts to telemetry
+    if (!isAborted && !endpoint.includes('/api/telemetry')) {
       try {
         const { reportToolError } = await import('./telemetry');
         void reportToolError({
@@ -70,7 +76,7 @@ export async function apiFetch(endpoint: string, options: ApiFetchOptions = {}):
         });
       } catch {}
     }
-    if (err?.name === 'AbortError') {
+    if (err?.name === 'AbortError' || isAborted) {
       throw new Error(`Request timed out after ${Math.round(timeoutMs / 1000)}s. The backend may be waking up or processing a heavy task. Please try again.`);
     }
     if (err?.message?.includes('Failed to fetch') || err?.message?.includes('NetworkError')) {
@@ -89,10 +95,10 @@ function anySignal(signals: AbortSignal[]): AbortSignal {
   const controller = new AbortController();
   for (const sig of signals) {
     if (sig.aborted) {
-      controller.abort();
+      controller.abort(sig.reason || new DOMException('Request aborted', 'AbortError'));
       return sig;
     }
-    sig.addEventListener('abort', () => controller.abort(), { once: true });
+    sig.addEventListener('abort', () => controller.abort(sig.reason || new DOMException('Request aborted', 'AbortError')), { once: true });
   }
   return controller.signal;
 }

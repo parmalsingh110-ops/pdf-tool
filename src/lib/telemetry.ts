@@ -270,8 +270,14 @@ export async function submitToolFeedback(payload: ToolFeedbackPayload): Promise<
  */
 export async function reportToolError(payload: ToolErrorPayload): Promise<void> {
   try {
-    // Never report stale chunk reload errors or browser translation DOM exceptions as crashes
-    if (isChunkLoadError(payload.errorMessage) || isDomMutationError(payload.errorMessage)) {
+    // Never report stale chunk reload errors, translation mutations, or routine client fetch aborts
+    const msg = (payload.errorMessage || '').toLowerCase();
+    if (
+      isChunkLoadError(payload.errorMessage) ||
+      isDomMutationError(payload.errorMessage) ||
+      msg.includes('abort') ||
+      msg.includes('signal is aborted')
+    ) {
       return;
     }
 

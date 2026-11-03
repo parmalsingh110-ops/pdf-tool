@@ -25,6 +25,8 @@ import {
 } from 'lucide-react';
 import { Peer } from 'peerjs';
 import QRCode from 'qrcode';
+import * as pdfjsLib from 'pdfjs-dist';
+import '../lib/pdfWorker';
 import { useSEO } from '../hooks/useSEO';
 import { usePageSEO } from '../lib/usePageSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
@@ -81,6 +83,7 @@ export default function ScanToPrint() {
   const [peerStatus, setPeerStatus] = useState<'connecting' | 'online' | 'error'>('connecting');
   const [connectedMobiles, setConnectedMobiles] = useState<number>(0);
   const [incomingProgress, setIncomingProgress] = useState<{ name: string; progress: number } | null>(null);
+  const [printingJobId, setPrintingJobId] = useState<string | null>(null);
 
   // Sender state (Mobile customer)
   const [senderFiles, setSenderFiles] = useState<File[]>([]);
@@ -548,43 +551,121 @@ export default function ScanToPrint() {
     e.target.value = '';
   };
 
-  // 1-Click Print specific job
-  const handlePrint = (job: PrintJob) => {
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) {
-      alert('Please allow popups to open the print dialog.');
-      return;
+  // Helper to convert base64 dataUrl into binary Blob
+  const dataUrlToBlob = (dataUrl: string): Blob => {
+    try {
+      const parts = dataUrl.split(';base64,');
+      const contentType = parts[0]?.split(':')[1] || 'application/pdf';
+      const raw = window.atob(parts[1] || '');
+      const rawLength = raw.length;
+      const uInt8Array = new Uint8Array(rawLength);
+      for (let i = 0; i < rawLength; ++i) {
+        uInt8Array[i] = raw.charCodeAt(i);
+      }
+      return new Blob([uInt8Array], { type: contentType });
+    } catch {
+      return new Blob([], { type: 'application/pdf' });
     }
+  };
 
-    if (job.type.includes('image')) {
-      printWindow.document.write(`
-        <!DOCTYPE html>
-        <html>
-          <head>
-            <title>${job.name} - Print</title>
-            <style>
-              @page { size: auto; margin: 0; }
-              body { margin: 0; display: flex; align-items: center; justify-content: center; height: 100vh; background: #fff; }
-              img { max-width: 95vw; max-height: 95vh; object-fit: contain; ${job.colorMode === 'bw' ? 'filter: grayscale(100%) contrast(120%);' : ''} }
-            </style>
-          </head>
-          <body>
-            <img src="${job.dataUrl}" onload="window.print(); window.close();" />
-          </body>
-        </html>
-      `);
-      printWindow.document.close();
-    } else {
-      printWindow.document.write(`
-        <!DOCTYPE html>
-        <html>
-          <head><title>${job.name}</title></head>
-          <body style="margin:0; padding:0;">
-            <iframe src="${job.dataUrl}" style="border:none; width:100vw; height:100vh;" onload="this.contentWindow.print();"></iframe>
-          </body>
-        </html>
-      `);
-      printWindow.document.close();
+  // 1-Click Print specific job with high-resolution canvas multi-page rendering (ZERO BLANK PAGES)
+  const handlePrint = async (job: PrintJob) => {
+    if (printingJobId) return;
+    setPrintingJobId(job.id);
+
+    try {
+      if (job.type.includes('image')) {
+        const printWindow = window.open('', '_blank');
+        if (!printWindow) {
+          alert('Please allow popups to open the print dialog.');
+          return;
+        }
+
+        printWindow.document.write(`
+          <!DOCTYPE html>
+          <html>
+            <head>
+              <title>${job.name} - Print</title>
+              <style>
+                @page { size: auto; margin: 0; }
+                body { margin: 0; display: flex; align-items: center; justify-content: center; min-height: 100vh; background: #fff; }
+                img { max-width: 96vw; max-height: 96vh; object-fit: contain; ${job.colorMode === 'bw' ? 'filter: grayscale(100%) contrast(125%);' : ''} }
+              </style>
+            </head>
+            <body>
+              <img src="${job.dataUrl}" onload="window.focus(); window.print(); window.onafterprint = function() { window.close(); };" />
+            </body>
+          </html>
+        `);
+        printWindow.document.close();
+      } else {
+        // PDF PRINTING: Multi-page high-DPI rendering via pdfjsLib
+        const blob = dataUrlToBlob(job.dataUrl);
+        const arrayBuffer = await blob.arrayBuffer();
+        const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) });
+        const pdf = await loadingTask.promise;
+        const totalPages = pdf.numPages;
+
+        const pageImages: string[] = [];
+        for (let p = 1; p <= totalPages; p++) {
+          const page = await pdf.getPage(p);
+          const viewport = page.getViewport({ scale: 2.0 }); // 200 DPI crisp print quality
+          const canvas = document.createElement('canvas');
+          canvas.width = viewport.width;
+          canvas.height = viewport.height;
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            await page.render({ canvasContext: ctx, viewport, canvas } as any).promise;
+            pageImages.push(canvas.toDataURL('image/jpeg', 0.95));
+          }
+        }
+
+        const printWindow = window.open('', '_blank');
+        if (!printWindow) {
+          // If popup is blocked by browser, fallback to direct Blob tab
+          const blobUrl = URL.createObjectURL(blob);
+          window.open(blobUrl, '_blank');
+          return;
+        }
+
+        printWindow.document.write(`
+          <!DOCTYPE html>
+          <html>
+            <head>
+              <title>${job.name} - Print (${totalPages} pages)</title>
+              <style>
+                @page { size: A4 auto; margin: 0; }
+                body { margin: 0; padding: 0; background: #fff; }
+                .page-item { width: 100%; page-break-after: always; display: flex; justify-content: center; align-items: center; }
+                .page-item:last-child { page-break-after: avoid; }
+                img { width: 100%; height: auto; display: block; ${job.colorMode === 'bw' ? 'filter: grayscale(100%) contrast(125%);' : ''} }
+              </style>
+            </head>
+            <body>
+              ${pageImages.map((src) => `<div class="page-item"><img src="${src}" /></div>`).join('')}
+              <script>
+                window.onload = function() {
+                  window.focus();
+                  window.print();
+                  window.onafterprint = function() { window.close(); };
+                };
+              </script>
+            </body>
+          </html>
+        `);
+        printWindow.document.close();
+      }
+    } catch (err) {
+      console.error('Print rendering error, opening native PDF', err);
+      try {
+        const blob = dataUrlToBlob(job.dataUrl);
+        const blobUrl = URL.createObjectURL(blob);
+        window.open(blobUrl, '_blank');
+      } catch {
+        alert('Could not render document for printing.');
+      }
+    } finally {
+      setPrintingJobId(null);
     }
   };
 
@@ -926,9 +1007,35 @@ export default function ScanToPrint() {
 
                       <button
                         onClick={() => handlePrint(job)}
-                        className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-sm flex items-center gap-1.5 transition-all"
+                        disabled={printingJobId === job.id}
+                        className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-sm flex items-center gap-1.5 transition-all disabled:opacity-50"
                       >
-                        <Printer className="w-3.5 h-3.5" /> 1-Click Print
+                        {printingJobId === job.id ? (
+                          <>
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin" /> Rendering...
+                          </>
+                        ) : (
+                          <>
+                            <Printer className="w-3.5 h-3.5" /> 1-Click Print
+                          </>
+                        )}
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          try {
+                            const blob = dataUrlToBlob(job.dataUrl);
+                            const blobUrl = URL.createObjectURL(blob);
+                            window.open(blobUrl, '_blank');
+                          } catch {
+                            const w = window.open('', '_blank');
+                            w?.document.write(`<iframe src="${job.dataUrl}" style="border:0;width:100vw;height:100vh;"></iframe>`);
+                          }
+                        }}
+                        title="Preview in New Tab"
+                        className="p-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-slate-900 text-xs"
+                      >
+                        <ExternalLink className="w-4 h-4" />
                       </button>
 
                       <button
