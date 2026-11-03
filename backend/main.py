@@ -4469,6 +4469,7 @@ async def test_webhook(request: Request):
 
 PRINT_DROP_ROOMS: dict = {}
 PRINT_DROP_ROOM_TIMESTAMPS: dict = {}
+PRINT_DROP_ROOM_TOKENS: dict = {}
 
 @app.post("/api/print-drop/upload")
 @limiter.limit("60/minute")
@@ -4485,14 +4486,19 @@ async def print_drop_upload(
     clean_session = session_id.strip().upper()
     file_bytes = await file.read()
 
-    if len(file_bytes) > 30 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="File too large (max 30MB)")
+    if len(file_bytes) > 50 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="File too large (max 50MB)")
 
     mime = file.content_type or "application/pdf"
     b64_data = f"data:{mime};base64,{base64.b64encode(file_bytes).decode('utf-8')}"
 
+    # Maintain consecutive room token counter
+    room_token = PRINT_DROP_ROOM_TOKENS.get(clean_session, 0) + 1
+    PRINT_DROP_ROOM_TOKENS[clean_session] = room_token
+
     job = {
         "id": f"job_{int(time.time() * 1000)}_{len(file_bytes)}",
+        "tokenNum": room_token,
         "name": file.filename or "Document.pdf",
         "size": len(file_bytes),
         "type": mime,
@@ -4514,8 +4520,9 @@ async def print_drop_upload(
     for k in expired:
         PRINT_DROP_ROOMS.pop(k, None)
         PRINT_DROP_ROOM_TIMESTAMPS.pop(k, None)
+        PRINT_DROP_ROOM_TOKENS.pop(k, None)
 
-    return {"success": True, "job_id": job["id"], "session_id": clean_session}
+    return {"success": True, "job_id": job["id"], "token_num": room_token, "session_id": clean_session}
 
 
 @app.get("/api/print-drop/jobs/{session_id}")

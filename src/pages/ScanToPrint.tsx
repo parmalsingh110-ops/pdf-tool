@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   Printer,
   QrCode,
@@ -22,6 +22,8 @@ import {
   RefreshCw,
   Clock,
   Layers,
+  RotateCcw,
+  Check,
 } from 'lucide-react';
 import { Peer } from 'peerjs';
 import QRCode from 'qrcode';
@@ -30,10 +32,11 @@ import '../lib/pdfWorker';
 import { useSEO } from '../hooks/useSEO';
 import { usePageSEO } from '../lib/usePageSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
-import { apiFetch } from '../lib/api';
+import { apiFetch, API_BASE } from '../lib/api';
 
 interface PrintJob {
   id: string;
+  tokenNum: number;
   name: string;
   size: number;
   type: string;
@@ -42,6 +45,8 @@ interface PrintJob {
   pages?: number;
   copies: number;
   colorMode: 'bw' | 'color';
+  status: 'pending' | 'printed';
+  printedAt?: string;
 }
 
 interface IncomingTransfer {
@@ -57,7 +62,7 @@ interface IncomingTransfer {
   colorMode: 'bw' | 'color';
 }
 
-const CHUNK_SIZE = 16384; // 16 KB safe WebRTC DataChannel packet size
+const CHUNK_SIZE = 64 * 1024; // 64 KB binary safe WebRTC SCTP packet size
 
 export default function ScanToPrint() {
   useSEO(
@@ -78,6 +83,7 @@ export default function ScanToPrint() {
 
   // Shopkeeper Queue state
   const [printJobs, setPrintJobs] = useState<PrintJob[]>([]);
+  const [queueTab, setQueueTab] = useState<'pending' | 'printed'>('pending');
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
   const [copiedLink, setCopiedLink] = useState(false);
   const [peerStatus, setPeerStatus] = useState<'connecting' | 'online' | 'error'>('connecting');
@@ -91,6 +97,7 @@ export default function ScanToPrint() {
   const [senderProgress, setSenderProgress] = useState(0);
   const [senderStatusText, setSenderStatusText] = useState('Beaming to Counter PC...');
   const [senderSuccess, setSenderSuccess] = useState(false);
+  const [customerToken, setCustomerToken] = useState<number | null>(null);
   const [mobileConnectionStatus, setMobileConnectionStatus] = useState<'connecting' | 'connected' | 'fallback'>('connecting');
 
   // Peer & Channel references
@@ -98,7 +105,37 @@ export default function ScanToPrint() {
   const mobileConnRef = useRef<any>(null);
   const channelRef = useRef<BroadcastChannel | null>(null);
   const incomingTransfersRef = useRef<Record<string, IncomingTransfer>>({});
-  const ackResolversRef = useRef<Record<string, () => void>>({});
+  const ackResolversRef = useRef<Record<string, (token?: number) => void>>({});
+  const tokenCounterRef = useRef<number>(1);
+
+  // Format file size nicely (KB / MB)
+  const formatFileSize = (bytes: number) => {
+    if (bytes >= 1024 * 1024) {
+      return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    }
+    return `${(bytes / 1024).toFixed(0)} KB`;
+  };
+
+  // Convert base64 / dataUrl into binary Blob
+  const dataUrlToBlob = (dataUrl: string): Blob => {
+    try {
+      if (dataUrl.startsWith('blob:')) {
+        // Already a blob url
+        return new Blob([], { type: 'application/pdf' });
+      }
+      const parts = dataUrl.split(';base64,');
+      const contentType = parts[0]?.split(':')[1] || 'application/pdf';
+      const raw = window.atob(parts[1] || '');
+      const rawLength = raw.length;
+      const uInt8Array = new Uint8Array(rawLength);
+      for (let i = 0; i < rawLength; ++i) {
+        uInt8Array[i] = raw.charCodeAt(i);
+      }
+      return new Blob([uInt8Array], { type: contentType });
+    } catch {
+      return new Blob([], { type: 'application/pdf' });
+    }
+  };
 
   // Play notification chime
   const playChime = useCallback(() => {
@@ -119,15 +156,21 @@ export default function ScanToPrint() {
     } catch {}
   }, [soundEnabled]);
 
-  // Add incoming job with deduplication
+  // Add incoming job with deduplication and token assignment
   const addIncomingJob = useCallback(
-    (job: PrintJob) => {
+    (job: Omit<PrintJob, 'tokenNum' | 'status'> & { tokenNum?: number; status?: 'pending' | 'printed' }) => {
       setPrintJobs((prev) => {
         if (prev.some((j) => j.id === job.id || (j.name === job.name && Math.abs(j.size - job.size) < 100))) {
           return prev;
         }
         playChime();
-        return [job, ...prev];
+        const assignedToken = job.tokenNum || tokenCounterRef.current++;
+        const completeJob: PrintJob = {
+          ...job,
+          tokenNum: assignedToken,
+          status: job.status || 'pending',
+        };
+        return [completeJob, ...prev];
       });
     },
     [playChime]
@@ -142,7 +185,6 @@ export default function ScanToPrint() {
       setSessionCode(existingSession.toUpperCase());
       setIsSenderMode(true);
     } else {
-      // Check stored session or create random 6-character room PIN
       const stored = sessionStorage.getItem('pms_counter_session');
       const newSession = stored || Math.random().toString(36).substring(2, 8).toUpperCase();
       sessionStorage.setItem('pms_counter_session', newSession);
@@ -180,7 +222,6 @@ export default function ScanToPrint() {
 
     if (!isSenderMode) {
       // ── COUNTER PC MODE ──
-      // Register with fixed Room ID so mobiles can connect directly
       peer = new Peer(roomId, {
         debug: 1,
         config: {
@@ -236,8 +277,10 @@ export default function ScanToPrint() {
             const transfer = incomingTransfersRef.current[data.jobId];
             if (transfer) {
               const fullDataUrl = transfer.chunks.join('');
+              const tokenNum = tokenCounterRef.current++;
               const job: PrintJob = {
                 id: transfer.jobId,
+                tokenNum,
                 name: transfer.name,
                 size: transfer.size,
                 type: transfer.type,
@@ -245,22 +288,24 @@ export default function ScanToPrint() {
                 timestamp: transfer.timestamp,
                 copies: transfer.copies,
                 colorMode: transfer.colorMode,
+                status: 'pending',
               };
               addIncomingJob(job);
               delete incomingTransfersRef.current[data.jobId];
               setIncomingProgress(null);
 
               try {
-                conn.send({ action: 'JOB_ACK', jobId: transfer.jobId });
+                conn.send({ action: 'JOB_ACK', jobId: transfer.jobId, tokenNum });
               } catch {}
             }
           }
 
           // 4. Single-shot payload fallback (for small files)
           else if (data.action === 'NEW_PRINT_JOB' && data.job) {
-            addIncomingJob(data.job);
+            const tokenNum = tokenCounterRef.current++;
+            addIncomingJob({ ...data.job, tokenNum, status: 'pending' });
             try {
-              conn.send({ action: 'JOB_ACK', jobId: data.job.id });
+              conn.send({ action: 'JOB_ACK', jobId: data.job.id, tokenNum });
             } catch {}
           }
         });
@@ -273,16 +318,14 @@ export default function ScanToPrint() {
       peer.on('error', (err) => {
         console.warn('WebRTC peer notice on PC:', err.type);
         if (err.type === 'unavailable-id') {
-          // If previous tab didn't cleanly disconnect, generate a fresh session code
           const freshPin = Math.random().toString(36).substring(2, 8).toUpperCase();
           sessionStorage.setItem('pms_counter_session', freshPin);
           setSessionCode(freshPin);
         }
-        setPeerStatus('online'); // fallback to API polling
+        setPeerStatus('online');
       });
     } else {
       // ── MOBILE SENDER MODE ──
-      // Create client peer and connect to Counter PC room
       peer = new Peer({
         debug: 1,
         config: {
@@ -305,9 +348,12 @@ export default function ScanToPrint() {
 
         conn.on('data', (data: any) => {
           if (data && data.action === 'JOB_ACK' && data.jobId) {
+            if (data.tokenNum) {
+              setCustomerToken(data.tokenNum);
+            }
             const resolver = ackResolversRef.current[data.jobId];
             if (resolver) {
-              resolver();
+              resolver(data.tokenNum);
               delete ackResolversRef.current[data.jobId];
             }
           }
@@ -348,20 +394,25 @@ export default function ScanToPrint() {
   useEffect(() => {
     if (isSenderMode || !sessionCode) return;
 
-    // Poll backend every 2.5 seconds as a secondary guarantee
+    // Poll backend every 3.5 seconds
     const pollInterval = setInterval(async () => {
       try {
-        const res = await apiFetch(`/api/print-drop/jobs/${sessionCode}`, { timeoutMs: 3000 });
+        const res = await apiFetch(`/api/print-drop/jobs/${sessionCode}`, { timeoutMs: 5000 });
         if (res.ok) {
           const data = await res.json();
           if (data.jobs && Array.isArray(data.jobs) && data.jobs.length > 0) {
-            data.jobs.forEach(addIncomingJob);
+            data.jobs.forEach((j: any) => {
+              if (j.tokenNum) {
+                tokenCounterRef.current = Math.max(tokenCounterRef.current, j.tokenNum + 1);
+              }
+              addIncomingJob({ ...j, status: 'pending' });
+            });
           }
         }
       } catch {
         // Quiet fail - WebRTC and Local channels handle it
       }
-    }, 2500);
+    }, 3500);
 
     return () => clearInterval(pollInterval);
   }, [isSenderMode, sessionCode, addIncomingJob]);
@@ -391,16 +442,57 @@ export default function ScanToPrint() {
       });
   }, [mobileLink, sessionCode]);
 
+  // High-Speed Relay Uploader with exact byte progress (Handles 20MB-50MB smoothly)
+  const uploadViaRelay = (file: File): Promise<boolean> => {
+    return new Promise((resolve) => {
+      const xhr = new XMLHttpRequest();
+      const formData = new FormData();
+      formData.append('session_id', sessionCode);
+      formData.append('file', file);
+      formData.append('copies', '1');
+      formData.append('color_mode', 'bw');
+
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) {
+          const pct = Math.round((e.loaded / e.total) * 95);
+          setSenderProgress(pct);
+          const loadedMb = (e.loaded / (1024 * 1024)).toFixed(1);
+          const totalMb = (e.total / (1024 * 1024)).toFixed(1);
+          setSenderStatusText(`Beaming ${file.name} (${loadedMb} / ${totalMb} MB)...`);
+        }
+      };
+
+      xhr.onload = () => {
+        if (xhr.status === 200) {
+          try {
+            const data = JSON.parse(xhr.responseText);
+            if (data.token_num) {
+              setCustomerToken(data.token_num);
+            }
+          } catch {}
+          resolve(true);
+        } else {
+          resolve(false);
+        }
+      };
+      xhr.onerror = () => resolve(false);
+      xhr.open('POST', `${API_BASE}/api/print-drop/upload`);
+      xhr.send(formData);
+    });
+  };
+
   // Handle customer mobile file selection & multi-channel transmit
   const handleCustomerUpload = async () => {
     if (senderFiles.length === 0) return;
     setSenderUploading(true);
-    setSenderProgress(5);
-    setSenderStatusText('Preparing document...');
+    setSenderProgress(2);
+    setSenderStatusText('Reading document...');
 
     try {
       for (let i = 0; i < senderFiles.length; i++) {
         const file = senderFiles[i];
+        const jobId = `job_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+        const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
         // 1. Convert to dataUrl
         const dataUrl = await new Promise<string>((resolve, reject) => {
@@ -410,10 +502,9 @@ export default function ScanToPrint() {
           reader.readAsDataURL(file);
         });
 
-        const jobId = `job_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-        const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
         const job: PrintJob = {
           id: jobId,
+          tokenNum: 0,
           name: file.name,
           size: file.size,
           type: file.type || 'application/pdf',
@@ -421,15 +512,16 @@ export default function ScanToPrint() {
           timestamp,
           copies: 1,
           colorMode: 'bw',
+          status: 'pending',
         };
 
         let beamedViaWebRtc = false;
 
-        // Channel A: WebRTC Direct Send to PC using 16KB Chunking Protocol
+        // Channel A: WebRTC Direct Send to PC using 64KB High-Speed Chunking Protocol
         if (mobileConnRef.current && mobileConnRef.current.open) {
           try {
-            setSenderStatusText(`Streaming ${file.name} directly to PC...`);
             const totalChunks = Math.ceil(dataUrl.length / CHUNK_SIZE);
+            setSenderStatusText(`Streaming ${file.name} (0 / ${formatFileSize(file.size)})...`);
 
             // Step A1: Send metadata header
             mobileConnRef.current.send({
@@ -444,7 +536,9 @@ export default function ScanToPrint() {
               colorMode: 'bw',
             });
 
-            // Step A2: Stream chunks with flow pacing
+            const dc = mobileConnRef.current.dataChannel;
+
+            // Step A2: Stream 64KB chunks with dynamic backpressure flow-control
             for (let c = 0; c < totalChunks; c++) {
               const chunk = dataUrl.substring(c * CHUNK_SIZE, (c + 1) * CHUNK_SIZE);
               mobileConnRef.current.send({
@@ -454,12 +548,19 @@ export default function ScanToPrint() {
                 chunk,
               });
 
-              const currentPct = Math.round(((c + 1) / totalChunks) * 85);
+              const currentPct = Math.round(((c + 1) / totalChunks) * 90);
               setSenderProgress(currentPct);
+              const streamedMb = (((c + 1) * CHUNK_SIZE) / (1024 * 1024)).toFixed(1);
+              const totalMb = (file.size / (1024 * 1024)).toFixed(1);
+              setSenderStatusText(`Streaming ${file.name} (${streamedMb} / ${totalMb} MB)...`);
 
-              // Throttle every 6 packets to prevent WebRTC buffer congestion
-              if (c % 6 === 0) {
-                await new Promise((r) => setTimeout(r, 10));
+              // Real WebRTC flow-control: if buffer exceeds 256KB, wait for drain
+              if (dc && dc.bufferedAmount > 256 * 1024) {
+                while (dc.bufferedAmount > 64 * 1024) {
+                  await new Promise((r) => setTimeout(r, 12));
+                }
+              } else if (c % 8 === 0) {
+                await new Promise((r) => setTimeout(r, 2));
               }
             }
 
@@ -471,26 +572,17 @@ export default function ScanToPrint() {
 
             beamedViaWebRtc = true;
           } catch (e) {
-            console.warn('WebRTC chunk stream notice, trying fallback', e);
+            console.warn('WebRTC chunk stream notice, using high-speed relay fallback', e);
           }
         }
 
-        // Channel B: Backend Relay API (Always run as a backup guarantee)
-        setSenderStatusText(`Confirming transfer on shop queue...`);
-        try {
-          const formData = new FormData();
-          formData.append('session_id', sessionCode);
-          formData.append('file', file);
-          formData.append('copies', '1');
-          formData.append('color_mode', 'bw');
-
-          await apiFetch('/api/print-drop/upload', {
-            method: 'POST',
-            body: formData,
-            timeoutMs: 15000,
-          });
-        } catch (e) {
-          console.warn('Backend relay upload notice', e);
+        // Channel B: Backend Relay API (Guaranteed delivery for all networks)
+        if (!beamedViaWebRtc) {
+          setSenderStatusText(`Transmitting ${file.name} via cloud relay...`);
+          await uploadViaRelay(file);
+        } else {
+          // Send background copy to relay as secondary guarantee without blocking
+          void uploadViaRelay(file);
         }
 
         // Channel C: BroadcastChannel (for same-browser tab testing)
@@ -500,12 +592,13 @@ export default function ScanToPrint() {
           } catch {}
         }
 
-        // Wait briefly for shopkeeper PC acknowledgment
+        // Wait for shopkeeper PC acknowledgment
         if (beamedViaWebRtc) {
           await new Promise<void>((resolve) => {
-            const timeout = setTimeout(resolve, 2000);
-            ackResolversRef.current[jobId] = () => {
+            const timeout = setTimeout(resolve, 2500);
+            ackResolversRef.current[jobId] = (token) => {
               clearTimeout(timeout);
+              if (token) setCustomerToken(token);
               resolve();
             };
           });
@@ -534,8 +627,10 @@ export default function ScanToPrint() {
     files.forEach((file) => {
       const reader = new FileReader();
       reader.onload = (ev) => {
+        const nextToken = tokenCounterRef.current++;
         const job: PrintJob = {
           id: `local_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+          tokenNum: nextToken,
           name: file.name,
           size: file.size,
           type: file.type || 'application/pdf',
@@ -543,6 +638,7 @@ export default function ScanToPrint() {
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           copies: 1,
           colorMode: 'bw',
+          status: 'pending',
         };
         addIncomingJob(job);
       };
@@ -551,21 +647,26 @@ export default function ScanToPrint() {
     e.target.value = '';
   };
 
-  // Helper to convert base64 dataUrl into binary Blob
-  const dataUrlToBlob = (dataUrl: string): Blob => {
-    try {
-      const parts = dataUrl.split(';base64,');
-      const contentType = parts[0]?.split(':')[1] || 'application/pdf';
-      const raw = window.atob(parts[1] || '');
-      const rawLength = raw.length;
-      const uInt8Array = new Uint8Array(rawLength);
-      for (let i = 0; i < rawLength; ++i) {
-        uInt8Array[i] = raw.charCodeAt(i);
-      }
-      return new Blob([uInt8Array], { type: contentType });
-    } catch {
-      return new Blob([], { type: 'application/pdf' });
-    }
+  // Mark specific job as Printed (moves to history)
+  const markAsPrinted = (id: string) => {
+    setPrintJobs((prev) =>
+      prev.map((j) =>
+        j.id === id
+          ? {
+              ...j,
+              status: 'printed',
+              printedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            }
+          : j
+      )
+    );
+  };
+
+  // Move back to Pending (Undo)
+  const markAsPending = (id: string) => {
+    setPrintJobs((prev) =>
+      prev.map((j) => (j.id === id ? { ...j, status: 'pending', printedAt: undefined } : j))
+    );
   };
 
   // 1-Click Print specific job with high-resolution canvas multi-page rendering (ZERO BLANK PAGES)
@@ -622,7 +723,6 @@ export default function ScanToPrint() {
 
         const printWindow = window.open('', '_blank');
         if (!printWindow) {
-          // If popup is blocked by browser, fallback to direct Blob tab
           const blobUrl = URL.createObjectURL(blob);
           window.open(blobUrl, '_blank');
           return;
@@ -655,6 +755,9 @@ export default function ScanToPrint() {
         `);
         printWindow.document.close();
       }
+
+      // Automatically mark as printed after sending to printer
+      markAsPrinted(job.id);
     } catch (err) {
       console.error('Print rendering error, opening native PDF', err);
       try {
@@ -671,8 +774,9 @@ export default function ScanToPrint() {
 
   // 1-Click Print All in Queue
   const handlePrintAll = () => {
-    if (!printJobs.length) return;
-    printJobs.forEach((j, i) => {
+    const pending = printJobs.filter((j) => j.status === 'pending');
+    if (!pending.length) return;
+    pending.forEach((j, i) => {
       setTimeout(() => handlePrint(j), i * 1500);
     });
   };
@@ -683,6 +787,10 @@ export default function ScanToPrint() {
     setCopiedLink(true);
     setTimeout(() => setCopiedLink(false), 2000);
   };
+
+  // Filtered jobs
+  const pendingJobs = useMemo(() => printJobs.filter((j) => j.status === 'pending'), [printJobs]);
+  const printedJobs = useMemo(() => printJobs.filter((j) => j.status === 'printed'), [printJobs]);
 
   // ==================== MOBILE SENDER VIEW ====================
   if (isSenderMode) {
@@ -714,12 +822,22 @@ export default function ScanToPrint() {
               <div className="w-16 h-16 rounded-full bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 mx-auto flex items-center justify-center animate-bounce">
                 <CheckCircle2 className="w-9 h-9" />
               </div>
-              <h2 className="text-xl font-black text-slate-900 dark:text-white">Document Sent to Counter!</h2>
-              <p className="text-xs text-slate-500 max-w-xs mx-auto">
-                Your file has been transferred to the shopkeeper&apos;s computer screen. Please tell the operator to print.
-              </p>
+              <div className="space-y-1">
+                <span className="text-xs font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 px-3 py-1 rounded-full border border-emerald-200 dark:border-emerald-800">
+                  Transferred to Operator PC
+                </span>
+                <h2 className="text-2xl font-black text-slate-900 dark:text-white pt-2">
+                  Your Token: <span className="text-rose-600 font-mono">#{customerToken || '1'}</span>
+                </h2>
+                <p className="text-xs text-slate-500 max-w-xs mx-auto pt-1">
+                  Please tell the counter operator your Token is <strong>#{customerToken || '1'}</strong> to collect your printout!
+                </p>
+              </div>
               <button
-                onClick={() => setSenderSuccess(false)}
+                onClick={() => {
+                  setSenderSuccess(false);
+                  setSenderFiles([]);
+                }}
                 className="w-full py-3.5 rounded-2xl bg-slate-900 text-white dark:bg-white dark:text-slate-900 text-sm font-bold shadow-md hover:opacity-90"
               >
                 Send Another File
@@ -757,7 +875,7 @@ export default function ScanToPrint() {
                     {senderFiles.map((f, i) => (
                       <div key={i} className="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 text-xs">
                         <span className="truncate max-w-[200px] font-medium text-slate-700 dark:text-slate-200">{f.name}</span>
-                        <span className="text-slate-400">{(f.size / 1024).toFixed(0)} KB</span>
+                        <span className="text-slate-400 font-mono">{formatFileSize(f.size)}</span>
                       </div>
                     ))}
                   </div>
@@ -765,12 +883,12 @@ export default function ScanToPrint() {
                   {senderUploading && (
                     <div className="space-y-1.5 pt-1">
                       <div className="flex justify-between text-xs font-bold text-rose-600">
-                        <span>{senderStatusText}</span>
+                        <span className="truncate max-w-[280px]">{senderStatusText}</span>
                         <span>{senderProgress}%</span>
                       </div>
                       <div className="w-full bg-slate-100 dark:bg-slate-800 rounded-full h-2 overflow-hidden">
                         <div
-                          className="bg-rose-600 h-2 rounded-full transition-all duration-200"
+                          className="bg-rose-600 h-2 rounded-full transition-all duration-150"
                           style={{ width: `${senderProgress}%` }}
                         />
                       </div>
@@ -833,10 +951,10 @@ export default function ScanToPrint() {
 
             <button
               onClick={handlePrintAll}
-              disabled={!printJobs.length}
+              disabled={!pendingJobs.length}
               className="px-5 py-2.5 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 font-bold text-xs shadow-md disabled:opacity-40 flex items-center gap-2 hover:opacity-90"
             >
-              <Printer className="w-4 h-4" /> Print All ({printJobs.length})
+              <Printer className="w-4 h-4" /> Print All ({pendingJobs.length})
             </button>
           </div>
         </div>
@@ -919,19 +1037,40 @@ export default function ScanToPrint() {
             </div>
           </div>
 
-          {/* RIGHT: Live Incoming Print Queue */}
-          <div className="lg:col-span-7 bg-white dark:bg-slate-900 rounded-3xl border border-slate-200/90 dark:border-slate-800 p-6 shadow-sm space-y-6">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
-              <div className="flex items-center gap-2.5">
-                <div className="w-3 h-3 rounded-full bg-emerald-500 animate-pulse" />
-                <h2 className="text-xl font-bold text-slate-900 dark:text-white">
-                  Live Print Queue ({printJobs.length})
-                </h2>
+          {/* RIGHT: Live Incoming Print Queue with Pending / Printed tabs */}
+          <div className="lg:col-span-7 bg-white dark:bg-slate-900 rounded-3xl border border-slate-200/90 dark:border-slate-800 p-6 shadow-sm space-y-5">
+            {/* Queue Navigation Tabs */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setQueueTab('pending')}
+                  className={`px-4 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all ${
+                    queueTab === 'pending'
+                      ? 'bg-rose-600 text-white shadow-sm'
+                      : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200'
+                  }`}
+                >
+                  <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
+                  Waiting to Print ({pendingJobs.length})
+                </button>
+
+                <button
+                  onClick={() => setQueueTab('printed')}
+                  className={`px-4 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all ${
+                    queueTab === 'printed'
+                      ? 'bg-emerald-600 text-white shadow-sm'
+                      : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200'
+                  }`}
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  Printed Today ({printedJobs.length})
+                </button>
               </div>
+
               {printJobs.length > 0 && (
                 <button
                   onClick={() => setPrintJobs([])}
-                  className="text-xs text-rose-600 hover:underline font-semibold flex items-center gap-1"
+                  className="text-xs text-rose-600 hover:underline font-semibold flex items-center gap-1 self-end sm:self-center"
                 >
                   <Trash2 className="w-3.5 h-3.5" /> Clear All
                 </button>
@@ -951,117 +1090,218 @@ export default function ScanToPrint() {
               </div>
             )}
 
-            {printJobs.length === 0 ? (
-              <div className="py-16 text-center space-y-3">
-                <div className="w-16 h-16 rounded-2xl bg-slate-50 dark:bg-slate-800 text-slate-300 dark:text-slate-600 mx-auto flex items-center justify-center">
-                  <Printer className="w-8 h-8" />
-                </div>
-                <h3 className="font-bold text-slate-700 dark:text-slate-200 text-sm">Print Queue is Empty</h3>
-                <p className="text-xs text-slate-400 max-w-sm mx-auto">
-                  When a customer scans your counter QR code on their phone and beams a file, it will instantly pop up here with a chime!
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-3 max-h-[600px] overflow-y-auto pr-1">
-                {printJobs.map((job) => (
-                  <div
-                    key={job.id}
-                    className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/70 dark:border-slate-700 hover:border-rose-400 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4"
-                  >
-                    {/* File Info */}
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className="w-12 h-12 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 flex items-center justify-center text-rose-600 shrink-0 overflow-hidden">
-                        {job.type.includes('image') ? (
-                          <img src={job.dataUrl} alt={job.name} className="w-full h-full object-cover" />
-                        ) : (
-                          <FileText className="w-6 h-6" />
-                        )}
-                      </div>
-                      <div className="min-w-0">
-                        <p className="font-bold text-sm text-slate-900 dark:text-white truncate max-w-[240px]">
-                          {job.name}
-                        </p>
-                        <p className="text-[11px] text-slate-400 flex items-center gap-2 mt-0.5">
-                          <span>{(job.size / 1024).toFixed(0)} KB</span>
-                          <span>•</span>
-                          <span>{job.timestamp}</span>
-                        </p>
-                      </div>
+            {/* TAB 1: PENDING QUEUE */}
+            {queueTab === 'pending' && (
+              <>
+                {pendingJobs.length === 0 ? (
+                  <div className="py-16 text-center space-y-3">
+                    <div className="w-16 h-16 rounded-2xl bg-slate-50 dark:bg-slate-800 text-slate-300 dark:text-slate-600 mx-auto flex items-center justify-center">
+                      <Printer className="w-8 h-8" />
                     </div>
-
-                    {/* Quick Print Actions */}
-                    <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
-                      <select
-                        value={job.colorMode}
-                        onChange={(e) => {
-                          const mode = e.target.value as 'bw' | 'color';
-                          setPrintJobs((prev) =>
-                            prev.map((j) => (j.id === job.id ? { ...j, colorMode: mode } : j))
-                          );
-                        }}
-                        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-2.5 py-2 text-xs font-bold text-slate-700 dark:text-slate-300 outline-none"
-                      >
-                        <option value="bw">B&amp;W</option>
-                        <option value="color">Color</option>
-                      </select>
-
-                      <button
-                        onClick={() => handlePrint(job)}
-                        disabled={printingJobId === job.id}
-                        className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-sm flex items-center gap-1.5 transition-all disabled:opacity-50"
-                      >
-                        {printingJobId === job.id ? (
-                          <>
-                            <RefreshCw className="w-3.5 h-3.5 animate-spin" /> Rendering...
-                          </>
-                        ) : (
-                          <>
-                            <Printer className="w-3.5 h-3.5" /> 1-Click Print
-                          </>
-                        )}
-                      </button>
-
-                      <button
-                        onClick={() => {
-                          try {
-                            const blob = dataUrlToBlob(job.dataUrl);
-                            const blobUrl = URL.createObjectURL(blob);
-                            window.open(blobUrl, '_blank');
-                          } catch {
-                            const w = window.open('', '_blank');
-                            w?.document.write(`<iframe src="${job.dataUrl}" style="border:0;width:100vw;height:100vh;"></iframe>`);
-                          }
-                        }}
-                        title="Preview in New Tab"
-                        className="p-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-slate-900 text-xs"
-                      >
-                        <ExternalLink className="w-4 h-4" />
-                      </button>
-
-                      <button
-                        onClick={() => {
-                          const a = document.createElement('a');
-                          a.href = job.dataUrl;
-                          a.download = job.name;
-                          a.click();
-                        }}
-                        title="Download to PC"
-                        className="p-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-slate-900 text-xs"
-                      >
-                        <Download className="w-4 h-4" />
-                      </button>
-
-                      <button
-                        onClick={() => setPrintJobs((prev) => prev.filter((j) => j.id !== job.id))}
-                        title="Delete from Queue"
-                        className="p-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-400 hover:text-rose-600 text-xs"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
+                    <h3 className="font-bold text-slate-700 dark:text-slate-200 text-sm">Print Queue is Empty</h3>
+                    <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                      When a customer scans your counter QR code on their phone and beams a file, it will pop up here with an automatic Token Number!
+                    </p>
                   </div>
-                ))}
-              </div>
+                ) : (
+                  <div className="space-y-3 max-h-[600px] overflow-y-auto pr-1">
+                    {pendingJobs.map((job) => (
+                      <div
+                        key={job.id}
+                        className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/70 dark:border-slate-700 hover:border-rose-400 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+                      >
+                        {/* File Info + Token Badge */}
+                        <div className="flex items-center gap-3 min-w-0">
+                          {/* Prominent Token Badge */}
+                          <div className="flex flex-col items-center justify-center min-w-[48px] h-12 rounded-2xl bg-rose-600 text-white font-black text-sm shadow-sm shrink-0">
+                            <span className="text-[9px] uppercase font-bold tracking-tight opacity-80 leading-none">Token</span>
+                            <span className="text-base font-extrabold leading-none mt-0.5">#{job.tokenNum}</span>
+                          </div>
+
+                          <div className="w-10 h-10 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 flex items-center justify-center text-rose-600 shrink-0 overflow-hidden">
+                            {job.type.includes('image') ? (
+                              <img src={job.dataUrl} alt={job.name} className="w-full h-full object-cover" />
+                            ) : (
+                              <FileText className="w-5 h-5" />
+                            )}
+                          </div>
+
+                          <div className="min-w-0">
+                            <p className="font-bold text-sm text-slate-900 dark:text-white truncate max-w-[200px] sm:max-w-[220px]">
+                              {job.name}
+                            </p>
+                            <p className="text-[11px] text-slate-400 flex items-center gap-2 mt-0.5">
+                              <span className="font-mono">{formatFileSize(job.size)}</span>
+                              <span>•</span>
+                              <span>{job.timestamp}</span>
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Actions */}
+                        <div className="flex items-center gap-2 shrink-0 self-end sm:self-center flex-wrap sm:flex-nowrap">
+                          <select
+                            value={job.colorMode}
+                            onChange={(e) => {
+                              const mode = e.target.value as 'bw' | 'color';
+                              setPrintJobs((prev) =>
+                                prev.map((j) => (j.id === job.id ? { ...j, colorMode: mode } : j))
+                              );
+                            }}
+                            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-2 py-2 text-xs font-bold text-slate-700 dark:text-slate-300 outline-none"
+                          >
+                            <option value="bw">B&amp;W</option>
+                            <option value="color">Color</option>
+                          </select>
+
+                          {/* 1-Click Print */}
+                          <button
+                            onClick={() => handlePrint(job)}
+                            disabled={printingJobId === job.id}
+                            className="px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-sm flex items-center gap-1.5 transition-all disabled:opacity-50"
+                          >
+                            {printingJobId === job.id ? (
+                              <>
+                                <RefreshCw className="w-3.5 h-3.5 animate-spin" /> Rendering...
+                              </>
+                            ) : (
+                              <>
+                                <Printer className="w-3.5 h-3.5" /> 1-Click Print
+                              </>
+                            )}
+                          </button>
+
+                          {/* Mark as Printed */}
+                          <button
+                            onClick={() => markAsPrinted(job.id)}
+                            title="Mark as Printed and move out of pending queue"
+                            className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-sm flex items-center gap-1.5 transition-all"
+                          >
+                            <Check className="w-3.5 h-3.5" /> Done
+                          </button>
+
+                          {/* Preview in tab */}
+                          <button
+                            onClick={() => {
+                              try {
+                                const blob = dataUrlToBlob(job.dataUrl);
+                                const blobUrl = URL.createObjectURL(blob);
+                                window.open(blobUrl, '_blank');
+                              } catch {
+                                const w = window.open('', '_blank');
+                                w?.document.write(`<iframe src="${job.dataUrl}" style="border:0;width:100vw;height:100vh;"></iframe>`);
+                              }
+                            }}
+                            title="Preview in New Tab"
+                            className="p-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-slate-900 text-xs"
+                          >
+                            <ExternalLink className="w-4 h-4" />
+                          </button>
+
+                          {/* Download */}
+                          <button
+                            onClick={() => {
+                              const a = document.createElement('a');
+                              a.href = job.dataUrl;
+                              a.download = job.name;
+                              a.click();
+                            }}
+                            title="Download to PC"
+                            className="p-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-slate-900 text-xs"
+                          >
+                            <Download className="w-4 h-4" />
+                          </button>
+
+                          {/* Delete */}
+                          <button
+                            onClick={() => setPrintJobs((prev) => prev.filter((j) => j.id !== job.id))}
+                            title="Delete from Queue"
+                            className="p-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-400 hover:text-rose-600 text-xs"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+
+            {/* TAB 2: PRINTED HISTORY */}
+            {queueTab === 'printed' && (
+              <>
+                {printedJobs.length === 0 ? (
+                  <div className="py-16 text-center space-y-3">
+                    <div className="w-16 h-16 rounded-2xl bg-slate-50 dark:bg-slate-800 text-slate-300 dark:text-slate-600 mx-auto flex items-center justify-center">
+                      <CheckCircle2 className="w-8 h-8" />
+                    </div>
+                    <h3 className="font-bold text-slate-700 dark:text-slate-200 text-sm">No Documents Printed Yet</h3>
+                    <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                      When you print or click &ldquo;Done&rdquo; on an incoming document, it will move here so you never confuse pending jobs!
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-3 max-h-[600px] overflow-y-auto pr-1">
+                    {printedJobs.map((job) => (
+                      <div
+                        key={job.id}
+                        className="p-4 rounded-2xl bg-emerald-50/40 dark:bg-emerald-950/20 border border-emerald-200/70 dark:border-emerald-800/60 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+                      >
+                        {/* File Info + Token Badge */}
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="flex flex-col items-center justify-center min-w-[48px] h-12 rounded-2xl bg-emerald-600 text-white font-black text-sm shadow-sm shrink-0">
+                            <span className="text-[9px] uppercase font-bold tracking-tight opacity-80 leading-none">Token</span>
+                            <span className="text-base font-extrabold leading-none mt-0.5">#{job.tokenNum}</span>
+                          </div>
+
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                              <p className="font-bold text-sm text-slate-900 dark:text-white truncate max-w-[200px] sm:max-w-[220px]">
+                                {job.name}
+                              </p>
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300">
+                                ✅ Printed {job.printedAt || ''}
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-slate-400 flex items-center gap-2 mt-0.5">
+                              <span className="font-mono">{formatFileSize(job.size)}</span>
+                              <span>•</span>
+                              <span>Received at {job.timestamp}</span>
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Actions */}
+                        <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+                          <button
+                            onClick={() => markAsPending(job.id)}
+                            title="Move back to Pending Queue"
+                            className="px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-bold text-xs flex items-center gap-1.5 hover:bg-slate-50 transition-all"
+                          >
+                            <RotateCcw className="w-3.5 h-3.5 text-slate-500" /> Undo
+                          </button>
+
+                          <button
+                            onClick={() => handlePrint(job)}
+                            className="px-3 py-2 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 font-bold text-xs flex items-center gap-1.5 shadow-sm"
+                          >
+                            <Printer className="w-3.5 h-3.5" /> Re-Print
+                          </button>
+
+                          <button
+                            onClick={() => setPrintJobs((prev) => prev.filter((j) => j.id !== job.id))}
+                            title="Delete"
+                            className="p-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-400 hover:text-rose-600 text-xs"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
             )}
           </div>
         </div>

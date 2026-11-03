@@ -5,9 +5,25 @@
  */
 
 export function getApiBaseUrl(): string {
+  if (typeof window !== 'undefined') {
+    const custom = localStorage.getItem('pdf_admin_backend_url');
+    if (custom && custom.trim()) return custom.trim().replace(/\/+$/, '');
+  }
+
+  const isLiveHost =
+    typeof window !== 'undefined' &&
+    window.location.hostname !== 'localhost' &&
+    window.location.hostname !== '127.0.0.1';
+
   const envUrl = import.meta.env.VITE_API_URL;
   if (envUrl && typeof envUrl === 'string' && envUrl.trim()) {
     let cleaned = envUrl.trim().replace(/\/+$/, '');
+
+    // In live production (e.g. pdfmediasuite.in), if envUrl points to localhost, ignore it to prevent Mixed Content
+    if (isLiveHost && (cleaned.includes('localhost') || cleaned.includes('127.0.0.1'))) {
+      return '';
+    }
+
     // If the browser page is HTTPS but VITE_API_URL is HTTP (and not localhost), upgrade or alert
     if (typeof window !== 'undefined' && window.location.protocol === 'https:' && cleaned.startsWith('http://') && !cleaned.includes('localhost')) {
       cleaned = cleaned.replace(/^http:\/\//, 'https://');
@@ -25,7 +41,7 @@ export function getApiBaseUrl(): string {
     return ''; // Relative path, handled by server proxy/rewrite
   }
 
-  return 'http://localhost:8000';
+  return isLiveHost ? '' : 'http://localhost:8000';
 }
 
 export const API_BASE = getApiBaseUrl();
