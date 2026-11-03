@@ -540,6 +540,18 @@ export default function Layout() {
               <li><Link to="/compress" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Compress PDF</Link></li>
               <li><Link to="/increase-size" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Increase PDF Size</Link></li>
               <li><Link to="/id-card-joiner" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">ID Card Joiner</Link></li>
+              <li><Link to="/pvc-card-maker" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">PVC Card Maker</Link></li>
+              <li><Link to="/stamp-paper-aligner" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">E-Stamp Aligner</Link></li>
+              <li><Link to="/assignment-cover-page" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Assignment Cover Page</Link></li>
+              <li><Link to="/rubber-stamp" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Digital Rubber Stamp</Link></li>
+              <li><Link to="/scan-to-print" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Scan to Print QR</Link></li>
+              <li><Link to="/gang-print-sheet" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Gang-Print Sheet</Link></li>
+              <li><Link to="/land-record-darkener" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Land Record Darkener</Link></li>
+              <li><Link to="/micro-pocket-notes" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Micro-Pocket Notes</Link></li>
+              <li><Link to="/lab-journal-formatter" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Lab Journal Formatter</Link></li>
+              <li><Link to="/board-notes-cleaner" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Board Notes Cleaner</Link></li>
+              <li><Link to="/resume-compactor" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Resume 1-Page Compactor</Link></li>
+              <li><Link to="/report-header-swapper" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Report Header Swapper</Link></li>
               <li><Link to="/edit" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Edit PDF</Link></li>
               <li><Link to="/protect" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Protect PDF</Link></li>
               <li><Link to="/rotate-pages" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Rotate PDF</Link></li>

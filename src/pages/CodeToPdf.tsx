@@ -469,7 +469,7 @@ async function generateCodePdf(
     y -= lineH;
   }
 
-  return new Blob([await pdfDoc.save()], { type: 'application/pdf' });
+  return new Blob([await pdfDoc.save() as any], { type: 'application/pdf' });
 }
 
 // ─── React component ─────────────────────────────────────────────────

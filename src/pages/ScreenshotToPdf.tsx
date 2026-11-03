@@ -77,7 +77,7 @@ export default function ScreenshotToPdf() {
         canvas.width = 0; canvas.height = 0;
       }
       const bytes = await doc.save();
-      setResultUrl(URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' })));
+      setResultUrl(URL.createObjectURL(new Blob([bytes as any], { type: 'application/pdf' })));
     } catch (e: any) { alert(e?.message || 'Failed'); }
     finally { setBusy(false); }
   };

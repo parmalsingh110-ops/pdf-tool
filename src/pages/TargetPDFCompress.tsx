@@ -62,7 +62,7 @@ export default function TargetPDFCompress() {
   };
 
   const finishCompression = (pdfBytes: Uint8Array) => {
-    const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+    const blob = new Blob([pdfBytes as any], { type: 'application/pdf' });
     const url = URL.createObjectURL(blob);
     
     setStats({

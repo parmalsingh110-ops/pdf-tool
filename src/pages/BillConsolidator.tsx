@@ -1,0 +1,593 @@
+import React, { useState, useRef, useEffect } from 'react';
+import {
+  Upload,
+  Download,
+  Printer,
+  Receipt,
+  FileSpreadsheet,
+  Plus,
+  Trash2,
+  ArrowUp,
+  ArrowDown,
+  Sliders,
+  DollarSign,
+  Smartphone,
+  Eye,
+  CheckCircle2,
+  Building2,
+} from 'lucide-react';
+import { PDFDocument } from 'pdf-lib';
+import * as pdfjsLib from 'pdfjs-dist';
+import '../lib/pdfWorker';
+import { useSEO } from '../hooks/useSEO';
+import { usePageSEO } from '../lib/usePageSEO';
+import ToolSEOSection from '../components/ToolSEOSection';
+import ShareQrModal from '../components/ShareQrModal';
+import { downloadBlob } from '../lib/utils';
+
+interface BillItem {
+  id: string;
+  file: File;
+  canvas: HTMLCanvasElement;
+  desc: string;
+  date: string;
+  amount: number;
+}
+
+type GridLayout = '4_per_page' | '6_per_page' | '2_per_page';
+
+export default function BillConsolidator() {
+  useSEO(
+    'Expense Bills & Fuel Slips 4-in-1 Consolidator — Merge Receipts into A4 PDF',
+    'Tile 4 or 6 fuel bills, toll receipts, and taxi slips onto single A4 sheets for reimbursement claims. Auto-calculates total expense summary table. Free & private.'
+  );
+
+  usePageSEO(
+    'Expense Bills Consolidator — Combine Receipts onto A4 Sheet',
+    'Free online tool for employees, accounts teams and CAs to combine multiple petrol slips, taxi receipts and GST bills into an audited A4 reimbursement claim PDF.',
+    'expense bills consolidator, petrol slip merger, merge receipts into one page pdf, 4 bills in one page, travel reimbursement sheet maker, combine tax receipts pdf',
+    '/bill-consolidator'
+  );
+
+  const [bills, setBills] = useState<BillItem[]>([]);
+  const [layout, setLayout] = useState<GridLayout>('4_per_page');
+  const [employeeName, setEmployeeName] = useState('Pankaj Meena');
+  const [claimTitle, setClaimTitle] = useState('Monthly Travel & Fuel Expense Claim');
+  const [companyName, setCompanyName] = useState('Finance & Accounts Dept.');
+  const [includeSummaryTable, setIncludeSummaryTable] = useState(true);
+  const [previewDataUrl, setPreviewDataUrl] = useState<string | null>(null);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [showQrModal, setShowQrModal] = useState(false);
+
+  // Upload multiple bill images or PDFs
+  const handleUploadFiles = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selectedFiles = Array.from(e.target.files || []);
+    if (selectedFiles.length === 0) return;
+    setIsProcessing(true);
+
+    const newBills: BillItem[] = [];
+
+    try {
+      for (const f of selectedFiles) {
+        if (f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf')) {
+          const buffer = await f.arrayBuffer();
+          const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(buffer) });
+          const pdf = await loadingTask.promise;
+          const page = await pdf.getPage(1);
+          const viewport = page.getViewport({ scale: 1.5 });
+          const canvas = document.createElement('canvas');
+          canvas.width = viewport.width;
+          canvas.height = viewport.height;
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            await page.render({ canvasContext: ctx, viewport, canvas } as any).promise;
+            newBills.push({
+              id: Math.random().toString(36).substring(2, 9),
+              file: f,
+              canvas,
+              desc: f.name.replace(/\.[^/.]+$/, '').replace(/[-_]/g, ' '),
+              date: new Date().toLocaleDateString('en-GB'),
+              amount: 0,
+            });
+          }
+        } else {
+          // Image file
+          await new Promise<void>((resolve) => {
+            const reader = new FileReader();
+            reader.onload = (ev) => {
+              const img = new Image();
+              img.onload = () => {
+                const canvas = document.createElement('canvas');
+                canvas.width = img.naturalWidth;
+                canvas.height = img.naturalHeight;
+                const ctx = canvas.getContext('2d');
+                if (ctx) {
+                  ctx.drawImage(img, 0, 0);
+                  newBills.push({
+                    id: Math.random().toString(36).substring(2, 9),
+                    file: f,
+                    canvas,
+                    desc: f.name.replace(/\.[^/.]+$/, '').replace(/[-_]/g, ' '),
+                    date: new Date().toLocaleDateString('en-GB'),
+                    amount: 0,
+                  });
+                }
+                resolve();
+              };
+              img.src = ev.target?.result as string;
+            };
+            reader.readAsDataURL(f);
+          });
+        }
+      }
+
+      setBills((prev) => [...prev, ...newBills]);
+    } catch (err) {
+      console.error('Error loading bills:', err);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  // Calculate total expense sum
+  const totalExpense = bills.reduce((sum, b) => sum + (Number(b.amount) || 0), 0);
+
+  // Render an A4 sheet for given batch of bills
+  const renderSheetCanvas = (batch: BillItem[], pageNum: number, totalPages: number): HTMLCanvasElement | null => {
+    const sheetW = 1654; // A4 200 DPI
+    const sheetH = 2338;
+    const canvas = document.createElement('canvas');
+    canvas.width = sheetW;
+    canvas.height = sheetH;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+
+    // White paper
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, sheetW, sheetH);
+
+    // Top Header Banner
+    ctx.fillStyle = '#0f172a';
+    ctx.font = 'bold 26px sans-serif';
+    ctx.fillText(claimTitle.toUpperCase(), 60, 65);
+
+    ctx.fillStyle = '#64748b';
+    ctx.font = '16px sans-serif';
+    ctx.fillText(`Employee: ${employeeName} | ${companyName} | Total Claim: ₹${totalExpense.toLocaleString('en-IN')}`, 60, 95);
+
+    ctx.strokeStyle = '#e2e8f0';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(60, 115);
+    ctx.lineTo(sheetW - 60, 115);
+    ctx.stroke();
+
+    // Summary Table Box if on Page 1
+    let startY = 135;
+    if (includeSummaryTable && pageNum === 1) {
+      const sumH = 110;
+      ctx.fillStyle = '#f8fafc';
+      ctx.fillRect(60, startY, sheetW - 120, sumH);
+      ctx.strokeStyle = '#cbd5e1';
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(60, startY, sheetW - 120, sumH);
+
+      ctx.fillStyle = '#0f172a';
+      ctx.font = 'bold 15px sans-serif';
+      ctx.fillText('AUDIT EXPENSE BREAKDOWN SUMMARY', 80, startY + 28);
+
+      let xOffset = 80;
+      batch.slice(0, 6).forEach((b, idx) => {
+        ctx.fillStyle = '#475569';
+        ctx.font = '13px sans-serif';
+        const label = `#${idx + 1} ${b.desc.slice(0, 16)}: ₹${b.amount}`;
+        ctx.fillText(label, xOffset, startY + 58);
+        xOffset += 240;
+        if (xOffset > sheetW - 200) xOffset = 80;
+      });
+
+      ctx.fillStyle = '#047857';
+      ctx.font = 'bold 16px sans-serif';
+      ctx.fillText(`TOTAL VERIFIED CLAIM AMOUNT: ₹${totalExpense.toLocaleString('en-IN')}`, 80, startY + 92);
+
+      startY += sumH + 20;
+    }
+
+    // Grid layout for bills
+    const availH = sheetH - startY - 70;
+    let cols = 2;
+    let rows = 2;
+
+    if (layout === '6_per_page') {
+      cols = 2;
+      rows = 3;
+    } else if (layout === '2_per_page') {
+      cols = 1;
+      rows = 2;
+    }
+
+    const boxW = Math.floor((sheetW - 120 - (cols - 1) * 30) / cols);
+    const boxH = Math.floor((availH - (rows - 1) * 30) / rows);
+
+    batch.forEach((bill, idx) => {
+      const c = idx % cols;
+      const r = Math.floor(idx / cols);
+      const bX = 60 + c * (boxW + 30);
+      const bY = startY + r * (boxH + 30);
+
+      // Card container
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(bX, bY, boxW, boxH);
+      ctx.strokeStyle = '#cbd5e1';
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(bX, bY, boxW, boxH);
+
+      // Top title bar of receipt box
+      ctx.fillStyle = '#f1f5f9';
+      ctx.fillRect(bX, bY, boxW, 36);
+      ctx.fillStyle = '#0f172a';
+      ctx.font = 'bold 13px sans-serif';
+      ctx.fillText(`ITEM #${idx + 1}: ${bill.desc.toUpperCase()}`, bX + 12, bY + 23);
+
+      ctx.fillStyle = '#047857';
+      ctx.font = 'bold 14px sans-serif';
+      ctx.textAlign = 'right';
+      ctx.fillText(`₹${bill.amount || '0'}`, bX + boxW - 12, bY + 23);
+      ctx.textAlign = 'left';
+
+      // Draw receipt image fitted inside remaining box area
+      const imgAvailH = boxH - 40;
+      const s = Math.min((boxW - 16) / bill.canvas.width, (imgAvailH - 16) / bill.canvas.height);
+      const dW = bill.canvas.width * s;
+      const dH = bill.canvas.height * s;
+      const dX = bX + (boxW - dW) / 2;
+      const dY = bY + 40 + (imgAvailH - dH) / 2;
+
+      ctx.drawImage(bill.canvas, dX, dY, dW, dH);
+    });
+
+    // Sheet Footer
+    ctx.fillStyle = '#94a3b8';
+    ctx.font = '13px sans-serif';
+    ctx.fillText(`Page ${pageNum} of ${totalPages} • Verified Expense Claim Voucher`, 60, sheetH - 30);
+
+    return canvas;
+  };
+
+  // Re-generate preview when bills, layout or metadata change
+  useEffect(() => {
+    if (bills.length === 0) return;
+
+    let countPerSheet = 4;
+    if (layout === '6_per_page') countPerSheet = 6;
+    if (layout === '2_per_page') countPerSheet = 2;
+
+    const totalSheets = Math.ceil(bills.length / countPerSheet);
+    const firstBatch = bills.slice(0, countPerSheet);
+    const canvas = renderSheetCanvas(firstBatch, 1, totalSheets);
+    if (canvas) {
+      setPreviewDataUrl(canvas.toDataURL('image/jpeg', 0.88));
+    }
+  }, [bills, layout, employeeName, claimTitle, companyName, includeSummaryTable]);
+
+  // Export all sheets to single PDF
+  const handleDownloadPdf = async () => {
+    if (bills.length === 0) return;
+    setIsProcessing(true);
+
+    try {
+      const pdfDoc = await PDFDocument.create();
+
+      let countPerSheet = 4;
+      if (layout === '6_per_page') countPerSheet = 6;
+      if (layout === '2_per_page') countPerSheet = 2;
+
+      const totalSheets = Math.ceil(bills.length / countPerSheet);
+
+      for (let p = 0; p < totalSheets; p++) {
+        const batch = bills.slice(p * countPerSheet, (p + 1) * countPerSheet);
+        const canvas = renderSheetCanvas(batch, p + 1, totalSheets);
+        if (!canvas) continue;
+
+        const jpgData = canvas.toDataURL('image/jpeg', 0.92);
+        const jpgBytes = await fetch(jpgData).then((r) => r.arrayBuffer());
+        const jpgImg = await pdfDoc.embedJpg(jpgBytes);
+
+        // A4 page 595.28 x 841.89 points
+        const page = pdfDoc.addPage([595.28, 841.89]);
+        page.drawImage(jpgImg, { x: 0, y: 0, width: 595.28, height: 841.89 });
+      }
+
+      const outBytes = await pdfDoc.save();
+      const blob = new Blob([outBytes as any], { type: 'application/pdf' });
+      downloadBlob(blob, `expense-claim-${Date.now()}.pdf`);
+    } catch (err) {
+      console.error('Error generating bill voucher PDF:', err);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 py-10 px-4 sm:px-6">
+      <div className="max-w-6xl mx-auto space-y-8">
+        {/* Header */}
+        <div className="text-center space-y-3">
+          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs font-bold uppercase tracking-wider">
+            <Receipt className="w-4 h-4" /> Office & Reimbursement Special
+          </div>
+          <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight">
+            Expense Bills & Fuel Slips 4-in-1 Consolidator
+          </h1>
+          <p className="text-sm sm:text-base text-slate-500 dark:text-slate-400 max-w-2xl mx-auto">
+            Consolidate 4 or 6 fuel bills, toll receipts, and taxi slips onto single A4 sheets.
+            Automatically calculates total claim amount and prints an audited expense voucher.
+          </p>
+        </div>
+
+        {/* Upload State */}
+        {bills.length === 0 ? (
+          <div className="max-w-2xl mx-auto">
+            <label className="flex flex-col items-center justify-center p-12 border-2 border-dashed border-slate-300 dark:border-slate-700 hover:border-emerald-500 rounded-3xl cursor-pointer bg-white dark:bg-slate-900 transition-all shadow-sm group">
+              <input
+                type="file"
+                multiple
+                accept=".pdf,image/png,image/jpeg,image/webp"
+                onChange={handleUploadFiles}
+                className="hidden"
+              />
+              <div className="w-16 h-16 rounded-2xl bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                <Upload className="w-8 h-8" />
+              </div>
+              <span className="text-base font-bold text-slate-900 dark:text-white mb-1">
+                Drop Receipt Photos or PDF Invoices Here
+              </span>
+              <span className="text-xs text-slate-400 text-center max-w-xs">
+                Upload petrol slips, toll plaza receipts, hotel bills, taxi slips, or GST invoices.
+              </span>
+            </label>
+          </div>
+        ) : (
+          /* Editor Layout */
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+            {/* Left Controls & Bill List */}
+            <div className="lg:col-span-6 space-y-5 bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+                <span className="text-sm font-bold flex items-center gap-2">
+                  <Sliders className="w-4 h-4 text-emerald-500" /> Voucher Details ({bills.length} Bills)
+                </span>
+                <button
+                  onClick={() => setBills([])}
+                  className="text-xs text-rose-500 hover:text-rose-600 font-semibold"
+                >
+                  Clear All
+                </button>
+              </div>
+
+              {/* Grid Layout Picker */}
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">
+                  Sheet Layout
+                </label>
+                <div className="grid grid-cols-3 gap-2 text-xs">
+                  {[
+                    { id: '4_per_page', label: '4 Bills (2×2 Grid)' },
+                    { id: '6_per_page', label: '6 Bills (3×2 Grid)' },
+                    { id: '2_per_page', label: '2 Bills (Large)' },
+                  ].map((opt) => (
+                    <button
+                      key={opt.id}
+                      onClick={() => setLayout(opt.id as GridLayout)}
+                      className={`p-2 rounded-xl border text-center font-bold transition ${
+                        layout === opt.id
+                          ? 'border-emerald-500 bg-emerald-600 text-white shadow-sm'
+                          : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Claim Metadata Inputs */}
+              <div className="space-y-2.5 p-3.5 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200 dark:border-slate-700 text-xs">
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-500 mb-1">
+                    Claim Title / Month
+                  </label>
+                  <input
+                    type="text"
+                    value={claimTitle}
+                    onChange={(e) => setClaimTitle(e.target.value)}
+                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 font-semibold"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-500 mb-1">
+                      Employee / Claimant
+                    </label>
+                    <input
+                      type="text"
+                      value={employeeName}
+                      onChange={(e) => setEmployeeName(e.target.value)}
+                      className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-500 mb-1">
+                      Department / Company
+                    </label>
+                    <input
+                      type="text"
+                      value={companyName}
+                      onChange={(e) => setCompanyName(e.target.value)}
+                      className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Bill Items Editable List */}
+              <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                  Receipt Breakdown & Amounts (₹)
+                </span>
+                {bills.map((bill, index) => (
+                  <div
+                    key={bill.id}
+                    className="flex items-center gap-2 p-2.5 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700 text-xs"
+                  >
+                    <span className="font-bold text-slate-400 w-5 text-center">#{index + 1}</span>
+                    <input
+                      type="text"
+                      value={bill.desc}
+                      onChange={(e) => {
+                        const updated = [...bills];
+                        updated[index].desc = e.target.value;
+                        setBills(updated);
+                      }}
+                      className="flex-1 px-2 py-1 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 font-medium"
+                      placeholder="Receipt Description"
+                    />
+                    <div className="flex items-center w-24">
+                      <span className="text-slate-400 font-bold px-1.5">₹</span>
+                      <input
+                        type="number"
+                        value={bill.amount || ''}
+                        onChange={(e) => {
+                          const updated = [...bills];
+                          updated[index].amount = parseFloat(e.target.value) || 0;
+                          setBills(updated);
+                        }}
+                        className="w-full px-1.5 py-1 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 font-bold text-emerald-600"
+                        placeholder="0"
+                      />
+                    </div>
+                    <button
+                      onClick={() => setBills(bills.filter((_, i) => i !== index))}
+                      className="text-slate-400 hover:text-rose-500 p-1"
+                      title="Remove"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              {/* Total Claim Banner */}
+              <div className="p-3 bg-emerald-50 dark:bg-emerald-950/40 rounded-xl border border-emerald-200 dark:border-emerald-800 flex items-center justify-between">
+                <span className="text-xs font-bold text-emerald-800 dark:text-emerald-300">
+                  Total Claim Summary ({bills.length} Receipts)
+                </span>
+                <span className="text-base font-extrabold text-emerald-600 dark:text-emerald-400">
+                  ₹{totalExpense.toLocaleString('en-IN')}
+                </span>
+              </div>
+
+              {/* Export Buttons */}
+              <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-2">
+                <button
+                  onClick={handleDownloadPdf}
+                  disabled={isProcessing}
+                  className="w-full flex items-center justify-center gap-2 py-3.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-sm shadow-md transition disabled:opacity-50"
+                >
+                  <Download className="w-4 h-4" /> Download Expense Voucher PDF
+                </button>
+                <button
+                  onClick={() => setShowQrModal(true)}
+                  className="w-full flex items-center justify-center gap-1.5 py-2 px-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-xl font-semibold text-xs transition"
+                >
+                  <Smartphone className="w-3.5 h-3.5" /> Send to Mobile Phone
+                </button>
+              </div>
+            </div>
+
+            {/* Right Live Preview */}
+            <div className="lg:col-span-6 bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col items-center">
+              <div className="w-full flex items-center justify-between mb-4">
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                  <Eye className="w-4 h-4 text-emerald-500" /> A4 Expense Claim Sheet Preview
+                </span>
+                <span className="text-xs font-semibold px-2.5 py-1 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 rounded-lg">
+                  Audited Format
+                </span>
+              </div>
+
+              {previewDataUrl ? (
+                <div className="w-full max-h-[640px] overflow-auto flex items-center justify-center p-4 bg-slate-100 dark:bg-slate-950 rounded-2xl border border-slate-200 dark:border-slate-800">
+                  <img
+                    src={previewDataUrl}
+                    alt="Expense Claim Sheet Preview"
+                    className="max-h-[580px] w-auto object-contain rounded shadow-lg border border-slate-300 dark:border-slate-700"
+                  />
+                </div>
+              ) : (
+                <div className="w-full h-96 flex items-center justify-center text-slate-400 text-xs">
+                  Generating expense voucher preview...
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* SEO Section */}
+        <ToolSEOSection
+          toolName="Expense Bills & Fuel Slips Consolidator"
+          headline="Combine Multiple Receipts and Bills into a Single Audited A4 PDF"
+          description="Filing travel claims, fuel reimbursements, and GST expense sheets often requires pasting dozens of small paper receipts onto sheets of paper. This tool automatically tiles 4 or 6 fuel bills, taxi slips, and invoices onto standard A4 sheets with itemized descriptions and auto-calculated total expense amounts."
+          steps={[
+            {
+              step: '01',
+              title: 'Upload Receipt Photos or Invoices',
+              desc: 'Select up to 20 fuel receipts, toll tickets, meal bills, or GST invoices.',
+            },
+            {
+              step: '02',
+              title: 'Enter Amounts & Descriptions',
+              desc: 'Optionally add descriptions and amounts in ₹; the tool auto-computes the grand total.',
+            },
+            {
+              step: '03',
+              title: 'Download Claim Voucher',
+              desc: 'Download an organized, clean A4 PDF ready for finance and accounts department approval.',
+            },
+          ]}
+          features={[
+            {
+              title: 'Auto-Summed Claim Summary',
+              desc: 'Automatically tallies all bill amounts into an audit-ready summary box on Page 1.',
+            },
+            {
+              title: 'Multi-Grid Options (4-in-1 / 6-in-1)',
+              desc: 'Fit 4 bills or 6 bills per A4 page to meet strict corporate travel policy guidelines.',
+            },
+            {
+              title: 'Tidy Borders & Labels',
+              desc: 'Neatly encloses every receipt with item numbers and dates to prevent lost reimbursement claims.',
+            },
+          ]}
+          faqs={[
+            {
+              q: 'Can I upload both PDF invoices and camera photos together?',
+              a: 'Yes, the tool supports mixed batches of JPEG, PNG, and PDF files simultaneously.',
+            },
+            {
+              q: 'Is this format accepted by corporate HR and finance departments?',
+              a: 'Yes, the clean A4 grid format with clear receipt borders and an audited summary table adheres to standard corporate reimbursement guidelines.',
+            },
+          ]}
+        />
+
+        {/* Mobile Transfer Modal */}
+        <ShareQrModal
+          isOpen={showQrModal}
+          onClose={() => setShowQrModal(false)}
+          title="Expense Claim PDF"
+          fileName="expense-claim.pdf"
+        />
+      </div>
+    </div>
+  );
+}

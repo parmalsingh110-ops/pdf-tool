@@ -112,7 +112,7 @@ export default function ConvertToTiff() {
 
       setProgress('Finalizing PDF…');
       const pdfBytes = await pdfDoc.save();
-      const pdfBlob = new Blob([pdfBytes], { type: 'application/pdf' });
+      const pdfBlob = new Blob([pdfBytes as any], { type: 'application/pdf' });
       setResultUrl(URL.createObjectURL(pdfBlob));
       setResultName(`${file.name.replace(/\.[^/.]+$/, '')}.pdf`);
       setProgress(`Done! ${ifds.length} TIFF page(s) converted to PDF.`);

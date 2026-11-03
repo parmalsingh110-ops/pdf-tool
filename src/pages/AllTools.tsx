@@ -1,4 +1,4 @@
-import { useMemo, useState, useCallback } from 'react';
+import { useMemo, useState, useCallback, useEffect } from 'react';
 import { usePageSEO } from '../lib/usePageSEO';
 import { Link } from 'react-router-dom';
 import { 
@@ -12,7 +12,8 @@ import {
   Info, Zap, ScanSearch, Star,
   // New icons for 13 new tools
   Shield, Wrench, Globe, FileCode2, Type, Accessibility, Volume2, Link as LinkIcon, BookMarked, Eraser,
-  Shuffle, FlipHorizontal, Compass, Bookmark,
+  Shuffle, FlipHorizontal, Compass, Bookmark, FileCheck2, Printer, Grid,
+  Briefcase, GraduationCap, Building2, Award, X,
 } from 'lucide-react';
 import { toggleFavorite, isFavorite } from '../lib/favorites';
 import { useSEO } from '../hooks/useSEO';
@@ -48,6 +49,23 @@ const categories = [
       { title: 'Clean Paper Signature (Transparent/White)', path: '/clean-signature', icon: Pen, color: 'text-indigo-600', bg: 'bg-indigo-50' },
       { title: 'Masked Aadhaar Maker (XXXX-XXXX)', path: '/masked-aadhaar', icon: ShieldCheck, color: 'text-emerald-600', bg: 'bg-emerald-50' },
       { title: 'All Documents to Single PDF (<1 MB)', path: '/exam-document-merger', icon: Combine, color: 'text-blue-600', bg: 'bg-blue-50' },
+      { title: 'e-Aadhaar & Voter to PVC Card', path: '/pvc-card-maker', icon: ScanLine, color: 'text-blue-600', bg: 'bg-blue-50' },
+      { title: 'E-Stamp Paper Margin Aligner', path: '/stamp-paper-aligner', icon: FileCheck2, color: 'text-amber-600', bg: 'bg-amber-50' },
+      { title: 'Ultra Xerox Eco-Cleaner', path: '/xerox-cleaner', icon: Sparkles, color: 'text-emerald-600', bg: 'bg-emerald-50' },
+      { title: 'College Assignment Cover Page', path: '/assignment-cover-page', icon: BookOpen, color: 'text-indigo-600', bg: 'bg-indigo-50' },
+      { title: 'Lecture Slides Handout Maker', path: '/slide-handouts', icon: Presentation, color: 'text-violet-600', bg: 'bg-violet-50' },
+      { title: 'Thesis Binding Gutter Margin', path: '/binding-margin', icon: BookMarked, color: 'text-cyan-600', bg: 'bg-cyan-50' },
+      { title: 'Expense Bills 4-in-1 Consolidator', path: '/bill-consolidator', icon: LayoutGrid, color: 'text-emerald-600', bg: 'bg-emerald-50' },
+      { title: 'Digital Rubber Stamp & Seal', path: '/rubber-stamp', icon: Stamp, color: 'text-blue-600', bg: 'bg-blue-50' },
+      { title: 'Batch Self-Attested & Sign Stamper', path: '/self-attest', icon: Pen, color: 'text-blue-600', bg: 'bg-blue-50' },
+      { title: 'Scan to Print QR Web-Drop', path: '/scan-to-print', icon: Printer, color: 'text-rose-600', bg: 'bg-rose-50' },
+      { title: 'Multi-Customer Gang-Print Sheet', path: '/gang-print-sheet', icon: Layers, color: 'text-emerald-600', bg: 'bg-emerald-50' },
+      { title: 'Faint Land Record & Bhu-Naksha Darkener', path: '/land-record-darkener', icon: FileCheck2, color: 'text-amber-600', bg: 'bg-amber-50' },
+      { title: 'Micro-Pocket Notes Maker (4-in-1, 8-in-1)', path: '/micro-pocket-notes', icon: BookOpen, color: 'text-violet-600', bg: 'bg-violet-50' },
+      { title: 'Lab Journal & Practical Formatter', path: '/lab-journal-formatter', icon: Grid, color: 'text-indigo-600', bg: 'bg-indigo-50' },
+      { title: 'Classroom Board Notes Cleaner', path: '/board-notes-cleaner', icon: Sparkles, color: 'text-cyan-600', bg: 'bg-cyan-50' },
+      { title: 'Strict 1-Page Resume Compactor', path: '/resume-compactor', icon: FileText, color: 'text-blue-600', bg: 'bg-blue-50' },
+      { title: 'Project Report Header & Watermark Swapper', path: '/report-header-swapper', icon: BookMarked, color: 'text-rose-600', bg: 'bg-rose-50' },
       { title: 'PDF to JPG', path: '/pdf-to-jpg', icon: ImageIcon, color: 'text-yellow-500', bg: 'bg-yellow-50' },
       { title: 'JPG to PDF', path: '/jpg-to-pdf', icon: FileImage, color: 'text-yellow-500', bg: 'bg-yellow-50' },
       { title: 'Organize PDF', path: '/organize', icon: Layers, color: 'text-blue-500', bg: 'bg-blue-50' },
@@ -202,6 +220,119 @@ const categories = [
   }
 ];
 
+interface RoleToolItem {
+  title: string;
+  desc: string;
+  path: string;
+  icon: any;
+  color: string;
+  bg: string;
+  badge?: string;
+}
+
+interface RoleProfile {
+  id: string;
+  label: string;
+  shortLabel?: string;
+  emoji: string;
+  tagline: string;
+  themeColor: string;
+  bannerBg: string;
+  tools: RoleToolItem[];
+}
+
+const ROLE_PROFILES: RoleProfile[] = [
+  {
+    id: 'emitra',
+    label: 'E-Mitra & Photo State',
+    shortLabel: 'E-Mitra & Photo State',
+    emoji: '🏢',
+    tagline: 'High-earning daily essentials for cyber cafes, Xerox shops, and CSC operators.',
+    themeColor: 'from-blue-600 to-cyan-600',
+    bannerBg: 'bg-gradient-to-r from-blue-50 to-cyan-50 dark:from-blue-950/40 dark:to-cyan-950/40 border-blue-200 dark:border-blue-800',
+    tools: [
+      { title: 'Scan to Print QR Web-Drop', path: '/scan-to-print', desc: 'Beam mobile files to PC queue without saving WhatsApp numbers.', icon: Printer, color: 'text-rose-600', bg: 'bg-rose-50', badge: 'Viral' },
+      { title: 'Multi-Customer Gang-Print Sheet', path: '/gang-print-sheet', desc: 'Combine 2-8 customer ID cards onto A4 or 4×6 photo sheet.', icon: Layers, color: 'text-emerald-600', bg: 'bg-emerald-50', badge: 'Paper Saver' },
+      { title: 'Faint Land Record Darkener', path: '/land-record-darkener', desc: 'Darken faint survey lines on Bhu-Naksha & Jamabandi maps.', icon: FileCheck2, color: 'text-amber-600', bg: 'bg-amber-50', badge: 'Revenue' },
+      { title: 'e-Aadhaar & Voter to PVC Card', path: '/pvc-card-maker', desc: 'CR80 standard 85.6×54mm PVC print sheet with cut marks.', icon: ScanLine, color: 'text-blue-600', bg: 'bg-blue-50', badge: 'Hot' },
+      { title: 'E-Stamp Paper Margin Aligner', path: '/stamp-paper-aligner', desc: 'Rajasthan, UP, Delhi legal agreement margin.', icon: FileCheck2, color: 'text-amber-600', bg: 'bg-amber-50', badge: 'Legal' },
+      { title: 'Ultra Xerox Eco-Cleaner', path: '/xerox-cleaner', desc: 'Mobile photo to pure white paper, save 60% toner.', icon: Sparkles, color: 'text-emerald-600', bg: 'bg-emerald-50', badge: 'Toner Saver' },
+      { title: 'Digital Rubber Stamp & Round Seal', path: '/rubber-stamp', desc: 'Custom shop round seal & transparent PNG.', icon: Stamp, color: 'text-indigo-600', bg: 'bg-indigo-50', badge: 'New' },
+      { title: 'Masked Aadhaar Maker (XXXX-XXXX)', path: '/masked-aadhaar', desc: 'Hide first 8 digits for safe KYC submission.', icon: ShieldCheck, color: 'text-emerald-600', bg: 'bg-emerald-50', badge: 'KYC Safe' },
+      { title: 'ID Card Front & Back Joiner', path: '/id-card-joiner', desc: '12-point perspective auto crop on A4/4×6.', icon: ContactRound, color: 'text-orange-600', bg: 'bg-orange-50', badge: 'Auto-Crop' },
+      { title: 'Clean Paper Signature', path: '/clean-signature', desc: 'Whiten background & transparent signature.', icon: Pen, color: 'text-violet-600', bg: 'bg-violet-50', badge: 'Online Forms' },
+      { title: 'Batch Self-Attested Stamper', path: '/self-attest', desc: 'Sign all pages of marksheets in 1-click.', icon: Pen, color: 'text-blue-600', bg: 'bg-blue-50', badge: '1-Click' },
+      { title: 'All Documents to Single PDF (<1 MB)', path: '/exam-document-merger', desc: 'Combine marksheets under strict size limits.', icon: Combine, color: 'text-blue-600', bg: 'bg-blue-50', badge: 'Govt Job' },
+      { title: 'Target Compress to Exact KB', path: '/target-compress', desc: 'Compress PDF down to exact 100KB, 200KB.', icon: Target, color: 'text-emerald-600', bg: 'bg-emerald-50', badge: 'Portal Fit' },
+    ],
+  },
+  {
+    id: 'student',
+    label: 'College & School Students',
+    shortLabel: 'College & Students',
+    emoji: '🎓',
+    tagline: 'Save paper, create perfect assignment dossiers, and format thesis bindings effortlessly.',
+    themeColor: 'from-violet-600 to-indigo-600',
+    bannerBg: 'bg-gradient-to-r from-violet-50 to-indigo-50 dark:from-violet-950/40 dark:to-indigo-950/40 border-violet-200 dark:border-violet-800',
+    tools: [
+      { title: 'Micro-Pocket Notes Maker', path: '/micro-pocket-notes', desc: '4-in-1, 8-in-1, 16-in-1 pocket revision booklets with cut marks.', icon: BookOpen, color: 'text-violet-600', bg: 'bg-violet-50', badge: 'Paper Saver' },
+      { title: 'Lab Journal & Practical Formatter', path: '/lab-journal-formatter', desc: 'Left 1cm Graph sheet, Right ruled notebook page with header.', icon: Grid, color: 'text-indigo-600', bg: 'bg-indigo-50', badge: 'Practical' },
+      { title: 'Classroom Board Notes Cleaner', path: '/board-notes-cleaner', desc: 'De-glare whiteboard photos & invert blackboard to black ink.', icon: Sparkles, color: 'text-cyan-600', bg: 'bg-cyan-50', badge: 'De-Glare' },
+      { title: 'Strict 1-Page Resume Compactor', path: '/resume-compactor', desc: 'Micro-adjust scale & margins to fit CV strictly on 1 page.', icon: FileText, color: 'text-blue-600', bg: 'bg-blue-50', badge: 'Placement' },
+      { title: 'Project Report Header Swapper', path: '/report-header-swapper', desc: 'Mask senior headers and stamp your college name & pages.', icon: BookMarked, color: 'text-rose-600', bg: 'bg-rose-50', badge: 'Thesis' },
+      { title: 'College Assignment Cover Page', path: '/assignment-cover-page', desc: 'University front page with auto-merge dossier.', icon: BookOpen, color: 'text-indigo-600', bg: 'bg-indigo-50', badge: 'Cover Sheet' },
+      { title: 'Lecture Slides Handouts Maker', path: '/slide-handouts', desc: '3 slides with ruled note lines, saves 75% paper.', icon: Presentation, color: 'text-violet-600', bg: 'bg-violet-50', badge: 'Handouts' },
+      { title: 'Thesis & Book Binding Margin', path: '/binding-margin', desc: 'Gutter margins for spiral & thesis hard binding.', icon: BookMarked, color: 'text-cyan-600', bg: 'bg-cyan-50', badge: 'Binding Safe' },
+      { title: 'Split in Half (Book Scan Cut)', path: '/split-in-half', desc: 'Cut 2-page scanned book spreads down center.', icon: Scissors, color: 'text-orange-600', bg: 'bg-orange-50', badge: 'Book Scans' },
+      { title: 'Handwritten Notes to PDF', path: '/handwriting-pdf', desc: 'Turn text into realistic handwritten pages.', icon: Pen, color: 'text-amber-600', bg: 'bg-amber-50', badge: 'Assignments' },
+      { title: 'Target Compress PDF', path: '/target-compress', desc: 'Shrink PDF to meet university portal size limits.', icon: Target, color: 'text-emerald-600', bg: 'bg-emerald-50', badge: 'Portal Fit' },
+      { title: 'Merge PDF', path: '/merge', desc: 'Combine multiple assignment & practical pages.', icon: Combine, color: 'text-red-500', bg: 'bg-red-50', badge: 'Essentials' },
+      { title: 'Searchable PDF (OCR)', path: '/searchable-pdf', desc: 'Make scanned notes text-searchable with OCR.', icon: ScanSearch, color: 'text-blue-600', bg: 'bg-blue-50', badge: 'Study Notes' },
+      { title: 'Word to PDF (Exact)', path: '/word-to-pdf-exact', desc: 'Convert reports to PDF with 100% formatting.', icon: FileType, color: 'text-indigo-600', bg: 'bg-indigo-50', badge: 'Project Reports' },
+    ],
+  },
+  {
+    id: 'office',
+    label: 'Office, Business & Legal',
+    shortLabel: 'Office & Business',
+    emoji: '💼',
+    tagline: 'Professional tools for advocates, accountants, CA filing, invoices, and expense claims.',
+    themeColor: 'from-emerald-600 to-teal-600',
+    bannerBg: 'bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-950/40 dark:to-teal-950/40 border-emerald-200 dark:border-emerald-800',
+    tools: [
+      { title: 'Scan to Print QR Web-Drop', path: '/scan-to-print', desc: 'Instant counter print queue without saving WhatsApp numbers.', icon: Printer, color: 'text-rose-600', bg: 'bg-rose-50', badge: 'Instant Queue' },
+      { title: 'Strict 1-Page Resume Compactor', path: '/resume-compactor', desc: 'Fit corporate CV strictly onto 1 page without text loss.', icon: FileText, color: 'text-blue-600', bg: 'bg-blue-50', badge: '1-Page CV' },
+      { title: 'Expense Bills 4-in-1 Consolidator', path: '/bill-consolidator', desc: 'Combine petrol slips with audited claim table.', icon: LayoutGrid, color: 'text-emerald-600', bg: 'bg-emerald-50', badge: 'Reimbursement' },
+      { title: 'E-Stamp Paper Margin Aligner', path: '/stamp-paper-aligner', desc: 'Print rent agreements cleanly on e-stamp paper.', icon: FileCheck2, color: 'text-amber-600', bg: 'bg-amber-50', badge: 'Affidavits' },
+      { title: 'Digital Rubber Stamp & Round Seal', path: '/rubber-stamp', desc: 'Verified, Paid, Approved stamps & transparent PNG.', icon: Stamp, color: 'text-indigo-600', bg: 'bg-indigo-50', badge: 'Official' },
+      { title: 'PDF to Word (.docx)', path: '/pdf-to-word', desc: 'Convert PDF to editable Word document.', icon: FileText, color: 'text-blue-700', bg: 'bg-blue-50', badge: 'Editable' },
+      { title: 'PDF to Excel (.xlsx)', path: '/pdf-to-excel', desc: 'Convert statement tables directly to Excel.', icon: FileText, color: 'text-emerald-700', bg: 'bg-emerald-50', badge: 'Accounts' },
+      { title: 'Password Protect PDF', path: '/protect', desc: 'AES-256 encryption for confidential reports.', icon: Lock, color: 'text-purple-500', bg: 'bg-purple-50', badge: 'Security' },
+      { title: 'Unlock PDF', path: '/unlock', desc: 'Lossless password removal for bank statements.', icon: Unlock, color: 'text-purple-500', bg: 'bg-purple-50', badge: 'Smart Pass' },
+      { title: 'Batch Self-Attested Stamper', path: '/self-attest', desc: 'Apply digital attestation & date across pages.', icon: Pen, color: 'text-blue-600', bg: 'bg-blue-50', badge: 'Batch Sign' },
+      { title: 'Flatten PDF Forms', path: '/flatten-pdf', desc: 'Lock interactive form fields before sending.', icon: Layers, color: 'text-rose-500', bg: 'bg-rose-50', badge: 'Form Lock' },
+      { title: 'Extract Tables to CSV', path: '/extract-tables', desc: 'Extract invoice tabular data cleanly.', icon: FileCode, color: 'text-emerald-500', bg: 'bg-emerald-50', badge: 'Audit' },
+    ],
+  },
+  {
+    id: 'sarkari',
+    label: 'Sarkari Job Recruitment',
+    shortLabel: 'Sarkari Job Exams',
+    emoji: '🏛️',
+    tagline: '1-click compliance for SSC, UPSC, Railway, Police, and State PSC recruitment forms.',
+    themeColor: 'from-amber-600 to-rose-600',
+    bannerBg: 'bg-gradient-to-r from-amber-50 to-rose-50 dark:from-amber-950/40 dark:to-rose-950/40 border-amber-200 dark:border-amber-800',
+    tools: [
+      { title: 'Sarkari Photo & Sign (Name & DOP)', path: '/sarkari-photo-signature', desc: 'Format photo with name & DOP + 20-50KB size.', icon: ContactRound, color: 'text-amber-600', bg: 'bg-amber-50', badge: 'Mandatory' },
+      { title: 'Clean Paper Signature', path: '/clean-signature', desc: 'Whiten mobile photo background to pure white.', icon: Pen, color: 'text-indigo-600', bg: 'bg-indigo-50', badge: 'Online Forms' },
+      { title: 'Masked Aadhaar Maker (XXXX-XXXX)', path: '/masked-aadhaar', desc: 'Mask first 8 digits according to UIDAI rules.', icon: ShieldCheck, color: 'text-emerald-600', bg: 'bg-emerald-50', badge: 'UIDAI Safe' },
+      { title: 'All Documents to Single PDF (<1 MB)', path: '/exam-document-merger', desc: 'Combine 10th, 12th, Caste & Domicile under 1MB.', icon: Combine, color: 'text-blue-600', bg: 'bg-blue-50', badge: 'Portal Fit' },
+      { title: 'Batch Self-Attested Stamper', path: '/self-attest', desc: 'Stamp signature + date on all certificates.', icon: Pen, color: 'text-blue-600', bg: 'bg-blue-50', badge: '1-Click' },
+      { title: 'Exact Image Size (KB/MB)', path: '/exact-image-size', desc: 'Compress photo/signature to exact target KB.', icon: ImageMinus, color: 'text-teal-500', bg: 'bg-teal-50', badge: 'SSC / UPSC' },
+    ],
+  },
+];
+
 export default function AllTools() {
   useSEO('All Tools Online Free | PDF Media Suite', 'Free online All Tools tool. No signup or installation required.');
 
@@ -213,7 +344,37 @@ export default function AllTools() {
   const [sortMode, setSortMode] = useState<'most-used' | 'newest' | 'a-z'>('most-used');
   const [query, setQuery] = useState('');
   const [activeCategory, setActiveCategory] = useState<string>('all');
+  const [selectedRole, setSelectedRole] = useState<string>('all');
   const [favTick, setFavTick] = useState(0); // force re-render on fav toggle
+
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const r = params.get('role');
+      if (r && ['emitra', 'student', 'office', 'sarkari'].includes(r)) {
+        setSelectedRole(r);
+      }
+    } catch {}
+  }, []);
+
+  const activeRoleProfile = useMemo(() => {
+    return ROLE_PROFILES.find((r) => r.id === selectedRole) || null;
+  }, [selectedRole]);
+
+  const filteredRoleTools = useMemo(() => {
+    if (!activeRoleProfile) return [];
+    let tools = [...activeRoleProfile.tools];
+    if (query.trim()) {
+      const q = query.toLowerCase();
+      tools = tools.filter((t) => t.title.toLowerCase().includes(q) || t.desc.toLowerCase().includes(q));
+    }
+    if (sortMode === 'a-z') {
+      tools.sort((a, b) => a.title.localeCompare(b.title));
+    } else if (sortMode === 'newest') {
+      tools.reverse();
+    }
+    return tools;
+  }, [activeRoleProfile, query, sortMode]);
 
   const handleToggleFav = useCallback((e: React.MouseEvent, path: string, title: string) => {
     e.preventDefault();
@@ -279,30 +440,75 @@ export default function AllTools() {
 
   return (
     <div className="w-full min-h-screen bg-slate-50 dark:bg-slate-950">
-      <div className="max-w-7xl mx-auto px-6 py-10 flex gap-8">
-        <aside className="hidden lg:block w-72 sticky top-24 h-[calc(100vh-110px)] bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-700 p-6">
-          <p className="text-[10px] uppercase tracking-[0.16em] text-rose-600 font-bold">Directory</p>
-          <div className="mt-5 flex flex-col gap-2">
-            {quickSections.map((item) => (
-              <a
-                key={item.id}
-                href={`#${item.id}`}
-                className="flex items-center gap-3 px-4 py-3 rounded-2xl text-sm font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 hover:text-rose-600 dark:hover:text-rose-400 transition-colors"
-              >
-                <item.icon className="w-4 h-4" />
-                {item.label}
-              </a>
-            ))}
-          </div>
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 flex gap-6 lg:gap-8">
+        <aside className="hidden lg:flex flex-col w-64 xl:w-72 shrink-0 sticky top-24 self-start max-h-[calc(100vh-115px)] bg-white dark:bg-slate-900 rounded-3xl border border-slate-200/90 dark:border-slate-800 p-4 shadow-sm">
+          <div className="overflow-y-auto scrollbar-none flex flex-col flex-1 pr-0.5">
+            {/* Workspaces by Profile */}
+            <div className="mb-4">
+              <p className="text-[11px] uppercase tracking-wider text-rose-600 font-bold mb-2 px-2">Workspaces by Profile</p>
+              <div className="flex flex-col gap-1">
+                <button
+                  onClick={() => setSelectedRole('all')}
+                  className={`w-full text-left flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold transition-all ${
+                    selectedRole === 'all'
+                      ? 'bg-rose-50 dark:bg-rose-950/50 text-rose-600 dark:text-rose-400 font-bold border border-rose-200 dark:border-rose-900'
+                      : 'text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'
+                  }`}
+                >
+                  <span className="flex items-center gap-2.5">
+                    <span className="text-base">🌐</span>
+                    <span>All Profiles</span>
+                  </span>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-500 font-bold">
+                    All
+                  </span>
+                </button>
+                {ROLE_PROFILES.map((rp) => (
+                  <button
+                    key={rp.id}
+                    onClick={() => setSelectedRole(rp.id)}
+                    className={`w-full text-left flex items-center justify-between px-3 py-2 rounded-xl text-xs transition-all ${
+                      selectedRole === rp.id
+                        ? 'bg-rose-50 dark:bg-rose-950/50 text-rose-600 dark:text-rose-400 font-bold border border-rose-200 dark:border-rose-900'
+                        : 'text-slate-700 dark:text-slate-300 font-medium hover:bg-slate-50 dark:hover:bg-slate-800'
+                    }`}
+                  >
+                    <span className="flex items-center gap-2.5 min-w-0 pr-1">
+                      <span className="text-base shrink-0">{rp.emoji}</span>
+                      <span className="truncate">{rp.shortLabel || rp.label}</span>
+                    </span>
+                    <span className="shrink-0 text-[10px] px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-500 font-bold">
+                      {rp.tools.length}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
 
-          <div className="mt-8 p-5 rounded-2xl bg-gradient-to-br from-rose-700 to-rose-500 text-white">
-            <p className="text-xs opacity-90">Upgrade to</p>
-            <h4 className="text-lg font-bold mt-1">MediaSuite Pro</h4>
-            <button className="mt-4 px-4 py-2 rounded-full bg-white text-rose-700 text-xs font-bold">Unlock All</button>
+            <div className="border-t border-slate-100 dark:border-slate-800 pt-3">
+              <p className="text-[11px] uppercase tracking-wider text-slate-400 font-bold mb-1.5 px-2">Directory</p>
+              <div className="flex flex-col gap-0.5">
+                {quickSections.map((item) => (
+                  <a
+                    key={item.id}
+                    href={`#${item.id}`}
+                    className="flex items-center gap-2.5 px-3 py-1.5 rounded-xl text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 hover:text-rose-600 dark:hover:text-rose-400 transition-colors"
+                  >
+                    <item.icon className="w-3.5 h-3.5 text-slate-400" />
+                    {item.label}
+                  </a>
+                ))}
+              </div>
+            </div>
+
+            <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center gap-2 px-2 text-slate-500 text-[11px]">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0 animate-pulse" />
+              <span className="font-semibold text-slate-700 dark:text-slate-300 truncate">110+ Free &amp; Private Tools</span>
+            </div>
           </div>
         </aside>
 
-        <div className="flex-1">
+        <div className="flex-1 min-w-0">
           <header className="mb-12">
             <h1 className="text-4xl md:text-5xl font-extrabold tracking-tight text-slate-900 dark:text-white">All Tools</h1>
             <p className="mt-3 text-lg text-slate-600 dark:text-slate-400 max-w-2xl">
@@ -356,9 +562,12 @@ export default function AllTools() {
                 return (
                   <button
                     key={tab.id}
-                    onClick={() => setActiveCategory(tab.id)}
+                    onClick={() => {
+                      setActiveCategory(tab.id);
+                      if (selectedRole !== 'all') setSelectedRole('all');
+                    }}
                     className={`inline-flex items-center gap-2 px-4 py-2 rounded-full text-xs font-bold whitespace-nowrap transition-all ${
-                      isActive
+                      isActive && selectedRole === 'all'
                         ? 'bg-rose-600 text-white shadow-sm shadow-rose-200'
                         : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-800 hover:border-rose-300 hover:text-rose-600'
                     }`}
@@ -369,96 +578,216 @@ export default function AllTools() {
                 );
               })}
             </div>
+
+            {/* Role / Profile Quick Filter Chips (Mobile & Quick Access) */}
+            <div className="mt-3 flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider whitespace-nowrap">Profile:</span>
+              <button
+                onClick={() => setSelectedRole('all')}
+                className={`px-3 py-1 rounded-full text-xs font-semibold whitespace-nowrap transition-all ${
+                  selectedRole === 'all'
+                    ? 'bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 font-bold shadow-sm'
+                    : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-800 hover:border-slate-400'
+                }`}
+              >
+                🌐 All Workspaces
+              </button>
+              {ROLE_PROFILES.map((rp) => (
+                <button
+                  key={rp.id}
+                  onClick={() => setSelectedRole(rp.id)}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold whitespace-nowrap transition-all ${
+                    selectedRole === rp.id
+                      ? 'bg-rose-600 text-white font-bold shadow-sm shadow-rose-200'
+                      : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-800 hover:border-rose-300 hover:text-rose-600'
+                  }`}
+                >
+                  <span>{rp.emoji}</span>
+                  {rp.label}
+                </button>
+              ))}
+            </div>
           </header>
 
-          {!query.trim() && activeCategory === 'all' && (
-            <section id="popular" className="mb-16">
-              <div className="flex items-center gap-3 mb-6">
-                <h2 className="text-2xl font-bold text-slate-900 dark:text-white">Popular Artifacts</h2>
-                <div className="h-px flex-1 bg-slate-200 dark:bg-slate-700" />
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
-                <Link to="/merge" className="md:col-span-8 rounded-3xl bg-white border border-slate-200 p-8 shadow-[0px_20px_40px_rgba(0,0,0,0.04)] hover:-translate-y-1 transition-all">
-                  <span className="inline-flex text-xs px-3 py-1 rounded-full bg-rose-50 text-rose-700 font-bold">Essential</span>
-                  <h3 className="mt-5 text-2xl font-extrabold text-slate-900">Omni-Merge Pro</h3>
-                  <p className="mt-2 text-slate-600 text-sm">Combine PDFs with smooth ordering and high-fidelity outputs.</p>
-                </Link>
-                <Link to="/compress" className="md:col-span-4 rounded-3xl bg-white border border-slate-200 p-8 shadow-[0px_20px_40px_rgba(0,0,0,0.04)] hover:-translate-y-1 transition-all">
-                  <h3 className="text-xl font-bold text-slate-900">Ultra-Shrink</h3>
-                  <p className="mt-2 text-slate-600 text-sm">Reduce size while preserving readability.</p>
-                </Link>
-              </div>
-            </section>
-          )}
-
-          <div className="space-y-16">
-            {sortedCategories.map((category, catIdx) => (
-              <section key={catIdx} id={categoryAnchor(category.title)}>
-                <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-6 pb-2 border-b border-slate-200 dark:border-slate-700">
-                  {category.title}
-                </h2>
-                <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
-                  {category.tools.length === 0 ? (
-                    <div className="col-span-full py-10 text-center text-slate-400 dark:text-slate-500">
-                      <Search className="w-8 h-8 mx-auto mb-2 opacity-40" />
-                      <p className="text-sm">No tools found for "<span className="font-semibold text-slate-600 dark:text-slate-300">{query}</span>"</p>
+          {activeRoleProfile ? (
+            <div className="space-y-6">
+              {/* Profile Workspace Banner */}
+              <div className={`p-6 md:p-8 rounded-3xl border ${activeRoleProfile.bannerBg}`}>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div>
+                    <div className="flex items-center gap-2.5 mb-2">
+                      <span className="text-3xl">{activeRoleProfile.emoji}</span>
+                      <h2 className="text-2xl md:text-3xl font-extrabold text-slate-900 dark:text-white">
+                        {activeRoleProfile.label} Workspace
+                      </h2>
                     </div>
-                  ) : category.tools.map((tool: any, idx: number) => {
-                    const isAvailable = !!tool.path;
-                    const faved = isAvailable && isFavorite(tool.path);
-                    const cardContent = (
-                      <>
-                        <div className="flex items-start justify-between mb-3">
-                          <div className={`w-10 h-10 rounded-xl ${tool.bg || 'bg-slate-100'} ${tool.color || 'text-slate-400'} flex items-center justify-center`}>
-                            <tool.icon className="w-5 h-5" />
-                          </div>
-                          {isAvailable && (
-                            <button
-                              onClick={(e) => handleToggleFav(e, tool.path, tool.title)}
-                              title={faved ? 'Remove from favorites' : 'Add to favorites'}
-                              className={`p-1 rounded-lg transition-colors ${
-                                faved
-                                  ? 'text-amber-400 hover:text-amber-500'
-                                  : 'text-slate-300 dark:text-slate-600 hover:text-amber-400'
-                              }`}
-                            >
-                              <Star className="w-3.5 h-3.5" fill={faved ? 'currentColor' : 'none'} />
-                            </button>
-                          )}
-                        </div>
-                        <h3 className={`font-semibold text-sm ${isAvailable ? 'text-slate-900 dark:text-slate-100 group-hover:text-rose-600 dark:group-hover:text-rose-400' : 'text-slate-500 dark:text-slate-500'}`}>
-                          {hl(tool.title)}
-                        </h3>
-                        {!isAvailable && (
-                          <span className="inline-block mt-2 text-[10px] uppercase tracking-wider font-bold text-violet-700 dark:text-violet-300 bg-violet-50 dark:bg-violet-950/60 border border-violet-200 dark:border-violet-800 px-2 py-1 rounded-md">
-                            Coming soon
-                          </span>
-                        )}
-                      </>
-                    );
+                    <p className="text-sm text-slate-600 dark:text-slate-300 max-w-2xl">
+                      {activeRoleProfile.tagline}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setSelectedRole('all')}
+                    className="self-start sm:self-center inline-flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-bold bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 hover:border-rose-500 hover:text-rose-600 shadow-sm transition-all"
+                  >
+                    <X className="w-3.5 h-3.5" /> Show All Tools
+                  </button>
+                </div>
+              </div>
 
-                    if (isAvailable) {
-                      return (
-                        <Link
-                          key={idx}
-                          to={tool.path}
-                          className="p-4 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700 hover:border-rose-200 dark:hover:border-rose-800 hover:shadow-md transition-all group"
-                        >
-                          {cardContent}
-                        </Link>
-                      );
-                    }
-
+              {/* Curated Role Tools Grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4">
+                {filteredRoleTools.length === 0 ? (
+                  <div className="col-span-full py-12 text-center text-slate-400">
+                    <Search className="w-8 h-8 mx-auto mb-2 opacity-40" />
+                    <p className="text-sm">No tools found matching &quot;{query}&quot; in this profile.</p>
+                  </div>
+                ) : (
+                  filteredRoleTools.map((tool, idx) => {
+                    const faved = isFavorite(tool.path);
                     return (
-                      <div key={idx} className="p-4 bg-slate-50 dark:bg-slate-900/60 rounded-2xl border border-dashed border-slate-300 dark:border-slate-600 opacity-80 cursor-not-allowed">
-                        {cardContent}
+                      <div
+                        key={idx}
+                        className="group relative rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 hover:border-rose-500 dark:hover:border-rose-500 shadow-sm hover:shadow-md transition-all flex flex-col justify-between"
+                      >
+                        <div>
+                          <div className="flex items-start justify-between mb-3">
+                            <div className={`w-10 h-10 rounded-xl ${tool.bg} ${tool.color} flex items-center justify-center`}>
+                              <tool.icon className="w-5 h-5" />
+                            </div>
+                            <div className="flex items-center gap-1">
+                              {tool.badge && (
+                                <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-rose-50 dark:bg-rose-950 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-900">
+                                  {tool.badge}
+                                </span>
+                              )}
+                              <button
+                                onClick={(e) => handleToggleFav(e, tool.path, tool.title)}
+                                title={faved ? 'Remove from favorites' : 'Add to favorites'}
+                                className={`p-1 rounded-lg transition-colors ${
+                                  faved
+                                    ? 'text-amber-400 hover:text-amber-500'
+                                    : 'text-slate-300 dark:text-slate-600 hover:text-amber-400'
+                                }`}
+                              >
+                                <Star className={`w-3.5 h-3.5 ${faved ? 'fill-amber-400 text-amber-400' : ''}`} />
+                              </button>
+                            </div>
+                          </div>
+                          <Link to={tool.path} className="block group-hover:text-rose-600 transition-colors">
+                            <h3 className="font-bold text-slate-900 dark:text-white text-sm line-clamp-1">
+                              {hl(tool.title)}
+                            </h3>
+                            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400 line-clamp-2">
+                              {tool.desc}
+                            </p>
+                          </Link>
+                        </div>
+                        <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
+                          <Link
+                            to={tool.path}
+                            className="text-[11px] font-semibold text-rose-600 dark:text-rose-400 group-hover:underline flex items-center gap-1"
+                          >
+                            Open Tool <span>&rarr;</span>
+                          </Link>
+                        </div>
                       </div>
                     );
-                  })}
-                </div>
-              </section>
-            ))}
-          </div>
+                  })
+                )}
+              </div>
+            </div>
+          ) : (
+            <>
+              {!query.trim() && activeCategory === 'all' && (
+                <section id="popular" className="mb-16">
+                  <div className="flex items-center gap-3 mb-6">
+                    <h2 className="text-2xl font-bold text-slate-900 dark:text-white">Popular Artifacts</h2>
+                    <div className="h-px flex-1 bg-slate-200 dark:bg-slate-700" />
+                  </div>
+                  <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+                    <Link to="/merge" className="lg:col-span-8 rounded-3xl bg-white border border-slate-200 p-8 shadow-[0px_20px_40px_rgba(0,0,0,0.04)] hover:-translate-y-1 transition-all">
+                      <span className="inline-flex text-xs px-3 py-1 rounded-full bg-rose-50 text-rose-700 font-bold">Essential</span>
+                      <h3 className="mt-5 text-2xl font-extrabold text-slate-900">Omni-Merge Pro</h3>
+                      <p className="mt-2 text-slate-600 text-sm">Combine PDFs with smooth ordering and high-fidelity outputs.</p>
+                    </Link>
+                    <Link to="/compress" className="lg:col-span-4 rounded-3xl bg-white border border-slate-200 p-8 shadow-[0px_20px_40px_rgba(0,0,0,0.04)] hover:-translate-y-1 transition-all">
+                      <h3 className="text-xl font-bold text-slate-900">Ultra-Shrink</h3>
+                      <p className="mt-2 text-slate-600 text-sm">Reduce size while preserving readability.</p>
+                    </Link>
+                  </div>
+                </section>
+              )}
+
+              <div className="space-y-16">
+                {sortedCategories.map((category, catIdx) => (
+                  <section key={catIdx} id={categoryAnchor(category.title)}>
+                    <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-6 pb-2 border-b border-slate-200 dark:border-slate-700">
+                      {category.title}
+                    </h2>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4">
+                      {category.tools.length === 0 ? (
+                        <div className="col-span-full py-10 text-center text-slate-400 dark:text-slate-500">
+                          <Search className="w-8 h-8 mx-auto mb-2 opacity-40" />
+                          <p className="text-sm">No tools found for &quot;<span className="font-semibold text-slate-600 dark:text-slate-300">{query}</span>&quot;</p>
+                        </div>
+                      ) : category.tools.map((tool: any, idx: number) => {
+                        const isAvailable = !!tool.path;
+                        const faved = isAvailable && isFavorite(tool.path);
+                        const cardContent = (
+                          <>
+                            <div className="flex items-start justify-between mb-3">
+                              <div className={`w-10 h-10 rounded-xl ${tool.bg || 'bg-slate-100'} ${tool.color || 'text-slate-400'} flex items-center justify-center`}>
+                                <tool.icon className="w-5 h-5" />
+                              </div>
+                              {isAvailable && (
+                                <button
+                                  onClick={(e) => handleToggleFav(e, tool.path, tool.title)}
+                                  title={faved ? 'Remove from favorites' : 'Add to favorites'}
+                                  className={`p-1 rounded-lg transition-colors ${
+                                    faved
+                                      ? 'text-amber-400 hover:text-amber-500'
+                                      : 'text-slate-300 dark:text-slate-600 hover:text-amber-400'
+                                  }`}
+                                >
+                                  <Star className="w-3.5 h-3.5" fill={faved ? 'currentColor' : 'none'} />
+                                </button>
+                              )}
+                            </div>
+                            <h3 className={`font-semibold text-sm ${isAvailable ? 'text-slate-900 dark:text-slate-100 group-hover:text-rose-600 dark:group-hover:text-rose-400' : 'text-slate-500 dark:text-slate-500'}`}>
+                              {hl(tool.title)}
+                            </h3>
+                            {!isAvailable && (
+                              <span className="inline-block mt-2 text-[10px] uppercase tracking-wider font-bold text-violet-700 dark:text-violet-300 bg-violet-50 dark:bg-violet-950/60 border border-violet-200 dark:border-violet-800 px-2 py-1 rounded-md">
+                                Coming soon
+                              </span>
+                            )}
+                          </>
+                        );
+
+                        if (isAvailable) {
+                          return (
+                            <Link
+                              key={idx}
+                              to={tool.path}
+                              className="p-4 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700 hover:border-rose-200 dark:hover:border-rose-800 hover:shadow-md transition-all group"
+                            >
+                              {cardContent}
+                            </Link>
+                          );
+                        }
+
+                        return (
+                          <div key={idx} className="p-4 bg-slate-50 dark:bg-slate-900/60 rounded-2xl border border-dashed border-slate-300 dark:border-slate-600 opacity-80 cursor-not-allowed">
+                            {cardContent}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </section>
+                ))}
+              </div>
+            </>
+          )}
         </div>
       </div>
 

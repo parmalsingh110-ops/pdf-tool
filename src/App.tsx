@@ -139,6 +139,23 @@ const RemoveAnnotations = lazy(() => import('./pages/RemoveAnnotations'));
 const DeskewPDF = lazy(() => import('./pages/DeskewPDF'));
 const RenamePDF = lazy(() => import('./pages/RenamePDF'));
 const CreateBookmarks = lazy(() => import('./pages/CreateBookmarks'));
+const PvcCardMaker = lazy(() => import('./pages/PvcCardMaker'));
+const StampPaperAligner = lazy(() => import('./pages/StampPaperAligner'));
+const XeroxCleaner = lazy(() => import('./pages/XeroxCleaner'));
+const AssignmentCoverPage = lazy(() => import('./pages/AssignmentCoverPage'));
+const SlideHandouts = lazy(() => import('./pages/SlideHandouts'));
+const BindingMargin = lazy(() => import('./pages/BindingMargin'));
+const BillConsolidator = lazy(() => import('./pages/BillConsolidator'));
+const RubberStampMaker = lazy(() => import('./pages/RubberStampMaker'));
+const SelfAttest = lazy(() => import('./pages/SelfAttest'));
+const ScanToPrint = lazy(() => import('./pages/ScanToPrint'));
+const GangPrintSheet = lazy(() => import('./pages/GangPrintSheet'));
+const LandRecordDarkener = lazy(() => import('./pages/LandRecordDarkener'));
+const MicroPocketNotes = lazy(() => import('./pages/MicroPocketNotes'));
+const LabJournalFormatter = lazy(() => import('./pages/LabJournalFormatter'));
+const BoardNotesCleaner = lazy(() => import('./pages/BoardNotesCleaner'));
+const ResumeCompactor = lazy(() => import('./pages/ResumeCompactor'));
+const ReportHeaderSwapper = lazy(() => import('./pages/ReportHeaderSwapper'));
 const NotFound = lazy(() => import('./pages/NotFound'));
 
 export default function App() {
@@ -307,6 +324,25 @@ export default function App() {
 
         {/* Admin Telemetry Dashboard */}
         <Route path="admin" element={<AdminDashboard />} />
+
+        {/* E-Mitra, Student & Office Productivity Suite */}
+        <Route path="pvc-card-maker" element={<PvcCardMaker />} />
+        <Route path="stamp-paper-aligner" element={<StampPaperAligner />} />
+        <Route path="xerox-cleaner" element={<XeroxCleaner />} />
+        <Route path="assignment-cover-page" element={<AssignmentCoverPage />} />
+        <Route path="slide-handouts" element={<SlideHandouts />} />
+        <Route path="binding-margin" element={<BindingMargin />} />
+        <Route path="bill-consolidator" element={<BillConsolidator />} />
+        <Route path="rubber-stamp" element={<RubberStampMaker />} />
+        <Route path="self-attest" element={<SelfAttest />} />
+        <Route path="scan-to-print" element={<ScanToPrint />} />
+        <Route path="gang-print-sheet" element={<GangPrintSheet />} />
+        <Route path="land-record-darkener" element={<LandRecordDarkener />} />
+        <Route path="micro-pocket-notes" element={<MicroPocketNotes />} />
+        <Route path="lab-journal-formatter" element={<LabJournalFormatter />} />
+        <Route path="board-notes-cleaner" element={<BoardNotesCleaner />} />
+        <Route path="resume-compactor" element={<ResumeCompactor />} />
+        <Route path="report-header-swapper" element={<ReportHeaderSwapper />} />
 
         {/* 404 Catch-All Route: Eliminates Soft-404 Errors in Google Search Console */}
         <Route path="*" element={<NotFound />} />
