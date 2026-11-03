@@ -24,6 +24,7 @@ import {
   Layers,
 } from 'lucide-react';
 import { Peer } from 'peerjs';
+import QRCode from 'qrcode';
 import { useSEO } from '../hooks/useSEO';
 import { usePageSEO } from '../lib/usePageSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
@@ -367,8 +368,25 @@ export default function ScanToPrint() {
     ? `${window.location.origin}/scan-to-print?session=${sessionCode}`
     : `https://www.pdfmediasuite.in/scan-to-print?session=${sessionCode}`;
 
-  // QR Code URL using high-quality SVG API
-  const qrSvgUrl = `https://api.qrserver.com/v1/create-qr-code/?size=260x260&margin=8&data=${encodeURIComponent(mobileLink)}`;
+  // Instant 100% Local In-Browser QR Code Generation (Zero External Network Delay)
+  const [qrDataUrl, setQrDataUrl] = useState<string>('');
+  useEffect(() => {
+    if (!mobileLink || !sessionCode) return;
+    QRCode.toDataURL(mobileLink, {
+      width: 280,
+      margin: 1,
+      color: {
+        dark: '#0f172a',
+        light: '#ffffff',
+      },
+      errorCorrectionLevel: 'M',
+    })
+      .then((url) => setQrDataUrl(url))
+      .catch((err) => {
+        console.warn('Local QR generation error, using fallback', err);
+        setQrDataUrl(`https://api.qrserver.com/v1/create-qr-code/?size=260x260&margin=8&data=${encodeURIComponent(mobileLink)}`);
+      });
+  }, [mobileLink, sessionCode]);
 
   // Handle customer mobile file selection & multi-channel transmit
   const handleCustomerUpload = async () => {
@@ -756,12 +774,19 @@ export default function ScanToPrint() {
 
             {/* QR Card */}
             <div className="p-6 rounded-3xl bg-slate-50 dark:bg-slate-800/60 border-2 border-dashed border-rose-200 dark:border-rose-900 flex flex-col items-center justify-center">
-              <div className="p-3 bg-white rounded-2xl shadow-md border border-slate-100">
-                <img
-                  src={qrSvgUrl}
-                  alt="Scan to Print QR Code"
-                  className="w-48 h-48 sm:w-56 sm:h-56 object-contain"
-                />
+              <div className="p-3 bg-white rounded-2xl shadow-md border border-slate-100 flex items-center justify-center min-w-[200px] min-h-[200px]">
+                {qrDataUrl ? (
+                  <img
+                    src={qrDataUrl}
+                    alt="Scan to Print QR Code"
+                    className="w-48 h-48 sm:w-56 sm:h-56 object-contain"
+                  />
+                ) : (
+                  <div className="w-48 h-48 sm:w-56 sm:h-56 flex flex-col items-center justify-center text-slate-400 gap-2">
+                    <RefreshCw className="w-6 h-6 animate-spin text-rose-600" />
+                    <span className="text-xs">Generating instant QR...</span>
+                  </div>
+                )}
               </div>
 
               <div className="mt-4 flex items-center gap-2">

@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import QRCode from 'qrcode';
 import {
   Calculator,
   Upload,
@@ -199,9 +200,26 @@ export default function PrintCostCalculator() {
     };
   }, [calculatedCounts, printMode, rateBwSingle, rateBwDuplex, rateColorSingle, rateColorDuplex, paperType, addSpiral, addLamination, copies]);
 
-  // Dynamic UPI Payment Link & QR Server URL
+  // Dynamic UPI Payment Link & QR
   const upiPayString = `upi://pay?pa=${encodeURIComponent(upiId)}&pn=${encodeURIComponent(shopName)}&am=${pricingSummary.grandTotal}&cu=INR&tn=${encodeURIComponent(`Print ${totalPages}p (${copies} copy)`)}`;
-  const upiQrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=280x280&margin=8&data=${encodeURIComponent(upiPayString)}`;
+  const upiQrUrlFallback = `https://api.qrserver.com/v1/create-qr-code/?size=280x280&margin=8&data=${encodeURIComponent(upiPayString)}`;
+
+  // Instant 100% Local In-Browser QR Code Generation (0ms Network Latency)
+  const [upiQrDataUrl, setUpiQrDataUrl] = useState<string>('');
+  useEffect(() => {
+    if (!upiPayString) return;
+    QRCode.toDataURL(upiPayString, {
+      width: 280,
+      margin: 1,
+      color: {
+        dark: '#0f172a',
+        light: '#ffffff',
+      },
+      errorCorrectionLevel: 'M',
+    })
+      .then((url) => setUpiQrDataUrl(url))
+      .catch(() => setUpiQrDataUrl(upiQrUrlFallback));
+  }, [upiPayString, upiQrUrlFallback]);
 
   return (
     <div className="w-full min-h-screen bg-slate-50 dark:bg-slate-950 py-10 px-4 sm:px-6 lg:px-8">
@@ -624,7 +642,7 @@ export default function PrintCostCalculator() {
                 {/* Scannable Dynamic UPI QR Code */}
                 <div className="bg-white p-4 rounded-2xl flex flex-col items-center text-center shadow-inner">
                   <img
-                    src={upiQrUrl}
+                    src={upiQrDataUrl || upiQrUrlFallback}
                     alt="Scan UPI QR"
                     className="w-48 h-48 object-contain rounded-xl"
                   />
@@ -676,7 +694,7 @@ export default function PrintCostCalculator() {
 
               <div className="bg-slate-50 dark:bg-slate-800 p-4 rounded-2xl border border-slate-200 dark:border-slate-700 flex justify-center">
                 <img
-                  src={upiQrUrl}
+                  src={upiQrDataUrl || upiQrUrlFallback}
                   alt="Dynamic UPI QR"
                   className="w-60 h-60 object-contain rounded-xl"
                 />

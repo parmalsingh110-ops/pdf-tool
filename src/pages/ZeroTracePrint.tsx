@@ -138,7 +138,7 @@ export default function ZeroTracePrint() {
   // Compute SHA-256 for proof of shredding
   const computeHash = async (u8: Uint8Array): Promise<string> => {
     try {
-      const hashBuffer = await crypto.subtle.digest('SHA-256', u8);
+      const hashBuffer = await crypto.subtle.digest('SHA-256', u8 as any);
       const hashArray = Array.from(new Uint8Array(hashBuffer));
       return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
     } catch {
