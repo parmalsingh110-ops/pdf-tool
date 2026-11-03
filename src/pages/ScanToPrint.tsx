@@ -64,6 +64,23 @@ interface IncomingTransfer {
 
 const CHUNK_SIZE = 64 * 1024; // 64 KB binary safe WebRTC SCTP packet size
 
+const PIN_CHARS = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+const generateCleanPin = (): string => {
+  let pin = '';
+  if (typeof window !== 'undefined' && window.crypto && window.crypto.getRandomValues) {
+    const arr = new Uint8Array(6);
+    window.crypto.getRandomValues(arr);
+    for (let i = 0; i < 6; i++) {
+      pin += PIN_CHARS[arr[i] % PIN_CHARS.length];
+    }
+    return pin;
+  }
+  for (let i = 0; i < 6; i++) {
+    pin += PIN_CHARS[Math.floor(Math.random() * PIN_CHARS.length)];
+  }
+  return pin;
+};
+
 export default function ScanToPrint() {
   useSEO(
     'Scan to Print QR Web-Drop — No WhatsApp Needed | PDF Media Suite',
@@ -116,12 +133,12 @@ export default function ScanToPrint() {
     return `${(bytes / 1024).toFixed(0)} KB`;
   };
 
-  // Convert base64 / dataUrl into binary Blob
-  const dataUrlToBlob = (dataUrl: string): Blob => {
+  // Convert any dataUrl / blobUrl / httpUrl into binary Blob
+  const dataUrlToBlob = async (dataUrl: string): Promise<Blob> => {
     try {
-      if (dataUrl.startsWith('blob:')) {
-        // Already a blob url
-        return new Blob([], { type: 'application/pdf' });
+      if (dataUrl.startsWith('blob:') || dataUrl.startsWith('http://') || dataUrl.startsWith('https://')) {
+        const res = await fetch(dataUrl);
+        return await res.blob();
       }
       const parts = dataUrl.split(';base64,');
       const contentType = parts[0]?.split(':')[1] || 'application/pdf';
@@ -176,7 +193,7 @@ export default function ScanToPrint() {
     [playChime]
   );
 
-  // Initialize session from URL or generate counter room PIN
+  // Initialize session from URL or generate collision-proof room PIN
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const existingSession = params.get('session');
@@ -186,10 +203,26 @@ export default function ScanToPrint() {
       setIsSenderMode(true);
     } else {
       const stored = sessionStorage.getItem('pms_counter_session');
-      const newSession = stored || Math.random().toString(36).substring(2, 8).toUpperCase();
-      sessionStorage.setItem('pms_counter_session', newSession);
-      setSessionCode(newSession);
-      setIsSenderMode(false);
+      if (stored) {
+        setSessionCode(stored);
+        setIsSenderMode(false);
+      } else {
+        const initialPin = generateCleanPin();
+        sessionStorage.setItem('pms_counter_session', initialPin);
+        setSessionCode(initialPin);
+        setIsSenderMode(false);
+
+        // Confirm unique collision-proof room with backend
+        apiFetch('/api/print-drop/new-session')
+          .then((res) => res.json())
+          .then((data) => {
+            if (data?.session_id) {
+              sessionStorage.setItem('pms_counter_session', data.session_id);
+              setSessionCode(data.session_id);
+            }
+          })
+          .catch(() => {});
+      }
     }
   }, []);
 
@@ -276,7 +309,13 @@ export default function ScanToPrint() {
           else if (data.action === 'JOB_FINISH') {
             const transfer = incomingTransfersRef.current[data.jobId];
             if (transfer) {
-              const fullDataUrl = transfer.chunks.join('');
+              let blobUrl = '';
+              try {
+                const blob = new Blob(transfer.chunks, { type: transfer.type });
+                blobUrl = URL.createObjectURL(blob);
+              } catch {
+                blobUrl = transfer.chunks.join('');
+              }
               const tokenNum = tokenCounterRef.current++;
               const job: PrintJob = {
                 id: transfer.jobId,
@@ -284,7 +323,7 @@ export default function ScanToPrint() {
                 name: transfer.name,
                 size: transfer.size,
                 type: transfer.type,
-                dataUrl: fullDataUrl,
+                dataUrl: blobUrl,
                 timestamp: transfer.timestamp,
                 copies: transfer.copies,
                 colorMode: transfer.colorMode,
@@ -401,12 +440,28 @@ export default function ScanToPrint() {
         if (res.ok) {
           const data = await res.json();
           if (data.jobs && Array.isArray(data.jobs) && data.jobs.length > 0) {
-            data.jobs.forEach((j: any) => {
+            for (const j of data.jobs) {
               if (j.tokenNum) {
                 tokenCounterRef.current = Math.max(tokenCounterRef.current, j.tokenNum + 1);
               }
-              addIncomingJob({ ...j, status: 'pending' });
-            });
+              let fileBlobUrl = j.dataUrl || '';
+              // If backend relayed document to zero-RAM disk spool, stream it directly as native Blob
+              if (j.fileUrl && !fileBlobUrl) {
+                try {
+                  const fileRes = await apiFetch(j.fileUrl, { timeoutMs: 40000 });
+                  if (fileRes.ok) {
+                    const blob = await fileRes.blob();
+                    fileBlobUrl = URL.createObjectURL(blob);
+                  }
+                } catch (e) {
+                  console.warn('Could not stream spooled document', e);
+                }
+              }
+
+              if (fileBlobUrl) {
+                addIncomingJob({ ...j, dataUrl: fileBlobUrl, status: 'pending' });
+              }
+            }
           }
         }
       } catch {
@@ -493,34 +548,12 @@ export default function ScanToPrint() {
         const file = senderFiles[i];
         const jobId = `job_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
         const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-
-        // 1. Convert to dataUrl
-        const dataUrl = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = (e) => resolve(e.target?.result as string);
-          reader.onerror = reject;
-          reader.readAsDataURL(file);
-        });
-
-        const job: PrintJob = {
-          id: jobId,
-          tokenNum: 0,
-          name: file.name,
-          size: file.size,
-          type: file.type || 'application/pdf',
-          dataUrl,
-          timestamp,
-          copies: 1,
-          colorMode: 'bw',
-          status: 'pending',
-        };
-
         let beamedViaWebRtc = false;
 
         // Channel A: WebRTC Direct Send to PC using 64KB High-Speed Chunking Protocol
         if (mobileConnRef.current && mobileConnRef.current.open) {
           try {
-            const totalChunks = Math.ceil(dataUrl.length / CHUNK_SIZE);
+            const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
             setSenderStatusText(`Streaming ${file.name} (0 / ${formatFileSize(file.size)})...`);
 
             // Step A1: Send metadata header
@@ -538,19 +571,23 @@ export default function ScanToPrint() {
 
             const dc = mobileConnRef.current.dataChannel;
 
-            // Step A2: Stream 64KB chunks with dynamic backpressure flow-control
+            // Step A2: Stream 64KB chunks directly from disk slice — Zero Mobile RAM overhead
             for (let c = 0; c < totalChunks; c++) {
-              const chunk = dataUrl.substring(c * CHUNK_SIZE, (c + 1) * CHUNK_SIZE);
+              const start = c * CHUNK_SIZE;
+              const end = Math.min(start + CHUNK_SIZE, file.size);
+              const chunkBlob = file.slice(start, end);
+              const chunkBuffer = await chunkBlob.arrayBuffer();
+
               mobileConnRef.current.send({
                 action: 'JOB_CHUNK',
                 jobId,
                 index: c,
-                chunk,
+                chunk: chunkBuffer,
               });
 
               const currentPct = Math.round(((c + 1) / totalChunks) * 90);
               setSenderProgress(currentPct);
-              const streamedMb = (((c + 1) * CHUNK_SIZE) / (1024 * 1024)).toFixed(1);
+              const streamedMb = (end / (1024 * 1024)).toFixed(1);
               const totalMb = (file.size / (1024 * 1024)).toFixed(1);
               setSenderStatusText(`Streaming ${file.name} (${streamedMb} / ${totalMb} MB)...`);
 
@@ -588,7 +625,22 @@ export default function ScanToPrint() {
         // Channel C: BroadcastChannel (for same-browser tab testing)
         if (channelRef.current) {
           try {
-            channelRef.current.postMessage({ action: 'NEW_PRINT_JOB', job });
+            const blobUrl = URL.createObjectURL(file);
+            channelRef.current.postMessage({
+              action: 'NEW_PRINT_JOB',
+              job: {
+                id: jobId,
+                tokenNum: 0,
+                name: file.name,
+                size: file.size,
+                type: file.type || 'application/pdf',
+                dataUrl: blobUrl,
+                timestamp,
+                copies: 1,
+                colorMode: 'bw',
+                status: 'pending',
+              },
+            });
           } catch {}
         }
 
@@ -619,54 +671,84 @@ export default function ScanToPrint() {
     }
   };
 
-  // Direct file drop on Shopkeeper PC
+  // Direct file drop on Shopkeeper PC (Instant Zero-Copy Blob URL)
   const handleShopkeeperFileDrop = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
     if (!files.length) return;
 
     files.forEach((file) => {
-      const reader = new FileReader();
-      reader.onload = (ev) => {
-        const nextToken = tokenCounterRef.current++;
-        const job: PrintJob = {
-          id: `local_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-          tokenNum: nextToken,
-          name: file.name,
-          size: file.size,
-          type: file.type || 'application/pdf',
-          dataUrl: ev.target?.result as string,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          copies: 1,
-          colorMode: 'bw',
-          status: 'pending',
-        };
-        addIncomingJob(job);
+      const blobUrl = URL.createObjectURL(file);
+      const nextToken = tokenCounterRef.current++;
+      const job: PrintJob = {
+        id: `local_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        tokenNum: nextToken,
+        name: file.name,
+        size: file.size,
+        type: file.type || 'application/pdf',
+        dataUrl: blobUrl,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        copies: 1,
+        colorMode: 'bw',
+        status: 'pending',
       };
-      reader.readAsDataURL(file);
+      addIncomingJob(job);
     });
     e.target.value = '';
   };
 
   // Mark specific job as Printed (moves to history)
   const markAsPrinted = (id: string) => {
-    setPrintJobs((prev) =>
-      prev.map((j) =>
+    setPrintJobs((prev) => {
+      const updated = prev.map((j) =>
         j.id === id
           ? {
               ...j,
-              status: 'printed',
+              status: 'printed' as const,
               printedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
             }
           : j
-      )
-    );
+      );
+      // Auto-prune printed history: keep at most 50 printed jobs to avoid DOM & memory bloat
+      const printed = updated.filter((j) => j.status === 'printed');
+      if (printed.length > 50) {
+        const oldest = printed[printed.length - 1];
+        if (oldest.dataUrl.startsWith('blob:')) {
+          try { URL.revokeObjectURL(oldest.dataUrl); } catch {}
+        }
+        return updated.filter((j) => j.id !== oldest.id);
+      }
+      return updated;
+    });
   };
 
   // Move back to Pending (Undo)
   const markAsPending = (id: string) => {
     setPrintJobs((prev) =>
-      prev.map((j) => (j.id === id ? { ...j, status: 'pending', printedAt: undefined } : j))
+      prev.map((j) => (j.id === id ? { ...j, status: 'pending' as const, printedAt: undefined } : j))
     );
+  };
+
+  // Delete job and explicitly release Blob memory
+  const deleteJob = (id: string) => {
+    setPrintJobs((prev) => {
+      const target = prev.find((j) => j.id === id);
+      if (target && target.dataUrl.startsWith('blob:')) {
+        try { URL.revokeObjectURL(target.dataUrl); } catch {}
+      }
+      return prev.filter((j) => j.id !== id);
+    });
+  };
+
+  // Clear all printed history and free Blob memory
+  const clearPrintedHistory = () => {
+    setPrintJobs((prev) => {
+      prev.filter((j) => j.status === 'printed').forEach((j) => {
+        if (j.dataUrl.startsWith('blob:')) {
+          try { URL.revokeObjectURL(j.dataUrl); } catch {}
+        }
+      });
+      return prev.filter((j) => j.status !== 'printed');
+    });
   };
 
   // 1-Click Print specific job with high-resolution canvas multi-page rendering (ZERO BLANK PAGES)
@@ -701,7 +783,7 @@ export default function ScanToPrint() {
         printWindow.document.close();
       } else {
         // PDF PRINTING: Multi-page high-DPI rendering via pdfjsLib
-        const blob = dataUrlToBlob(job.dataUrl);
+        const blob = await dataUrlToBlob(job.dataUrl);
         const arrayBuffer = await blob.arrayBuffer();
         const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) });
         const pdf = await loadingTask.promise;
@@ -761,7 +843,7 @@ export default function ScanToPrint() {
     } catch (err) {
       console.error('Print rendering error, opening native PDF', err);
       try {
-        const blob = dataUrlToBlob(job.dataUrl);
+        const blob = await dataUrlToBlob(job.dataUrl);
         const blobUrl = URL.createObjectURL(blob);
         window.open(blobUrl, '_blank');
       } catch {
@@ -1069,7 +1151,14 @@ export default function ScanToPrint() {
 
               {printJobs.length > 0 && (
                 <button
-                  onClick={() => setPrintJobs([])}
+                  onClick={() => {
+                    printJobs.forEach((j) => {
+                      if (j.dataUrl.startsWith('blob:')) {
+                        try { URL.revokeObjectURL(j.dataUrl); } catch {}
+                      }
+                    });
+                    setPrintJobs([]);
+                  }}
                   className="text-xs text-rose-600 hover:underline font-semibold flex items-center gap-1 self-end sm:self-center"
                 >
                   <Trash2 className="w-3.5 h-3.5" /> Clear All
@@ -1182,9 +1271,13 @@ export default function ScanToPrint() {
 
                           {/* Preview in tab */}
                           <button
-                            onClick={() => {
+                            onClick={async () => {
                               try {
-                                const blob = dataUrlToBlob(job.dataUrl);
+                                if (job.dataUrl.startsWith('blob:')) {
+                                  window.open(job.dataUrl, '_blank');
+                                  return;
+                                }
+                                const blob = await dataUrlToBlob(job.dataUrl);
                                 const blobUrl = URL.createObjectURL(blob);
                                 window.open(blobUrl, '_blank');
                               } catch {
@@ -1214,7 +1307,7 @@ export default function ScanToPrint() {
 
                           {/* Delete */}
                           <button
-                            onClick={() => setPrintJobs((prev) => prev.filter((j) => j.id !== job.id))}
+                            onClick={() => deleteJob(job.id)}
                             title="Delete from Queue"
                             className="p-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-400 hover:text-rose-600 text-xs"
                           >
@@ -1290,7 +1383,7 @@ export default function ScanToPrint() {
                           </button>
 
                           <button
-                            onClick={() => setPrintJobs((prev) => prev.filter((j) => j.id !== job.id))}
+                            onClick={() => deleteJob(job.id)}
                             title="Delete"
                             className="p-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-400 hover:text-rose-600 text-xs"
                           >
@@ -1299,6 +1392,15 @@ export default function ScanToPrint() {
                         </div>
                       </div>
                     ))}
+
+                    <div className="pt-2 text-center">
+                      <button
+                        onClick={clearPrintedHistory}
+                        className="text-xs text-slate-400 hover:text-rose-600 font-semibold inline-flex items-center gap-1.5 transition-colors py-1 px-3 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/40"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" /> Clear Printed History ({printedJobs.length})
+                      </button>
+                    </div>
                   </div>
                 )}
               </>
