@@ -4470,6 +4470,7 @@ async def test_webhook(request: Request):
 PRINT_DROP_ROOMS: dict = {}
 PRINT_DROP_ROOM_TIMESTAMPS: dict = {}
 PRINT_DROP_ROOM_TOKENS: dict = {}
+PRINT_DROP_DEVICE_TOKENS: dict = {}
 PRINT_DROP_SPOOL_DIR = Path(tempfile.gettempdir()) / "pms_print_spool"
 PRINT_DROP_SPOOL_DIR.mkdir(parents=True, exist_ok=True)
 PIN_CHARS = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"  # 32 unambiguous chars (no 0/O, 1/I/L)
@@ -4483,6 +4484,7 @@ def _prune_expired_print_rooms():
             PRINT_DROP_ROOMS.pop(s, None)
             PRINT_DROP_ROOM_TIMESTAMPS.pop(s, None)
             PRINT_DROP_ROOM_TOKENS.pop(s, None)
+            PRINT_DROP_DEVICE_TOKENS.pop(s, None)
             session_folder = PRINT_DROP_SPOOL_DIR / s
             if session_folder.exists():
                 shutil.rmtree(session_folder, ignore_errors=True)
@@ -4494,6 +4496,7 @@ def _prune_expired_print_rooms():
                 PRINT_DROP_ROOMS.pop(s, None)
                 PRINT_DROP_ROOM_TIMESTAMPS.pop(s, None)
                 PRINT_DROP_ROOM_TOKENS.pop(s, None)
+                PRINT_DROP_DEVICE_TOKENS.pop(s, None)
                 session_folder = PRINT_DROP_SPOOL_DIR / s
                 if session_folder.exists():
                     shutil.rmtree(session_folder, ignore_errors=True)
@@ -4523,6 +4526,7 @@ async def print_drop_upload(
     file: UploadFile = File(...),
     copies: int = Form(1),
     color_mode: str = Form("bw"),
+    sender_device_id: str = Form(""),
 ):
     """
     Zero-RAM disk streaming relay:
@@ -4567,13 +4571,22 @@ async def print_drop_upload(
         raise HTTPException(status_code=500, detail=f"Failed to stream file: {str(e)}")
 
     mime = file.content_type or "application/pdf"
-    room_token = PRINT_DROP_ROOM_TOKENS.get(clean_session, 0) + 1
-    PRINT_DROP_ROOM_TOKENS[clean_session] = room_token
+    # Map device ID to room token if provided, so subsequent files from same phone share customer token
+    device_token_map = PRINT_DROP_DEVICE_TOKENS.setdefault(clean_session, {})
+    clean_device_id = (sender_device_id or "").strip()
+    if clean_device_id and clean_device_id in device_token_map:
+        room_token = device_token_map[clean_device_id]
+    else:
+        room_token = PRINT_DROP_ROOM_TOKENS.get(clean_session, 0) + 1
+        PRINT_DROP_ROOM_TOKENS[clean_session] = room_token
+        if clean_device_id:
+            device_token_map[clean_device_id] = room_token
 
     # Lightweight metadata (< 250 bytes in RAM)
     job = {
         "id": job_id,
         "tokenNum": room_token,
+        "senderDeviceId": clean_device_id,
         "name": file.filename or "Document.pdf",
         "size": total_size,
         "type": mime,

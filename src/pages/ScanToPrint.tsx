@@ -30,6 +30,12 @@ import {
   Send,
   Laptop,
   Monitor,
+  Edit3,
+  Users,
+  List,
+  LayoutGrid,
+  X,
+  Store,
 } from 'lucide-react';
 import { Peer } from 'peerjs';
 import QRCode from 'qrcode';
@@ -44,6 +50,8 @@ import { apiFetch, API_BASE } from '../lib/api';
 interface PrintJob {
   id: string;
   tokenNum: number;
+  senderDeviceId?: string;
+  deviceLabel?: string;
   name: string;
   size: number;
   type: string;
@@ -60,6 +68,8 @@ interface PrintJob {
 
 interface IncomingTransfer {
   jobId: string;
+  senderDeviceId?: string;
+  deviceLabel?: string;
   name: string;
   size: number;
   type: string;
@@ -71,6 +81,43 @@ interface IncomingTransfer {
   copies: number;
   colorMode: 'bw' | 'color';
 }
+
+interface CustomerGroup {
+  customerToken: number;
+  senderDeviceId: string;
+  deviceLabel: string;
+  firstTimestamp: string;
+  jobs: PrintJob[];
+  pendingJobs: PrintJob[];
+  printedJobs: PrintJob[];
+  totalPrints: number;
+  totalFiles: number;
+  isComplete: boolean;
+}
+
+// ─── Storage Keys ──────────────────────────────────────────────────────────
+const PMS_PERMANENT_PIN_KEY = 'pms_permanent_counter_pin';
+const PMS_SHOP_NAME_KEY = 'pms_shop_name';
+const PMS_SENDER_DEVICE_ID_KEY = 'pms_sender_device_id';
+
+const getSenderDeviceId = (): string => {
+  if (typeof window === 'undefined') return 'dev_' + Date.now().toString(36);
+  try {
+    let id = localStorage.getItem(PMS_SENDER_DEVICE_ID_KEY);
+    if (!id) {
+      id = 'dev_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 7);
+      localStorage.setItem(PMS_SENDER_DEVICE_ID_KEY, id);
+    }
+    return id;
+  } catch {
+    return 'dev_' + Date.now().toString(36);
+  }
+};
+
+const getDeviceLabel = (): string => {
+  if (typeof window === 'undefined') return 'Mobile';
+  return /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent) ? 'Mobile Phone' : 'PC / Laptop';
+};
 
 // ─── Constants ─────────────────────────────────────────────────────────────
 // Adaptive chunk sizes — browsers support up to 256 KB on modern WebRTC SCTP
@@ -186,9 +233,18 @@ export default function ScanToPrint() {
   const [isDragOver, setIsDragOver] = useState<boolean>(false);
   const pinInputRefs = useRef<(HTMLInputElement | null)[]>([]);
 
+  // ── Permanent PIN & Shop Identity State ──────────────────────────────────
+  const [shopName, setShopName] = useState<string>('Cyber Cafe & E-Mitra Print Station');
+  const [showPinModal, setShowPinModal] = useState<boolean>(false);
+  const [customPinInput, setCustomPinInput] = useState<string>('');
+  const [customShopNameInput, setCustomShopNameInput] = useState<string>('');
+  const [pinNotice, setPinNotice] = useState<string | null>(null);
+
   // ── Shopkeeper Queue state ───────────────────────────────────────────────
   const [printJobs, setPrintJobs] = useState<PrintJob[]>([]);
   const [queueTab, setQueueTab] = useState<'pending' | 'printed'>('pending');
+  const [viewMode, setViewMode] = useState<'grouped' | 'flat'>('grouped');
+  const [isPrintingCustomerToken, setIsPrintingCustomerToken] = useState<number | null>(null);
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
   const [copiedLink, setCopiedLink] = useState(false);
   const [peerStatus, setPeerStatus] = useState<'connecting' | 'online' | 'error'>('connecting');
@@ -204,6 +260,7 @@ export default function ScanToPrint() {
   const [senderStatusText, setSenderStatusText] = useState('Beaming to Counter PC...');
   const [senderSuccess, setSenderSuccess] = useState(false);
   const [customerToken, setCustomerToken] = useState<number | null>(null);
+  const [deliveredBatch, setDeliveredBatch] = useState<{ name: string; size: number; copies: number; colorMode: 'bw' | 'color' }[]>([]);
   const [senderCopies, setSenderCopies] = useState<number>(1);
   const [senderColorMode, setSenderColorMode] = useState<'bw' | 'color'>('bw');
   const [mobileConnectionStatus, setMobileConnectionStatus] = useState<'connecting' | 'connected' | 'fallback'>('connecting');
@@ -216,6 +273,7 @@ export default function ScanToPrint() {
   const incomingTransfersRef = useRef<Record<string, IncomingTransfer>>({});
   const ackResolversRef = useRef<Record<string, (token?: number) => void>>({});
   const tokenCounterRef = useRef<number>(1);
+  const deviceTokenMapRef = useRef<Record<string, number>>({});
   const pollBackoffRef = useRef<number>(3500);
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const senderAbortRef = useRef<boolean>(false);
@@ -334,9 +392,9 @@ export default function ScanToPrint() {
     } catch {}
   }, []);
 
-  // ─── Add Job with Deduplication ─────────────────────────────────────────
+  // ─── Add Job with Deduplication & Device Bundling ────────────────────────
   const addIncomingJob = useCallback(
-    (job: Omit<PrintJob, 'tokenNum' | 'status'> & { tokenNum?: number; status?: 'pending' | 'printed' }) => {
+    (job: Omit<PrintJob, 'tokenNum' | 'status'> & { tokenNum?: number; status?: 'pending' | 'printed'; senderDeviceId?: string; deviceLabel?: string }) => {
       let isDuplicate = false;
       setPrintJobs((prev) => {
         // Deduplicate by ID and by (name + ±100-byte size)
@@ -345,10 +403,28 @@ export default function ScanToPrint() {
           return prev;
         }
         playChime();
-        const assignedToken = job.tokenNum || tokenCounterRef.current++;
+
+        // Customer Token resolution (group by sender device)
+        let assignedToken = job.tokenNum;
+        const devId = job.senderDeviceId;
+
+        if (!assignedToken) {
+          if (devId && deviceTokenMapRef.current[devId]) {
+            assignedToken = deviceTokenMapRef.current[devId];
+          } else {
+            assignedToken = tokenCounterRef.current++;
+            if (devId) deviceTokenMapRef.current[devId] = assignedToken;
+          }
+        } else {
+          if (devId) deviceTokenMapRef.current[devId] = assignedToken;
+          tokenCounterRef.current = Math.max(tokenCounterRef.current, assignedToken + 1);
+        }
+
         const completeJob: PrintJob = {
           ...job,
           tokenNum: assignedToken,
+          senderDeviceId: devId,
+          deviceLabel: job.deviceLabel || (job.id.startsWith('local_') ? 'Counter PC' : 'Mobile Phone'),
           orientation: job.orientation || 'auto',
           status: job.status || 'pending',
         };
@@ -380,8 +456,14 @@ export default function ScanToPrint() {
     [playChime, detectPdfPages]
   );
 
-  // ─── Session Initialization ──────────────────────────────────────────────
+  // ─── Session Initialization (Permanent Counter PIN) ─────────────────────
   useEffect(() => {
+    // Load custom shop name if set
+    try {
+      const storedShop = localStorage.getItem(PMS_SHOP_NAME_KEY);
+      if (storedShop) setShopName(storedShop);
+    } catch {}
+
     try {
       const storedRecent = localStorage.getItem('pms_recent_counter_pins');
       if (storedRecent) setRecentPins(JSON.parse(storedRecent));
@@ -405,26 +487,29 @@ export default function ScanToPrint() {
         setRecentPins(updated);
       } catch {}
     } else {
-      const stored = sessionStorage.getItem('pms_counter_session');
-      if (stored) {
-        setSessionCode(stored);
+      // COUNTER PC: Always load permanent Counter PIN so standee QR stays valid forever
+      let permanentPin = '';
+      try {
+        permanentPin = localStorage.getItem(PMS_PERMANENT_PIN_KEY) || '';
+      } catch {}
+
+      if (permanentPin) {
+        setSessionCode(permanentPin);
         setIsSenderMode(false);
       } else {
-        const initialPin = generateCleanPin();
-        sessionStorage.setItem('pms_counter_session', initialPin);
+        // First time initialization: check legacy sessionStorage or generate clean PIN
+        let initialPin = '';
+        try {
+          initialPin = sessionStorage.getItem('pms_counter_session') || '';
+        } catch {}
+        if (!initialPin) {
+          initialPin = generateCleanPin();
+        }
+        try {
+          localStorage.setItem(PMS_PERMANENT_PIN_KEY, initialPin);
+        } catch {}
         setSessionCode(initialPin);
         setIsSenderMode(false);
-
-        // Try to get a collision-free server-verified session
-        apiFetch('/api/print-drop/new-session')
-          .then((res) => res.json())
-          .then((data) => {
-            if (data?.session_id) {
-              sessionStorage.setItem('pms_counter_session', data.session_id);
-              setSessionCode(data.session_id);
-            }
-          })
-          .catch(() => {});
       }
     }
   }, []);
@@ -503,6 +588,8 @@ export default function ScanToPrint() {
             // We use a Map-based approach on receive so sparse chunk indices work correctly.
             incomingTransfersRef.current[data.jobId] = {
               jobId: data.jobId,
+              senderDeviceId: data.senderDeviceId,
+              deviceLabel: data.deviceLabel || 'Mobile Phone',
               name: data.name,
               size: data.size,
               type: data.type || 'application/pdf',
@@ -551,10 +638,21 @@ export default function ScanToPrint() {
                 blobUrl = '';
               }
 
-              const tokenNum = tokenCounterRef.current++;
+              // Determine or reuse Customer Token for this device
+              let tokenNum = 1;
+              const devId = transfer.senderDeviceId;
+              if (devId && deviceTokenMapRef.current[devId]) {
+                tokenNum = deviceTokenMapRef.current[devId];
+              } else {
+                tokenNum = tokenCounterRef.current++;
+                if (devId) deviceTokenMapRef.current[devId] = tokenNum;
+              }
+
               const job: PrintJob = {
                 id: transfer.jobId,
                 tokenNum,
+                senderDeviceId: transfer.senderDeviceId,
+                deviceLabel: transfer.deviceLabel,
                 name: transfer.name,
                 size: transfer.size,
                 type: transfer.type,
@@ -570,15 +668,22 @@ export default function ScanToPrint() {
               setIncomingProgress(null);
 
               // Send ACK with token back to mobile
-              try { conn.send({ action: 'JOB_ACK', jobId: transfer.jobId, tokenNum }); } catch {}
+              try { conn.send({ action: 'JOB_ACK', jobId: transfer.jobId, tokenNum, customerToken: tokenNum }); } catch {}
             }
           }
 
           // Single-shot fallback for tiny files
           else if (data.action === 'NEW_PRINT_JOB' && data.job) {
-            const tokenNum = tokenCounterRef.current++;
+            let tokenNum = 1;
+            const devId = data.job.senderDeviceId;
+            if (devId && deviceTokenMapRef.current[devId]) {
+              tokenNum = deviceTokenMapRef.current[devId];
+            } else {
+              tokenNum = tokenCounterRef.current++;
+              if (devId) deviceTokenMapRef.current[devId] = tokenNum;
+            }
             addIncomingJob({ ...data.job, tokenNum, status: 'pending' });
-            try { conn.send({ action: 'JOB_ACK', jobId: data.job.id, tokenNum }); } catch {}
+            try { conn.send({ action: 'JOB_ACK', jobId: data.job.id, tokenNum, customerToken: tokenNum }); } catch {}
           }
         });
 
@@ -587,10 +692,11 @@ export default function ScanToPrint() {
 
       peer.on('error', (err) => {
         if (err.type === 'unavailable-id') {
-          // Collision — regenerate a fresh session pin
-          const freshPin = generateCleanPin();
-          sessionStorage.setItem('pms_counter_session', freshPin);
-          setSessionCode(freshPin);
+          // Do not overwrite permanent PIN!
+          setPeerStatus('error');
+          setPinNotice(
+            `Counter PIN #${sessionCode} is currently occupied or held by another browser tab. Please wait a few seconds and click Reconnect.`
+          );
         } else if (err.type === 'peer-unavailable') {
           // Expected when a mobile client disconnects
         } else {
@@ -613,10 +719,11 @@ export default function ScanToPrint() {
 
         conn.on('data', (data: any) => {
           if (data?.action === 'JOB_ACK' && data.jobId) {
-            if (data.tokenNum) setCustomerToken(data.tokenNum);
+            const assignedTok = data.customerToken || data.tokenNum;
+            if (assignedTok) setCustomerToken(assignedTok);
             const resolver = ackResolversRef.current[data.jobId];
             if (resolver) {
-              resolver(data.tokenNum);
+              resolver(assignedTok);
               delete ackResolversRef.current[data.jobId];
             }
           }
@@ -715,29 +822,120 @@ export default function ScanToPrint() {
       <!DOCTYPE html>
       <html>
         <head>
-          <title>Counter QR Code - ${sessionCode}</title>
+          <title>Counter QR Standee - ${sessionCode}</title>
           <style>
-            @page { size: A5 portrait; margin: 0; }
-            body { margin: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; background: #fff; font-family: system-ui, sans-serif; }
-            .box { border: 3px solid #000; border-radius: 16px; padding: 24px 28px; text-align: center; }
-            h1 { font-size: 20px; margin: 0 0 4px; font-weight: 900; }
-            p { font-size: 13px; color: #444; margin: 0 0 16px; }
-            img { width: 240px; height: 240px; display: block; margin: 0 auto 16px; }
-            .pin { font-size: 28px; font-weight: 900; letter-spacing: 6px; border: 2px solid #000; padding: 6px 20px; border-radius: 8px; display: inline-block; margin-bottom: 12px; }
-            .sub { font-size: 11px; color: #666; }
+            @page { size: A5 portrait; margin: 8mm; }
+            * { box-sizing: border-box; }
+            body {
+              margin: 0;
+              padding: 0;
+              display: flex;
+              flex-direction: column;
+              align-items: center;
+              justify-content: center;
+              min-height: 98vh;
+              background: #fff;
+              font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+              color: #0f172a;
+            }
+            .standee-card {
+              border: 4px solid #e11d48;
+              border-radius: 24px;
+              padding: 24px 26px;
+              text-align: center;
+              max-width: 440px;
+              width: 100%;
+              background: #ffffff;
+            }
+            .shop-badge {
+              font-size: 11px;
+              font-weight: 800;
+              text-transform: uppercase;
+              letter-spacing: 2px;
+              background: #fff1f2;
+              color: #e11d48;
+              border: 1px solid #fecdd3;
+              padding: 4px 14px;
+              border-radius: 999px;
+              display: inline-block;
+              margin-bottom: 8px;
+            }
+            h1 { font-size: 21px; font-weight: 900; margin: 0 0 4px; color: #0f172a; line-height: 1.2; }
+            .tagline { font-size: 12.5px; color: #475569; margin: 0 0 14px; font-weight: 600; }
+            .qr-box {
+              background: #fff;
+              border: 2px solid #e2e8f0;
+              border-radius: 18px;
+              padding: 12px;
+              display: inline-block;
+              margin-bottom: 12px;
+            }
+            .qr-box img { width: 220px; height: 220px; display: block; margin: 0 auto; }
+            .pin-container { margin-bottom: 12px; }
+            .pin-label { font-size: 10.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 1.5px; color: #64748b; margin-bottom: 4px; }
+            .pin-code {
+              font-size: 30px;
+              font-weight: 900;
+              letter-spacing: 6px;
+              background: #f8fafc;
+              border: 2px solid #0f172a;
+              color: #0f172a;
+              padding: 6px 22px;
+              border-radius: 12px;
+              display: inline-block;
+              font-family: monospace;
+            }
+            .steps {
+              text-align: left;
+              background: #f8fafc;
+              border: 1px solid #e2e8f0;
+              border-radius: 14px;
+              padding: 10px 16px;
+              margin-bottom: 12px;
+              font-size: 11px;
+              color: #334155;
+              line-height: 1.6;
+            }
+            .steps ol { margin: 0; padding-left: 18px; }
+            .steps li { margin-bottom: 2px; font-weight: 600; }
+            .footer-badge {
+              font-size: 10px;
+              font-weight: 800;
+              color: #10b981;
+              letter-spacing: 0.5px;
+            }
+            .link-text { font-size: 9px; color: #94a3b8; margin-top: 4px; font-family: monospace; }
           </style>
         </head>
         <body>
-          <div class="box">
-            <h1>📄 Scan to Print</h1>
-            <p>Scan QR code from your phone to send documents directly for printing</p>
-            <img src="${qrDataUrl}" alt="QR Code" />
-            <div>
-              <div class="pin">${sessionCode}</div>
+          <div class="standee-card">
+            <div class="shop-badge">${shopName || 'DIRECT PRINT STATION'}</div>
+            <h1>📄 Mobile se Direct Print Bhejein</h1>
+            <p class="tagline">WhatsApp par number save karne ki koi zaroorat nahi!</p>
+            <div class="qr-box">
+              <img src="${qrDataUrl}" alt="Counter QR Standee" />
             </div>
-            <div class="sub">No WhatsApp • No App • 100% Private<br>Or visit: ${mobileLink}</div>
+            <div class="pin-container">
+              <div class="pin-label">Permanent Counter PIN</div>
+              <div class="pin-code">${sessionCode}</div>
+            </div>
+            <div class="steps">
+              <ol>
+                <li>Phone camera ya Paytm / GPay / Scanner se QR scan karein</li>
+                <li>Apna Document ya Photo select karke <strong>Send</strong> karein</li>
+                <li>Screen par mila <strong>Customer Token</strong> counter par batayein</li>
+              </ol>
+            </div>
+            <div class="footer-badge">🔒 100% Private • Direct Beam • Zero Data Stored</div>
+            <div class="link-text">${mobileLink}</div>
           </div>
-          <script>window.onload = function() { window.print(); window.onafterprint = function() { window.close(); }; };<\/script>
+          <script>
+            window.onload = function() {
+              window.focus();
+              setTimeout(function() { window.print(); }, 200);
+              window.onafterprint = function() { window.close(); };
+            };
+          <\/script>
         </body>
       </html>
     `);
@@ -754,6 +952,7 @@ export default function ScanToPrint() {
       formData.append('file', file);
       formData.append('copies', String(copies));
       formData.append('color_mode', colorMode);
+      formData.append('sender_device_id', getSenderDeviceId());
 
       xhr.upload.onprogress = (e) => {
         if (e.lengthComputable) {
@@ -851,6 +1050,8 @@ export default function ScanToPrint() {
             mobileConnRef.current.send({
               action: 'JOB_START',
               jobId,
+              senderDeviceId: getSenderDeviceId(),
+              deviceLabel: getDeviceLabel(),
               name: file.name,
               size: file.size,
               type: file.type || 'application/pdf',
@@ -982,6 +1183,8 @@ export default function ScanToPrint() {
               job: {
                 id: jobId,
                 tokenNum: 0,
+                senderDeviceId: getSenderDeviceId(),
+                deviceLabel: getDeviceLabel(),
                 name: file.name,
                 size: file.size,
                 type: file.type || 'application/pdf',
@@ -998,6 +1201,14 @@ export default function ScanToPrint() {
         }
       }
 
+      setDeliveredBatch(
+        senderFiles.map((f) => ({
+          name: f.name,
+          size: f.size,
+          copies: senderCopies,
+          colorMode: senderColorMode,
+        }))
+      );
       setSenderProgress(100);
       setSenderSuccess(true);
       setSenderFiles([]);
@@ -1015,11 +1226,21 @@ export default function ScanToPrint() {
     const files = Array.from(e.target.files || []);
     if (!files.length) return;
 
+    // Allocate / reuse token for local shopkeeper drops
+    const devId = 'local_counter_pc';
+    let tokenNum = deviceTokenMapRef.current[devId];
+    if (!tokenNum) {
+      tokenNum = tokenCounterRef.current++;
+      deviceTokenMapRef.current[devId] = tokenNum;
+    }
+
     files.forEach((file) => {
       const blobUrl = URL.createObjectURL(file);
       const job: PrintJob = {
         id: `local_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-        tokenNum: tokenCounterRef.current++,
+        tokenNum,
+        senderDeviceId: devId,
+        deviceLabel: 'Counter PC',
         name: file.name,
         size: file.size,
         type: file.type || 'application/pdf',
@@ -1322,6 +1543,94 @@ export default function ScanToPrint() {
     }
   };
 
+  // ─── Customer Bundle Printing ───────────────────────────────────────────
+  const handlePrintCustomerBundle = async (group: CustomerGroup) => {
+    if (isPrintingCustomerToken !== null || printingJobId !== null) return;
+    const toPrint = group.pendingJobs;
+    if (!toPrint.length) return;
+
+    setIsPrintingCustomerToken(group.customerToken);
+
+    try {
+      for (let i = 0; i < toPrint.length; i++) {
+        const job = toPrint[i];
+        await handlePrint(job);
+        if (i < toPrint.length - 1) {
+          // Safe gap between consecutive print dialogs
+          await new Promise((r) => setTimeout(r, 1600));
+        }
+      }
+    } catch (e) {
+      console.error('Customer bundle print notice', e);
+    } finally {
+      setIsPrintingCustomerToken(null);
+    }
+  };
+
+  const markCustomerBundlePrinted = (customerToken: number) => {
+    const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    setPrintJobs((prev) =>
+      prev.map((j) => (j.tokenNum === customerToken ? { ...j, status: 'printed' as const, printedAt: now } : j))
+    );
+  };
+
+  const markCustomerBundlePending = (customerToken: number) => {
+    setPrintJobs((prev) =>
+      prev.map((j) => (j.tokenNum === customerToken ? { ...j, status: 'pending' as const, printedAt: undefined } : j))
+    );
+  };
+
+  const deleteCustomerBundle = (customerToken: number) => {
+    setPrintJobs((prev) => {
+      prev.filter((j) => j.tokenNum === customerToken).forEach((j) => {
+        if (j.dataUrl.startsWith('blob:')) {
+          try { URL.revokeObjectURL(j.dataUrl); } catch {}
+        }
+      });
+      return prev.filter((j) => j.tokenNum !== customerToken);
+    });
+  };
+
+  // ─── Custom PIN & Shop Settings ─────────────────────────────────────────
+  const handleSaveCustomPin = (newPinRaw: string, newShopNameRaw?: string) => {
+    const cleanPin = newPinRaw.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (cleanPin.length < 3 || cleanPin.length > 10) {
+      alert('PIN must be 3 to 10 characters (letters and numbers only, e.g. SHARMA or K9X2M7).');
+      return;
+    }
+
+    try {
+      localStorage.setItem(PMS_PERMANENT_PIN_KEY, cleanPin);
+      if (newShopNameRaw !== undefined) {
+        const trimmedShop = newShopNameRaw.trim() || 'Cyber Cafe & E-Mitra Print Station';
+        localStorage.setItem(PMS_SHOP_NAME_KEY, trimmedShop);
+        setShopName(trimmedShop);
+      }
+    } catch {}
+
+    try {
+      if (peerRef.current) {
+        peerRef.current.destroy();
+        peerRef.current = null;
+      }
+    } catch {}
+
+    setConnectedMobiles(0);
+    setSessionCode(cleanPin);
+    setPinNotice(null);
+    setShowPinModal(false);
+    setPeerReconnectKey((k) => k + 1);
+  };
+
+  const handleResetPin = () => {
+    const confirmMsg =
+      'Kya aap waqai new Counter PIN generate karna chahte hain?\n\nAgar aapne puraana QR Standee print karke counter par lagaya hua hai, to aapko naya QR print karke lagana hoga.';
+    if (window.confirm(confirmMsg)) {
+      const newPin = generateCleanPin();
+      handleSaveCustomPin(newPin);
+    }
+  };
+
   // ─── Print All ──────────────────────────────────────────────────────────
   const handlePrintAll = async () => {
     const pending = printJobs.filter((j) => j.status === 'pending');
@@ -1343,6 +1652,54 @@ export default function ScanToPrint() {
   // ─── Derived ────────────────────────────────────────────────────────────
   const pendingJobs = useMemo(() => printJobs.filter((j) => j.status === 'pending'), [printJobs]);
   const printedJobs = useMemo(() => printJobs.filter((j) => j.status === 'printed'), [printJobs]);
+
+  // ─── Customer Grouping (Memoized) ────────────────────────────────────────
+  const customerGroups = useMemo(() => {
+    const map = new Map<number, CustomerGroup>();
+
+    for (const job of printJobs) {
+      const token = job.tokenNum || 1;
+      if (!map.has(token)) {
+        map.set(token, {
+          customerToken: token,
+          senderDeviceId: job.senderDeviceId || `device_${token}`,
+          deviceLabel: job.deviceLabel || (job.id.startsWith('local_') ? 'Counter PC' : 'Mobile Phone'),
+          firstTimestamp: job.timestamp,
+          jobs: [],
+          pendingJobs: [],
+          printedJobs: [],
+          totalPrints: 0,
+          totalFiles: 0,
+          isComplete: true,
+        });
+      }
+
+      const group = map.get(token)!;
+      group.jobs.push(job);
+      group.totalFiles += 1;
+      const pages = job.pages || 1;
+      group.totalPrints += job.copies * pages;
+
+      if (job.status === 'pending') {
+        group.pendingJobs.push(job);
+        group.isComplete = false;
+      } else {
+        group.printedJobs.push(job);
+      }
+    }
+
+    return Array.from(map.values());
+  }, [printJobs]);
+
+  const pendingCustomerGroups = useMemo(
+    () => customerGroups.filter((g) => g.pendingJobs.length > 0),
+    [customerGroups]
+  );
+
+  const printedCustomerGroups = useMemo(
+    () => customerGroups.filter((g) => g.pendingJobs.length === 0 && g.printedJobs.length > 0),
+    [customerGroups]
+  );
 
   // ════════════════════════════════════════════════════════════════════════
   // UNIVERSAL SENDER VIEW (PC, Laptop, Mobile)
@@ -1503,8 +1860,8 @@ export default function ScanToPrint() {
               </div>
 
               {senderSuccess ? (
-                /* Success Screen */
-                <div className="py-8 text-center space-y-4">
+                /* Success Screen with Customer Token & Bundle Info */
+                <div className="py-6 text-center space-y-4">
                   <div className="w-16 h-16 rounded-full bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 mx-auto flex items-center justify-center">
                     <CheckCircle2 className="w-9 h-9" />
                   </div>
@@ -1515,16 +1872,60 @@ export default function ScanToPrint() {
                     <h2 className="text-3xl font-black text-slate-900 dark:text-white pt-3">
                       Token <span className="text-rose-600 font-mono">#{customerToken ?? 1}</span>
                     </h2>
-                    <p className="text-sm text-slate-500 max-w-xs mx-auto pt-1">
-                      Tell the operator your Token is <strong>#{customerToken ?? 1}</strong> to collect your printout.
+                    <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-300 max-w-xs mx-auto pt-1 font-medium">
+                      Counter operator ko apna Token <strong className="text-rose-600 font-black">#{customerToken ?? 1}</strong> batayein apna printout lene ke liye.
                     </p>
                   </div>
-                  <button
-                    onClick={() => { setSenderSuccess(false); setSenderFiles([]); setSenderCopies(1); setSenderColorMode('bw'); }}
-                    className="w-full py-3.5 rounded-2xl bg-slate-900 text-white dark:bg-white dark:text-slate-900 text-sm font-bold shadow-md hover:opacity-90 transition"
-                  >
-                    Send Another Document
-                  </button>
+
+                  {/* Delivered documents list */}
+                  {deliveredBatch.length > 0 && (
+                    <div className="text-left bg-slate-50 dark:bg-slate-800/80 rounded-2xl p-3 border border-slate-200 dark:border-slate-700 space-y-1.5 max-h-40 overflow-y-auto">
+                      <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider block">
+                        Delivered in Token #{customerToken ?? 1} ({deliveredBatch.length} file{deliveredBatch.length > 1 ? 's' : ''}):
+                      </span>
+                      {deliveredBatch.map((f, idx) => (
+                        <div key={idx} className="flex items-center justify-between text-xs py-1 border-b border-slate-100 dark:border-slate-700/50 last:border-0">
+                          <span className="font-semibold text-slate-700 dark:text-slate-200 truncate max-w-[200px]">{f.name}</span>
+                          <span className="font-mono text-[11px] text-rose-600 font-bold shrink-0 ml-2">
+                            {f.copies} {f.copies > 1 ? 'copies' : 'copy'} · {f.colorMode === 'bw' ? 'B&W' : 'Color'}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="space-y-2 pt-2">
+                    <button
+                      onClick={() => {
+                        setSenderSuccess(false);
+                        setSenderFiles([]);
+                        setSenderCopies(1);
+                        setSenderColorMode('bw');
+                      }}
+                      className="w-full py-3.5 rounded-2xl bg-rose-600 hover:bg-rose-700 active:scale-95 text-white text-sm font-bold shadow-md transition"
+                    >
+                      ➕ Send More Files (Same Token #{customerToken ?? 1})
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        // Allocate fresh device ID so user can send for another person
+                        try {
+                          const newDevId = 'dev_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 7);
+                          localStorage.setItem(PMS_SENDER_DEVICE_ID_KEY, newDevId);
+                        } catch {}
+                        setCustomerToken(null);
+                        setDeliveredBatch([]);
+                        setSenderSuccess(false);
+                        setSenderFiles([]);
+                        setSenderCopies(1);
+                        setSenderColorMode('bw');
+                      }}
+                      className="w-full py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 hover:border-slate-400 text-xs font-semibold text-slate-600 dark:text-slate-300 transition"
+                    >
+                      🔄 New Customer (Get Fresh Token)
+                    </button>
+                  </div>
                 </div>
               ) : (
                 <div className="space-y-4">
@@ -1699,6 +2100,219 @@ export default function ScanToPrint() {
     );
   }
 
+  // ─── Render Single Document Row (Used in both Grouped and Flat views) ────
+  const renderJobRow = (job: PrintJob, isInsideBundle = false) => (
+    <div
+      key={job.id}
+      className={`p-3 sm:p-3.5 rounded-2xl border transition-all ${
+        job.status === 'printed'
+          ? 'bg-emerald-50/40 dark:bg-emerald-950/20 border-emerald-200/70 dark:border-emerald-800/60'
+          : isInsideBundle
+          ? 'bg-white dark:bg-slate-800 border-slate-200/80 dark:border-slate-700 hover:border-rose-300 dark:hover:border-rose-700 shadow-xs'
+          : 'bg-slate-50 dark:bg-slate-800/60 border-slate-200/70 dark:border-slate-700 hover:border-rose-400'
+      }`}
+    >
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="flex items-center gap-3 min-w-0">
+          {/* Token Badge if not inside bundle card */}
+          {!isInsideBundle && (
+            <div className={`flex flex-col items-center justify-center min-w-[50px] h-12 rounded-xl text-white font-black shadow-sm shrink-0 ${
+              job.status === 'printed' ? 'bg-emerald-600' : 'bg-rose-600'
+            }`}>
+              <span className="text-[8px] uppercase font-bold tracking-tight opacity-80 leading-none">Token</span>
+              <span className="text-base font-extrabold leading-none mt-0.5">#{job.tokenNum}</span>
+            </div>
+          )}
+
+          {/* Thumbnail */}
+          <div className="w-10 h-10 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 flex items-center justify-center text-rose-600 shrink-0 overflow-hidden">
+            {job.type.startsWith('image/') ? (
+              <img src={job.dataUrl} alt={job.name} className="w-full h-full object-cover" />
+            ) : (
+              <FileText className="w-5 h-5" />
+            )}
+          </div>
+
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <p className="font-bold text-sm text-slate-900 dark:text-white truncate max-w-[180px] sm:max-w-[240px]">
+                {job.name}
+              </p>
+              {job.status === 'printed' && (
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 shrink-0">
+                  ✅ Printed {job.printedAt || ''}
+                </span>
+              )}
+            </div>
+            <p className="text-[11px] text-slate-400 mt-0.5 flex flex-wrap items-center gap-1.5">
+              <span className="font-mono">{formatFileSize(job.size)}</span>
+              {job.pages && (
+                <>
+                  <span>•</span>
+                  <span className="font-bold text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-700 px-1.5 py-0.5 rounded text-[10px]">
+                    {job.pages} page{job.pages > 1 ? 's' : ''}
+                  </span>
+                  <span>•</span>
+                  <span className="font-extrabold text-rose-600">
+                    Total: {job.pages * job.copies} prints
+                  </span>
+                </>
+              )}
+              {job.detectedOrientation === 'landscape' && (
+                <>
+                  <span>•</span>
+                  <span className="font-bold text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-950/60 px-1.5 py-0.5 rounded text-[10px]">
+                    🔄 Landscape
+                  </span>
+                </>
+              )}
+              <span>•</span>
+              <span>{job.timestamp}</span>
+              {job.copies > 1 && !job.pages && (
+                <><span>•</span><span className="font-bold text-rose-500">×{job.copies} copies</span></>
+              )}
+            </p>
+          </div>
+        </div>
+
+        {/* Action controls */}
+        <div className="flex items-center gap-1.5 shrink-0 flex-wrap sm:flex-nowrap self-end sm:self-center">
+          {job.status === 'pending' ? (
+            <>
+              {/* Copies control */}
+              <div className="flex items-center gap-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-1.5 py-1">
+                <button
+                  type="button"
+                  onClick={() => updateJobField(job.id, 'copies', Math.max(1, job.copies - 1))}
+                  className="w-5 h-5 rounded flex items-center justify-center hover:bg-slate-100 dark:hover:bg-slate-800"
+                >
+                  <Minus className="w-3 h-3" />
+                </button>
+                <span className="text-xs font-black text-slate-900 dark:text-white w-5 text-center">{job.copies}</span>
+                <button
+                  type="button"
+                  onClick={() => updateJobField(job.id, 'copies', Math.min(20, job.copies + 1))}
+                  className="w-5 h-5 rounded flex items-center justify-center hover:bg-slate-100 dark:hover:bg-slate-800"
+                >
+                  <Plus className="w-3 h-3" />
+                </button>
+              </div>
+
+              {/* B&W / Color toggle */}
+              <select
+                value={job.colorMode}
+                onChange={(e) => updateJobField(job.id, 'colorMode', e.target.value as 'bw' | 'color')}
+                className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-2 py-1.5 text-xs font-bold text-slate-700 dark:text-slate-300 outline-none"
+              >
+                <option value="bw">B&W</option>
+                <option value="color">Color</option>
+              </select>
+
+              {/* Orientation toggle */}
+              <select
+                value={job.orientation || 'auto'}
+                onChange={(e) => updateJobField(job.id, 'orientation', e.target.value as 'auto' | 'portrait' | 'landscape')}
+                title="Page Orientation (Auto detects Landscape)"
+                className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-2 py-1.5 text-xs font-bold text-slate-700 dark:text-slate-300 outline-none"
+              >
+                <option value="auto">
+                  Auto {job.detectedOrientation ? `(${job.detectedOrientation === 'landscape' ? 'Land' : 'Port'})` : ''}
+                </option>
+                <option value="portrait">📄 Port</option>
+                <option value="landscape">🔄 Land</option>
+              </select>
+
+              {/* 1-Click Print */}
+              <button
+                type="button"
+                onClick={() => handlePrint(job)}
+                disabled={printingJobId === job.id}
+                className="px-3.5 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-sm flex items-center gap-1.5 transition-all disabled:opacity-50"
+              >
+                {printingJobId === job.id ? (
+                  <><RefreshCw className="w-3 h-3 animate-spin" /> Rendering...</>
+                ) : (
+                  <><Printer className="w-3.5 h-3.5" /> Print</>
+                )}
+              </button>
+
+              {/* Mark as Done */}
+              <button
+                type="button"
+                onClick={() => markAsPrinted(job.id)}
+                title="Mark as Printed"
+                className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1 transition-all"
+              >
+                <Check className="w-3.5 h-3.5" /> Done
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={() => markAsPending(job.id)}
+                title="Move back to Pending"
+                className="px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-bold text-xs flex items-center gap-1 hover:bg-slate-50 transition"
+              >
+                <RotateCcw className="w-3.5 h-3.5 text-slate-500" /> Undo
+              </button>
+              <button
+                type="button"
+                onClick={() => handlePrint(job)}
+                className="px-3 py-1.5 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 font-bold text-xs flex items-center gap-1 shadow-sm hover:opacity-90 transition"
+              >
+                <Printer className="w-3.5 h-3.5" /> Re-Print
+              </button>
+            </>
+          )}
+
+          {/* Preview */}
+          <button
+            type="button"
+            onClick={async () => {
+              try {
+                if (job.dataUrl.startsWith('blob:')) { window.open(job.dataUrl, '_blank'); return; }
+                const { buffer, type } = await urlToArrayBuffer(job.dataUrl);
+                window.open(URL.createObjectURL(arrayBufferToBlob(buffer, type)), '_blank');
+              } catch {
+                window.open(job.dataUrl, '_blank');
+              }
+            }}
+            title="Preview"
+            className="p-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-slate-900 transition"
+          >
+            <ExternalLink className="w-3.5 h-3.5" />
+          </button>
+
+          {/* Download */}
+          <button
+            type="button"
+            onClick={() => {
+              const a = document.createElement('a');
+              a.href = job.dataUrl;
+              a.download = job.name;
+              a.click();
+            }}
+            title="Download"
+            className="p-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-slate-900 transition"
+          >
+            <Download className="w-3.5 h-3.5" />
+          </button>
+
+          {/* Delete */}
+          <button
+            type="button"
+            onClick={() => deleteJob(job.id)}
+            title="Delete"
+            className="p-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-400 hover:text-rose-600 transition"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
   // ════════════════════════════════════════════════════════════════════════
   // COUNTER PC SHOPKEEPER VIEW
   // ════════════════════════════════════════════════════════════════════════
@@ -1829,14 +2443,77 @@ export default function ScanToPrint() {
                 )}
               </div>
 
-              <div className="mt-3 flex items-center gap-2">
-                <span className="text-xs font-semibold text-slate-500">Counter PIN:</span>
-                <span className="text-xl font-black tracking-widest text-slate-900 dark:text-white bg-white dark:bg-slate-900 px-3 py-1 rounded-lg border border-slate-200 dark:border-slate-700">
-                  {sessionCode}
-                </span>
+              <div className="mt-3 flex flex-col items-center gap-1.5 w-full">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-slate-500">Counter PIN:</span>
+                  <span className="text-xl font-black tracking-widest text-slate-900 dark:text-white bg-white dark:bg-slate-900 px-3 py-1 rounded-lg border border-slate-200 dark:border-slate-700 font-mono">
+                    {sessionCode}
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-1.5 text-[10.5px] font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/60 px-2.5 py-0.5 rounded-full border border-emerald-200 dark:border-emerald-800">
+                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>Permanent QR (Standee Safe)</span>
+                </div>
+
+                <div className="flex items-center gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCustomPinInput(sessionCode);
+                      setCustomShopNameInput(shopName);
+                      setShowPinModal(true);
+                    }}
+                    className="px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 hover:border-rose-400 bg-white dark:bg-slate-800 text-[11px] font-bold text-slate-700 dark:text-slate-200 flex items-center gap-1 transition"
+                    title="Customize Shop Name & PIN"
+                  >
+                    <Edit3 className="w-3 h-3 text-rose-600" /> Custom PIN / Shop
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleResetPin}
+                    className="px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 hover:border-rose-400 bg-white dark:bg-slate-800 text-[11px] font-bold text-slate-500 hover:text-rose-600 flex items-center gap-1 transition"
+                    title="Generate fresh random PIN"
+                  >
+                    <RefreshCw className="w-3 h-3" /> Reset
+                  </button>
+                </div>
               </div>
 
-              <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1.5 text-center px-2">
+              {pinNotice && (
+                <div className="mt-2.5 w-full p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-800 text-[11px] text-amber-900 dark:text-amber-100 flex flex-col gap-1.5">
+                  <div className="flex items-start gap-1.5">
+                    <AlertCircle className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
+                    <span>{pinNotice}</span>
+                  </div>
+                  <div className="flex items-center justify-end gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPinNotice(null);
+                        setPeerStatus('connecting');
+                        setPeerReconnectKey((k) => k + 1);
+                      }}
+                      className="px-2 py-0.5 rounded bg-amber-600 hover:bg-amber-700 text-white font-bold text-[10px]"
+                    >
+                      Reconnect
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCustomPinInput(sessionCode);
+                        setCustomShopNameInput(shopName);
+                        setShowPinModal(true);
+                      }}
+                      className="px-2 py-0.5 rounded border border-amber-400 text-amber-900 dark:text-amber-100 font-bold text-[10px]"
+                    >
+                      Change PIN
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-2 text-center px-2">
                 Scan QR or enter PIN <strong className="text-rose-600 font-mono">#{sessionCode}</strong> to beam files wirelessly from any phone, laptop, or PC!
               </p>
 
@@ -1915,10 +2592,11 @@ export default function ScanToPrint() {
           {/* ── RIGHT: Print Queue ───────────────────────────────────────── */}
           <div className="lg:col-span-8 bg-white dark:bg-slate-900 rounded-3xl border border-slate-200/90 dark:border-slate-800 p-6 shadow-sm space-y-5">
 
-            {/* Tabs */}
+            {/* Tabs & View Switcher */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <button
+                  type="button"
                   onClick={() => setQueueTab('pending')}
                   className={`px-4 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all ${
                     queueTab === 'pending'
@@ -1931,6 +2609,7 @@ export default function ScanToPrint() {
                 </button>
 
                 <button
+                  type="button"
                   onClick={() => setQueueTab('printed')}
                   className={`px-4 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all ${
                     queueTab === 'printed'
@@ -1943,19 +2622,52 @@ export default function ScanToPrint() {
                 </button>
               </div>
 
-              {printJobs.length > 0 && (
-                <button
-                  onClick={() => {
-                    printJobs.forEach((j) => {
-                      if (j.dataUrl.startsWith('blob:')) { try { URL.revokeObjectURL(j.dataUrl); } catch {} }
-                    });
-                    setPrintJobs([]);
-                  }}
-                  className="text-xs text-rose-600 hover:underline font-semibold flex items-center gap-1 self-end sm:self-center"
-                >
-                  <Trash2 className="w-3.5 h-3.5" /> Clear All
-                </button>
-              )}
+              <div className="flex items-center gap-2.5 self-end sm:self-center flex-wrap">
+                {/* View Switcher: Customer Bundles vs Flat Files */}
+                <div className="inline-flex p-1 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700/80 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setViewMode('grouped')}
+                    className={`px-2.5 py-1 rounded-lg font-bold flex items-center gap-1.5 transition ${
+                      viewMode === 'grouped'
+                        ? 'bg-white dark:bg-slate-900 text-rose-600 shadow-sm'
+                        : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
+                    }`}
+                    title="Customer-wise Bundles"
+                  >
+                    <Users className="w-3.5 h-3.5" />
+                    <span>Customer Bundles</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setViewMode('flat')}
+                    className={`px-2.5 py-1 rounded-lg font-bold flex items-center gap-1.5 transition ${
+                      viewMode === 'flat'
+                        ? 'bg-white dark:bg-slate-900 text-rose-600 shadow-sm'
+                        : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
+                    }`}
+                    title="All Files Flat List"
+                  >
+                    <List className="w-3.5 h-3.5" />
+                    <span>All Files</span>
+                  </button>
+                </div>
+
+                {printJobs.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      printJobs.forEach((j) => {
+                        if (j.dataUrl.startsWith('blob:')) { try { URL.revokeObjectURL(j.dataUrl); } catch {} }
+                      });
+                      setPrintJobs([]);
+                    }}
+                    className="text-xs text-rose-600 hover:underline font-semibold flex items-center gap-1 ml-1"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" /> Clear All
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Incoming progress bar */}
@@ -1989,177 +2701,90 @@ export default function ScanToPrint() {
                     </div>
                     <h3 className="font-bold text-slate-700 dark:text-slate-200 text-sm">Queue is Empty</h3>
                     <p className="text-xs text-slate-400 max-w-sm mx-auto">
-                      When a customer scans your QR code and beams a file, it pops up here with a Token Number!
+                      When a customer scans your QR code and beams files, their documents arrive neatly bundled under a Customer Token!
                     </p>
                   </div>
-                ) : (
-                  <div className="space-y-3 max-h-[65vh] overflow-y-auto pr-1">
-                    {pendingJobs.map((job) => (
+                ) : viewMode === 'grouped' ? (
+                  /* ── Grouped by Customer Bundles ── */
+                  <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
+                    {pendingCustomerGroups.map((group) => (
                       <div
-                        key={job.id}
-                        className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/70 dark:border-slate-700 hover:border-rose-400 transition-all"
+                        key={group.customerToken}
+                        className="rounded-3xl border-2 border-slate-200/80 dark:border-slate-700/80 bg-white dark:bg-slate-900 shadow-sm overflow-hidden hover:border-rose-400 dark:hover:border-rose-600 transition-all"
                       >
-                        {/* Top row: token + file info + actions */}
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                          <div className="flex items-center gap-3 min-w-0">
-                            {/* Token Badge */}
-                            <div className="flex flex-col items-center justify-center min-w-[52px] h-14 rounded-2xl bg-rose-600 text-white font-black shadow-sm shrink-0">
-                              <span className="text-[9px] uppercase font-bold tracking-tight opacity-80 leading-none">Token</span>
-                              <span className="text-lg font-extrabold leading-none mt-0.5">#{job.tokenNum}</span>
+                        {/* Bundle Header */}
+                        <div className="bg-gradient-to-r from-slate-50 via-rose-50/25 to-slate-50 dark:from-slate-800/80 dark:via-rose-950/20 dark:to-slate-800/80 p-3.5 sm:p-4 border-b border-slate-200 dark:border-slate-700/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                          <div className="flex items-center gap-3">
+                            {/* Big Customer Token Badge */}
+                            <div className="flex flex-col items-center justify-center min-w-[56px] h-14 rounded-2xl bg-rose-600 text-white font-black shadow-sm shrink-0">
+                              <span className="text-[9px] uppercase font-bold tracking-tight opacity-90 leading-none">Customer</span>
+                              <span className="text-xl font-extrabold leading-none mt-0.5">#{group.customerToken}</span>
                             </div>
 
-                            {/* Thumbnail */}
-                            <div className="w-10 h-10 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 flex items-center justify-center text-rose-600 shrink-0 overflow-hidden">
-                              {job.type.startsWith('image/') ? (
-                                <img src={job.dataUrl} alt={job.name} className="w-full h-full object-cover" />
-                              ) : (
-                                <FileText className="w-5 h-5" />
-                              )}
-                            </div>
-
-                            <div className="min-w-0">
-                              <p className="font-bold text-sm text-slate-900 dark:text-white truncate max-w-[180px] sm:max-w-[260px]">
-                                {job.name}
-                              </p>
-                              <p className="text-[11px] text-slate-400 mt-0.5 flex flex-wrap items-center gap-1.5">
-                                <span className="font-mono">{formatFileSize(job.size)}</span>
-                                {job.pages && (
-                                  <>
-                                    <span>•</span>
-                                    <span className="font-bold text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-700 px-1.5 py-0.5 rounded text-[10px]">
-                                      {job.pages} page{job.pages > 1 ? 's' : ''}
-                                    </span>
-                                    <span>•</span>
-                                    <span className="font-extrabold text-rose-600">
-                                      Total: {job.pages * job.copies} prints
-                                    </span>
-                                  </>
-                                )}
-                                {job.detectedOrientation === 'landscape' && (
-                                  <>
-                                    <span>•</span>
-                                    <span className="font-bold text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-950/60 px-1.5 py-0.5 rounded text-[10px]">
-                                      🔄 Landscape
-                                    </span>
-                                  </>
-                                )}
-                                <span>•</span>
-                                <span>{job.timestamp}</span>
-                                {job.copies > 1 && !job.pages && (
-                                  <><span>•</span><span className="font-bold text-rose-500">×{job.copies} copies</span></>
-                                )}
+                            <div>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <h3 className="font-black text-slate-900 dark:text-white text-base">
+                                  Customer Bundle #{group.customerToken}
+                                </h3>
+                                <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-rose-100 dark:bg-rose-950/80 text-rose-700 dark:text-rose-300">
+                                  {group.pendingJobs.length} doc{group.pendingJobs.length > 1 ? 's' : ''} · {group.totalPrints} print{group.totalPrints > 1 ? 's' : ''}
+                                </span>
+                                <span className="text-[10px] font-semibold text-slate-500 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-full flex items-center gap-1">
+                                  {group.deviceLabel.includes('Mobile') ? '📱' : '💻'} {group.deviceLabel}
+                                </span>
+                              </div>
+                              <p className="text-[11px] text-slate-400 mt-0.5">
+                                Arrived: {group.firstTimestamp} • {group.totalFiles} file{group.totalFiles > 1 ? 's' : ''} in total
                               </p>
                             </div>
                           </div>
 
-                          {/* Action buttons */}
-                          <div className="flex items-center gap-1.5 shrink-0 flex-wrap sm:flex-nowrap self-end sm:self-center">
-                            {/* Copies control */}
-                            <div className="flex items-center gap-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-1.5 py-1">
-                              <button
-                                onClick={() => updateJobField(job.id, 'copies', Math.max(1, job.copies - 1))}
-                                className="w-5 h-5 rounded flex items-center justify-center hover:bg-slate-100 dark:hover:bg-slate-800"
-                              >
-                                <Minus className="w-3 h-3" />
-                              </button>
-                              <span className="text-xs font-black text-slate-900 dark:text-white w-5 text-center">{job.copies}</span>
-                              <button
-                                onClick={() => updateJobField(job.id, 'copies', Math.min(20, job.copies + 1))}
-                                className="w-5 h-5 rounded flex items-center justify-center hover:bg-slate-100 dark:hover:bg-slate-800"
-                              >
-                                <Plus className="w-3 h-3" />
-                              </button>
-                            </div>
-
-                            {/* B&W / Color toggle */}
-                            <select
-                              value={job.colorMode}
-                              onChange={(e) => updateJobField(job.id, 'colorMode', e.target.value as 'bw' | 'color')}
-                              className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-2 py-2 text-xs font-bold text-slate-700 dark:text-slate-300 outline-none"
-                            >
-                              <option value="bw">B&W</option>
-                              <option value="color">Color</option>
-                            </select>
-
-                            {/* Orientation toggle */}
-                            <select
-                              value={job.orientation || 'auto'}
-                              onChange={(e) => updateJobField(job.id, 'orientation', e.target.value as 'auto' | 'portrait' | 'landscape')}
-                              title="Page Orientation (Auto detects Landscape)"
-                              className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-2 py-2 text-xs font-bold text-slate-700 dark:text-slate-300 outline-none"
-                            >
-                              <option value="auto">
-                                Auto {job.detectedOrientation ? `(${job.detectedOrientation === 'landscape' ? 'Land' : 'Port'})` : ''}
-                              </option>
-                              <option value="portrait">📄 Port</option>
-                              <option value="landscape">🔄 Land</option>
-                            </select>
-
-                            {/* 1-Click Print */}
+                          {/* Bundle Action Buttons */}
+                          <div className="flex items-center gap-2 shrink-0 self-end sm:self-center flex-wrap">
                             <button
-                              onClick={() => handlePrint(job)}
-                              disabled={printingJobId === job.id}
-                              className="px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-sm flex items-center gap-1.5 transition-all disabled:opacity-50"
+                              type="button"
+                              onClick={() => handlePrintCustomerBundle(group)}
+                              disabled={isPrintingCustomerToken === group.customerToken}
+                              className="px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 active:scale-95 text-white font-extrabold text-xs shadow-sm flex items-center gap-1.5 transition disabled:opacity-50"
                             >
-                              {printingJobId === job.id ? (
-                                <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Rendering...</>
+                              {isPrintingCustomerToken === group.customerToken ? (
+                                <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Printing Bundle...</>
                               ) : (
-                                <><Printer className="w-3.5 h-3.5" /> Print</>
+                                <><Printer className="w-3.5 h-3.5" /> Print Customer Bundle ({group.totalPrints})</>
                               )}
                             </button>
 
-                            {/* Mark as Done */}
                             <button
-                              onClick={() => markAsPrinted(job.id)}
-                              title="Mark as Printed"
-                              className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1 transition-all"
+                              type="button"
+                              onClick={() => markCustomerBundlePrinted(group.customerToken)}
+                              className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1 transition shadow-sm"
+                              title="Mark All Documents in this Bundle as Printed"
                             >
-                              <Check className="w-3.5 h-3.5" /> Done
+                              <Check className="w-3.5 h-3.5" /> All Done
                             </button>
 
-                            {/* Preview */}
                             <button
-                              onClick={async () => {
-                                try {
-                                  if (job.dataUrl.startsWith('blob:')) { window.open(job.dataUrl, '_blank'); return; }
-                                  const { buffer, type } = await urlToArrayBuffer(job.dataUrl);
-                                  window.open(URL.createObjectURL(arrayBufferToBlob(buffer, type)), '_blank');
-                                } catch {
-                                  window.open(job.dataUrl, '_blank');
-                                }
-                              }}
-                              title="Preview"
-                              className="p-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-slate-900 transition"
+                              type="button"
+                              onClick={() => deleteCustomerBundle(group.customerToken)}
+                              className="p-2 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition"
+                              title="Delete Customer Bundle"
                             >
-                              <ExternalLink className="w-4 h-4" />
-                            </button>
-
-                            {/* Download */}
-                            <button
-                              onClick={() => {
-                                const a = document.createElement('a');
-                                a.href = job.dataUrl;
-                                a.download = job.name;
-                                a.click();
-                              }}
-                              title="Download"
-                              className="p-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-slate-900 transition"
-                            >
-                              <Download className="w-4 h-4" />
-                            </button>
-
-                            {/* Delete */}
-                            <button
-                              onClick={() => deleteJob(job.id)}
-                              title="Delete"
-                              className="p-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-400 hover:text-rose-600 transition"
-                            >
-                              <Trash2 className="w-4 h-4" />
+                              <Trash2 className="w-3.5 h-3.5" />
                             </button>
                           </div>
                         </div>
+
+                        {/* Documents inside this Customer Bundle */}
+                        <div className="p-3 sm:p-4 space-y-2 bg-slate-50/40 dark:bg-slate-900/40">
+                          {group.jobs.map((job) => renderJobRow(job, true))}
+                        </div>
                       </div>
                     ))}
+                  </div>
+                ) : (
+                  /* ── Flat File List ── */
+                  <div className="space-y-3 max-h-[65vh] overflow-y-auto pr-1">
+                    {pendingJobs.map((job) => renderJobRow(job, false))}
                   </div>
                 )}
               </>
@@ -2175,81 +2800,87 @@ export default function ScanToPrint() {
                     </div>
                     <h3 className="font-bold text-slate-700 dark:text-slate-200 text-sm">No Documents Printed Yet</h3>
                     <p className="text-xs text-slate-400 max-w-sm mx-auto">
-                      When you print or click "Done", items move here so you never confuse pending jobs.
+                      When you print or click &ldquo;Done&rdquo;, items move here so you never confuse pending jobs.
                     </p>
                   </div>
-                ) : (
-                  <div className="space-y-3 max-h-[65vh] overflow-y-auto pr-1">
-                    {printedJobs.map((job) => (
+                ) : viewMode === 'grouped' ? (
+                  /* ── Grouped Printed Customer Bundles ── */
+                  <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
+                    {printedCustomerGroups.map((group) => (
                       <div
-                        key={job.id}
-                        className="p-4 rounded-2xl bg-emerald-50/40 dark:bg-emerald-950/20 border border-emerald-200/70 dark:border-emerald-800/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                        key={group.customerToken}
+                        className="rounded-3xl border border-emerald-200/80 dark:border-emerald-800/60 bg-emerald-50/20 dark:bg-emerald-950/10 shadow-xs overflow-hidden"
                       >
-                        <div className="flex items-center gap-3 min-w-0">
-                          {/* Token badge */}
-                          <div className="flex flex-col items-center justify-center min-w-[52px] h-14 rounded-2xl bg-emerald-600 text-white font-black shadow-sm shrink-0">
-                            <span className="text-[9px] uppercase font-bold tracking-tight opacity-80 leading-none">Token</span>
-                            <span className="text-lg font-extrabold leading-none mt-0.5">#{job.tokenNum}</span>
+                        <div className="p-3.5 sm:p-4 bg-emerald-50/50 dark:bg-emerald-950/30 border-b border-emerald-200/60 dark:border-emerald-800/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                          <div className="flex items-center gap-3">
+                            <div className="flex flex-col items-center justify-center min-w-[52px] h-13 rounded-2xl bg-emerald-600 text-white font-black shadow-xs shrink-0">
+                              <span className="text-[8px] uppercase font-bold tracking-tight opacity-90 leading-none">Customer</span>
+                              <span className="text-lg font-extrabold leading-none mt-0.5">#{group.customerToken}</span>
+                            </div>
+                            <div>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <h4 className="font-bold text-sm text-slate-900 dark:text-white">
+                                  Customer #{group.customerToken} Completed
+                                </h4>
+                                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300">
+                                  ✅ {group.totalFiles} doc{group.totalFiles > 1 ? 's' : ''} ({group.totalPrints} prints)
+                                </span>
+                              </div>
+                              <p className="text-[11px] text-slate-400 mt-0.5">
+                                Arrived: {group.firstTimestamp}
+                              </p>
+                            </div>
                           </div>
 
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <p className="font-bold text-sm text-slate-900 dark:text-white truncate max-w-[180px] sm:max-w-[260px]">
-                                {job.name}
-                              </p>
-                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 shrink-0">
-                                ✅ Printed {job.printedAt || ''}
-                              </span>
-                            </div>
-                            <p className="text-[11px] text-slate-400 mt-0.5 flex items-center gap-1.5 flex-wrap">
-                              <span className="font-mono">{formatFileSize(job.size)}</span>
-                              {job.pages && (
-                                <>
-                                  <span>•</span>
-                                  <span className="font-bold text-slate-700 dark:text-slate-200">
-                                    {job.pages} pg ({job.pages * job.copies} prints)
-                                  </span>
-                                </>
-                              )}
-                              <span>•</span>
-                              <span>Received {job.timestamp}</span>
-                              {job.copies > 1 && !job.pages && <><span>•</span><span className="text-emerald-600 font-bold">×{job.copies}</span></>}
-                              {(job.detectedOrientation === 'landscape' || job.orientation === 'landscape') && (
-                                <><span>•</span><span className="text-amber-600 font-bold">🔄 Landscape</span></>
-                              )}
-                            </p>
+                          <div className="flex items-center gap-2 self-end sm:self-center">
+                            <button
+                              type="button"
+                              onClick={() => markCustomerBundlePending(group.customerToken)}
+                              className="px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-bold text-xs flex items-center gap-1.5 hover:bg-slate-50 transition"
+                            >
+                              <RotateCcw className="w-3.5 h-3.5 text-slate-500" /> Undo All
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handlePrintCustomerBundle(group)}
+                              className="px-3 py-1.5 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 font-bold text-xs flex items-center gap-1.5 shadow-sm hover:opacity-90 transition"
+                            >
+                              <Printer className="w-3.5 h-3.5" /> Re-Print
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => deleteCustomerBundle(group.customerToken)}
+                              className="p-1.5 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-400 hover:text-rose-600 transition"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
                           </div>
                         </div>
 
-                        <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
-                          <button
-                            onClick={() => markAsPending(job.id)}
-                            title="Move back to Pending"
-                            className="px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-bold text-xs flex items-center gap-1.5 hover:bg-slate-50 transition"
-                          >
-                            <RotateCcw className="w-3.5 h-3.5 text-slate-500" /> Undo
-                          </button>
-
-                          <button
-                            onClick={() => handlePrint(job)}
-                            className="px-3 py-2 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 font-bold text-xs flex items-center gap-1.5 shadow-sm hover:opacity-90 transition"
-                          >
-                            <Printer className="w-3.5 h-3.5" /> Re-Print
-                          </button>
-
-                          <button
-                            onClick={() => deleteJob(job.id)}
-                            title="Delete"
-                            className="p-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-400 hover:text-rose-600 transition"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                        <div className="p-3 sm:p-4 space-y-2">
+                          {group.jobs.map((job) => renderJobRow(job, true))}
                         </div>
                       </div>
                     ))}
 
                     <div className="pt-2 text-center">
                       <button
+                        type="button"
+                        onClick={clearPrintedHistory}
+                        className="text-xs text-slate-400 hover:text-rose-600 font-semibold inline-flex items-center gap-1.5 transition-colors py-1 px-3 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/40"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" /> Clear Printed History ({printedJobs.length})
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  /* ── Flat Printed List ── */
+                  <div className="space-y-3 max-h-[65vh] overflow-y-auto pr-1">
+                    {printedJobs.map((job) => renderJobRow(job, false))}
+
+                    <div className="pt-2 text-center">
+                      <button
+                        type="button"
                         onClick={clearPrintedHistory}
                         className="text-xs text-slate-400 hover:text-rose-600 font-semibold inline-flex items-center gap-1.5 transition-colors py-1 px-3 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/40"
                       >
@@ -2262,6 +2893,85 @@ export default function ScanToPrint() {
             )}
           </div>
         </div>
+
+        {/* ── Shop Identity & Custom PIN Modal ────────────────────────────── */}
+        {showPinModal && (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-6 sm:p-7 max-w-md w-full shadow-2xl space-y-5 animate-in fade-in zoom-in-95 duration-150">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-10 h-10 rounded-2xl bg-rose-50 dark:bg-rose-950/60 text-rose-600 flex items-center justify-center">
+                    <Store className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-extrabold text-slate-900 dark:text-white">Shop &amp; Permanent PIN Settings</h3>
+                    <p className="text-xs text-slate-500">Fixed forever on your counter QR Standee</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowPinModal(false)}
+                  className="p-2 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
+                    Shop / Counter Name (Printed on QR Standee)
+                  </label>
+                  <input
+                    type="text"
+                    value={customShopNameInput}
+                    onChange={(e) => setCustomShopNameInput(e.target.value)}
+                    placeholder="e.g. Sharma Cyber Cafe & E-Mitra"
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs sm:text-sm text-slate-900 dark:text-white focus:outline-none focus:border-rose-500 font-medium"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
+                    Custom Counter PIN / Shop Code
+                  </label>
+                  <input
+                    type="text"
+                    maxLength={10}
+                    value={customPinInput}
+                    onChange={(e) => setCustomPinInput(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))}
+                    placeholder="e.g. SHARMA or 6-CHAR PIN"
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-sm font-black font-mono tracking-widest text-slate-900 dark:text-white focus:outline-none focus:border-rose-500 uppercase"
+                  />
+                  <p className="text-[11px] text-slate-400 mt-1">
+                    3 to 10 letters/numbers (e.g. <span className="font-mono font-bold text-rose-600">SHARMA</span>, <span className="font-mono font-bold text-rose-600">CYBER1</span>, or <span className="font-mono font-bold text-rose-600">{sessionCode}</span>).
+                  </p>
+                </div>
+
+                <div className="p-3 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 text-amber-800 dark:text-amber-200 text-xs">
+                  ⚠️ <strong>Note:</strong> Agar aap PIN change karenge to aapka puraana printed QR standee update ho jayega aur aapko naya QR print karna hoga.
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowPinModal(false)}
+                  className="flex-1 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSaveCustomPin(customPinInput || sessionCode, customShopNameInput)}
+                  className="flex-1 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shadow-md transition"
+                >
+                  Save &amp; Update QR
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* SEO Section */}
         <ToolSEOSection
