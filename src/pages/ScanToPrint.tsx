@@ -307,11 +307,13 @@ export default function ScanToPrint() {
   }, [soundEnabled]);
 
   // ─── Background PDF Page & Orientation Detector ─────────────────────────
-  const detectPdfPages = useCallback(async (jobId: string, dataUrl: string) => {
+  const detectPdfPages = useCallback(async (jobId: string, dataUrl: string, cancelledRef: { current: boolean }) => {
     try {
       const { buffer } = await urlToArrayBuffer(dataUrl);
+      if (cancelledRef.current) return;
       const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(buffer) });
       const pdf = await loadingTask.promise;
+      if (cancelledRef.current) { loadingTask.destroy?.(); return; }
       const numPages = pdf.numPages;
       let detectedOrientation: 'portrait' | 'landscape' = 'portrait';
       if (numPages > 0) {
@@ -323,18 +325,23 @@ export default function ScanToPrint() {
           }
         } catch {}
       }
-      setPrintJobs((prev) =>
-        prev.map((j) => (j.id === jobId ? { ...j, pages: numPages, detectedOrientation } : j))
-      );
+      if (cancelledRef.current) return;
+      setPrintJobs((prev) => {
+        // Only update if job still exists in queue (race condition guard)
+        if (!prev.some((j) => j.id === jobId)) return prev;
+        return prev.map((j) => (j.id === jobId ? { ...j, pages: numPages, detectedOrientation } : j));
+      });
     } catch {}
   }, []);
 
   // ─── Add Job with Deduplication ─────────────────────────────────────────
   const addIncomingJob = useCallback(
     (job: Omit<PrintJob, 'tokenNum' | 'status'> & { tokenNum?: number; status?: 'pending' | 'printed' }) => {
+      let isDuplicate = false;
       setPrintJobs((prev) => {
         // Deduplicate by ID and by (name + ±100-byte size)
         if (prev.some((j) => j.id === job.id || (j.name === job.name && Math.abs(j.size - job.size) < 100))) {
+          isDuplicate = true;
           return prev;
         }
         playChime();
@@ -348,9 +355,12 @@ export default function ScanToPrint() {
         return [completeJob, ...prev];
       });
 
+      if (isDuplicate) return;
+
       // Detect pages & orientation in background if PDF
       if ((job.type === 'application/pdf' || job.name?.toLowerCase().endsWith('.pdf')) && !job.pages && job.dataUrl) {
-        void detectPdfPages(job.id, job.dataUrl);
+        const cancelledRef = { current: false };
+        void detectPdfPages(job.id, job.dataUrl, cancelledRef);
       }
 
       // Detect orientation if Image
@@ -358,10 +368,12 @@ export default function ScanToPrint() {
         const img = new Image();
         img.onload = () => {
           const detectedOrientation = img.width > img.height ? 'landscape' : 'portrait';
-          setPrintJobs((prev) =>
-            prev.map((j) => (j.id === job.id ? { ...j, detectedOrientation } : j))
-          );
+          setPrintJobs((prev) => {
+            if (!prev.some((j) => j.id === job.id)) return prev;
+            return prev.map((j) => (j.id === job.id ? { ...j, detectedOrientation } : j));
+          });
         };
+        img.onerror = () => {};
         img.src = job.dataUrl;
       }
     },
@@ -515,7 +527,11 @@ export default function ScanToPrint() {
                 transfer.receivedBytes = (transfer.receivedBytes || 0) + (chunkBuf?.byteLength || 0);
               }
               const pct = Math.min(99, Math.round((transfer.receivedBytes / transfer.size) * 100));
-              setIncomingProgress({ name: transfer.name, progress: pct });
+              // Throttle React state updates to when percentage integer actually changes
+              setIncomingProgress((prev) => {
+                if (prev && prev.name === transfer.name && prev.progress === pct) return prev;
+                return { name: transfer.name, progress: pct };
+              });
             }
           }
 
@@ -524,11 +540,13 @@ export default function ScanToPrint() {
             if (transfer) {
               let blobUrl = '';
               try {
-                // Sort chunks by index and concatenate — handles any chunk size / order
+                // Collect valid chunks by index and assemble
                 const validChunks = (transfer.chunks as (ArrayBuffer | undefined)[])
                   .filter((c): c is ArrayBuffer => c !== undefined);
-                const blob = new Blob(validChunks, { type: transfer.type });
-                blobUrl = URL.createObjectURL(blob);
+                if (validChunks.length > 0 && transfer.receivedBytes > 0) {
+                  const blob = new Blob(validChunks, { type: transfer.type });
+                  blobUrl = URL.createObjectURL(blob);
+                }
               } catch {
                 blobUrl = '';
               }
@@ -607,9 +625,12 @@ export default function ScanToPrint() {
         conn.on('error', () => setMobileConnectionStatus('fallback'));
 
         // If not connected in 5s, fall back to cloud relay
-        setTimeout(() => {
+        const fallbackTimer = setTimeout(() => {
           if (!conn.open) setMobileConnectionStatus('fallback');
         }, 5000);
+
+        // Store timer cleanup on conn so it can be cleared on unmount
+        (conn as any)._fallbackTimer = fallbackTimer;
       });
 
       peer.on('error', () => setMobileConnectionStatus('fallback'));
@@ -620,6 +641,13 @@ export default function ScanToPrint() {
 
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
+      try {
+        if (mobileConnRef.current) {
+          clearTimeout((mobileConnRef.current as any)._fallbackTimer);
+          mobileConnRef.current.close?.();
+          mobileConnRef.current = null;
+        }
+      } catch {}
       try { peer.destroy(); } catch {}
     };
   }, [sessionCode, targetCounterPin, isSenderMode, addIncomingJob, peerReconnectKey]);
@@ -923,17 +951,30 @@ export default function ScanToPrint() {
           }
         }
 
-        // ── Channel B: Backend Relay (guaranteed delivery fallback) ──────
-        if (!beamedViaWebRtc) {
-          setSenderStatusText(`Transmitting ${file.name} via cloud relay...`);
-          await uploadViaRelay(file, senderCopies, senderColorMode);
-        } else {
-          // Background relay copy — silent secondary guarantee (no await)
-          void uploadViaRelay(file, senderCopies, senderColorMode);
+        // Wait for Counter PC acknowledgment if beamed via WebRTC (timeout after 4s)
+        let ackReceived = false;
+        if (beamedViaWebRtc) {
+          ackReceived = await new Promise<boolean>((resolve) => {
+            const timeout = setTimeout(() => resolve(false), 4000);
+            ackResolversRef.current[jobId] = (token) => {
+              clearTimeout(timeout);
+              if (token) setCustomerToken(token);
+              resolve(true);
+            };
+          });
         }
 
-        // ── Channel C: BroadcastChannel (same-browser testing) ───────────
-        if (channelRef.current) {
+        // ── Channel B: Backend Relay (smart fallback ONLY if WebRTC failed or unacknowledged) ──
+        if (!ackReceived) {
+          setSenderStatusText(`Transmitting ${file.name} via cloud relay...`);
+          const relayOk = await uploadViaRelay(file, senderCopies, senderColorMode);
+          if (!relayOk && !beamedViaWebRtc) {
+            throw new Error(`Failed to transmit ${file.name}`);
+          }
+        }
+
+        // ── Channel C: BroadcastChannel (same-browser testing fallback) ──
+        if (channelRef.current && !ackReceived) {
           try {
             const blobUrl = URL.createObjectURL(file);
             channelRef.current.postMessage({
@@ -951,18 +992,10 @@ export default function ScanToPrint() {
                 status: 'pending',
               },
             });
+            // Revoke after a generous delay to let receiver load the blob
+            setTimeout(() => { try { URL.revokeObjectURL(blobUrl); } catch {} }, 30000);
           } catch {}
         }
-
-        // Wait for PC acknowledgment (or timeout after 4s)
-        await new Promise<void>((resolve) => {
-          const timeout = setTimeout(resolve, 4000);
-          ackResolversRef.current[jobId] = (token) => {
-            clearTimeout(timeout);
-            if (token) setCustomerToken(token);
-            resolve();
-          };
-        });
       }
 
       setSenderProgress(100);
@@ -1122,13 +1155,17 @@ export default function ScanToPrint() {
         const totalPages = pdf.numPages;
         const filter = job.colorMode === 'bw' ? 'filter: grayscale(100%) contrast(1.2);' : '';
 
-        // Render all pages to high-DPI JPEG data URLs + detect orientation per page
+        // Render all pages to high-DPI JPEG blob/data URLs + detect orientation per page
         interface RenderedPage {
           src: string;
           isLandscape: boolean;
         }
         const renderedPages: RenderedPage[] = [];
+        const tempBlobUrls: string[] = [];
         let landscapeCount = 0;
+        // Adaptive render scale: high DPI for small docs, memory-safe for 15+ page docs
+        const renderScale = totalPages > 15 ? 1.8 : 2.2;
+        const renderQuality = totalPages > 15 ? 0.88 : 0.92;
 
         for (let p = 1; p <= totalPages; p++) {
           const page = await pdf.getPage(p);
@@ -1141,15 +1178,20 @@ export default function ScanToPrint() {
 
           if (pageIsLandscape) landscapeCount++;
 
-          // 2.5x scale = ~225 DPI on 90 PPI display — crisp laser/inkjet output
-          const viewport = page.getViewport({ scale: 2.5 });
+          const viewport = page.getViewport({ scale: renderScale });
           const canvas = document.createElement('canvas');
           canvas.width = viewport.width;
           canvas.height = viewport.height;
           const ctx = canvas.getContext('2d')!;
           await page.render({ canvasContext: ctx, viewport, canvas } as any).promise;
+
+          // Convert to binary Blob URL (avoids massive base64 memory overhead)
+          const blob = await new Promise<Blob | null>((res) => canvas.toBlob(res, 'image/jpeg', renderQuality));
+          const pageSrc = blob ? URL.createObjectURL(blob) : canvas.toDataURL('image/jpeg', renderQuality);
+          if (pageSrc.startsWith('blob:')) tempBlobUrls.push(pageSrc);
+
           renderedPages.push({
-            src: canvas.toDataURL('image/jpeg', 0.92),
+            src: pageSrc,
             isLandscape: pageIsLandscape,
           });
           // Allow GC between pages for large docs
@@ -1164,7 +1206,10 @@ export default function ScanToPrint() {
         if (!printWindow) {
           // Popup blocked — open native PDF directly
           const blob = arrayBufferToBlob(buffer, type);
-          window.open(URL.createObjectURL(blob), '_blank');
+          const tempUrl = URL.createObjectURL(blob);
+          window.open(tempUrl, '_blank');
+          setTimeout(() => { try { URL.revokeObjectURL(tempUrl); } catch {} }, 30000);
+          tempBlobUrls.forEach((u) => { try { URL.revokeObjectURL(u); } catch {} });
           return;
         }
 
@@ -1253,6 +1298,11 @@ export default function ScanToPrint() {
           </body></html>
         `);
         printWindow.document.close();
+        if (tempBlobUrls.length > 0) {
+          setTimeout(() => {
+            tempBlobUrls.forEach((u) => { try { URL.revokeObjectURL(u); } catch {} });
+          }, 60000);
+        }
       }
 
       // Auto-mark as printed
@@ -1261,7 +1311,9 @@ export default function ScanToPrint() {
       console.error('Print rendering error', err);
       try {
         const { buffer, type } = await urlToArrayBuffer(job.dataUrl);
-        window.open(URL.createObjectURL(arrayBufferToBlob(buffer, type)), '_blank');
+        const tempUrl = URL.createObjectURL(arrayBufferToBlob(buffer, type));
+        window.open(tempUrl, '_blank');
+        setTimeout(() => { try { URL.revokeObjectURL(tempUrl); } catch {} }, 30000);
       } catch {
         alert('Could not render document for printing.');
       }
@@ -1485,6 +1537,7 @@ export default function ScanToPrint() {
                   <label
                     onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
                     onDragLeave={() => setIsDragOver(false)}
+                    onDragEnd={() => setIsDragOver(false)}
                     onDrop={(e) => {
                       e.preventDefault();
                       setIsDragOver(false);
@@ -1822,7 +1875,31 @@ export default function ScanToPrint() {
               </button>
 
               {/* Drop from PC */}
-              <label className="w-full py-2.5 rounded-xl border border-dashed border-slate-300 dark:border-slate-700 hover:border-rose-400 text-slate-600 dark:text-slate-300 text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition-colors hover:bg-slate-50">
+              <label
+                onDragOver={(e) => { e.preventDefault(); }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  const files = Array.from(e.dataTransfer.files || []);
+                  if (!files.length) return;
+                  files.forEach((file) => {
+                    const blobUrl = URL.createObjectURL(file);
+                    const job: PrintJob = {
+                      id: `local_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+                      tokenNum: tokenCounterRef.current++,
+                      name: file.name,
+                      size: file.size,
+                      type: file.type || 'application/pdf',
+                      dataUrl: blobUrl,
+                      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                      copies: 1,
+                      colorMode: 'bw',
+                      status: 'pending',
+                    };
+                    addIncomingJob(job);
+                  });
+                }}
+                className="w-full py-2.5 rounded-xl border border-dashed border-slate-300 dark:border-slate-700 hover:border-rose-400 text-slate-600 dark:text-slate-300 text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition-colors hover:bg-slate-50"
+              >
                 <Upload className="w-3.5 h-3.5" /> Drop Local File from this PC to Queue
                 <input
                   type="file"
