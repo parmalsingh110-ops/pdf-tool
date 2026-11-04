@@ -48,6 +48,8 @@ interface PrintJob {
   pages?: number;
   copies: number;
   colorMode: 'bw' | 'color';
+  orientation?: 'auto' | 'portrait' | 'landscape';
+  detectedOrientation?: 'portrait' | 'landscape';
   status: 'pending' | 'printed';
   printedAt?: string;
 }
@@ -229,15 +231,25 @@ export default function ScanToPrint() {
     } catch {}
   }, [soundEnabled]);
 
-  // ─── Background PDF Page Counter ────────────────────────────────────────
+  // ─── Background PDF Page & Orientation Detector ─────────────────────────
   const detectPdfPages = useCallback(async (jobId: string, dataUrl: string) => {
     try {
       const { buffer } = await urlToArrayBuffer(dataUrl);
       const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(buffer) });
       const pdf = await loadingTask.promise;
       const numPages = pdf.numPages;
+      let detectedOrientation: 'portrait' | 'landscape' = 'portrait';
+      if (numPages > 0) {
+        try {
+          const firstPage = await pdf.getPage(1);
+          const vp = firstPage.getViewport({ scale: 1.0 });
+          if (vp.width > vp.height) {
+            detectedOrientation = 'landscape';
+          }
+        } catch {}
+      }
       setPrintJobs((prev) =>
-        prev.map((j) => (j.id === jobId ? { ...j, pages: numPages } : j))
+        prev.map((j) => (j.id === jobId ? { ...j, pages: numPages, detectedOrientation } : j))
       );
     } catch {}
   }, []);
@@ -255,14 +267,27 @@ export default function ScanToPrint() {
         const completeJob: PrintJob = {
           ...job,
           tokenNum: assignedToken,
+          orientation: job.orientation || 'auto',
           status: job.status || 'pending',
         };
         return [completeJob, ...prev];
       });
 
-      // Detect pages in background if PDF
+      // Detect pages & orientation in background if PDF
       if ((job.type === 'application/pdf' || job.name?.toLowerCase().endsWith('.pdf')) && !job.pages && job.dataUrl) {
         void detectPdfPages(job.id, job.dataUrl);
+      }
+
+      // Detect orientation if Image
+      if (job.type.startsWith('image/') && job.dataUrl) {
+        const img = new Image();
+        img.onload = () => {
+          const detectedOrientation = img.width > img.height ? 'landscape' : 'portrait';
+          setPrintJobs((prev) =>
+            prev.map((j) => (j.id === job.id ? { ...j, detectedOrientation } : j))
+          );
+        };
+        img.src = job.dataUrl;
       }
     },
     [playChime, detectPdfPages]
@@ -937,19 +962,53 @@ export default function ScanToPrint() {
         if (!printWindow) { alert('Please allow popups to print.'); return; }
 
         const filter = job.colorMode === 'bw' ? 'filter: grayscale(100%) contrast(125%);' : '';
+
+        // Determine orientation
+        let isImgLandscape = job.orientation === 'landscape';
+        if (job.orientation !== 'landscape' && job.orientation !== 'portrait') {
+          if (job.detectedOrientation) {
+            isImgLandscape = job.detectedOrientation === 'landscape';
+          } else {
+            const imgObj = new Image();
+            imgObj.src = job.dataUrl;
+            await new Promise((res) => { imgObj.onload = res; imgObj.onerror = res; });
+            isImgLandscape = imgObj.width > imgObj.height;
+          }
+        }
+
+        const pageSize = isImgLandscape ? 'A4 landscape' : 'A4 portrait';
+
         const imgHtml = copiesArr
-          .map(() => `<div class="copy"><img src="${job.dataUrl}" /></div>`)
+          .map(() => `
+            <div class="copy ${isImgLandscape ? 'copy-landscape' : 'copy-portrait'}">
+              <img src="${job.dataUrl}" />
+            </div>
+          `)
           .join('');
 
         printWindow.document.write(`
           <!DOCTYPE html><html>
-          <head><title>${job.name} — Print (×${job.copies})</title>
+          <head><title>${job.name} — Print (×${job.copies}${isImgLandscape ? ' · Landscape' : ''})</title>
           <style>
-            @page { size: auto; margin: 8mm; }
+            @page { size: ${pageSize}; margin: 6mm; }
+            * { box-sizing: border-box; }
             body { margin: 0; background: #fff; }
-            .copy { display: flex; align-items: center; justify-content: center; width: 100%; page-break-after: always; min-height: 96vh; }
-            .copy:last-child { page-break-after: avoid; }
-            img { max-width: 100%; max-height: 96vh; object-fit: contain; ${filter} }
+            .copy {
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              width: 100%;
+              page-break-after: always;
+              break-after: page;
+              min-height: 96vh;
+            }
+            .copy:last-child { page-break-after: avoid; break-after: avoid; }
+            img {
+              max-width: 100%;
+              max-height: 96vh;
+              object-fit: contain;
+              ${filter}
+            }
           </style></head>
           <body>${imgHtml}
           <script>window.onload = function() { window.focus(); window.print(); window.onafterprint = function() { window.close(); }; };<\/script>
@@ -964,10 +1023,25 @@ export default function ScanToPrint() {
         const totalPages = pdf.numPages;
         const filter = job.colorMode === 'bw' ? 'filter: grayscale(100%) contrast(1.2);' : '';
 
-        // Render all pages to high-DPI JPEG data URLs
-        const pageImages: string[] = [];
+        // Render all pages to high-DPI JPEG data URLs + detect orientation per page
+        interface RenderedPage {
+          src: string;
+          isLandscape: boolean;
+        }
+        const renderedPages: RenderedPage[] = [];
+        let landscapeCount = 0;
+
         for (let p = 1; p <= totalPages; p++) {
           const page = await pdf.getPage(p);
+          const baseViewport = page.getViewport({ scale: 1.0 });
+
+          // Determine page orientation
+          let pageIsLandscape = baseViewport.width > baseViewport.height;
+          if (job.orientation === 'landscape') pageIsLandscape = true;
+          if (job.orientation === 'portrait') pageIsLandscape = false;
+
+          if (pageIsLandscape) landscapeCount++;
+
           // 2.5x scale = ~225 DPI on 90 PPI display — crisp laser/inkjet output
           const viewport = page.getViewport({ scale: 2.5 });
           const canvas = document.createElement('canvas');
@@ -975,11 +1049,17 @@ export default function ScanToPrint() {
           canvas.height = viewport.height;
           const ctx = canvas.getContext('2d')!;
           await page.render({ canvasContext: ctx, viewport, canvas } as any).promise;
-          pageImages.push(canvas.toDataURL('image/jpeg', 0.92));
+          renderedPages.push({
+            src: canvas.toDataURL('image/jpeg', 0.92),
+            isLandscape: pageIsLandscape,
+          });
           // Allow GC between pages for large docs
           canvas.width = 0;
           canvas.height = 0;
         }
+
+        const isDocLandscape = landscapeCount >= renderedPages.length / 2;
+        const defaultPageSize = isDocLandscape ? 'A4 landscape' : 'A4 portrait';
 
         const printWindow = window.open('', '_blank');
         if (!printWindow) {
@@ -989,13 +1069,13 @@ export default function ScanToPrint() {
           return;
         }
 
-        // Build print page — each page gets exact A4 sizing, copies duplicate the page sequence
+        // Build print page — each page gets exact A4 sizing according to its orientation
         const pagesHtml = copiesArr
           .flatMap(() =>
-            pageImages.map(
-              (src, idx) => `
-              <div class="pg">
-                <img src="${src}" alt="Page ${idx + 1}" />
+            renderedPages.map(
+              (p, idx) => `
+              <div class="pg ${p.isLandscape ? 'pg-landscape' : 'pg-portrait'}">
+                <img src="${p.src}" alt="Page ${idx + 1}" />
               </div>`
             )
           )
@@ -1003,24 +1083,60 @@ export default function ScanToPrint() {
 
         printWindow.document.write(`
           <!DOCTYPE html><html>
-          <head><title>${job.name} (${totalPages}p ×${job.copies})</title>
+          <head><title>${job.name} (${totalPages}p ×${job.copies}${isDocLandscape ? ' · Landscape' : ''})</title>
           <style>
-            @page { size: A4 portrait; margin: 0; }
+            @page {
+              size: ${defaultPageSize};
+              margin: 0;
+            }
+            @page sheet-portrait {
+              size: A4 portrait;
+              margin: 0;
+            }
+            @page sheet-landscape {
+              size: A4 landscape;
+              margin: 0;
+            }
             * { box-sizing: border-box; }
-            body { margin: 0; padding: 0; background: #fff; }
+            html, body {
+              margin: 0;
+              padding: 0;
+              background: #fff;
+              -webkit-print-color-adjust: exact;
+              print-color-adjust: exact;
+            }
             .pg {
-              width: 210mm;
-              height: 297mm;
               display: flex;
               align-items: center;
               justify-content: center;
               page-break-after: always;
+              break-after: page;
               overflow: hidden;
             }
-            .pg:last-child { page-break-after: avoid; }
-            img {
+            .pg:last-child {
+              page-break-after: avoid;
+              break-after: avoid;
+            }
+            .pg-portrait {
+              page: sheet-portrait;
               width: 210mm;
               height: 297mm;
+            }
+            .pg-portrait img {
+              width: 210mm;
+              height: 297mm;
+              object-fit: contain;
+              display: block;
+              ${filter}
+            }
+            .pg-landscape {
+              page: sheet-landscape;
+              width: 297mm;
+              height: 210mm;
+            }
+            .pg-landscape img {
+              width: 297mm;
+              height: 210mm;
               object-fit: contain;
               display: block;
               ${filter}
@@ -1594,6 +1710,14 @@ export default function ScanToPrint() {
                                     </span>
                                   </>
                                 )}
+                                {job.detectedOrientation === 'landscape' && (
+                                  <>
+                                    <span>•</span>
+                                    <span className="font-bold text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-950/60 px-1.5 py-0.5 rounded text-[10px]">
+                                      🔄 Landscape
+                                    </span>
+                                  </>
+                                )}
                                 <span>•</span>
                                 <span>{job.timestamp}</span>
                                 {job.copies > 1 && !job.pages && (
@@ -1630,6 +1754,20 @@ export default function ScanToPrint() {
                             >
                               <option value="bw">B&W</option>
                               <option value="color">Color</option>
+                            </select>
+
+                            {/* Orientation toggle */}
+                            <select
+                              value={job.orientation || 'auto'}
+                              onChange={(e) => updateJobField(job.id, 'orientation', e.target.value as 'auto' | 'portrait' | 'landscape')}
+                              title="Page Orientation (Auto detects Landscape)"
+                              className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-2 py-2 text-xs font-bold text-slate-700 dark:text-slate-300 outline-none"
+                            >
+                              <option value="auto">
+                                Auto {job.detectedOrientation ? `(${job.detectedOrientation === 'landscape' ? 'Land' : 'Port'})` : ''}
+                              </option>
+                              <option value="portrait">📄 Port</option>
+                              <option value="landscape">🔄 Land</option>
                             </select>
 
                             {/* 1-Click Print */}
@@ -1751,6 +1889,9 @@ export default function ScanToPrint() {
                               <span>•</span>
                               <span>Received {job.timestamp}</span>
                               {job.copies > 1 && !job.pages && <><span>•</span><span className="text-emerald-600 font-bold">×{job.copies}</span></>}
+                              {(job.detectedOrientation === 'landscape' || job.orientation === 'landscape') && (
+                                <><span>•</span><span className="text-amber-600 font-bold">🔄 Landscape</span></>
+                              )}
                             </p>
                           </div>
                         </div>
