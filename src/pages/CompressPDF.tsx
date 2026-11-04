@@ -25,6 +25,7 @@ export default function CompressPDF() {
   const [compressedUrl, setCompressedUrl] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [targetSizeKB, setTargetSizeKB] = useState<number>(100);
+  const [targetUnit, setTargetUnit] = useState<'KB' | 'MB'>('KB');
   const [useTargetSize, setUseTargetSize] = useState(false);
   const [stats, setStats] = useState<{original: number, compressed: number, method?: string} | null>(null);
   const [usedFallback, setUsedFallback] = useState(false);
@@ -101,7 +102,8 @@ export default function CompressPDF() {
           setProcessingStep('Applying target-based advanced compression...');
           const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
           const totalPages = pdf.numPages;
-          const targetBytes = targetSizeKB * 1024;
+          const effectiveKB = targetUnit === 'MB' ? targetSizeKB * 1024 : targetSizeKB;
+          const targetBytes = effectiveKB * 1024;
           const perPageBudget = targetBytes / Math.max(1, totalPages);
 
           const canvasToJpegBytes = (canvas: HTMLCanvasElement, q: number) =>
@@ -343,14 +345,39 @@ export default function CompressPDF() {
       <div className="text-center mb-12 max-w-3xl mx-auto px-4">
         <h1 className="text-4xl font-bold text-gray-900 mb-4">Compress PDF file</h1>
         <p className="text-xl text-gray-600">Reduce file size while optimizing for maximal PDF quality.</p>
-        <p className="mt-4 text-sm text-gray-600 bg-blue-50 border border-blue-100 rounded-xl px-4 py-3 text-left">
-          <strong>Need a specific file size?</strong> The &quot;Less compression&quot; path only strips metadata (near-lossless).
-          For a hard cap in kilobytes (with rasterized pages), use{' '}
-          <Link to="/target-compress" className="text-blue-700 font-semibold underline">
-            Target size PDF compress
+        
+        {/* Prominent Target Size Banner / Action Button */}
+        <div className="mt-6 p-4 sm:p-5 bg-gradient-to-r from-emerald-50 via-teal-50 to-blue-50 dark:from-emerald-950/40 dark:via-teal-950/40 dark:to-blue-950/40 border-2 border-emerald-300 dark:border-emerald-700 rounded-2xl shadow-sm flex flex-col sm:flex-row items-center justify-between gap-4 text-left">
+          <div className="flex items-start gap-3.5">
+            <div className="w-11 h-11 rounded-2xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-md">
+              <Target className="w-6 h-6 animate-pulse" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700">
+                  Exact Size Mode
+                </span>
+                <span className="text-xs font-bold text-emerald-700 dark:text-emerald-400">
+                  KB &amp; MB Support
+                </span>
+              </div>
+              <h3 className="text-base sm:text-lg font-black text-slate-900 dark:text-white mt-1">
+                Need an Exact Target Size? (e.g. 100 KB, 200 KB, 1 MB, 2 MB)
+              </h3>
+              <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-300 mt-0.5">
+                Set strict file size limits for Sarkari job portals, SSC/UPSC, courts, or email attachments.
+              </p>
+            </div>
+          </div>
+
+          <Link
+            to="/target-compress"
+            className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-extrabold text-sm shadow-md hover:shadow-lg transition-all shrink-0 cursor-pointer w-full sm:w-auto text-center"
+          >
+            <Target className="w-4 h-4" />
+            <span>Open Target Compress →</span>
           </Link>
-          .
-        </p>
+        </div>
       </div>
 
       {!file ? (
@@ -408,10 +435,48 @@ export default function CompressPDF() {
                       Use target size based compression
                     </label>
                     {useTargetSize && (
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Target Size (KB)
-                        </label>
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <label className="block text-sm font-semibold text-gray-700">
+                            Target Size ({targetUnit})
+                          </label>
+                          {/* KB / MB Toggle */}
+                          <div className="inline-flex rounded-lg p-0.5 bg-gray-200 border border-gray-300">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (targetUnit !== 'KB') {
+                                  setTargetUnit('KB');
+                                  setTargetSizeKB((prev) => Math.round(prev * 1024));
+                                }
+                              }}
+                              className={`px-2.5 py-1 text-xs font-bold rounded-md transition-all ${
+                                targetUnit === 'KB'
+                                  ? 'bg-white text-gray-900 shadow-xs'
+                                  : 'text-gray-600 hover:text-gray-900'
+                              }`}
+                            >
+                              KB
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (targetUnit !== 'MB') {
+                                  setTargetUnit('MB');
+                                  setTargetSizeKB((prev) => Math.max(1, Math.round(prev / 1024)));
+                                }
+                              }}
+                              className={`px-2.5 py-1 text-xs font-bold rounded-md transition-all ${
+                                targetUnit === 'MB'
+                                  ? 'bg-white text-gray-900 shadow-xs'
+                                  : 'text-gray-600 hover:text-gray-900'
+                              }`}
+                            >
+                              MB
+                            </button>
+                          </div>
+                        </div>
+
                         <div className="relative">
                           <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                             <Target className="h-4 w-4 text-gray-400" />
@@ -419,13 +484,19 @@ export default function CompressPDF() {
                           <input
                             type="number"
                             min={1}
+                            step={targetUnit === 'MB' ? '0.1' : '1'}
                             value={targetSizeKB}
-                            onChange={(e) => setTargetSizeKB(Math.max(1, Number(e.target.value) || 1))}
-                            className="w-full pl-9 pr-3 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none"
+                            onChange={(e) => setTargetSizeKB(Math.max(0.1, Number(e.target.value) || 1))}
+                            className="w-full pl-9 pr-14 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none text-sm font-bold"
                           />
+                          <span className="absolute inset-y-0 right-0 pr-3 flex items-center text-xs font-bold text-gray-400 pointer-events-none">
+                            {targetUnit}
+                          </span>
                         </div>
-                        <p className="mt-2 text-xs text-gray-500">
-                          Advanced mode tries to keep output near this size by tuning raster quality.
+                        <p className="text-xs text-gray-500">
+                          {targetUnit === 'MB'
+                            ? `Tuning quality to stay under ~${(targetSizeKB * 1024).toLocaleString()} KB (${targetSizeKB} MB).`
+                            : `Tuning quality to stay under ~${targetSizeKB} KB.`}
                         </p>
                       </div>
                     )}

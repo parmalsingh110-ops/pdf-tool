@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Upload, Download, Sparkles, Sliders, Shield, Crop, Contrast, CheckCircle2, RotateCw } from 'lucide-react';
+import { Upload, Download, Sparkles, Sliders, Shield, Crop, Contrast, CheckCircle2, RotateCw, Target } from 'lucide-react';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
@@ -31,8 +31,10 @@ export default function CleanSignature() {
   const [rotation, setRotation] = useState<number>(0);
   const [removeRuledLines, setRemoveRuledLines] = useState<boolean>(true);
 
-  // Target size
-  const [targetKb, setTargetKb] = useState<number>(20); // 20 KB default for exam portals
+  // Target size (0 = Original / No Limit)
+  const [targetKb, setTargetKb] = useState<number>(20);
+  const [isCustomKb, setIsCustomKb] = useState<boolean>(false);
+  const [customKbValue, setCustomKbValue] = useState<string>('20');
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [fileSizeKb, setFileSizeKb] = useState<number | null>(null);
 
@@ -181,20 +183,63 @@ export default function CleanSignature() {
       }
 
       // Generate Data URL (PNG if transparent, else JPEG)
-      const mime = makeTransparent ? 'image/png' : 'image/jpeg';
-      let dataUrl = finalCanvas.toDataURL(mime, 0.92);
+      const targetBytes = targetKb > 0 ? targetKb * 1024 : 0;
+      let dataUrl = '';
 
-      // Target file size compression if JPEG
-      if (!makeTransparent && targetKb > 0) {
-        const targetBytes = targetKb * 1024;
-        let low = 0.1;
-        let high = 0.98;
-        for (let k = 0; k < 6; k++) {
-          const q = (low + high) / 2;
-          dataUrl = finalCanvas.toDataURL('image/jpeg', q);
-          const bytes = Math.round((dataUrl.length - 22) * 0.75);
-          if (bytes > targetBytes) high = q;
-          else low = q;
+      if (makeTransparent) {
+        // PNG export
+        dataUrl = finalCanvas.toDataURL('image/png');
+        let bytes = Math.round((dataUrl.length - 22) * 0.75);
+
+        // If target size is set and PNG exceeds it, downscale dimensions
+        if (targetBytes > 0 && bytes > targetBytes) {
+          let scale = 0.9;
+          while (bytes > targetBytes && scale >= 0.35) {
+            const scCanvas = document.createElement('canvas');
+            scCanvas.width = Math.max(80, Math.round(finalCanvas.width * scale));
+            scCanvas.height = Math.max(30, Math.round(finalCanvas.height * scale));
+            const scCtx = scCanvas.getContext('2d');
+            if (scCtx) {
+              scCtx.drawImage(finalCanvas, 0, 0, scCanvas.width, scCanvas.height);
+              dataUrl = scCanvas.toDataURL('image/png');
+              bytes = Math.round((dataUrl.length - 22) * 0.75);
+            }
+            scale -= 0.08;
+          }
+        }
+      } else {
+        // Target file size compression if JPEG
+        if (targetBytes > 0) {
+          let low = 0.08;
+          let high = 0.98;
+          for (let k = 0; k < 8; k++) {
+            const q = (low + high) / 2;
+            dataUrl = finalCanvas.toDataURL('image/jpeg', q);
+            const bytes = Math.round((dataUrl.length - 22) * 0.75);
+            if (bytes > targetBytes) high = q;
+            else low = q;
+          }
+          // If still larger at lowest quality, scale down slightly
+          let bytes = Math.round((dataUrl.length - 22) * 0.75);
+          if (bytes > targetBytes) {
+            let scale = 0.85;
+            while (bytes > targetBytes && scale >= 0.35) {
+              const scCanvas = document.createElement('canvas');
+              scCanvas.width = Math.max(80, Math.round(finalCanvas.width * scale));
+              scCanvas.height = Math.max(30, Math.round(finalCanvas.height * scale));
+              const scCtx = scCanvas.getContext('2d');
+              if (scCtx) {
+                scCtx.fillStyle = '#ffffff';
+                scCtx.fillRect(0, 0, scCanvas.width, scCanvas.height);
+                scCtx.drawImage(finalCanvas, 0, 0, scCanvas.width, scCanvas.height);
+                dataUrl = scCanvas.toDataURL('image/jpeg', 0.75);
+                bytes = Math.round((dataUrl.length - 22) * 0.75);
+              }
+              scale -= 0.12;
+            }
+          }
+        } else {
+          dataUrl = finalCanvas.toDataURL('image/jpeg', 0.94);
         }
       }
 
@@ -446,30 +491,148 @@ export default function CleanSignature() {
                 </label>
               </div>
 
-              {/* Target File Size (For White BG mode) */}
-              {!makeTransparent && (
-                <div className="pt-3 border-t border-gray-100 space-y-2">
-                  <label className="block text-xs font-semibold text-gray-700">
-                    Target File Size (for Exam Uploads):
+              {/* Target File Size Controls (Universal for Transparent PNG & White BG JPG) */}
+              <div className="pt-3 border-t border-gray-100 space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-gray-800 flex items-center gap-1.5">
+                    <Target className="w-3.5 h-3.5 text-indigo-600" /> Target File Size Limit:
                   </label>
-                  <div className="flex flex-wrap gap-2">
-                    {[10, 20, 30, 50].map((kb) => (
+                  <span className="text-xs font-mono font-bold text-indigo-600">
+                    {targetKb === 0 ? 'Max Quality (No Limit)' : `≤ ${targetKb} KB`}
+                  </span>
+                </div>
+
+                {/* Preset Chips */}
+                <div className="flex flex-wrap gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTargetKb(0);
+                      setIsCustomKb(false);
+                    }}
+                    className={`text-xs px-2.5 py-1.5 rounded-lg border font-bold transition-all ${
+                      targetKb === 0
+                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                        : 'bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100'
+                    }`}
+                  >
+                    Original (No Limit)
+                  </button>
+
+                  {[10, 20, 30, 50].map((kb) => (
+                    <button
+                      key={kb}
+                      type="button"
+                      onClick={() => {
+                        setTargetKb(kb);
+                        setIsCustomKb(false);
+                        setCustomKbValue(String(kb));
+                      }}
+                      className={`text-xs px-2.5 py-1.5 rounded-lg border font-bold transition-all ${
+                        targetKb === kb && !isCustomKb
+                          ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                          : 'bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100'
+                      }`}
+                    >
+                      {kb} KB
+                    </button>
+                  ))}
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsCustomKb(true);
+                      setTargetKb(Number(customKbValue) || 20);
+                    }}
+                    className={`text-xs px-2.5 py-1.5 rounded-lg border font-bold transition-all ${
+                      isCustomKb
+                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                        : 'bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100'
+                    }`}
+                  >
+                    Custom KB ✏️
+                  </button>
+                </div>
+
+                {/* Custom Input & Slider when Custom KB is active */}
+                {isCustomKb && (
+                  <div className="p-3 bg-indigo-50/60 rounded-xl border border-indigo-100 space-y-2">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-xs font-semibold text-gray-700">Set Exact Size (KB):</span>
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          type="number"
+                          min="5"
+                          max="200"
+                          value={customKbValue}
+                          onChange={(e) => {
+                            setCustomKbValue(e.target.value);
+                            const n = Number(e.target.value);
+                            if (n > 0) setTargetKb(n);
+                          }}
+                          className="w-20 px-2 py-1 text-xs font-black text-center bg-white border border-gray-300 rounded-lg focus:border-indigo-500 outline-none"
+                        />
+                        <span className="text-xs font-bold text-gray-500">KB</span>
+                      </div>
+                    </div>
+                    <input
+                      type="range"
+                      min="5"
+                      max="150"
+                      value={targetKb || 20}
+                      onChange={(e) => {
+                        const val = Number(e.target.value);
+                        setTargetKb(val);
+                        setCustomKbValue(String(val));
+                      }}
+                      className="w-full accent-indigo-600 cursor-pointer"
+                    />
+                    <div className="flex justify-between text-[10px] text-gray-400">
+                      <span>5 KB (Tiny)</span>
+                      <span>50 KB</span>
+                      <span>150 KB (High Res)</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Official Exam Portals Shortcuts */}
+                <div className="pt-1">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block mb-1.5">
+                    Official Exam Portal Shortcuts:
+                  </span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {[
+                      { name: '🏛️ SSC (10-20 KB)', kb: 18 },
+                      { name: '🇮🇳 UPSC (20-50 KB)', kb: 40 },
+                      { name: '🏦 Bank/IBPS (10-20 KB)', kb: 15 },
+                      { name: '🎯 NTA/NEET (4-30 KB)', kb: 20 },
+                    ].map((exam) => (
                       <button
-                        key={kb}
+                        key={exam.name}
                         type="button"
-                        onClick={() => setTargetKb(kb)}
-                        className={`text-xs px-2.5 py-1 rounded-lg border font-medium ${
-                          targetKb === kb
-                            ? 'bg-indigo-600 text-white border-indigo-600'
-                            : 'bg-gray-50 text-gray-700 border-gray-200'
+                        onClick={() => {
+                          setTargetKb(exam.kb);
+                          setIsCustomKb(false);
+                          setCustomKbValue(String(exam.kb));
+                        }}
+                        className={`text-[11px] px-2 py-1 rounded-md border transition-all ${
+                          targetKb === exam.kb && !isCustomKb
+                            ? 'bg-indigo-100 text-indigo-900 border-indigo-400 font-bold'
+                            : 'bg-white text-gray-600 border-gray-200 hover:border-indigo-300'
                         }`}
                       >
-                        {kb} KB
+                        {exam.name}
                       </button>
                     ))}
                   </div>
                 </div>
-              )}
+
+                <p className="text-[11px] text-gray-500">
+                  {makeTransparent
+                    ? 'Transparent PNG dimensions will adapt smoothly to meet portal size limits.'
+                    : 'White background JPG will dial in exact compression to fit portal guidelines.'}
+                </p>
+              </div>
             </div>
 
             <button
@@ -488,15 +651,26 @@ export default function CleanSignature() {
           {/* Preview & Download Column (6 cols) */}
           <div className="lg:col-span-6 space-y-5 lg:sticky lg:top-8">
             <div className="p-5 bg-white border border-gray-200 rounded-2xl shadow-xs">
-              <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
                 <span className="text-xs font-bold text-gray-700 uppercase tracking-wider">
                   Live Clean Signature Preview
                 </span>
-                {fileSizeKb !== null && (
-                  <span className="text-xs font-mono font-bold px-2 py-0.5 bg-emerald-50 text-emerald-700 rounded-md border border-emerald-200">
-                    ~{fileSizeKb} KB
-                  </span>
-                )}
+                <div className="flex items-center gap-2">
+                  {fileSizeKb !== null && (
+                    <span className="text-xs font-mono font-bold px-2 py-0.5 bg-emerald-50 text-emerald-700 rounded-md border border-emerald-200">
+                      ~{fileSizeKb} KB
+                    </span>
+                  )}
+                  {targetKb > 0 && fileSizeKb !== null && (
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md border flex items-center gap-1 ${
+                      fileSizeKb <= targetKb + 3
+                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                        : 'bg-amber-50 text-amber-700 border-amber-200'
+                    }`}>
+                      {fileSizeKb <= targetKb + 3 ? '✅ Within' : '⚠️ Target'} ≤ {targetKb} KB
+                    </span>
+                  )}
+                </div>
               </div>
 
               {/* Preview Container */}
