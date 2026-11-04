@@ -103,6 +103,41 @@ chrome.runtime.onInstalled.addListener(({ reason }) => {
 
     // ── Shortcut launchers ──
     chrome.contextMenus.create({
+      id: 'open_scan_to_print',
+      parentId: 'pdf_media_suite_root',
+      title: '🖨️ Scan to Print (QR Web-Drop)',
+      contexts: ['all'],
+    });
+
+    chrome.contextMenus.create({
+      id: 'open_target_compress',
+      parentId: 'pdf_media_suite_root',
+      title: '🎯 Target Size Compress (KB & MB)',
+      contexts: ['all'],
+    });
+
+    chrome.contextMenus.create({
+      id: 'open_passport_photo',
+      parentId: 'pdf_media_suite_root',
+      title: '👔 Passport Photo 4x6 Sheet Maker',
+      contexts: ['all'],
+    });
+
+    chrome.contextMenus.create({
+      id: 'open_clean_signature',
+      parentId: 'pdf_media_suite_root',
+      title: '✍️ Clean Paper Signature (White/PNG)',
+      contexts: ['all'],
+    });
+
+    chrome.contextMenus.create({
+      id: 'open_smart_kyc',
+      parentId: 'pdf_media_suite_root',
+      title: '📋 Smart KYC Slip Maker',
+      contexts: ['all'],
+    });
+
+    chrome.contextMenus.create({
       id: 'open_sarkari_photo',
       parentId: 'pdf_media_suite_root',
       title: '🇮🇳 Sarkari Photo & Signature (20–50 KB)',
@@ -126,7 +161,7 @@ chrome.runtime.onInstalled.addListener(({ reason }) => {
     chrome.contextMenus.create({
       id: 'open_all_tools',
       parentId: 'pdf_media_suite_root',
-      title: '🚀 Browse All 110+ Tools',
+      title: '🚀 Browse All 130+ Tools',
       contexts: ['all'],
     });
   });
@@ -171,6 +206,26 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
 
     case 'sarkari_photo_from_image':
       targetUrl = `${BASE_URL}/sarkari-photo-signature?utm_source=extension_context_menu`;
+      break;
+
+    case 'open_scan_to_print':
+      targetUrl = `${BASE_URL}/scan-to-print?utm_source=extension_context_menu`;
+      break;
+
+    case 'open_target_compress':
+      targetUrl = `${BASE_URL}/target-compress?utm_source=extension_context_menu`;
+      break;
+
+    case 'open_passport_photo':
+      targetUrl = `${BASE_URL}/passport-photo-sheet?utm_source=extension_context_menu`;
+      break;
+
+    case 'open_clean_signature':
+      targetUrl = `${BASE_URL}/clean-signature?utm_source=extension_context_menu`;
+      break;
+
+    case 'open_smart_kyc':
+      targetUrl = `${BASE_URL}/smart-kyc-slip?utm_source=extension_context_menu`;
       break;
 
     case 'open_sarkari_photo':

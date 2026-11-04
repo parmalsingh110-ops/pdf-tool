@@ -1,46 +1,56 @@
-# PDF Media Suite — Official Browser Extension (Manifest V3) v2.0
+# PDF Media Suite — Official Browser Extension (Manifest V3) v2.2.0
 
-This browser extension brings the power of **PDF Media Suite (110+ Free Tools)** directly into Google Chrome, Microsoft Edge, Brave, Opera, and Arc browsers.
+This browser extension brings the power of **PDF Media Suite (130+ Free Tools)** directly into Google Chrome, Microsoft Edge, Brave, Opera, and Arc browsers.
 
 ---
 
-## 🌟 Key Features (v2.0 Advanced Edition)
+## 🌟 Key Features (v2.2.0 Cyber Cafe & Enterprise Edition)
 
-1. **Active PDF Tab Detection & Badge**:
+1. **Scan to Print (QR Web-Drop) Quick-Launch**:
+   - Customers scan the QR code on their phone to beam documents directly to your computer without sharing or saving WhatsApp numbers.
+   - Dedicated **🖨️ Cyber Cafe** category tab for E-Mitra, CSC centers, and xerox shops.
+
+2. **Target Size PDF Compress (KB & MB)**:
+   - Compress PDFs strictly to 100 KB, 200 KB, 500 KB, 1 MB, 2 MB with decimal support.
+
+3. **Passport Photo 4x6 Sheet Maker**:
+   - Make printable 8, 16, or 32 passport photo sheets on 4×6 or A4 paper with AI dress and suit change.
+
+4. **Clean Paper Signature Tool**:
+   - Convert phone camera photos of handwritten signatures on notebook paper into clean transparent PNGs or 10–20 KB pure white JPGs.
+
+5. **Smart KYC Slip Maker & Sarkari Portals**:
+   - Combine Aadhaar, PAN card, and Bank passbook into a verified single-page slip for account opening and CSC services.
+
+6. **Active PDF Tab Detection & Badge**:
    - Whenever you browse or open any PDF file in your browser, a red **"PDF" badge** automatically lights up on the extension icon in the toolbar.
    - Clicking the icon reveals a special **"📄 PDF Detected!"** banner with instant 1-click actions:
      - ⚡ Compress PDF
      - 📝 Convert to Word (.docx)
      - 🚀 Open all PDF tools
 
-2. **Keyboard Shortcut (1-Click Launch)**:
+7. **Keyboard Shortcut (1-Click Launch)**:
    - Press **`Ctrl+Shift+P`** (or **`Command+Shift+P`** on Mac) from ANY tab or window to instantly open the extension popup.
 
-3. **Recently Used Tools History**:
+8. **Recently Used Tools History**:
    - Tracks your recently opened tools in browser local storage.
    - Click the clock icon (**🕐**) in the header to view or clear your history for rapid workflows.
 
-4. **110+ Tools Catalog with Instant Search & Tags**:
+9. **130+ Tools Catalog with Instant Search & Tags**:
    - Sleek 400px popup UI with smooth slide-in animations and skeleton loaders.
-   - Search across 110+ tools by name, description, or common keywords (e.g. `20kb`, `aadhaar`, `ocr`, `cmyk`, `scanner`, `split`).
-   - Categorized tabs: **⭐ Popular**, **📄 PDF**, **🔄 Convert**, **🖼️ Image**, **🇮🇳 Sarkari**, **🔒 Security**, **✨ All (110+)**.
+   - Categorized tabs: **⭐ Popular**, **🖨️ Cyber Cafe**, **🇮🇳 Sarkari**, **📄 PDF**, **🔄 Convert**, **🖼️ Image**, **🔒 Security**, **✨ All (130+)**.
 
-5. **Smart Drag-and-Drop Dropzone**:
+10. **Smart Drag-and-Drop Dropzone**:
    - Drop any file right inside the popup:
-     - Drops a **PDF** ➔ Launches Compress PDF
+     - Drops a **PDF** ➔ Launches Compress PDF / Target Compress
      - Drops an **Image (JPG/PNG/WebP)** ➔ Launches JPG to PDF
      - Drops an **Office file (Word/Excel/PPT)** ➔ Launches Universal Converter
 
-6. **Google Search In-Search Quick Action Widget (PrintFriendly & Monica Style)**:
-   - When searching on Google for *any* PDF query (*"compress pdf"*, *"pdf to word"*, *"merge pdf"*, *"sarkari photo"*, *"masked aadhaar"*, *"unlock pdf"*, *"50kb image"*, etc.):
-   - Dynamically injects a beautiful, native-looking PDF Media Suite card right above the search results with the exact matched tool and 6 quick-action pills!
-   - Supports light mode & dark mode on Google.
+11. **Google Search In-Search Quick Action Widget**:
+   - Injects a native-looking PDF Media Suite card right above Google search results for queries like *"scan to print"*, *"compress pdf 100kb"*, *"passport photo"*, *"clean signature"*, etc.
 
-7. **Expanded Right-Click Context Menu (10+ Actions)**:
-   - Right-click anywhere ➔ **Save Webpage as PDF**, **Screenshot Page to PDF**
-   - Right-click any link ➔ **Compress this PDF**, **Convert PDF → Word**, **Convert PDF → Excel**, **Unlock Protected PDF**
-   - Right-click any image ➔ **Convert Image to PDF**, **Remove Background**, **Make Sarkari Photo Sheet**
-   - Quick launch for **Sarkari Photo & Sign**, **Document Scanner**, **Merge PDFs**, **All 110+ Tools**
+12. **Expanded Right-Click Context Menu**:
+   - Quick launch for **Scan to Print**, **Target Compress**, **Passport Photo Sheet**, **Clean Signature**, **Smart KYC Slip**, **Sarkari Photo & Sign**, **Document Scanner**, **Merge PDFs**, **All 130+ Tools**.
 
 8. **Welcome Onboarding Screen**:
    - Automatically opens PDF Media Suite upon first installation so users can explore all capabilities.

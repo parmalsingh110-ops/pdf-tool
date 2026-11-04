@@ -12,8 +12,18 @@
   const urlParams = new URLSearchParams(window.location.search);
   const query = (urlParams.get('q') || '').toLowerCase().trim();
 
-  // ─── 110+ KEYWORD → TOOL MAPPING ──────────────────────────────────────
+  // ─── 130+ KEYWORD → TOOL MAPPING ──────────────────────────────────────
   const TOOL_MAP = [
+    // Scan to Print QR Web-Drop
+    { keys: ['scan to print','qr print','print drop','whatsapp print','print without whatsapp','counter print','mobile to pc print','cyber cafe print'], tool: { name:'Scan to Print (QR Web-Drop)', desc:'Beam documents from mobile to counter PC for 1-click printing without saving WhatsApp.', path:'/scan-to-print', badge:'🖨️ Cyber Cafe' } },
+    // Target Size Compress
+    { keys: ['target compress','compress pdf to 100kb','compress to 200kb','compress to 1mb','compress to 500kb','exact kb pdf','pdf exact size','target size pdf'], tool: { name:'Target Size PDF Compress', desc:'Strictly compress PDF to exact target KB or MB limit for portals.', path:'/target-compress', badge:'🎯 Exact KB & MB' } },
+    // Clean Paper Signature
+    { keys: ['clean signature','paper signature to digital','transparent signature','remove paper background','signature white background','signature crop','ssc signature 20kb','clean sign photo'], tool: { name:'Clean Paper Signature', desc:'Convert phone photo of signature to clean transparent PNG or pure white JPG.', path:'/clean-signature', badge:'✍️ Pure Ink' } },
+    // Smart KYC Slip
+    { keys: ['smart kyc','kyc slip','aadhaar pan join','bank passbook kyc','combine kyc documents','kyc page'], tool: { name:'Smart KYC Slip Maker', desc:'Combine Aadhaar + PAN + Bank passbook into 1 verified page for account opening.', path:'/smart-kyc-slip', badge:'📋 KYC AI' } },
+    // Admit Card Optimizer
+    { keys: ['admit card print','hall ticket print','admit card crop','roll number slip print','exam hall ticket'], tool: { name:'Admit Card & Hall Ticket Optimizer', desc:'Auto-crop admit cards & enhance contrast for clean 1-page printing.', path:'/admit-card-optimizer', badge:'🎟️ Exam Slip' } },
     // Compress / Reduce
     { keys: ['compress pdf','reduce pdf','pdf compress','pdf size','small pdf','pdf kb','pdf mb','lightweight pdf','pdf reducer','optimize pdf','shrink pdf','pdf file size','pdf too large'], tool: { name:'Compress PDF', desc:'Compress PDF to exact KB/MB target without losing quality.', path:'/compress', badge:'⚡ No Watermark' } },
     // Merge / Combine
