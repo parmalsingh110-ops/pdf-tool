@@ -344,12 +344,77 @@ def health(request: Request, response: Response):
     return JSONResponse(content={"status": "ok"}, status_code=200)
 
 
-# Web Share Target Fallback: redirects to frontend scan-to-print
-# If the service worker didn't intercept the POST /share-target, the backend cleanly redirects.
+# Web Share Target Fallback: hydrates shared files into client CacheStorage + IndexedDB if SW was bypassed
 @app.api_route("/share-target", methods=["GET", "POST"])
-async def share_target_fallback():
-    from fastapi.responses import RedirectResponse
-    return RedirectResponse(url="/scan-to-print?from_share=true", status_code=303)
+async def share_target_fallback(request: Request):
+    from fastapi.responses import RedirectResponse, HTMLResponse
+    import base64
+    import json
+
+    if request.method != "POST":
+        return RedirectResponse(url="/scan-to-print?from_share=true", status_code=303)
+
+    try:
+        form = await request.form()
+        extracted_files = []
+        for _, value in form.multi_items():
+            if hasattr(value, "read") and hasattr(value, "filename"):
+                raw_bytes = await value.read()
+                if raw_bytes:
+                    extracted_files.append({
+                        "name": getattr(value, "filename", None) or f"Shared_Document_{int(time.time())}.pdf",
+                        "type": getattr(value, "content_type", None) or "application/pdf",
+                        "size": len(raw_bytes),
+                        "b64": base64.b64encode(raw_bytes).decode("ascii"),
+                    })
+
+        if not extracted_files:
+            return RedirectResponse(url="/scan-to-print?from_share=true", status_code=303)
+
+        payload_json = json.dumps({
+            "files": extracted_files,
+            "title": str(form.get("title") or ""),
+            "text": str(form.get("text") or ""),
+            "timestamp": int(time.time() * 1000),
+        }).replace("<", "\\u003c")
+
+        html = f"""<!doctype html>
+<html>
+<head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/><title>Loading Shared Document…</title></head>
+<body style="margin:0;background:#0f172a;color:#f8fafc;display:flex;align-items:center;justify-content:center;min-height:100vh;font-family:system-ui,sans-serif;">
+  <div>Preparing Shared Document…</div>
+  <script>
+    (async function() {{
+      try {{
+        var data = {payload_json};
+        var now = data.timestamp || Date.now();
+        var materialized = [];
+        for (var i = 0; i < (data.files || []).length; i++) {{
+          var item = data.files[i];
+          var binStr = atob(item.b64);
+          var bytes = new Uint8Array(binStr.length);
+          for (var j = 0; j < binStr.length; j++) bytes[j] = binStr.charCodeAt(j);
+          materialized.push({{ name: item.name, type: item.type || 'application/pdf', size: bytes.byteLength, lastModified: now, buffer: bytes.buffer }});
+        }}
+        if (materialized.length > 0 && typeof caches !== 'undefined') {{
+          var cache = await caches.open('pms-share-cache-v2');
+          var metaItems = [];
+          for (var k = 0; k < materialized.length; k++) {{
+            var mf = materialized[k];
+            await cache.put('/__pms_shared_file__/' + k, new Response(mf.buffer, {{ status: 200, headers: {{ 'Content-Type': mf.type }} }}));
+            metaItems.push({{ index: k, name: mf.name, type: mf.type, size: mf.size, lastModified: now }});
+          }}
+          await cache.put('/__pms_shared_meta__', new Response(JSON.stringify({{ id: 'latest_share', title: data.title || '', text: data.text || '', timestamp: now, items: metaItems }}), {{ status: 200, headers: {{ 'Content-Type': 'application/json' }} }}));
+        }}
+      }} catch (e) {{}}
+      window.location.replace('/scan-to-print?from_share=true&share_ts=' + Date.now());
+    }})();
+  </script>
+</body>
+</html>"""
+        return HTMLResponse(content=html, status_code=200)
+    except Exception:
+        return RedirectResponse(url="/scan-to-print?from_share=true", status_code=303)
 
 
 

@@ -1,9 +1,10 @@
 import { lazy, Suspense, useEffect } from 'react';
-import { Routes, Route } from 'react-router-dom';
+import { Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import { ToastProvider } from './components/Toast';
 import Layout from './components/Layout';
 import ScrollToTop from './components/ScrollToTop';
 import Home from './pages/Home';
+import { getSharedFilesFromCache, subscribeSharedFilesReady } from './lib/shareTarget';
 
 // ── Lazy Loaded Tool & Informational Pages (Code Splitting for Core Web Vitals) ──
 const MergePDF = lazy(() => import('./pages/MergePDF'));
@@ -168,6 +169,9 @@ const PamphletMaker = lazy(() => import('./pages/PamphletMaker'));
 const NotFound = lazy(() => import('./pages/NotFound'));
 
 export default function App() {
+  const navigate = useNavigate();
+  const location = useLocation();
+
   // ── Backend Warmup Ping ─────────────────────────────────────────
   useEffect(() => {
     const API_BASE = import.meta.env.VITE_API_URL;
@@ -175,6 +179,24 @@ export default function App() {
       fetch(`${API_BASE}/health`, { method: 'HEAD' }).catch(() => {/* silent */});
     }
   }, []);
+
+  // ── Global Mobile/PC Share Target Auto-Router ───────────────────
+  useEffect(() => {
+    const checkPendingShare = async () => {
+      if (window.location.pathname.includes('/scan-to-print')) return;
+      try {
+        const bundle = await getSharedFilesFromCache();
+        if (bundle && bundle.files.length > 0 && Date.now() - bundle.timestamp < 90 * 1000) {
+          navigate('/scan-to-print?from_share=true', { replace: true });
+        }
+      } catch {}
+    };
+    void checkPendingShare();
+    const unsub = subscribeSharedFilesReady(() => {
+      void checkPendingShare();
+    });
+    return () => unsub();
+  }, [navigate, location.pathname]);
 
   return (
     <ToastProvider>

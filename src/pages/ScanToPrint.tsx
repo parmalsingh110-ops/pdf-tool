@@ -49,6 +49,7 @@ import ToolSEOSection from '../components/ToolSEOSection';
 import { apiFetch, API_BASE } from '../lib/api';
 import {
   getSharedFilesFromCache,
+  clearSharedFilesCache,
   promptPWAInstall,
   subscribePWAInstall,
   subscribeSharedFilesReady,
@@ -394,7 +395,14 @@ export default function ScanToPrint() {
   }, []);
 
   const removeSenderFile = useCallback((indexToRemove: number) => {
-    setSenderFiles((prev) => prev.filter((_, idx) => idx !== indexToRemove));
+    setSenderFiles((prev) => {
+      const next = prev.filter((_, idx) => idx !== indexToRemove);
+      if (next.length === 0) {
+        void clearSharedFilesCache();
+        setIsSharedFromExternal(false);
+      }
+      return next;
+    });
   }, []);
 
   // ─── Notification Chime (Singleton Context) ─────────────────────────────
@@ -590,7 +598,7 @@ export default function ScanToPrint() {
   }, []);
 
   // ─── Web Share Target / WhatsApp Direct Share Consumer ───────────────────
-  const consumePendingSharedFiles = useCallback(async () => {
+  const consumePendingSharedFiles = useCallback(async (): Promise<boolean> => {
     try {
       const bundle = await getSharedFilesFromCache();
       if (bundle && bundle.files.length > 0) {
@@ -598,23 +606,42 @@ export default function ScanToPrint() {
         setIsSharedFromExternal(true);
         if (bundle.title) setSharedSourceTitle(bundle.title);
         handleFilesSelected(bundle.files, false);
-        playChime();
-        // Clean the from_share param from URL cleanly without reloading
+        // Clean the from_share / share_ts params from URL cleanly without reloading
         try {
           const cleanUrl = new URL(window.location.href);
-          if (cleanUrl.searchParams.has('from_share')) {
+          if (cleanUrl.searchParams.has('from_share') || cleanUrl.searchParams.has('share_ts')) {
             cleanUrl.searchParams.delete('from_share');
+            cleanUrl.searchParams.delete('share_ts');
             window.history.replaceState({}, '', cleanUrl.toString());
           }
         } catch {}
+        return true;
       }
     } catch (e) {
       console.warn('[ScanToPrint] Share target check error:', e);
     }
-  }, [handleFilesSelected, playChime]);
+    return false;
+  }, [handleFilesSelected]);
 
   useEffect(() => {
-    void consumePendingSharedFiles();
+    let cancelled = false;
+    const retryTimers: ReturnType<typeof setTimeout>[] = [];
+
+    (async () => {
+      const foundImmediately = await consumePendingSharedFiles();
+      if (!foundImmediately && !cancelled) {
+        // Multi-stage retries in case Android flash storage / Service Worker CacheStorage is still flushing
+        for (const delay of [150, 450, 1000, 2200]) {
+          const t = setTimeout(async () => {
+            if (!cancelled) {
+              await consumePendingSharedFiles();
+            }
+          }, delay);
+          retryTimers.push(t);
+        }
+      }
+    })();
+
     const unsubShareReady = subscribeSharedFilesReady(() => {
       void consumePendingSharedFiles();
     });
@@ -626,11 +653,13 @@ export default function ScanToPrint() {
     window.addEventListener('focus', onFocusOrVisible);
     document.addEventListener('visibilitychange', onFocusOrVisible);
     return () => {
+      cancelled = true;
+      retryTimers.forEach((t) => clearTimeout(t));
       unsubShareReady();
       window.removeEventListener('focus', onFocusOrVisible);
       document.removeEventListener('visibilitychange', onFocusOrVisible);
     };
-  }, [consumePendingSharedFiles]);
+  }, [consumePendingSharedFiles, targetCounterPin]);
 
   // ─── Built-In Live Camera QR Code Scanner (for WhatsApp Share / Sender) ──
   useEffect(() => {
@@ -1453,6 +1482,8 @@ export default function ScanToPrint() {
       setSenderProgress(100);
       setSenderSuccess(true);
       setSenderFiles([]);
+      setIsSharedFromExternal(false);
+      void clearSharedFilesCache();
     } catch (err) {
       console.error(err);
       alert('Error transferring file. Please try again.');
@@ -2318,80 +2349,22 @@ export default function ScanToPrint() {
                     🔒 <strong>100% Private &amp; Direct:</strong> Files beam straight to counter #{targetCounterPin}. No WhatsApp, no contact sharing.
                   </div>
 
-                  {/* Drag & Drop File picker */}
-                  <label
-                    onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
-                    onDragLeave={() => setIsDragOver(false)}
-                    onDragEnd={() => setIsDragOver(false)}
-                    onDrop={(e) => {
-                      e.preventDefault();
-                      setIsDragOver(false);
-                      const dropped = Array.from(e.dataTransfer.files || []);
-                      if (dropped.length) handleFilesSelected(dropped, false);
-                    }}
-                    className={`block border-2 border-dashed rounded-3xl p-7 text-center cursor-pointer transition-all active:scale-95 ${
-                      isDragOver
-                        ? 'border-rose-600 bg-rose-50 dark:bg-rose-950/40'
-                        : 'border-slate-300 dark:border-slate-700 hover:border-rose-500 bg-slate-50/40 dark:bg-slate-800/40'
-                    }`}
-                  >
-                    <Upload className="w-10 h-10 mx-auto text-slate-400 mb-2" />
-                    <span className="font-extrabold text-sm sm:text-base text-slate-800 dark:text-slate-200 block">
-                      {isDragOver ? 'Drop files here!' : senderFiles.length > 0 ? 'Tap to Add More Documents' : 'Tap or Drag & Drop Documents here'}
-                    </span>
-                    <span className="text-xs text-slate-400 mt-1 block">PDF, Aadhaar, Photos, Docs — Up to 100 MB</span>
-                    <input
-                      type="file"
-                      multiple
-                      accept="application/pdf,image/*,.pdf,.jpg,.jpeg,.png,.webp,.doc,.docx"
-                      className="hidden"
-                      onChange={(e) => {
-                        handleFilesSelected(Array.from(e.target.files || []), false);
-                        e.target.value = '';
-                      }}
-                    />
-                  </label>
-
-                  {/* Quick Action Helpers: Camera Scan & WhatsApp PWA Installer */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    <label className="flex items-center justify-center gap-2 py-2.5 px-3 rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 hover:border-rose-500 bg-white dark:bg-slate-800 text-xs font-bold text-slate-700 dark:text-slate-200 cursor-pointer transition active:scale-95 shadow-sm">
-                      <Camera className="w-4 h-4 text-rose-600 shrink-0" />
-                      <span>Take Photo / Camera Scan</span>
-                      <input
-                        type="file"
-                        accept="image/*"
-                        capture="environment"
-                        className="hidden"
-                        onChange={(e) => {
-                          const files = Array.from(e.target.files || []);
-                          if (files.length) handleFilesSelected(files, true);
-                          e.target.value = '';
-                        }}
-                      />
-                    </label>
-
-                    {canInstallPWA && (
-                      <button
-                        type="button"
-                        onClick={promptPWAInstall}
-                        className="flex items-center justify-center gap-2 py-2.5 px-3 rounded-2xl bg-gradient-to-r from-rose-500/10 to-indigo-500/10 border border-rose-200 dark:border-rose-900/60 hover:border-rose-400 text-xs font-bold text-rose-700 dark:text-rose-300 transition active:scale-95 shadow-sm cursor-pointer"
-                      >
-                        <Share2 className="w-4 h-4 text-rose-600 shrink-0" />
-                        <span>Enable WhatsApp Share (1-Tap)</span>
-                      </button>
-                    )}
-                  </div>
-
+                  {/* If files are already loaded (e.g. from Mobile/PC Share), show Selected Files & Beam Button FIRST at the top! */}
                   {senderFiles.length > 0 && (
-                    <div className="space-y-3">
+                    <div className="space-y-3 p-4 rounded-2xl bg-slate-50/70 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700">
                       <div className="flex items-center justify-between px-1">
-                        <span className="text-[11px] font-bold text-slate-500">
-                          Selected Documents ({senderFiles.length})
+                        <span className="text-xs font-extrabold text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
+                          <FileText className="w-4 h-4 text-rose-600" />
+                          <span>Ready to Print ({senderFiles.length} {senderFiles.length > 1 ? 'files' : 'file'})</span>
                         </span>
                         {senderFiles.length > 1 && (
                           <button
                             type="button"
-                            onClick={() => setSenderFiles([])}
+                            onClick={() => {
+                              setSenderFiles([]);
+                              setIsSharedFromExternal(false);
+                              void clearSharedFilesCache();
+                            }}
                             className="text-[11px] font-bold text-rose-600 hover:underline"
                           >
                             Clear all
@@ -2402,8 +2375,8 @@ export default function ScanToPrint() {
                       {/* Selected file list */}
                       <div className="max-h-36 overflow-y-auto space-y-1.5">
                         {senderFiles.map((f, i) => (
-                          <div key={i} className="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200/60 dark:border-slate-700/60 text-xs">
-                            <span className="truncate max-w-[200px] font-semibold text-slate-700 dark:text-slate-200">{f.name}</span>
+                          <div key={i} className="flex items-center justify-between p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-700 text-xs shadow-xs">
+                            <span className="truncate max-w-[200px] font-bold text-slate-800 dark:text-slate-200">{f.name}</span>
                             <div className="flex items-center gap-2 shrink-0 ml-2">
                               <span className="text-slate-400 font-mono text-[11px]">{formatFileSize(f.size)}</span>
                               <button
@@ -2428,21 +2401,21 @@ export default function ScanToPrint() {
                       )}
 
                       {/* Print options */}
-                      <div className="grid grid-cols-2 gap-2">
+                      <div className="grid grid-cols-2 gap-2 pt-1">
                         {/* Copies selector */}
                         <div className="flex flex-col gap-1">
                           <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Copies</span>
-                          <div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-800 rounded-xl px-2 py-2 border border-slate-200 dark:border-slate-700">
+                          <div className="flex items-center gap-2 bg-white dark:bg-slate-900 rounded-xl px-2 py-2 border border-slate-200 dark:border-slate-700">
                             <button
                               onClick={() => setSenderCopies((n) => Math.max(1, n - 1))}
-                              className="w-6 h-6 rounded-lg bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 flex items-center justify-center hover:bg-rose-50 transition"
+                              className="w-6 h-6 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-600 flex items-center justify-center hover:bg-rose-50 transition"
                             >
                               <Minus className="w-3 h-3" />
                             </button>
                             <span className="text-sm font-black text-slate-900 dark:text-white flex-1 text-center">{senderCopies}</span>
                             <button
                               onClick={() => setSenderCopies((n) => Math.min(20, n + 1))}
-                              className="w-6 h-6 rounded-lg bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 flex items-center justify-center hover:bg-rose-50 transition"
+                              className="w-6 h-6 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-600 flex items-center justify-center hover:bg-rose-50 transition"
                             >
                               <Plus className="w-3 h-3" />
                             </button>
@@ -2458,7 +2431,7 @@ export default function ScanToPrint() {
                               className={`flex-1 py-2 text-xs font-bold transition ${
                                 senderColorMode === 'bw'
                                   ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900'
-                                  : 'bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
+                                  : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300'
                               }`}
                             >
                               B&amp;W
@@ -2468,7 +2441,7 @@ export default function ScanToPrint() {
                               className={`flex-1 py-2 text-xs font-bold transition ${
                                 senderColorMode === 'color'
                                   ? 'bg-rose-600 text-white'
-                                  : 'bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
+                                  : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300'
                               }`}
                             >
                               Color
@@ -2533,6 +2506,74 @@ export default function ScanToPrint() {
                       </button>
                     </div>
                   )}
+
+                  {/* Drag & Drop File picker (Compact if files already loaded, Large if empty) */}
+                  <label
+                    onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
+                    onDragLeave={() => setIsDragOver(false)}
+                    onDragEnd={() => setIsDragOver(false)}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      setIsDragOver(false);
+                      const dropped = Array.from(e.dataTransfer.files || []);
+                      if (dropped.length) handleFilesSelected(dropped, false);
+                    }}
+                    className={`block border-2 border-dashed rounded-3xl text-center cursor-pointer transition-all active:scale-95 ${
+                      senderFiles.length > 0 ? 'p-3.5' : 'p-7'
+                    } ${
+                      isDragOver
+                        ? 'border-rose-600 bg-rose-50 dark:bg-rose-950/40'
+                        : 'border-slate-300 dark:border-slate-700 hover:border-rose-500 bg-slate-50/40 dark:bg-slate-800/40'
+                    }`}
+                  >
+                    {senderFiles.length === 0 && <Upload className="w-10 h-10 mx-auto text-slate-400 mb-2" />}
+                    <span className="font-extrabold text-xs sm:text-sm text-slate-800 dark:text-slate-200 block">
+                      {isDragOver ? 'Drop files here!' : senderFiles.length > 0 ? '➕ Tap to Add More Documents' : 'Tap or Drag & Drop Documents here'}
+                    </span>
+                    {senderFiles.length === 0 && (
+                      <span className="text-xs text-slate-400 mt-1 block">PDF, Aadhaar, Photos, Docs — Up to 100 MB</span>
+                    )}
+                    <input
+                      type="file"
+                      multiple
+                      accept="application/pdf,image/*,.pdf,.jpg,.jpeg,.png,.webp,.doc,.docx"
+                      className="hidden"
+                      onChange={(e) => {
+                        handleFilesSelected(Array.from(e.target.files || []), false);
+                        e.target.value = '';
+                      }}
+                    />
+                  </label>
+
+                  {/* Quick Action Helpers: Camera Scan & WhatsApp PWA Installer */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <label className="flex items-center justify-center gap-2 py-2.5 px-3 rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 hover:border-rose-500 bg-white dark:bg-slate-800 text-xs font-bold text-slate-700 dark:text-slate-200 cursor-pointer transition active:scale-95 shadow-sm">
+                      <Camera className="w-4 h-4 text-rose-600 shrink-0" />
+                      <span>Take Photo / Camera Scan</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        capture="environment"
+                        className="hidden"
+                        onChange={(e) => {
+                          const files = Array.from(e.target.files || []);
+                          if (files.length) handleFilesSelected(files, true);
+                          e.target.value = '';
+                        }}
+                      />
+                    </label>
+
+                    {canInstallPWA && (
+                      <button
+                        type="button"
+                        onClick={promptPWAInstall}
+                        className="flex items-center justify-center gap-2 py-2.5 px-3 rounded-2xl bg-gradient-to-r from-rose-500/10 to-indigo-500/10 border border-rose-200 dark:border-rose-900/60 hover:border-rose-400 text-xs font-bold text-rose-700 dark:text-rose-300 transition active:scale-95 shadow-sm cursor-pointer"
+                      >
+                        <Share2 className="w-4 h-4 text-rose-600 shrink-0" />
+                        <span>Enable WhatsApp Share (1-Tap)</span>
+                      </button>
+                    )}
+                  </div>
                 </div>
               )}
             </>
