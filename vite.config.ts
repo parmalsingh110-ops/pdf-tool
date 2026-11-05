@@ -12,8 +12,123 @@ import { nodePolyfills } from 'vite-plugin-node-polyfills';
  * CacheStorage + IndexedDB, and redirects to `/scan-to-print?from_share=true`.
  */
 function pmsShareTargetServerPlugin(): Plugin {
+  // Built-in local print-drop relay so localhost:3000 works even when Python port 8000 is not running
+  const localPrintRooms = new Map<string, any[]>();
+  const localPrintFiles = new Map<string, { buffer: Buffer; mime: string }>();
+  const localRoomTokens = new Map<string, number>();
+  const localDeviceTokens = new Map<string, Map<string, number>>();
+
   const handleShareTargetMiddleware = (req: any, res: any, next: () => void) => {
     const reqUrl = String(req.url || '');
+
+    // ── Built-in Print-Drop Relay Endpoints (/api/print-drop/*) ──────────
+    if (reqUrl.startsWith('/api/print-drop/jobs/') && req.method === 'GET') {
+      const sessionRaw = reqUrl.split('/api/print-drop/jobs/')[1]?.split('?')[0] || '';
+      const cleanSession = sessionRaw.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+      const jobs = localPrintRooms.get(cleanSession) || [];
+      localPrintRooms.delete(cleanSession);
+      res.statusCode = 200;
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify({ success: true, jobs }));
+      return;
+    }
+
+    if (reqUrl.startsWith('/api/print-drop/file/') && req.method === 'GET') {
+      const parts = reqUrl.split('/api/print-drop/file/')[1]?.split('?')[0]?.split('/') || [];
+      const key = `${(parts[0] || '').toUpperCase()}_${parts[1] || ''}`;
+      const stored = localPrintFiles.get(key);
+      localPrintFiles.delete(key);
+      if (!stored) {
+        res.statusCode = 404;
+        res.end('Not found');
+        return;
+      }
+      res.statusCode = 200;
+      res.setHeader('Content-Type', stored.mime || 'application/octet-stream');
+      res.end(stored.buffer);
+      return;
+    }
+
+    if (reqUrl.startsWith('/api/print-drop/upload') && req.method === 'POST') {
+      const chunks: Buffer[] = [];
+      req.on('data', (c: Buffer) => chunks.push(c));
+      req.on('end', async () => {
+        try {
+          const rawBody = Buffer.concat(chunks);
+          const headers: Record<string, string> = {};
+          for (const [k, v] of Object.entries(req.headers || {})) {
+            if (typeof v === 'string') headers[k] = v;
+            else if (Array.isArray(v)) headers[k] = v.join(', ');
+          }
+          const webReq = new Request(`http://localhost${reqUrl}`, {
+            method: 'POST',
+            headers,
+            body: rawBody,
+          });
+          const formData = await webReq.formData();
+          const sessionRaw = String(formData.get('session_id') || '');
+          const cleanSession = sessionRaw.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+          const fileEntry = formData.get('file') as File | null;
+          if (!cleanSession || !fileEntry || typeof fileEntry.arrayBuffer !== 'function') {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: 'Invalid upload' }));
+            return;
+          }
+          const ab = await fileEntry.arrayBuffer();
+          const buf = Buffer.from(ab);
+          const jobId = String(formData.get('job_id') || `job_${Date.now()}`);
+          const copies = Number(formData.get('copies') || 1);
+          const colorMode = String(formData.get('color_mode') || 'bw') === 'color' ? 'color' : 'bw';
+          const senderDeviceId = String(formData.get('sender_device_id') || '');
+          const deviceLabel = String(formData.get('device_label') || 'Sender Device');
+
+          if (!localDeviceTokens.has(cleanSession)) {
+            localDeviceTokens.set(cleanSession, new Map());
+          }
+          const devMap = localDeviceTokens.get(cleanSession)!;
+          let tokenNum = 1;
+          if (senderDeviceId && devMap.has(senderDeviceId)) {
+            tokenNum = devMap.get(senderDeviceId)!;
+          } else {
+            tokenNum = (localRoomTokens.get(cleanSession) || 0) + 1;
+            localRoomTokens.set(cleanSession, tokenNum);
+            if (senderDeviceId) devMap.set(senderDeviceId, tokenNum);
+          }
+
+          localPrintFiles.set(`${cleanSession}_${jobId}`, {
+            buffer: buf,
+            mime: fileEntry.type || 'application/pdf',
+          });
+
+          const job = {
+            id: jobId,
+            tokenNum,
+            senderDeviceId,
+            deviceLabel,
+            name: fileEntry.name || 'Document.pdf',
+            size: buf.byteLength,
+            type: fileEntry.type || 'application/pdf',
+            fileUrl: `/api/print-drop/file/${cleanSession}/${jobId}`,
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            copies,
+            colorMode,
+          };
+
+          const existing = localPrintRooms.get(cleanSession) || [];
+          existing.push(job);
+          localPrintRooms.set(cleanSession, existing);
+
+          res.statusCode = 200;
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify({ success: true, job_id: jobId, token_num: tokenNum, session_id: cleanSession }));
+        } catch (e) {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: 'Relay error' }));
+        }
+      });
+      return;
+    }
+
     if (!reqUrl.startsWith('/share-target')) {
       return next();
     }

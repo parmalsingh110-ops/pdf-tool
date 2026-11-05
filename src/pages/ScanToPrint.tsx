@@ -598,8 +598,15 @@ export default function ScanToPrint() {
   }, []);
 
   // ─── Web Share Target / WhatsApp Direct Share Consumer ───────────────────
-  const consumePendingSharedFiles = useCallback(async (): Promise<boolean> => {
+  const consumePendingSharedFiles = useCallback(async (forceSenderSwitch = false): Promise<boolean> => {
     try {
+      const search = typeof window !== 'undefined' ? window.location.search : '';
+      const hasShareUrlParam = search.includes('from_share=true') || search.includes('mode=send');
+      // Never hijack a normal Counter Station tab into Sender Mode unless opened from Share/Open-With or already in Sender Mode
+      if (!hasShareUrlParam && !isSenderMode && !forceSenderSwitch) {
+        return false;
+      }
+
       const bundle = await getSharedFilesFromCache();
       if (bundle && bundle.files.length > 0) {
         setIsSenderMode(true);
@@ -621,33 +628,38 @@ export default function ScanToPrint() {
       console.warn('[ScanToPrint] Share target check error:', e);
     }
     return false;
-  }, [handleFilesSelected]);
+  }, [handleFilesSelected, isSenderMode]);
 
   useEffect(() => {
     let cancelled = false;
     const retryTimers: ReturnType<typeof setTimeout>[] = [];
+    const isShareEntry =
+      typeof window !== 'undefined' &&
+      (window.location.search.includes('from_share=true') || window.location.search.includes('mode=send'));
 
-    (async () => {
-      const foundImmediately = await consumePendingSharedFiles();
-      if (!foundImmediately && !cancelled) {
-        // Multi-stage retries in case Android flash storage / Service Worker CacheStorage is still flushing
-        for (const delay of [150, 450, 1000, 2200]) {
-          const t = setTimeout(async () => {
-            if (!cancelled) {
-              await consumePendingSharedFiles();
-            }
-          }, delay);
-          retryTimers.push(t);
+    if (isShareEntry || isSenderMode) {
+      (async () => {
+        const foundImmediately = await consumePendingSharedFiles(isShareEntry);
+        if (!foundImmediately && !cancelled && isShareEntry) {
+          // Multi-stage retries in case Android flash storage / Service Worker CacheStorage is still flushing
+          for (const delay of [150, 450, 1000, 2200]) {
+            const t = setTimeout(async () => {
+              if (!cancelled) {
+                await consumePendingSharedFiles(true);
+              }
+            }, delay);
+            retryTimers.push(t);
+          }
         }
-      }
-    })();
+      })();
+    }
 
     const unsubShareReady = subscribeSharedFilesReady(() => {
-      void consumePendingSharedFiles();
+      void consumePendingSharedFiles(true);
     });
     const onFocusOrVisible = () => {
-      if (document.visibilityState === 'visible') {
-        void consumePendingSharedFiles();
+      if (document.visibilityState === 'visible' && isSenderMode) {
+        void consumePendingSharedFiles(false);
       }
     };
     window.addEventListener('focus', onFocusOrVisible);
@@ -659,7 +671,7 @@ export default function ScanToPrint() {
       window.removeEventListener('focus', onFocusOrVisible);
       document.removeEventListener('visibilitychange', onFocusOrVisible);
     };
-  }, [consumePendingSharedFiles, targetCounterPin]);
+  }, [consumePendingSharedFiles, targetCounterPin, isSenderMode]);
 
   // ─── Built-In Live Camera QR Code Scanner (for WhatsApp Share / Sender) ──
   useEffect(() => {
@@ -740,21 +752,87 @@ export default function ScanToPrint() {
     };
   }, [showQrScanner, handleConnectWithPin, playChime]);
 
-  // ─── BroadcastChannel (same-browser cross-tab) ───────────────────────────
+  // ─── BroadcastChannel (Cross-Tab & PWA-to-Counter Leader/Follower Sync) ──
   useEffect(() => {
     const activeCode = isSenderMode ? (targetCounterPin || sessionCode) : sessionCode;
     if (!activeCode) return;
-    const bc = new BroadcastChannel(`pdfmediasuite_print_${activeCode}`);
+    const bc = new BroadcastChannel(`pdfmediasuite_print_${activeCode.toUpperCase()}`);
     channelRef.current = bc;
 
     bc.onmessage = (event) => {
       const data = event.data;
-      if (data?.action === 'NEW_PRINT_JOB' && !isSenderMode && data.job) {
-        addIncomingJob(data.job);
+      if (!data || typeof data !== 'object') return;
+
+      // 1. Direct Job Beamed from another tab / PWA window on the same PC
+      if ((data.action === 'NEW_PRINT_JOB' || data.action === 'SYNC_JOB_TO_SIBLINGS') && !isSenderMode && data.job) {
+        let localBlobUrl = data.job.dataUrl || '';
+        if (data.fileBlob instanceof Blob) {
+          try {
+            localBlobUrl = URL.createObjectURL(data.fileBlob);
+          } catch {}
+        }
+        let tokenNum = data.job.tokenNum || 0;
+        const devId = data.job.senderDeviceId;
+        if (!tokenNum) {
+          if (devId && deviceTokenMapRef.current[devId]) {
+            tokenNum = deviceTokenMapRef.current[devId];
+          } else {
+            tokenNum = tokenCounterRef.current++;
+            if (devId) deviceTokenMapRef.current[devId] = tokenNum;
+          }
+        }
+        addIncomingJob({ ...data.job, tokenNum, dataUrl: localBlobUrl, status: 'pending' });
+
+        if (data.action === 'NEW_PRINT_JOB') {
+          try {
+            bc.postMessage({
+              action: 'BC_JOB_ACK',
+              jobId: data.job.id,
+              tokenNum,
+              customerToken: tokenNum,
+            });
+          } catch {}
+        }
+      }
+
+      // 2. Sender tab receiving instant ACK from Counter tab on same PC
+      else if (data.action === 'BC_JOB_ACK' && isSenderMode && data.jobId) {
+        const assignedTok = data.customerToken || data.tokenNum;
+        if (assignedTok) setCustomerToken(assignedTok);
+        const resolver = ackResolversRef.current[data.jobId];
+        if (resolver) {
+          resolver(assignedTok);
+          delete ackResolversRef.current[data.jobId];
+        }
+      }
+
+      // 3. Multi-Tab Leader/Follower Online Status Synchronization
+      else if (data.action === 'PING_LEADER' && !isSenderMode) {
+        if (peerRef.current && !peerRef.current.destroyed && !peerRef.current.disconnected) {
+          try {
+            bc.postMessage({ action: 'LEADER_ONLINE' });
+          } catch {}
+        }
+      } else if (data.action === 'LEADER_ONLINE') {
+        if (!isSenderMode) {
+          setPeerStatus('online');
+          setPinNotice(null);
+        } else {
+          setMobileConnectionStatus('connected');
+        }
       }
     };
 
-    return () => { bc.close(); };
+    // Announce presence or check if a sibling Counter tab is already online on this PC
+    try {
+      bc.postMessage({ action: 'PING_LEADER' });
+    } catch {}
+
+    return () => {
+      try {
+        bc.close();
+      } catch {}
+    };
   }, [sessionCode, targetCounterPin, isSenderMode, addIncomingJob]);
 
   // ─── QR Code Generation ──────────────────────────────────────────────────
@@ -778,7 +856,7 @@ export default function ScanToPrint() {
       });
   }, [mobileLink, sessionCode]);
 
-  // ─── WebRTC PeerJS (Primary Transport) ──────────────────────────────────
+  // ─── WebRTC PeerJS (Primary Transport, StrictMode-Safe with Auto-Heal) ───
   useEffect(() => {
     // In sender mode, wait until a valid 3 to 10-char target PIN is entered
     if (isSenderMode && (!targetCounterPin || targetCounterPin.length < 3)) {
@@ -789,228 +867,289 @@ export default function ScanToPrint() {
     if (!activeSession) return;
 
     const roomId = `pms-print-${activeSession.toLowerCase()}`;
-    let peer: Peer;
+    let peer: Peer | null = null;
     let watchdogTimer: ReturnType<typeof setInterval> | null = null;
+    let connectTimeoutTimer: ReturnType<typeof setTimeout> | null = null;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    let cancelled = false;
 
     if (!isSenderMode) {
-      // ── COUNTER PC MODE ──────────────────────────────────────────────────
-      peer = new Peer(roomId, {
-        debug: 0,
-        config: { iceServers: ICE_SERVERS },
-      });
-      peerRef.current = peer;
+      setPeerStatus('connecting');
+    }
 
-      peer.on('open', () => setPeerStatus('online'));
+    // 80ms debounce prevents React 19 <StrictMode> on localhost:3000 from creating & destroying
+    // a duplicate Peer(roomId) within 1ms and locking the ID on 0.peerjs.com!
+    const initTimer = setTimeout(() => {
+      if (cancelled) return;
 
-      // Auto-recover if signaling WebSocket temporarily drops during a long workday
-      peer.on('disconnected', () => {
-        setPeerStatus('connecting');
-        setTimeout(() => {
+      if (!isSenderMode) {
+        // ── COUNTER PC MODE ──────────────────────────────────────────────────
+        peer = new Peer(roomId, {
+          debug: 0,
+          config: { iceServers: ICE_SERVERS },
+        });
+        peerRef.current = peer;
+
+        // If signaling handshake stalls in 'connecting' for >7s, automatically retry
+        connectTimeoutTimer = setTimeout(() => {
+          if (!cancelled && peer && !peer.open) {
+            try {
+              channelRef.current?.postMessage({ action: 'PING_LEADER' });
+            } catch {}
+            setPeerReconnectKey((k) => k + 1);
+          }
+        }, 7000);
+
+        peer.on('open', () => {
+          if (connectTimeoutTimer) clearTimeout(connectTimeoutTimer);
+          setPeerStatus('online');
+          setPinNotice(null);
           try {
-            if (peer && !peer.destroyed && peer.disconnected) {
-              peer.reconnect();
-            }
+            channelRef.current?.postMessage({ action: 'LEADER_ONLINE' });
           } catch {}
-        }, 1500);
-      });
+        });
 
-      // Stale Transfer Watchdog: free RAM and clear stuck progress bars if a client drops mid-stream
-      watchdogTimer = setInterval(() => {
-        const now = Date.now();
-        let removedAny = false;
-        for (const [jId, tr] of Object.entries(incomingTransfersRef.current)) {
-          if (now - (tr.lastUpdated || 0) > 15000) {
-            delete incomingTransfersRef.current[jId];
-            removedAny = true;
-          }
-        }
-        if (removedAny && Object.keys(incomingTransfersRef.current).length === 0) {
-          setIncomingProgress(null);
-        }
-      }, 5000);
-
-      peer.on('connection', (conn) => {
-        setConnectedMobiles((n) => n + 1);
-        const activeConnJobIds = new Set<string>();
-
-        conn.on('data', (data: any) => {
-          if (!data || typeof data !== 'object') return;
-
-          if (data.action === 'JOB_START') {
-            activeConnJobIds.add(data.jobId);
-            incomingTransfersRef.current[data.jobId] = {
-              jobId: data.jobId,
-              senderDeviceId: data.senderDeviceId,
-              deviceLabel: data.deviceLabel || 'Mobile Phone',
-              name: data.name,
-              size: data.size,
-              type: data.type || 'application/pdf',
-              timestamp: data.timestamp || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-              totalChunks: data.totalChunks || 1,
-              chunks: [],  // Will be filled sparsely by index
-              receivedCount: 0,
-              receivedBytes: 0,
-              copies: data.copies || 1,
-              colorMode: data.colorMode || 'bw',
-              lastUpdated: Date.now(),
-            };
-            setIncomingProgress({ name: data.name, progress: 0 });
-          }
-
-          else if (data.action === 'JOB_CHUNK') {
-            const transfer = incomingTransfersRef.current[data.jobId];
-            if (transfer) {
-              transfer.lastUpdated = Date.now();
-              const chunkBuf = data.chunk as ArrayBuffer;
-              if (!transfer.chunks[data.index]) {
-                transfer.chunks[data.index] = chunkBuf;
-                transfer.receivedCount++;
-                transfer.receivedBytes = (transfer.receivedBytes || 0) + (chunkBuf?.byteLength || 0);
+        // Auto-recover if signaling WebSocket temporarily drops during a long workday
+        peer.on('disconnected', () => {
+          setPeerStatus('connecting');
+          setTimeout(() => {
+            try {
+              if (peer && !peer.destroyed && peer.disconnected) {
+                peer.reconnect();
               }
-              const pct = Math.min(99, Math.round((transfer.receivedBytes / Math.max(1, transfer.size)) * 100));
-              // Throttle React state updates to when percentage integer actually changes
-              setIncomingProgress((prev) => {
-                if (prev && prev.name === transfer.name && prev.progress === pct) return prev;
-                return { name: transfer.name, progress: pct };
-              });
+            } catch {}
+          }, 1500);
+        });
+
+        // Stale Transfer Watchdog: free RAM and clear stuck progress bars if a client drops mid-stream
+        watchdogTimer = setInterval(() => {
+          const now = Date.now();
+          let removedAny = false;
+          for (const [jId, tr] of Object.entries(incomingTransfersRef.current)) {
+            if (now - (tr.lastUpdated || 0) > 15000) {
+              delete incomingTransfersRef.current[jId];
+              removedAny = true;
             }
           }
+          if (removedAny && Object.keys(incomingTransfersRef.current).length === 0) {
+            setIncomingProgress(null);
+          }
+        }, 5000);
 
-          else if (data.action === 'JOB_FINISH') {
-            activeConnJobIds.delete(data.jobId);
-            const transfer = incomingTransfersRef.current[data.jobId];
-            if (transfer) {
-              let blobUrl = '';
-              try {
-                // Collect valid chunks by index and assemble
-                const validChunks = (transfer.chunks as (ArrayBuffer | undefined)[])
-                  .filter((c): c is ArrayBuffer => c !== undefined);
-                if (validChunks.length > 0 && transfer.receivedBytes > 0) {
-                  const blob = new Blob(validChunks, { type: transfer.type });
-                  blobUrl = URL.createObjectURL(blob);
+        peer.on('connection', (conn) => {
+          setConnectedMobiles((n) => n + 1);
+          const activeConnJobIds = new Set<string>();
+
+          conn.on('data', (data: any) => {
+            if (!data || typeof data !== 'object') return;
+
+            if (data.action === 'JOB_START') {
+              activeConnJobIds.add(data.jobId);
+              incomingTransfersRef.current[data.jobId] = {
+                jobId: data.jobId,
+                senderDeviceId: data.senderDeviceId,
+                deviceLabel: data.deviceLabel || 'Mobile Phone',
+                name: data.name,
+                size: data.size,
+                type: data.type || 'application/pdf',
+                timestamp: data.timestamp || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                totalChunks: data.totalChunks || 1,
+                chunks: [],
+                receivedCount: 0,
+                receivedBytes: 0,
+                copies: data.copies || 1,
+                colorMode: data.colorMode || 'bw',
+                lastUpdated: Date.now(),
+              };
+              setIncomingProgress({ name: data.name, progress: 0 });
+            }
+
+            else if (data.action === 'JOB_CHUNK') {
+              const transfer = incomingTransfersRef.current[data.jobId];
+              if (transfer) {
+                transfer.lastUpdated = Date.now();
+                const rawChunk = data.chunk;
+                const chunkLen =
+                  rawChunk?.byteLength ??
+                  rawChunk?.size ??
+                  rawChunk?.buffer?.byteLength ??
+                  0;
+                if (!transfer.chunks[data.index]) {
+                  transfer.chunks[data.index] = rawChunk;
+                  transfer.receivedCount++;
+                  transfer.receivedBytes = (transfer.receivedBytes || 0) + chunkLen;
                 }
-              } catch {
-                blobUrl = '';
+                const pct = Math.min(99, Math.round((transfer.receivedBytes / Math.max(1, transfer.size)) * 100));
+                setIncomingProgress((prev) => {
+                  if (prev && prev.name === transfer.name && prev.progress === pct) return prev;
+                  return { name: transfer.name, progress: pct };
+                });
               }
+            }
 
-              // Determine or reuse Customer Token for this device
+            else if (data.action === 'JOB_FINISH') {
+              activeConnJobIds.delete(data.jobId);
+              const transfer = incomingTransfersRef.current[data.jobId];
+              if (transfer) {
+                let blobUrl = '';
+                let assembledBlob: Blob | null = null;
+                try {
+                  const validChunks = (transfer.chunks as any[]).filter((c) => c !== undefined && c !== null);
+                  if (validChunks.length > 0) {
+                    assembledBlob = new Blob(validChunks, { type: transfer.type });
+                    blobUrl = URL.createObjectURL(assembledBlob);
+                  }
+                } catch {
+                  blobUrl = '';
+                }
+
+                // Determine or reuse Customer Token for this device
+                let tokenNum = 1;
+                const devId = transfer.senderDeviceId;
+                if (devId && deviceTokenMapRef.current[devId]) {
+                  tokenNum = deviceTokenMapRef.current[devId];
+                } else {
+                  tokenNum = tokenCounterRef.current++;
+                  if (devId) deviceTokenMapRef.current[devId] = tokenNum;
+                }
+
+                const job: PrintJob = {
+                  id: transfer.jobId,
+                  tokenNum,
+                  senderDeviceId: transfer.senderDeviceId,
+                  deviceLabel: transfer.deviceLabel,
+                  name: transfer.name,
+                  size: transfer.size,
+                  type: transfer.type,
+                  dataUrl: blobUrl,
+                  timestamp: transfer.timestamp,
+                  copies: transfer.copies,
+                  colorMode: transfer.colorMode,
+                  status: 'pending',
+                };
+
+                if (blobUrl) {
+                  addIncomingJob(job);
+                  // Sync received WebRTC job to any other open Counter Station tabs on this PC!
+                  if (assembledBlob) {
+                    try {
+                      channelRef.current?.postMessage({
+                        action: 'SYNC_JOB_TO_SIBLINGS',
+                        job,
+                        fileBlob: assembledBlob,
+                      });
+                    } catch {}
+                  }
+                }
+                delete incomingTransfersRef.current[data.jobId];
+                setIncomingProgress(null);
+
+                // Send ACK with token back to mobile
+                try { conn.send({ action: 'JOB_ACK', jobId: transfer.jobId, tokenNum, customerToken: tokenNum }); } catch {}
+              }
+            }
+
+            // Single-shot fallback for tiny files
+            else if (data.action === 'NEW_PRINT_JOB' && data.job) {
               let tokenNum = 1;
-              const devId = transfer.senderDeviceId;
+              const devId = data.job.senderDeviceId;
               if (devId && deviceTokenMapRef.current[devId]) {
                 tokenNum = deviceTokenMapRef.current[devId];
               } else {
                 tokenNum = tokenCounterRef.current++;
                 if (devId) deviceTokenMapRef.current[devId] = tokenNum;
               }
+              addIncomingJob({ ...data.job, tokenNum, status: 'pending' });
+              try { conn.send({ action: 'JOB_ACK', jobId: data.job.id, tokenNum, customerToken: tokenNum }); } catch {}
+            }
+          });
 
-              const job: PrintJob = {
-                id: transfer.jobId,
-                tokenNum,
-                senderDeviceId: transfer.senderDeviceId,
-                deviceLabel: transfer.deviceLabel,
-                name: transfer.name,
-                size: transfer.size,
-                type: transfer.type,
-                dataUrl: blobUrl,
-                timestamp: transfer.timestamp,
-                copies: transfer.copies,
-                colorMode: transfer.colorMode,
-                status: 'pending',
-              };
-
-              if (blobUrl) addIncomingJob(job);
-              delete incomingTransfersRef.current[data.jobId];
+          conn.on('close', () => {
+            setConnectedMobiles((n) => Math.max(0, n - 1));
+            for (const jId of activeConnJobIds) {
+              delete incomingTransfersRef.current[jId];
+            }
+            if (Object.keys(incomingTransfersRef.current).length === 0) {
               setIncomingProgress(null);
-
-              // Send ACK with token back to mobile
-              try { conn.send({ action: 'JOB_ACK', jobId: transfer.jobId, tokenNum, customerToken: tokenNum }); } catch {}
             }
-          }
-
-          // Single-shot fallback for tiny files
-          else if (data.action === 'NEW_PRINT_JOB' && data.job) {
-            let tokenNum = 1;
-            const devId = data.job.senderDeviceId;
-            if (devId && deviceTokenMapRef.current[devId]) {
-              tokenNum = deviceTokenMapRef.current[devId];
-            } else {
-              tokenNum = tokenCounterRef.current++;
-              if (devId) deviceTokenMapRef.current[devId] = tokenNum;
-            }
-            addIncomingJob({ ...data.job, tokenNum, status: 'pending' });
-            try { conn.send({ action: 'JOB_ACK', jobId: data.job.id, tokenNum, customerToken: tokenNum }); } catch {}
-          }
+          });
         });
 
-        conn.on('close', () => {
-          setConnectedMobiles((n) => Math.max(0, n - 1));
-          // Clean up any unfinished transfers started on this connection
-          for (const jId of activeConnJobIds) {
-            delete incomingTransfersRef.current[jId];
-          }
-          if (Object.keys(incomingTransfersRef.current).length === 0) {
-            setIncomingProgress(null);
+        peer.on('error', (err) => {
+          if (connectTimeoutTimer) clearTimeout(connectTimeoutTimer);
+          if (err.type === 'unavailable-id') {
+            // Check if a sibling Counter tab on this same browser is already online as Leader
+            try {
+              channelRef.current?.postMessage({ action: 'PING_LEADER' });
+            } catch {}
+            // Also schedule automatic retry in 2.5s (in case the previous tab just refreshed/closed on 0.peerjs.com)
+            retryTimer = setTimeout(() => {
+              if (!cancelled) {
+                setPeerReconnectKey((k) => k + 1);
+              }
+            }, 2500);
+          } else if (err.type === 'peer-unavailable') {
+            // Expected when a mobile client disconnects
+          } else {
+            retryTimer = setTimeout(() => {
+              if (!cancelled) {
+                setPeerReconnectKey((k) => k + 1);
+              }
+            }, 3000);
           }
         });
-      });
+      } else {
+        // ── MOBILE / PC SENDER MODE ──────────────────────────────────────────
+        peer = new Peer({
+          debug: 0,
+          config: { iceServers: ICE_SERVERS },
+        });
+        peerRef.current = peer;
 
-      peer.on('error', (err) => {
-        if (err.type === 'unavailable-id') {
-          // Do not overwrite permanent PIN!
-          setPeerStatus('error');
-          setPinNotice(
-            `Counter PIN #${sessionCode} is currently occupied or held by another browser tab. Please wait a few seconds and click Reconnect.`
-          );
-        } else if (err.type === 'peer-unavailable') {
-          // Expected when a mobile client disconnects
-        } else {
-          setPeerStatus('error');
-        }
-      });
-    } else {
-      // ── MOBILE SENDER MODE ───────────────────────────────────────────────
-      peer = new Peer({
-        debug: 0,
-        config: { iceServers: ICE_SERVERS },
-      });
-      peerRef.current = peer;
+        peer.on('open', () => {
+          if (cancelled || !peer) return;
+          const conn = peer.connect(roomId, { reliable: true });
+          mobileConnRef.current = conn;
 
-      peer.on('open', () => {
-        const conn = peer.connect(roomId, { reliable: true });
-        mobileConnRef.current = conn;
+          conn.on('open', () => setMobileConnectionStatus('connected'));
 
-        conn.on('open', () => setMobileConnectionStatus('connected'));
-
-        conn.on('data', (data: any) => {
-          if (data?.action === 'JOB_ACK' && data.jobId) {
-            const assignedTok = data.customerToken || data.tokenNum;
-            if (assignedTok) setCustomerToken(assignedTok);
-            const resolver = ackResolversRef.current[data.jobId];
-            if (resolver) {
-              resolver(assignedTok);
-              delete ackResolversRef.current[data.jobId];
+          conn.on('data', (data: any) => {
+            if (data?.action === 'JOB_ACK' && data.jobId) {
+              const assignedTok = data.customerToken || data.tokenNum;
+              if (assignedTok) setCustomerToken(assignedTok);
+              const resolver = ackResolversRef.current[data.jobId];
+              if (resolver) {
+                resolver(assignedTok);
+                delete ackResolversRef.current[data.jobId];
+              }
             }
-          }
+          });
+
+          conn.on('error', () => setMobileConnectionStatus('fallback'));
+
+          const fallbackTimer = setTimeout(() => {
+            if (!conn.open) setMobileConnectionStatus('fallback');
+          }, 5000);
+
+          (conn as any)._fallbackTimer = fallbackTimer;
         });
 
-        conn.on('error', () => setMobileConnectionStatus('fallback'));
+        peer.on('error', () => setMobileConnectionStatus('fallback'));
+      }
+    }, 80);
 
-        // If not connected in 5s, fall back to cloud relay
-        const fallbackTimer = setTimeout(() => {
-          if (!conn.open) setMobileConnectionStatus('fallback');
-        }, 5000);
-
-        // Store timer cleanup on conn so it can be cleared on unmount
-        (conn as any)._fallbackTimer = fallbackTimer;
-      });
-
-      peer.on('error', () => setMobileConnectionStatus('fallback'));
-    }
-
-    const handleBeforeUnload = () => { try { peer.destroy(); } catch {} };
+    const handleBeforeUnload = () => {
+      try {
+        peer?.destroy();
+      } catch {}
+    };
     window.addEventListener('beforeunload', handleBeforeUnload);
 
     return () => {
+      cancelled = true;
+      clearTimeout(initTimer);
+      if (connectTimeoutTimer) clearTimeout(connectTimeoutTimer);
+      if (retryTimer) clearTimeout(retryTimer);
       window.removeEventListener('beforeunload', handleBeforeUnload);
       if (watchdogTimer) clearInterval(watchdogTimer);
       try {
@@ -1020,49 +1159,82 @@ export default function ScanToPrint() {
           mobileConnRef.current = null;
         }
       } catch {}
-      try { peer.destroy(); } catch {}
+      try {
+        peer?.destroy();
+      } catch {}
     };
   }, [sessionCode, targetCounterPin, isSenderMode, addIncomingJob, peerReconnectKey]);
 
-  // ─── Backend API Polling (PC Fallback, progressive backoff) ─────────────
+  // ─── Backend API Polling (Local + Cloud Relay Fallback) ─────────────────
   useEffect(() => {
     if (isSenderMode || !sessionCode) return;
 
     let cancelled = false;
 
+    const fetchRelayJobsFromBase = async (baseUrl: string): Promise<boolean> => {
+      try {
+        const ctrl = new AbortController();
+        const tid = setTimeout(() => ctrl.abort(), 4500);
+        const res = await fetch(`${baseUrl}/api/print-drop/jobs/${sessionCode}`, { signal: ctrl.signal });
+        clearTimeout(tid);
+        if (!res.ok) return false;
+        const data = await res.json();
+        if (data.jobs?.length) {
+          for (const j of data.jobs) {
+            if (j.tokenNum) tokenCounterRef.current = Math.max(tokenCounterRef.current, j.tokenNum + 1);
+
+            let fileBlobUrl = j.dataUrl || '';
+            let downloadedBlob: Blob | null = null;
+            if (j.fileUrl && !fileBlobUrl) {
+              try {
+                const fileUrlFull = j.fileUrl.startsWith('http') ? j.fileUrl : `${baseUrl}${j.fileUrl}`;
+                const fileRes = await fetch(fileUrlFull);
+                if (fileRes.ok) {
+                  downloadedBlob = await fileRes.blob();
+                  fileBlobUrl = URL.createObjectURL(downloadedBlob);
+                }
+              } catch {}
+            }
+
+            if (fileBlobUrl) {
+              const incoming = { ...j, dataUrl: fileBlobUrl, status: 'pending' as const };
+              addIncomingJob(incoming);
+              if (downloadedBlob) {
+                try {
+                  channelRef.current?.postMessage({
+                    action: 'SYNC_JOB_TO_SIBLINGS',
+                    job: incoming,
+                    fileBlob: downloadedBlob,
+                  });
+                } catch {}
+              }
+            }
+          }
+          return true;
+        }
+        return false;
+      } catch {
+        return false;
+      }
+    };
+
     const poll = async () => {
       if (cancelled) return;
       try {
-        const res = await apiFetch(`/api/print-drop/jobs/${sessionCode}`, { timeoutMs: 5000 });
-        if (res.ok) {
-          const data = await res.json();
-          if (data.jobs?.length) {
-            for (const j of data.jobs) {
-              if (j.tokenNum) tokenCounterRef.current = Math.max(tokenCounterRef.current, j.tokenNum + 1);
-
-              let fileBlobUrl = j.dataUrl || '';
-              if (j.fileUrl && !fileBlobUrl) {
-                try {
-                  const fileRes = await apiFetch(j.fileUrl, { timeoutMs: 40000 });
-                  if (fileRes.ok) {
-                    const blob = await fileRes.blob();
-                    fileBlobUrl = URL.createObjectURL(blob);
-                  }
-                } catch {}
-              }
-
-              if (fileBlobUrl) addIncomingJob({ ...j, dataUrl: fileBlobUrl, status: 'pending' });
-            }
-            // Got new jobs — reset backoff to fast
-            pollBackoffRef.current = 3500;
-          } else {
-            // Empty — back off gradually up to 12 seconds to save resources
-            pollBackoffRef.current = Math.min(pollBackoffRef.current + 500, 12000);
-          }
+        // 1. Poll configured API_BASE (or same-origin Vite dev/preview server if localhost:8000 is not running)
+        const gotPrimary = await fetchRelayJobsFromBase(API_BASE);
+        let gotSecondary = false;
+        if (typeof window !== 'undefined' && API_BASE.includes('localhost:8000')) {
+          // On localhost:3000, also check same-origin Vite relay so it works even without Python port 8000 running
+          gotSecondary = await fetchRelayJobsFromBase('');
+        }
+        if (gotPrimary || gotSecondary) {
+          pollBackoffRef.current = 3000;
+        } else {
+          pollBackoffRef.current = Math.min(pollBackoffRef.current + 500, 10000);
         }
       } catch {
-        // Backend sleeping — silent fail, slow down polling
-        pollBackoffRef.current = Math.min(pollBackoffRef.current + 1000, 12000);
+        pollBackoffRef.current = Math.min(pollBackoffRef.current + 1000, 10000);
       }
 
       if (!cancelled) {
@@ -1070,7 +1242,7 @@ export default function ScanToPrint() {
       }
     };
 
-    pollTimerRef.current = setTimeout(poll, 3500);
+    pollTimerRef.current = setTimeout(poll, 2500);
 
     return () => {
       cancelled = true;
@@ -1210,45 +1382,56 @@ export default function ScanToPrint() {
     win.document.close();
   };
 
-  // ─── Relay Upload (Fallback / secondary guarantee) ───────────────────────
+  // ─── Relay Upload (Fallback / secondary guarantee with localhost auto-fallback) ───
   const uploadViaRelay = (file: File, copies: number, colorMode: 'bw' | 'color', jobId: string): Promise<boolean> => {
-    return new Promise((resolve) => {
-      const xhr = new XMLHttpRequest();
-      const formData = new FormData();
-      const activeSession = isSenderMode ? (targetCounterPin || sessionCode) : sessionCode;
-      formData.append('session_id', activeSession);
-      formData.append('file', file);
-      formData.append('copies', String(copies));
-      formData.append('color_mode', colorMode);
-      formData.append('sender_device_id', getSenderDeviceId());
-      formData.append('job_id', jobId);
-      formData.append('device_label', getDeviceLabel());
+    const attemptUploadToBase = (baseUrl: string): Promise<boolean> =>
+      new Promise((resolve) => {
+        const xhr = new XMLHttpRequest();
+        const formData = new FormData();
+        const activeSession = isSenderMode ? (targetCounterPin || sessionCode) : sessionCode;
+        formData.append('session_id', activeSession);
+        formData.append('file', file);
+        formData.append('copies', String(copies));
+        formData.append('color_mode', colorMode);
+        formData.append('sender_device_id', getSenderDeviceId());
+        formData.append('job_id', jobId);
+        formData.append('device_label', getDeviceLabel());
 
-      xhr.upload.onprogress = (e) => {
-        if (e.lengthComputable) {
-          const pct = Math.round((e.loaded / e.total) * 95);
-          setSenderProgress(pct);
-          setSenderStatusText(
-            `Uploading ${file.name} (${(e.loaded / 1048576).toFixed(1)} / ${(e.total / 1048576).toFixed(1)} MB)...`
-          );
-        }
-      };
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable) {
+            const pct = Math.round((e.loaded / e.total) * 95);
+            setSenderProgress(pct);
+            setSenderStatusText(
+              `Uploading ${file.name} (${(e.loaded / 1048576).toFixed(1)} / ${(e.total / 1048576).toFixed(1)} MB)...`
+            );
+          }
+        };
 
-      xhr.onload = () => {
-        if (xhr.status === 200) {
-          try {
-            const data = JSON.parse(xhr.responseText);
-            if (data.token_num) setCustomerToken(data.token_num);
-          } catch {}
-          resolve(true);
-        } else {
-          resolve(false);
-        }
-      };
-      xhr.onerror = () => resolve(false);
-      xhr.open('POST', `${API_BASE}/api/print-drop/upload`);
-      xhr.send(formData);
-    });
+        xhr.onload = () => {
+          if (xhr.status === 200) {
+            try {
+              const data = JSON.parse(xhr.responseText);
+              if (data.token_num) setCustomerToken(data.token_num);
+            } catch {}
+            resolve(true);
+          } else {
+            resolve(false);
+          }
+        };
+        xhr.onerror = () => resolve(false);
+        xhr.open('POST', `${baseUrl}/api/print-drop/upload`);
+        xhr.send(formData);
+      });
+
+    return (async () => {
+      const okPrimary = await attemptUploadToBase(API_BASE);
+      if (okPrimary) return true;
+      // If localhost:8000 is not running during npm run dev, fall back to same-origin Vite relay (/api/print-drop/upload)
+      if (API_BASE.includes('localhost:8000')) {
+        return await attemptUploadToBase('');
+      }
+      return false;
+    })();
   };
 
   // ─── Customer Mobile Upload (Multi-channel, Sliding Window) ─────────────
@@ -1435,21 +1618,21 @@ export default function ScanToPrint() {
           });
         }
 
-        // ── Channel B: Backend Relay (smart fallback ONLY if WebRTC failed or unacknowledged) ──
-        if (!ackReceived) {
-          setSenderStatusText(`Transmitting ${file.name} via cloud relay...`);
-          const relayOk = await uploadViaRelay(file, senderCopies, senderColorMode, jobId);
-          if (!relayOk && !beamedViaWebRtc) {
-            throw new Error(`Failed to transmit ${file.name}`);
-          }
-        }
-
-        // ── Channel C: BroadcastChannel (same-browser testing fallback) ──
+        // ── Channel B: Instant Same-Browser / PWA-to-Counter BroadcastChannel ──
         if (channelRef.current && !ackReceived) {
           try {
-            const blobUrl = URL.createObjectURL(file);
+            const bcAckPromise = new Promise<boolean>((resolve) => {
+              const timeout = setTimeout(() => resolve(false), 400);
+              ackResolversRef.current[jobId] = (token) => {
+                clearTimeout(timeout);
+                if (token) setCustomerToken(token);
+                resolve(true);
+              };
+            });
+
             channelRef.current.postMessage({
               action: 'NEW_PRINT_JOB',
+              fileBlob: file,
               job: {
                 id: jobId,
                 tokenNum: 0,
@@ -1458,16 +1641,25 @@ export default function ScanToPrint() {
                 name: file.name,
                 size: file.size,
                 type: file.type || 'application/pdf',
-                dataUrl: blobUrl,
+                dataUrl: '',
                 timestamp,
                 copies: senderCopies,
                 colorMode: senderColorMode,
                 status: 'pending',
               },
             });
-            // Revoke after a generous delay to let receiver load the blob
-            setTimeout(() => { try { URL.revokeObjectURL(blobUrl); } catch {} }, 30000);
+
+            ackReceived = await bcAckPromise;
           } catch {}
+        }
+
+        // ── Channel C: Backend Relay (smart fallback ONLY if WebRTC & BroadcastChannel unacknowledged) ──
+        if (!ackReceived) {
+          setSenderStatusText(`Transmitting ${file.name} via cloud relay...`);
+          const relayOk = await uploadViaRelay(file, senderCopies, senderColorMode, jobId);
+          if (!relayOk && !beamedViaWebRtc) {
+            throw new Error(`Failed to transmit ${file.name}`);
+          }
         }
       }
 
