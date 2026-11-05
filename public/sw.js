@@ -1,5 +1,6 @@
-// PDF Media Suite - High Performance PWA Service Worker v1.0
+// PDF Media Suite - Enterprise PWA Service Worker v2.0
 // Features: W3C Web Share Target API Level 2 (Direct WhatsApp & System Share Handler)
+// Materializes shared file streams into ArrayBuffers immediately to prevent Android content:// URI expiration.
 
 const DB_NAME = 'pms_share_cache_v1';
 const STORE_NAME = 'shared_records';
@@ -29,7 +30,7 @@ async function saveSharedRecord(record) {
   });
 }
 
-self.addEventListener('install', (event) => {
+self.addEventListener('install', () => {
   self.skipWaiting();
 });
 
@@ -38,33 +39,81 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
-  const url = new URL(event.request.url);
+  let url;
+  try {
+    url = new URL(event.request.url);
+  } catch {
+    return;
+  }
 
   // Intercept Web Share Target POST requests
-  if (event.request.method === 'POST' && (url.pathname === '/share-target' || url.pathname.endsWith('/share-target'))) {
+  if (
+    event.request.method === 'POST' &&
+    (url.pathname === '/share-target' || url.pathname.endsWith('/share-target'))
+  ) {
     event.respondWith(
       (async () => {
         try {
           const formData = await event.request.formData();
-          const files = formData.getAll('shared_files');
-          const title = formData.get('title') || '';
-          const text = formData.get('text') || '';
+          let rawFiles = formData.getAll('shared_files');
 
-          const validFiles = [];
-          for (const f of files) {
-            if (f && typeof f === 'object' && f.name) {
-              validFiles.push(f);
+          // Fallback: if OS/app used a different field key, collect all File/Blob entries
+          if (!rawFiles || rawFiles.length === 0) {
+            rawFiles = [];
+            for (const [, value] of formData.entries()) {
+              if (value && typeof value === 'object' && typeof value.arrayBuffer === 'function') {
+                rawFiles.push(value);
+              }
             }
           }
 
-          if (validFiles.length > 0) {
+          const title = formData.get('title') || '';
+          const text = formData.get('text') || '';
+
+          // Materialize file streams into ArrayBuffers while Android content:// intent is still open
+          const materializedFiles = [];
+          for (const f of rawFiles) {
+            if (f && typeof f === 'object' && typeof f.arrayBuffer === 'function') {
+              try {
+                const buffer = await f.arrayBuffer();
+                if (buffer && buffer.byteLength > 0) {
+                  materializedFiles.push({
+                    name: f.name || `Shared_Document_${Date.now()}.pdf`,
+                    type: f.type || 'application/pdf',
+                    size: buffer.byteLength,
+                    lastModified: f.lastModified || Date.now(),
+                    buffer,
+                  });
+                }
+              } catch (readErr) {
+                // Fallback to storing raw Blob/File if arrayBuffer fails
+                materializedFiles.push(f);
+              }
+            }
+          }
+
+          if (materializedFiles.length > 0) {
             await saveSharedRecord({
               id: 'latest_share',
-              files: validFiles,
+              files: materializedFiles,
               title: String(title),
               text: String(text),
               timestamp: Date.now(),
             });
+
+            // Notify any already-open window clients so background tabs can react immediately
+            try {
+              const clientList = await self.clients.matchAll({
+                type: 'window',
+                includeUncontrolled: true,
+              });
+              for (const client of clientList) {
+                client.postMessage({
+                  type: 'PMS_SHARED_FILES_READY',
+                  timestamp: Date.now(),
+                });
+              }
+            } catch {}
           }
         } catch (err) {
           console.error('[PMS ServiceWorker] Error processing share target:', err);

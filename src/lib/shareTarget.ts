@@ -1,7 +1,8 @@
 /**
- * PDF Media Suite — Web Share Target & PWA Installation Manager
- * Handles incoming files shared from WhatsApp / File Manager via Android Share Sheet
- * and coordinates PWA installation prompts.
+ * PDF Media Suite — Enterprise Web Share Target & PWA Installation Manager
+ * Handles incoming files shared from WhatsApp / File Manager via Android Share Sheet,
+ * reconstructs materialized ArrayBuffers into native File instances, and coordinates
+ * PWA installation prompts.
  */
 
 const DB_NAME = 'pms_share_cache_v1';
@@ -34,15 +35,26 @@ export interface SharedBundle {
 
 /**
  * Retrieves and clears any pending files sent via Web Share Target (e.g. from WhatsApp).
+ * Uses a single atomic readwrite transaction to prevent race conditions across tabs.
  */
 export async function getSharedFilesFromCache(): Promise<SharedBundle | null> {
+  let db: IDBDatabase | null = null;
   try {
-    const db = await openShareDB();
+    db = await openShareDB();
     const record = await new Promise<any>((resolve, reject) => {
-      const tx = db.transaction(STORE_NAME, 'readwrite');
+      const tx = db!.transaction(STORE_NAME, 'readwrite');
       const store = tx.objectStore(STORE_NAME);
       const getReq = store.get('latest_share');
-      getReq.onsuccess = () => resolve(getReq.result);
+      getReq.onsuccess = () => {
+        const res = getReq.result;
+        if (res) {
+          // Delete atomically inside the same readwrite transaction so no duplicate consumer reads it
+          try {
+            store.delete('latest_share');
+          } catch {}
+        }
+        resolve(res);
+      };
       getReq.onerror = () => reject(getReq.error);
     });
 
@@ -53,33 +65,32 @@ export async function getSharedFilesFromCache(): Promise<SharedBundle | null> {
     // Check expiration: valid for up to 15 minutes after sharing
     const isExpired = Date.now() - (record.timestamp || 0) > 15 * 60 * 1000;
     if (isExpired) {
-      const tx = db.transaction(STORE_NAME, 'readwrite');
-      tx.objectStore(STORE_NAME).delete('latest_share');
       return null;
     }
 
-    // Convert stored items back to standard File objects
+    // Convert stored items (ArrayBuffer descriptors, Blobs, or Files) back to standard File objects
     const restoredFiles: File[] = [];
     for (const item of record.files) {
       if (item instanceof File) {
         restoredFiles.push(item);
       } else if (item instanceof Blob) {
         const name = (item as any).name || 'shared-document.pdf';
-        restoredFiles.push(new File([item], name, { type: item.type || 'application/pdf', lastModified: Date.now() }));
+        restoredFiles.push(
+          new File([item], name, {
+            type: item.type || 'application/pdf',
+            lastModified: Date.now(),
+          })
+        );
       } else if (item && typeof item === 'object') {
         const name = item.name || 'shared-document.pdf';
         const type = item.type || 'application/pdf';
-        if (item.data) {
-          restoredFiles.push(new File([item.data], name, { type, lastModified: Date.now() }));
+        const lastModified = item.lastModified || Date.now();
+        const rawData = item.buffer || item.data;
+        if (rawData) {
+          restoredFiles.push(new File([rawData], name, { type, lastModified }));
         }
       }
     }
-
-    // Clean up record so it is not re-consumed on future page reloads
-    try {
-      const tx = db.transaction(STORE_NAME, 'readwrite');
-      tx.objectStore(STORE_NAME).delete('latest_share');
-    } catch {}
 
     if (restoredFiles.length === 0) return null;
 
@@ -92,12 +103,17 @@ export async function getSharedFilesFromCache(): Promise<SharedBundle | null> {
   } catch (err) {
     console.warn('[ShareTarget] Unable to retrieve shared files from IndexedDB:', err);
     return null;
+  } finally {
+    try {
+      db?.close();
+    } catch {}
   }
 }
 
-// ─── PWA Installation & Service Worker ──────────────────────────────────────
+// ─── PWA Installation & Service Worker Event Bus ────────────────────────────
 let deferredInstallPrompt: any = null;
 const installListeners = new Set<(canInstall: boolean) => void>();
+const sharedReadyListeners = new Set<() => void>();
 
 export function registerServiceWorker(): void {
   if (typeof window === 'undefined') return;
@@ -107,13 +123,11 @@ export function registerServiceWorker(): void {
       navigator.serviceWorker
         .register('/sw.js')
         .then((reg) => {
-          // Check for worker updates periodically
           reg.onupdatefound = () => {
             const installing = reg.installing;
             if (installing) {
               installing.onstatechange = () => {
                 if (installing.state === 'installed' && navigator.serviceWorker.controller) {
-                  // New service worker version available
                   console.info('[PMS] Service worker updated.');
                 }
               };
@@ -123,6 +137,13 @@ export function registerServiceWorker(): void {
         .catch((err) => {
           console.warn('[PMS] Service worker registration failed:', err);
         });
+    });
+
+    // Listen for live notifications from sw.js when new files are shared to an already-open PWA
+    navigator.serviceWorker.addEventListener('message', (event) => {
+      if (event.data && event.data.type === 'PMS_SHARED_FILES_READY') {
+        sharedReadyListeners.forEach((fn) => fn());
+      }
     });
 
     window.addEventListener('beforeinstallprompt', (e: Event) => {
@@ -136,6 +157,13 @@ export function registerServiceWorker(): void {
       installListeners.forEach((fn) => fn(false));
     });
   }
+}
+
+export function subscribeSharedFilesReady(callback: () => void): () => void {
+  sharedReadyListeners.add(callback);
+  return () => {
+    sharedReadyListeners.delete(callback);
+  };
 }
 
 export function subscribePWAInstall(callback: (canInstall: boolean) => void): () => void {

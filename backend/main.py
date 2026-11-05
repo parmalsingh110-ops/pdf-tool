@@ -4498,10 +4498,19 @@ def _prune_expired_print_rooms():
             if session_folder.exists():
                 shutil.rmtree(session_folder, ignore_errors=True)
 
-        # LRU safety valve: cap total active rooms tracked in memory to 2,000
-        if len(PRINT_DROP_ROOMS) > 2000:
+        # Also sweep any individual spooled .bin files older than 15 minutes inside active rooms
+        if PRINT_DROP_SPOOL_DIR.exists():
+            for bin_file in PRINT_DROP_SPOOL_DIR.glob("*/*.bin"):
+                try:
+                    if now - bin_file.stat().st_mtime > 900:
+                        bin_file.unlink(missing_ok=True)
+                except Exception:
+                    pass
+
+        # LRU safety valve: cap total active rooms tracked in memory to 5,000
+        if len(PRINT_DROP_ROOM_TIMESTAMPS) > 5000:
             sorted_rooms = sorted(PRINT_DROP_ROOM_TIMESTAMPS.items(), key=lambda x: x[1])
-            for s, _ in sorted_rooms[:500]:
+            for s, _ in sorted_rooms[:1000]:
                 PRINT_DROP_ROOMS.pop(s, None)
                 PRINT_DROP_ROOM_TIMESTAMPS.pop(s, None)
                 PRINT_DROP_ROOM_TOKENS.pop(s, None)
@@ -4536,6 +4545,8 @@ async def print_drop_upload(
     copies: int = Form(1),
     color_mode: str = Form("bw"),
     sender_device_id: str = Form(""),
+    job_id: str = Form(""),
+    device_label: str = Form(""),
 ):
     """
     Zero-RAM disk streaming relay:
@@ -4545,7 +4556,7 @@ async def print_drop_upload(
     """
     _prune_expired_print_rooms()
     clean_session = re.sub(r"[^A-Z0-9]", "", session_id.strip().upper())
-    if len(clean_session) < 4 or len(clean_session) > 12:
+    if len(clean_session) < 3 or len(clean_session) > 12:
         raise HTTPException(status_code=400, detail="Invalid session room PIN")
 
     # Anti-Spam Queue Cap: Max 30 pending uncollected files per room
@@ -4559,8 +4570,9 @@ async def print_drop_upload(
     session_folder = PRINT_DROP_SPOOL_DIR / clean_session
     session_folder.mkdir(parents=True, exist_ok=True)
 
-    job_id = f"job_{int(time.time() * 1000)}_{uuid.uuid4().hex[:6]}"
-    file_path = session_folder / f"{job_id}.bin"
+    clean_client_job_id = re.sub(r"[^a-zA-Z0-9_-]", "", (job_id or "").strip())[:48]
+    final_job_id = clean_client_job_id if clean_client_job_id else f"job_{int(time.time() * 1000)}_{uuid.uuid4().hex[:6]}"
+    file_path = session_folder / f"{final_job_id}.bin"
 
     # Stream file to disk in 64KB chunks — zero base64 memory allocation
     total_size = 0
@@ -4568,10 +4580,10 @@ async def print_drop_upload(
         with open(file_path, "wb") as f_out:
             while chunk := await file.read(64 * 1024):
                 total_size += len(chunk)
-                if total_size > 50 * 1024 * 1024:
+                if total_size > 100 * 1024 * 1024:
                     f_out.close()
                     file_path.unlink(missing_ok=True)
-                    raise HTTPException(status_code=400, detail="File too large (max 50MB)")
+                    raise HTTPException(status_code=400, detail="File too large (max 100MB)")
                 f_out.write(chunk)
     except HTTPException:
         raise
@@ -4593,16 +4605,17 @@ async def print_drop_upload(
 
     # Lightweight metadata (< 250 bytes in RAM)
     job = {
-        "id": job_id,
+        "id": final_job_id,
         "tokenNum": room_token,
         "senderDeviceId": clean_device_id,
+        "deviceLabel": (device_label or "Mobile Phone").strip()[:32],
         "name": file.filename or "Document.pdf",
         "size": total_size,
         "type": mime,
-        "fileUrl": f"/api/print-drop/file/{clean_session}/{job_id}",
+        "fileUrl": f"/api/print-drop/file/{clean_session}/{final_job_id}",
         "timestamp": time.strftime("%I:%M:%S %p"),
-        "copies": copies,
-        "colorMode": color_mode,
+        "copies": max(1, min(20, copies)),
+        "colorMode": "color" if color_mode == "color" else "bw",
     }
 
     if clean_session not in PRINT_DROP_ROOMS:
@@ -4611,7 +4624,7 @@ async def print_drop_upload(
     PRINT_DROP_ROOMS[clean_session].append(job)
     PRINT_DROP_ROOM_TIMESTAMPS[clean_session] = time.time()
 
-    return {"success": True, "job_id": job_id, "token_num": room_token, "session_id": clean_session}
+    return {"success": True, "job_id": final_job_id, "token_num": room_token, "session_id": clean_session}
 
 @app.get("/api/print-drop/jobs/{session_id}")
 async def print_drop_poll(session_id: str):
@@ -4624,7 +4637,7 @@ async def print_drop_poll(session_id: str):
 
 @app.get("/api/print-drop/file/{session_id}/{job_id}")
 async def print_drop_download_file(session_id: str, job_id: str):
-    """Serve spooled document to counter PC with immediate streaming."""
+    """Serve spooled document to counter PC with immediate streaming and instant post-delivery deletion."""
     clean_session = re.sub(r"[^A-Z0-9]", "", session_id.strip().upper())
     safe_job_id = re.sub(r"[^a-zA-Z0-9_-]", "", job_id)
 
@@ -4638,7 +4651,8 @@ async def print_drop_download_file(session_id: str, job_id: str):
         headers={
             "Cache-Control": "private, no-cache, no-store, must-revalidate",
             "Content-Disposition": f'inline; filename="{safe_job_id}.bin"',
-        }
+        },
+        background=BackgroundTask(lambda: file_path.unlink(missing_ok=True)),
     )
 
 

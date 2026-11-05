@@ -51,6 +51,7 @@ import {
   getSharedFilesFromCache,
   promptPWAInstall,
   subscribePWAInstall,
+  subscribeSharedFilesReady,
   isPWARunningStandalone,
 } from '../lib/shareTarget';
 
@@ -88,6 +89,7 @@ interface IncomingTransfer {
   receivedBytes: number;                // Incremental byte count for O(1) progress tracking
   copies: number;
   colorMode: 'bw' | 'color';
+  lastUpdated: number;                  // Watchdog timestamp to prevent stuck transfers
 }
 
 interface CustomerGroup {
@@ -274,10 +276,13 @@ export default function ScanToPrint() {
   const [mobileConnectionStatus, setMobileConnectionStatus] = useState<'connecting' | 'connected' | 'fallback'>('connecting');
   const [peerReconnectKey, setPeerReconnectKey] = useState<number>(0);
 
-  // ── Web Share Target (WhatsApp / File Share) & PWA state ────────────────
+  // ── Web Share Target (WhatsApp / File Share), QR Scanner & PWA state ────
   const [canInstallPWA, setCanInstallPWA] = useState<boolean>(false);
   const [isSharedFromExternal, setIsSharedFromExternal] = useState<boolean>(false);
   const [sharedSourceTitle, setSharedSourceTitle] = useState<string>('');
+  const [showQrScanner, setShowQrScanner] = useState<boolean>(false);
+  const [qrScanError, setQrScanError] = useState<string | null>(null);
+  const qrVideoRef = useRef<HTMLVideoElement | null>(null);
 
   // ── Peer & Channel refs ──────────────────────────────────────────────────
   const peerRef = useRef<Peer | null>(null);
@@ -293,8 +298,8 @@ export default function ScanToPrint() {
 
   // ── PIN Entry & File Selection Helpers ────────────────────────────────────
   const handleConnectWithPin = useCallback((pinToConnect: string) => {
-    const cleanPin = pinToConnect.trim().toUpperCase();
-    if (cleanPin.length !== 6) return;
+    const cleanPin = pinToConnect.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (cleanPin.length < 3 || cleanPin.length > 10) return;
     setTargetCounterPin(cleanPin);
     setMobileConnectionStatus('connecting');
 
@@ -310,7 +315,7 @@ export default function ScanToPrint() {
   }, []);
 
   const handlePinDigitChange = (index: number, val: string) => {
-    const char = val.slice(-1).toUpperCase();
+    const char = val.slice(-1).toUpperCase().replace(/[^A-Z0-9]/g, '');
     const newDigits = [...pinDigits];
     newDigits[index] = char;
     setPinDigits(newDigits);
@@ -328,34 +333,69 @@ export default function ScanToPrint() {
   const handlePinKeyDown = (index: number, e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Backspace' && !pinDigits[index] && index > 0) {
       pinInputRefs.current[index - 1]?.focus();
+    } else if (e.key === 'Enter') {
+      const full = pinDigits.join('').trim();
+      if (full.length >= 3) {
+        handleConnectWithPin(full);
+      }
     }
   };
 
   const handlePinPaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
     e.preventDefault();
     const text = e.clipboardData.getData('text').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
-    if (text.length >= 6) {
-      const chars = text.slice(0, 6).split('');
+    if (text.length >= 3) {
+      const clipped = text.slice(0, 10);
+      const chars = clipped.slice(0, 6).split('');
+      while (chars.length < 6) chars.push('');
       setPinDigits(chars);
-      handleConnectWithPin(text.slice(0, 6));
+      handleConnectWithPin(clipped);
     }
   };
 
-  const handleFilesSelected = (files: File[]) => {
+  const handleFilesSelected = useCallback((files: File[], isFromCamera = false) => {
     const valid: File[] = [];
     let hasOver100Mb = false;
-    files.forEach((f) => {
+    const timeTag = new Date().toTimeString().slice(0, 8).replace(/:/g, '');
+
+    files.forEach((f, idx) => {
       if (f.size > 100 * 1024 * 1024) {
         hasOver100Mb = true;
       } else {
-        valid.push(f);
+        // Rename generic mobile camera captures (image.jpg / photo.jpg) so multiple scans never collide
+        let fileToQueue = f;
+        if (isFromCamera || /^image\.\w+$|^photo\.\w+$/i.test(f.name)) {
+          const ext = f.name.split('.').pop() || 'jpg';
+          fileToQueue = new File([f], `Camera_Scan_${timeTag}_${idx + 1}.${ext}`, {
+            type: f.type || 'image/jpeg',
+            lastModified: Date.now(),
+          });
+        }
+        valid.push(fileToQueue);
       }
     });
+
     if (hasOver100Mb) {
       alert('Files larger than 100 MB cannot be transferred. Please select smaller files.');
     }
-    setSenderFiles(valid);
-  };
+
+    if (valid.length > 0) {
+      setSenderSuccess(false);
+      setSenderFiles((prev) => {
+        const merged = [...prev];
+        for (const nf of valid) {
+          if (!merged.some((ef) => ef.name === nf.name && ef.size === nf.size)) {
+            merged.push(nf);
+          }
+        }
+        return merged;
+      });
+    }
+  }, []);
+
+  const removeSenderFile = useCallback((indexToRemove: number) => {
+    setSenderFiles((prev) => prev.filter((_, idx) => idx !== indexToRemove));
+  }, []);
 
   // ─── Notification Chime (Singleton Context) ─────────────────────────────
   const playChime = useCallback(() => {
@@ -410,8 +450,19 @@ export default function ScanToPrint() {
     (job: Omit<PrintJob, 'tokenNum' | 'status'> & { tokenNum?: number; status?: 'pending' | 'printed'; senderDeviceId?: string; deviceLabel?: string }) => {
       let isDuplicate = false;
       setPrintJobs((prev) => {
-        // Deduplicate by ID and by (name + ±100-byte size)
-        if (prev.some((j) => j.id === job.id || (j.name === job.name && Math.abs(j.size - job.size) < 100))) {
+        // Deterministic deduplication by job ID or identical pending file from same device
+        if (
+          prev.some(
+            (j) =>
+              j.id === job.id ||
+              (j.status === 'pending' &&
+                j.senderDeviceId &&
+                job.senderDeviceId &&
+                j.senderDeviceId === job.senderDeviceId &&
+                j.name === job.name &&
+                j.size === job.size)
+          )
+        ) {
           isDuplicate = true;
           return prev;
         }
@@ -484,13 +535,33 @@ export default function ScanToPrint() {
 
     const params = new URLSearchParams(window.location.search);
     const existingSession = params.get('session');
+    const isFromShare = params.get('from_share') === 'true' || params.get('mode') === 'send';
+
+    // Always generate or load the Counter PIN so if the user switches to Counter Station it's ready
+    let permanentPin = '';
+    try {
+      permanentPin = localStorage.getItem(PMS_PERMANENT_PIN_KEY) || '';
+    } catch {}
+    if (!permanentPin) {
+      try {
+        permanentPin = sessionStorage.getItem('pms_counter_session') || '';
+      } catch {}
+    }
+    if (!permanentPin) {
+      permanentPin = generateCleanPin();
+    }
+    try {
+      localStorage.setItem(PMS_PERMANENT_PIN_KEY, permanentPin);
+    } catch {}
 
     if (existingSession) {
-      const pin = existingSession.toUpperCase();
+      const pin = existingSession.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
       setSessionCode(pin);
       setTargetCounterPin(pin);
       setIsSenderMode(true);
-      setPinDigits(pin.slice(0, 6).split(''));
+      const chars = pin.slice(0, 6).split('');
+      while (chars.length < 6) chars.push('');
+      setPinDigits(chars);
 
       try {
         const storedRecent = localStorage.getItem('pms_recent_counter_pins');
@@ -499,31 +570,14 @@ export default function ScanToPrint() {
         localStorage.setItem('pms_recent_counter_pins', JSON.stringify(updated));
         setRecentPins(updated);
       } catch {}
+    } else if (isFromShare) {
+      // Opened via WhatsApp / System Share Target: start directly in Sender Mode!
+      setSessionCode(permanentPin);
+      setIsSenderMode(true);
     } else {
-      // COUNTER PC: Always load permanent Counter PIN so standee QR stays valid forever
-      let permanentPin = '';
-      try {
-        permanentPin = localStorage.getItem(PMS_PERMANENT_PIN_KEY) || '';
-      } catch {}
-
-      if (permanentPin) {
-        setSessionCode(permanentPin);
-        setIsSenderMode(false);
-      } else {
-        // First time initialization: check legacy sessionStorage or generate clean PIN
-        let initialPin = '';
-        try {
-          initialPin = sessionStorage.getItem('pms_counter_session') || '';
-        } catch {}
-        if (!initialPin) {
-          initialPin = generateCleanPin();
-        }
-        try {
-          localStorage.setItem(PMS_PERMANENT_PIN_KEY, initialPin);
-        } catch {}
-        setSessionCode(initialPin);
-        setIsSenderMode(false);
-      }
+      // COUNTER PC default mode
+      setSessionCode(permanentPin);
+      setIsSenderMode(false);
     }
   }, []);
 
@@ -536,34 +590,126 @@ export default function ScanToPrint() {
   }, []);
 
   // ─── Web Share Target / WhatsApp Direct Share Consumer ───────────────────
+  const consumePendingSharedFiles = useCallback(async () => {
+    try {
+      const bundle = await getSharedFilesFromCache();
+      if (bundle && bundle.files.length > 0) {
+        setIsSenderMode(true);
+        setIsSharedFromExternal(true);
+        if (bundle.title) setSharedSourceTitle(bundle.title);
+        handleFilesSelected(bundle.files, false);
+        playChime();
+        // Clean the from_share param from URL cleanly without reloading
+        try {
+          const cleanUrl = new URL(window.location.href);
+          if (cleanUrl.searchParams.has('from_share')) {
+            cleanUrl.searchParams.delete('from_share');
+            window.history.replaceState({}, '', cleanUrl.toString());
+          }
+        } catch {}
+      }
+    } catch (e) {
+      console.warn('[ScanToPrint] Share target check error:', e);
+    }
+  }, [handleFilesSelected, playChime]);
+
   useEffect(() => {
-    let isCancelled = false;
+    void consumePendingSharedFiles();
+    const unsubShareReady = subscribeSharedFilesReady(() => {
+      void consumePendingSharedFiles();
+    });
+    const onFocusOrVisible = () => {
+      if (document.visibilityState === 'visible') {
+        void consumePendingSharedFiles();
+      }
+    };
+    window.addEventListener('focus', onFocusOrVisible);
+    document.addEventListener('visibilitychange', onFocusOrVisible);
+    return () => {
+      unsubShareReady();
+      window.removeEventListener('focus', onFocusOrVisible);
+      document.removeEventListener('visibilitychange', onFocusOrVisible);
+    };
+  }, [consumePendingSharedFiles]);
+
+  // ─── Built-In Live Camera QR Code Scanner (for WhatsApp Share / Sender) ──
+  useEffect(() => {
+    if (!showQrScanner) return;
+    let activeStream: MediaStream | null = null;
+    let scanInterval: ReturnType<typeof setInterval> | null = null;
+    let cancelled = false;
+
+    setQrScanError(null);
+
     (async () => {
       try {
-        const bundle = await getSharedFilesFromCache();
-        if (bundle && bundle.files.length > 0 && !isCancelled) {
-          setIsSenderMode(true);
-          setIsSharedFromExternal(true);
-          if (bundle.title) setSharedSourceTitle(bundle.title);
-          handleFilesSelected(bundle.files);
-          playChime();
-          // Clean the from_share param from URL cleanly without reloading
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          setQrScanError('Camera access is not available in this browser. Please enter the 6-digit PIN manually.');
+          return;
+        }
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
+          audio: false,
+        });
+        if (cancelled) {
+          stream.getTracks().forEach((t) => t.stop());
+          return;
+        }
+        activeStream = stream;
+        if (qrVideoRef.current) {
+          qrVideoRef.current.srcObject = stream;
+          await qrVideoRef.current.play().catch(() => {});
+        }
+
+        const BarcodeDetectorClass = (window as any).BarcodeDetector;
+        if (!BarcodeDetectorClass) {
+          setQrScanError('Live QR auto-detection is not supported on this browser version. Please type the Counter PIN shown below the QR.');
+          return;
+        }
+
+        const detector = new BarcodeDetectorClass({ formats: ['qr_code'] });
+        scanInterval = setInterval(async () => {
+          if (cancelled || !qrVideoRef.current || qrVideoRef.current.readyState < 2) return;
           try {
-            const cleanUrl = new URL(window.location.href);
-            if (cleanUrl.searchParams.has('from_share')) {
-              cleanUrl.searchParams.delete('from_share');
-              window.history.replaceState({}, '', cleanUrl.toString());
+            const barcodes = await detector.detect(qrVideoRef.current);
+            if (barcodes && barcodes.length > 0) {
+              const raw = String(barcodes[0].rawValue || '').trim();
+              if (!raw) return;
+
+              let extractedPin = '';
+              try {
+                const parsedUrl = new URL(raw);
+                extractedPin = (parsedUrl.searchParams.get('session') || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+              } catch {
+                extractedPin = raw.toUpperCase().replace(/[^A-Z0-9]/g, '');
+              }
+
+              if (extractedPin.length >= 3 && extractedPin.length <= 10) {
+                if (scanInterval) clearInterval(scanInterval);
+                stream.getTracks().forEach((t) => t.stop());
+                playChime();
+                const chars = extractedPin.slice(0, 6).split('');
+                while (chars.length < 6) chars.push('');
+                setPinDigits(chars);
+                setShowQrScanner(false);
+                handleConnectWithPin(extractedPin);
+              }
             }
           } catch {}
-        }
-      } catch (e) {
-        console.warn('[ScanToPrint] Share target check error:', e);
+        }, 160);
+      } catch {
+        setQrScanError('Camera permission denied or unavailable. Please type the Counter PIN manually.');
       }
     })();
+
     return () => {
-      isCancelled = true;
+      cancelled = true;
+      if (scanInterval) clearInterval(scanInterval);
+      if (activeStream) {
+        activeStream.getTracks().forEach((t) => t.stop());
+      }
     };
-  }, [playChime]);
+  }, [showQrScanner, handleConnectWithPin, playChime]);
 
   // ─── BroadcastChannel (same-browser cross-tab) ───────────────────────────
   useEffect(() => {
@@ -605,8 +751,8 @@ export default function ScanToPrint() {
 
   // ─── WebRTC PeerJS (Primary Transport) ──────────────────────────────────
   useEffect(() => {
-    // In sender mode, wait until a valid 6-char target PIN is entered
-    if (isSenderMode && (!targetCounterPin || targetCounterPin.length < 6)) {
+    // In sender mode, wait until a valid 3 to 10-char target PIN is entered
+    if (isSenderMode && (!targetCounterPin || targetCounterPin.length < 3)) {
       return;
     }
 
@@ -615,6 +761,7 @@ export default function ScanToPrint() {
 
     const roomId = `pms-print-${activeSession.toLowerCase()}`;
     let peer: Peer;
+    let watchdogTimer: ReturnType<typeof setInterval> | null = null;
 
     if (!isSenderMode) {
       // ── COUNTER PC MODE ──────────────────────────────────────────────────
@@ -626,17 +773,42 @@ export default function ScanToPrint() {
 
       peer.on('open', () => setPeerStatus('online'));
 
+      // Auto-recover if signaling WebSocket temporarily drops during a long workday
+      peer.on('disconnected', () => {
+        setPeerStatus('connecting');
+        setTimeout(() => {
+          try {
+            if (peer && !peer.destroyed && peer.disconnected) {
+              peer.reconnect();
+            }
+          } catch {}
+        }, 1500);
+      });
+
+      // Stale Transfer Watchdog: free RAM and clear stuck progress bars if a client drops mid-stream
+      watchdogTimer = setInterval(() => {
+        const now = Date.now();
+        let removedAny = false;
+        for (const [jId, tr] of Object.entries(incomingTransfersRef.current)) {
+          if (now - (tr.lastUpdated || 0) > 15000) {
+            delete incomingTransfersRef.current[jId];
+            removedAny = true;
+          }
+        }
+        if (removedAny && Object.keys(incomingTransfersRef.current).length === 0) {
+          setIncomingProgress(null);
+        }
+      }, 5000);
+
       peer.on('connection', (conn) => {
         setConnectedMobiles((n) => n + 1);
+        const activeConnJobIds = new Set<string>();
 
         conn.on('data', (data: any) => {
           if (!data || typeof data !== 'object') return;
 
           if (data.action === 'JOB_START') {
-            // Initialise chunked transfer
-            // NOTE: totalChunks is an *estimate* (small-chunk count at warm-up time).
-            // The actual chunk count may differ due to adaptive chunk sizing.
-            // We use a Map-based approach on receive so sparse chunk indices work correctly.
+            activeConnJobIds.add(data.jobId);
             incomingTransfersRef.current[data.jobId] = {
               jobId: data.jobId,
               senderDeviceId: data.senderDeviceId,
@@ -651,6 +823,7 @@ export default function ScanToPrint() {
               receivedBytes: 0,
               copies: data.copies || 1,
               colorMode: data.colorMode || 'bw',
+              lastUpdated: Date.now(),
             };
             setIncomingProgress({ name: data.name, progress: 0 });
           }
@@ -658,13 +831,14 @@ export default function ScanToPrint() {
           else if (data.action === 'JOB_CHUNK') {
             const transfer = incomingTransfersRef.current[data.jobId];
             if (transfer) {
+              transfer.lastUpdated = Date.now();
               const chunkBuf = data.chunk as ArrayBuffer;
               if (!transfer.chunks[data.index]) {
                 transfer.chunks[data.index] = chunkBuf;
                 transfer.receivedCount++;
                 transfer.receivedBytes = (transfer.receivedBytes || 0) + (chunkBuf?.byteLength || 0);
               }
-              const pct = Math.min(99, Math.round((transfer.receivedBytes / transfer.size) * 100));
+              const pct = Math.min(99, Math.round((transfer.receivedBytes / Math.max(1, transfer.size)) * 100));
               // Throttle React state updates to when percentage integer actually changes
               setIncomingProgress((prev) => {
                 if (prev && prev.name === transfer.name && prev.progress === pct) return prev;
@@ -674,6 +848,7 @@ export default function ScanToPrint() {
           }
 
           else if (data.action === 'JOB_FINISH') {
+            activeConnJobIds.delete(data.jobId);
             const transfer = incomingTransfersRef.current[data.jobId];
             if (transfer) {
               let blobUrl = '';
@@ -738,7 +913,16 @@ export default function ScanToPrint() {
           }
         });
 
-        conn.on('close', () => setConnectedMobiles((n) => Math.max(0, n - 1)));
+        conn.on('close', () => {
+          setConnectedMobiles((n) => Math.max(0, n - 1));
+          // Clean up any unfinished transfers started on this connection
+          for (const jId of activeConnJobIds) {
+            delete incomingTransfersRef.current[jId];
+          }
+          if (Object.keys(incomingTransfersRef.current).length === 0) {
+            setIncomingProgress(null);
+          }
+        });
       });
 
       peer.on('error', (err) => {
@@ -799,6 +983,7 @@ export default function ScanToPrint() {
 
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
+      if (watchdogTimer) clearInterval(watchdogTimer);
       try {
         if (mobileConnRef.current) {
           clearTimeout((mobileConnRef.current as any)._fallbackTimer);
@@ -997,7 +1182,7 @@ export default function ScanToPrint() {
   };
 
   // ─── Relay Upload (Fallback / secondary guarantee) ───────────────────────
-  const uploadViaRelay = (file: File, copies: number, colorMode: 'bw' | 'color'): Promise<boolean> => {
+  const uploadViaRelay = (file: File, copies: number, colorMode: 'bw' | 'color', jobId: string): Promise<boolean> => {
     return new Promise((resolve) => {
       const xhr = new XMLHttpRequest();
       const formData = new FormData();
@@ -1007,6 +1192,8 @@ export default function ScanToPrint() {
       formData.append('copies', String(copies));
       formData.append('color_mode', colorMode);
       formData.append('sender_device_id', getSenderDeviceId());
+      formData.append('job_id', jobId);
+      formData.append('device_label', getDeviceLabel());
 
       xhr.upload.onprogress = (e) => {
         if (e.lengthComputable) {
@@ -1222,7 +1409,7 @@ export default function ScanToPrint() {
         // ── Channel B: Backend Relay (smart fallback ONLY if WebRTC failed or unacknowledged) ──
         if (!ackReceived) {
           setSenderStatusText(`Transmitting ${file.name} via cloud relay...`);
-          const relayOk = await uploadViaRelay(file, senderCopies, senderColorMode);
+          const relayOk = await uploadViaRelay(file, senderCopies, senderColorMode, jobId);
           if (!relayOk && !beamedViaWebRtc) {
             throw new Error(`Failed to transmit ${file.name}`);
           }
@@ -1788,9 +1975,9 @@ export default function ScanToPrint() {
         </div>
 
         <div className="w-full max-w-lg bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-6 sm:p-8 shadow-xl space-y-5">
-          {!targetCounterPin || targetCounterPin.length < 6 ? (
-            /* ── STEP 1: ENTER COUNTER PIN ──────────────────────────────── */
-            <div className="space-y-6 text-center py-2">
+          {!targetCounterPin || targetCounterPin.length < 3 ? (
+            /* ── STEP 1: ENTER COUNTER PIN OR SCAN SHOP QR ──────────────── */
+            <div className="space-y-5 text-center py-1">
               <div className="w-16 h-16 rounded-3xl bg-rose-50 dark:bg-rose-950/60 text-rose-600 mx-auto flex items-center justify-center shadow-inner">
                 <Radio className="w-8 h-8 animate-pulse" />
               </div>
@@ -1800,13 +1987,13 @@ export default function ScanToPrint() {
                   Beam Files to Counter PC
                 </h2>
                 <p className="text-xs sm:text-sm text-slate-500 mt-1 max-w-sm mx-auto">
-                  Type the 6-character Counter PIN shown on the shop screen (e.g. <span className="font-mono font-black text-rose-600">K9X2M7</span>) to connect wirelessly.
+                  Scan the shop QR code or type the Counter PIN shown on the shop screen (e.g. <span className="font-mono font-black text-rose-600">K9X2M7</span>).
                 </p>
               </div>
 
               {/* Shared / Pre-selected Document Banner */}
               {senderFiles.length > 0 && (
-                <div className="p-4 rounded-2xl bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-950/60 dark:to-teal-950/40 border border-emerald-200 dark:border-emerald-800 text-left space-y-1.5 shadow-sm">
+                <div className="p-4 rounded-2xl bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-950/60 dark:to-teal-950/40 border border-emerald-200 dark:border-emerald-800 text-left space-y-2 shadow-sm">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2 text-emerald-800 dark:text-emerald-300 font-extrabold text-xs">
                       <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
@@ -1816,17 +2003,95 @@ export default function ScanToPrint() {
                       {senderFiles.length} file{senderFiles.length > 1 ? 's' : ''}
                     </span>
                   </div>
-                  <div className="text-xs text-slate-800 dark:text-slate-200 font-bold truncate pl-6">
-                    {senderFiles.map((f) => f.name).join(', ')}
+
+                  <div className="space-y-1 max-h-28 overflow-y-auto pl-6 pr-1">
+                    {senderFiles.map((f, idx) => (
+                      <div key={idx} className="flex items-center justify-between text-xs bg-white/70 dark:bg-slate-900/60 px-2.5 py-1.5 rounded-xl border border-emerald-200/60 dark:border-emerald-800/60">
+                        <span className="font-bold text-slate-800 dark:text-slate-200 truncate max-w-[200px]">{f.name}</span>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className="text-[10px] font-mono text-slate-500">{formatFileSize(f.size)}</span>
+                          <button
+                            type="button"
+                            onClick={() => removeSenderFile(idx)}
+                            className="text-slate-400 hover:text-rose-600 p-0.5 rounded"
+                            title="Remove file"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                  <p className="text-[11px] text-emerald-700 dark:text-emerald-400 font-medium pl-6">
-                    Shopkeeper ka 6-digit PIN enter karein ya niche Recent Counter chunein.
-                  </p>
+
+                  {recentPins.length > 0 ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const lastPin = recentPins[0];
+                        const chars = lastPin.slice(0, 6).split('');
+                        while (chars.length < 6) chars.push('');
+                        setPinDigits(chars);
+                        handleConnectWithPin(lastPin);
+                      }}
+                      className="w-full mt-1 py-2.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-extrabold text-xs flex items-center justify-center gap-1.5 shadow-sm transition cursor-pointer"
+                    >
+                      <Zap className="w-3.5 h-3.5" /> 1-Tap Connect to Recent Shop (#{recentPins[0]})
+                    </button>
+                  ) : (
+                    <p className="text-[11px] text-emerald-700 dark:text-emerald-400 font-medium pl-6">
+                      Shopkeeper ka QR scan karein ya niche Counter PIN dalein.
+                    </p>
+                  )}
                 </div>
               )}
 
+              {/* Built-In Live Camera QR Scanner Modal / Viewfinder */}
+              {showQrScanner ? (
+                <div className="p-4 rounded-2xl bg-slate-900 text-white space-y-3 border-2 border-rose-500 shadow-lg">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-extrabold flex items-center gap-1.5 text-rose-400">
+                      <QrCode className="w-4 h-4" /> Point Camera at Counter QR Standee
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setShowQrScanner(false)}
+                      className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-300 flex items-center gap-1"
+                    >
+                      <X className="w-3.5 h-3.5" /> Close
+                    </button>
+                  </div>
+                  <div className="relative rounded-xl overflow-hidden bg-black aspect-video flex items-center justify-center border border-slate-700">
+                    <video
+                      ref={qrVideoRef}
+                      playsInline
+                      muted
+                      className="w-full h-full object-cover"
+                    />
+                    <div className="absolute inset-0 pointer-events-none border-2 border-dashed border-rose-500/70 m-6 rounded-xl" />
+                  </div>
+                  {qrScanError && (
+                    <p className="text-[11px] text-amber-300 font-medium">{qrScanError}</p>
+                  )}
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setShowQrScanner(true)}
+                  className="w-full py-3.5 px-4 rounded-2xl bg-slate-900 dark:bg-white hover:opacity-95 active:scale-98 text-white dark:text-slate-900 font-extrabold text-xs sm:text-sm shadow-md flex items-center justify-center gap-2 transition cursor-pointer"
+                >
+                  <QrCode className="w-4 h-4 text-rose-500" />
+                  <span>📷 Scan Shop Counter QR Code</span>
+                </button>
+              )}
+
+              <div className="flex items-center gap-3 text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                <div className="flex-1 h-px bg-slate-200 dark:bg-slate-800" />
+                <span>OR ENTER COUNTER PIN</span>
+                <div className="flex-1 h-px bg-slate-200 dark:bg-slate-800" />
+              </div>
+
               {/* 6-Digit PIN input boxes */}
-              <div className="flex items-center justify-center gap-1.5 sm:gap-3 pt-1">
+              <div className="flex items-center justify-center gap-1.5 sm:gap-3">
                 {[0, 1, 2, 3, 4, 5].map((idx) => (
                   <input
                     key={idx}
@@ -1842,13 +2107,13 @@ export default function ScanToPrint() {
                 ))}
               </div>
 
-              {/* Connect Button */}
+              {/* Connect Button (Supports 3 to 10 char custom shop codes too) */}
               <button
                 onClick={() => {
-                  const fullPin = pinDigits.join('').toUpperCase();
-                  if (fullPin.length === 6) handleConnectWithPin(fullPin);
+                  const fullPin = pinDigits.join('').trim().toUpperCase();
+                  if (fullPin.length >= 3) handleConnectWithPin(fullPin);
                 }}
-                disabled={pinDigits.join('').length < 6}
+                disabled={pinDigits.join('').trim().length < 3}
                 className="w-full py-4 rounded-2xl bg-rose-600 hover:bg-rose-700 active:scale-95 text-white font-bold text-sm shadow-md transition-all flex items-center justify-center gap-2 disabled:opacity-40 cursor-pointer"
               >
                 <Zap className="w-4 h-4" /> Connect to Counter PIN
@@ -1856,17 +2121,19 @@ export default function ScanToPrint() {
 
               {/* Recent Counters */}
               {recentPins.length > 0 && (
-                <div className="pt-2 space-y-2">
+                <div className="pt-1 space-y-2">
                   <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
                     Recently Connected Counters
                   </span>
                   <div className="flex items-center justify-center gap-2 flex-wrap">
-                    {recentPins.slice(0, 3).map((pin) => (
+                    {recentPins.slice(0, 4).map((pin) => (
                       <button
                         key={pin}
                         type="button"
                         onClick={() => {
-                          setPinDigits(pin.slice(0, 6).split(''));
+                          const chars = pin.slice(0, 6).split('');
+                          while (chars.length < 6) chars.push('');
+                          setPinDigits(chars);
                           handleConnectWithPin(pin);
                         }}
                         className="px-3.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 hover:border-rose-400 bg-white dark:bg-slate-800 text-xs font-mono font-bold text-slate-700 dark:text-slate-200 flex items-center gap-1.5 transition active:scale-95 shadow-sm"
@@ -1880,7 +2147,7 @@ export default function ScanToPrint() {
 
               {/* PWA 1-Tap WhatsApp Share Banner */}
               {canInstallPWA && (
-                <div className="pt-2">
+                <div className="pt-1">
                   <button
                     type="button"
                     onClick={promptPWAInstall}
@@ -2060,7 +2327,7 @@ export default function ScanToPrint() {
                       e.preventDefault();
                       setIsDragOver(false);
                       const dropped = Array.from(e.dataTransfer.files || []);
-                      if (dropped.length) handleFilesSelected(dropped);
+                      if (dropped.length) handleFilesSelected(dropped, false);
                     }}
                     className={`block border-2 border-dashed rounded-3xl p-7 text-center cursor-pointer transition-all active:scale-95 ${
                       isDragOver
@@ -2070,7 +2337,7 @@ export default function ScanToPrint() {
                   >
                     <Upload className="w-10 h-10 mx-auto text-slate-400 mb-2" />
                     <span className="font-extrabold text-sm sm:text-base text-slate-800 dark:text-slate-200 block">
-                      {isDragOver ? 'Drop files here!' : 'Tap or Drag & Drop Documents here'}
+                      {isDragOver ? 'Drop files here!' : senderFiles.length > 0 ? 'Tap to Add More Documents' : 'Tap or Drag & Drop Documents here'}
                     </span>
                     <span className="text-xs text-slate-400 mt-1 block">PDF, Aadhaar, Photos, Docs — Up to 100 MB</span>
                     <input
@@ -2078,7 +2345,10 @@ export default function ScanToPrint() {
                       multiple
                       accept="application/pdf,image/*,.pdf,.jpg,.jpeg,.png,.webp,.doc,.docx"
                       className="hidden"
-                      onChange={(e) => handleFilesSelected(Array.from(e.target.files || []))}
+                      onChange={(e) => {
+                        handleFilesSelected(Array.from(e.target.files || []), false);
+                        e.target.value = '';
+                      }}
                     />
                   </label>
 
@@ -2094,7 +2364,8 @@ export default function ScanToPrint() {
                         className="hidden"
                         onChange={(e) => {
                           const files = Array.from(e.target.files || []);
-                          if (files.length) handleFilesSelected(files);
+                          if (files.length) handleFilesSelected(files, true);
+                          e.target.value = '';
                         }}
                       />
                     </label>
@@ -2113,12 +2384,37 @@ export default function ScanToPrint() {
 
                   {senderFiles.length > 0 && (
                     <div className="space-y-3">
+                      <div className="flex items-center justify-between px-1">
+                        <span className="text-[11px] font-bold text-slate-500">
+                          Selected Documents ({senderFiles.length})
+                        </span>
+                        {senderFiles.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => setSenderFiles([])}
+                            className="text-[11px] font-bold text-rose-600 hover:underline"
+                          >
+                            Clear all
+                          </button>
+                        )}
+                      </div>
+
                       {/* Selected file list */}
                       <div className="max-h-36 overflow-y-auto space-y-1.5">
                         {senderFiles.map((f, i) => (
-                          <div key={i} className="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 text-xs">
-                            <span className="truncate max-w-[220px] font-medium text-slate-700 dark:text-slate-200">{f.name}</span>
-                            <span className="text-slate-400 font-mono shrink-0 ml-2">{formatFileSize(f.size)}</span>
+                          <div key={i} className="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200/60 dark:border-slate-700/60 text-xs">
+                            <span className="truncate max-w-[200px] font-semibold text-slate-700 dark:text-slate-200">{f.name}</span>
+                            <div className="flex items-center gap-2 shrink-0 ml-2">
+                              <span className="text-slate-400 font-mono text-[11px]">{formatFileSize(f.size)}</span>
+                              <button
+                                type="button"
+                                onClick={() => removeSenderFile(i)}
+                                className="p-1 rounded-lg hover:bg-rose-100 dark:hover:bg-rose-950 text-slate-400 hover:text-rose-600 transition"
+                                title="Remove file"
+                              >
+                                <X className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
                           </div>
                         ))}
                       </div>
