@@ -110,13 +110,84 @@ export async function getSharedFilesFromCache(): Promise<SharedBundle | null> {
   }
 }
 
-// ─── PWA Installation & Service Worker Event Bus ────────────────────────────
+// ─── PWA Installation, OS File Handler & Service Worker Event Bus ──────────
 let deferredInstallPrompt: any = null;
 const installListeners = new Set<(canInstall: boolean) => void>();
 const sharedReadyListeners = new Set<() => void>();
 
+/**
+ * Saves files launched via Windows Explorer / macOS Finder "Open With -> PDF Media Suite"
+ * (W3C File Handling API `window.launchQueue`) into the unified IndexedDB share cache.
+ */
+async function saveLaunchedFilesToCache(files: File[]): Promise<void> {
+  if (!files.length) return;
+  let db: IDBDatabase | null = null;
+  try {
+    const serializedFiles = [];
+    for (const f of files) {
+      const buffer = await f.arrayBuffer();
+      serializedFiles.push({
+        name: f.name || 'document.pdf',
+        type: f.type || 'application/pdf',
+        size: f.size || buffer.byteLength,
+        lastModified: f.lastModified || Date.now(),
+        buffer,
+      });
+    }
+    db = await openShareDB();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db!.transaction(STORE_NAME, 'readwrite');
+      const store = tx.objectStore(STORE_NAME);
+      store.put({
+        id: 'latest_share',
+        files: serializedFiles,
+        title: 'Opened from Device Storage',
+        text: '',
+        timestamp: Date.now(),
+      });
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch (err) {
+    console.warn('[FileHandler] Failed to cache OS-launched files:', err);
+  } finally {
+    try {
+      db?.close();
+    } catch {}
+  }
+}
+
 export function registerServiceWorker(): void {
   if (typeof window === 'undefined') return;
+
+  // W3C File Handling API: handles "Open With -> PDF Media Suite" from Windows Explorer & Mac Finder
+  if ('launchQueue' in window && (window as any).launchQueue) {
+    try {
+      (window as any).launchQueue.setConsumer(async (launchParams: any) => {
+        if (!launchParams || !launchParams.files || !launchParams.files.length) return;
+        const extractedFiles: File[] = [];
+        for (const handle of launchParams.files) {
+          try {
+            if (handle && typeof handle.getFile === 'function') {
+              const file = await handle.getFile();
+              if (file) extractedFiles.push(file);
+            }
+          } catch (e) {
+            console.warn('[FileHandler] Could not read file handle:', e);
+          }
+        }
+        if (extractedFiles.length > 0) {
+          await saveLaunchedFilesToCache(extractedFiles);
+          sharedReadyListeners.forEach((fn) => fn());
+          if (!window.location.pathname.includes('/scan-to-print')) {
+            window.location.href = '/scan-to-print?from_share=true';
+          }
+        }
+      });
+    } catch (err) {
+      console.warn('[FileHandler] launchQueue registration skipped:', err);
+    }
+  }
 
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {

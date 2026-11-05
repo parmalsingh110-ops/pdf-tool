@@ -36,6 +36,20 @@
       ]
     }
   },
+  "file_handlers": [
+    {
+      "action": "/scan-to-print?from_share=true",
+      "accept": {
+        "application/pdf": [".pdf"],
+        "image/jpeg": [".jpg", ".jpeg"],
+        "image/png": [".png"],
+        "image/webp": [".webp"],
+        "application/msword": [".doc"],
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document": [".docx"]
+      },
+      "launch_type": "single-client"
+    }
+  ],
   "icons": [
     {
       "src": "/favicon.svg",
