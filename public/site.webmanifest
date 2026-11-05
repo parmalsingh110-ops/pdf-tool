@@ -10,6 +10,32 @@
   "background_color": "#ffffff",
   "lang": "en",
   "categories": ["productivity", "utilities", "education"],
+  "share_target": {
+    "action": "/share-target",
+    "method": "POST",
+    "enctype": "multipart/form-data",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url",
+      "files": [
+        {
+          "name": "shared_files",
+          "accept": [
+            "application/pdf",
+            ".pdf",
+            "image/*",
+            ".jpg",
+            ".jpeg",
+            ".png",
+            ".webp",
+            "application/msword",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+          ]
+        }
+      ]
+    }
+  },
   "icons": [
     {
       "src": "/favicon.svg",
@@ -31,6 +57,13 @@
     }
   ],
   "shortcuts": [
+    {
+      "name": "Scan to Print",
+      "short_name": "Beam Print",
+      "description": "Beam documents directly to shop counter for printing",
+      "url": "/scan-to-print",
+      "icons": [{ "src": "/favicon.svg", "sizes": "96x96" }]
+    },
     {
       "name": "Merge PDF",
       "short_name": "Merge",

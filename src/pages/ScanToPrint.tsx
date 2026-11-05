@@ -36,6 +36,8 @@ import {
   LayoutGrid,
   X,
   Store,
+  Camera,
+  Share2,
 } from 'lucide-react';
 import { Peer } from 'peerjs';
 import QRCode from 'qrcode';
@@ -45,6 +47,12 @@ import { useSEO } from '../hooks/useSEO';
 import { usePageSEO } from '../lib/usePageSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
 import { apiFetch, API_BASE } from '../lib/api';
+import {
+  getSharedFilesFromCache,
+  promptPWAInstall,
+  subscribePWAInstall,
+  isPWARunningStandalone,
+} from '../lib/shareTarget';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 interface PrintJob {
@@ -265,6 +273,11 @@ export default function ScanToPrint() {
   const [senderColorMode, setSenderColorMode] = useState<'bw' | 'color'>('bw');
   const [mobileConnectionStatus, setMobileConnectionStatus] = useState<'connecting' | 'connected' | 'fallback'>('connecting');
   const [peerReconnectKey, setPeerReconnectKey] = useState<number>(0);
+
+  // ── Web Share Target (WhatsApp / File Share) & PWA state ────────────────
+  const [canInstallPWA, setCanInstallPWA] = useState<boolean>(false);
+  const [isSharedFromExternal, setIsSharedFromExternal] = useState<boolean>(false);
+  const [sharedSourceTitle, setSharedSourceTitle] = useState<string>('');
 
   // ── Peer & Channel refs ──────────────────────────────────────────────────
   const peerRef = useRef<Peer | null>(null);
@@ -513,6 +526,44 @@ export default function ScanToPrint() {
       }
     }
   }, []);
+
+  // ─── PWA Install Prompt Listener ─────────────────────────────────────────
+  useEffect(() => {
+    const unsub = subscribePWAInstall((canInstall) => {
+      setCanInstallPWA(canInstall);
+    });
+    return () => unsub();
+  }, []);
+
+  // ─── Web Share Target / WhatsApp Direct Share Consumer ───────────────────
+  useEffect(() => {
+    let isCancelled = false;
+    (async () => {
+      try {
+        const bundle = await getSharedFilesFromCache();
+        if (bundle && bundle.files.length > 0 && !isCancelled) {
+          setIsSenderMode(true);
+          setIsSharedFromExternal(true);
+          if (bundle.title) setSharedSourceTitle(bundle.title);
+          handleFilesSelected(bundle.files);
+          playChime();
+          // Clean the from_share param from URL cleanly without reloading
+          try {
+            const cleanUrl = new URL(window.location.href);
+            if (cleanUrl.searchParams.has('from_share')) {
+              cleanUrl.searchParams.delete('from_share');
+              window.history.replaceState({}, '', cleanUrl.toString());
+            }
+          } catch {}
+        }
+      } catch (e) {
+        console.warn('[ScanToPrint] Share target check error:', e);
+      }
+    })();
+    return () => {
+      isCancelled = true;
+    };
+  }, [playChime]);
 
   // ─── BroadcastChannel (same-browser cross-tab) ───────────────────────────
   useEffect(() => {
@@ -925,6 +976,9 @@ export default function ScanToPrint() {
                 <li>Apna Document ya Photo select karke <strong>Send</strong> karein</li>
                 <li>Screen par mila <strong>Customer Token</strong> counter par batayein</li>
               </ol>
+              <div style="margin-top: 6px; padding: 5px 8px; background: #fff1f2; border: 1px dashed #f43f5e; border-radius: 8px; font-size: 10px; color: #be123c; font-weight: bold;">
+                💡 WhatsApp Direct Share: WhatsApp me PDF par 'Share' daba kar 'PDF Media Suite' chunein — bina file dhoonde direct print!
+              </div>
             </div>
             <div class="footer-badge">🔒 100% Private • Direct Beam • Zero Data Stored</div>
             <div class="link-text">${mobileLink}</div>
@@ -1750,6 +1804,27 @@ export default function ScanToPrint() {
                 </p>
               </div>
 
+              {/* Shared / Pre-selected Document Banner */}
+              {senderFiles.length > 0 && (
+                <div className="p-4 rounded-2xl bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-950/60 dark:to-teal-950/40 border border-emerald-200 dark:border-emerald-800 text-left space-y-1.5 shadow-sm">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-emerald-800 dark:text-emerald-300 font-extrabold text-xs">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                      <span>{isSharedFromExternal ? '📥 Document Shared from WhatsApp / Device' : '📄 Document Ready to Beam'}</span>
+                    </div>
+                    <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/80 text-emerald-800 dark:text-emerald-200">
+                      {senderFiles.length} file{senderFiles.length > 1 ? 's' : ''}
+                    </span>
+                  </div>
+                  <div className="text-xs text-slate-800 dark:text-slate-200 font-bold truncate pl-6">
+                    {senderFiles.map((f) => f.name).join(', ')}
+                  </div>
+                  <p className="text-[11px] text-emerald-700 dark:text-emerald-400 font-medium pl-6">
+                    Shopkeeper ka 6-digit PIN enter karein ya niche Recent Counter chunein.
+                  </p>
+                </div>
+              )}
+
               {/* 6-Digit PIN input boxes */}
               <div className="flex items-center justify-center gap-1.5 sm:gap-3 pt-1">
                 {[0, 1, 2, 3, 4, 5].map((idx) => (
@@ -1800,6 +1875,35 @@ export default function ScanToPrint() {
                       </button>
                     ))}
                   </div>
+                </div>
+              )}
+
+              {/* PWA 1-Tap WhatsApp Share Banner */}
+              {canInstallPWA && (
+                <div className="pt-2">
+                  <button
+                    type="button"
+                    onClick={promptPWAInstall}
+                    className="w-full p-3 rounded-2xl bg-gradient-to-r from-rose-500/10 via-purple-500/10 to-indigo-500/10 border border-rose-200 dark:border-rose-900/60 hover:border-rose-400 flex items-center justify-between gap-3 text-left transition active:scale-98 shadow-sm cursor-pointer"
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-xl bg-rose-600 text-white flex items-center justify-center shrink-0 shadow">
+                        <Share2 className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <div className="text-xs font-black text-slate-900 dark:text-white flex items-center gap-1.5">
+                          <span>Enable 1-Tap WhatsApp Share</span>
+                          <span className="text-[9px] bg-rose-600 text-white px-1.5 py-0.2 rounded-full font-bold">New</span>
+                        </div>
+                        <div className="text-[10.5px] text-slate-500 dark:text-slate-400">
+                          Add to phone to share PDFs directly from WhatsApp share menu!
+                        </div>
+                      </div>
+                    </div>
+                    <span className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shrink-0 shadow">
+                      Add
+                    </span>
+                  </button>
                 </div>
               )}
 
@@ -1929,6 +2033,19 @@ export default function ScanToPrint() {
                 </div>
               ) : (
                 <div className="space-y-4">
+                  {/* Shared from WhatsApp Banner */}
+                  {isSharedFromExternal && (
+                    <div className="p-3.5 rounded-2xl bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-950/60 dark:to-teal-950/40 border border-emerald-300 dark:border-emerald-800 flex items-center justify-between text-xs text-emerald-900 dark:text-emerald-200 shadow-sm animate-in fade-in">
+                      <div className="flex items-center gap-2">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <span className="font-bold">Loaded directly from WhatsApp / System Share!</span>
+                      </div>
+                      <span className="text-[10px] font-mono font-bold bg-emerald-200 dark:bg-emerald-900/80 text-emerald-900 dark:text-emerald-100 px-2 py-0.5 rounded-full">
+                        Ready to Send
+                      </span>
+                    </div>
+                  )}
+
                   {/* Privacy Notice */}
                   <div className="p-3 rounded-2xl bg-rose-50/60 dark:bg-rose-950/30 border border-rose-100 dark:border-rose-900 text-xs text-rose-700 dark:text-rose-300">
                     🔒 <strong>100% Private &amp; Direct:</strong> Files beam straight to counter #{targetCounterPin}. No WhatsApp, no contact sharing.
@@ -1964,6 +2081,35 @@ export default function ScanToPrint() {
                       onChange={(e) => handleFilesSelected(Array.from(e.target.files || []))}
                     />
                   </label>
+
+                  {/* Quick Action Helpers: Camera Scan & WhatsApp PWA Installer */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <label className="flex items-center justify-center gap-2 py-2.5 px-3 rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 hover:border-rose-500 bg-white dark:bg-slate-800 text-xs font-bold text-slate-700 dark:text-slate-200 cursor-pointer transition active:scale-95 shadow-sm">
+                      <Camera className="w-4 h-4 text-rose-600 shrink-0" />
+                      <span>Take Photo / Camera Scan</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        capture="environment"
+                        className="hidden"
+                        onChange={(e) => {
+                          const files = Array.from(e.target.files || []);
+                          if (files.length) handleFilesSelected(files);
+                        }}
+                      />
+                    </label>
+
+                    {canInstallPWA && (
+                      <button
+                        type="button"
+                        onClick={promptPWAInstall}
+                        className="flex items-center justify-center gap-2 py-2.5 px-3 rounded-2xl bg-gradient-to-r from-rose-500/10 to-indigo-500/10 border border-rose-200 dark:border-rose-900/60 hover:border-rose-400 text-xs font-bold text-rose-700 dark:text-rose-300 transition active:scale-95 shadow-sm cursor-pointer"
+                      >
+                        <Share2 className="w-4 h-4 text-rose-600 shrink-0" />
+                        <span>Enable WhatsApp Share (1-Tap)</span>
+                      </button>
+                    )}
+                  </div>
 
                   {senderFiles.length > 0 && (
                     <div className="space-y-3">
@@ -2454,6 +2600,10 @@ export default function ScanToPrint() {
                 <div className="flex items-center gap-1.5 text-[10.5px] font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/60 px-2.5 py-0.5 rounded-full border border-emerald-200 dark:border-emerald-800">
                   <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
                   <span>Permanent QR (Standee Safe)</span>
+                </div>
+
+                <div className="w-full mt-1 p-2 rounded-xl bg-rose-50/80 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/60 text-[11px] text-rose-700 dark:text-rose-300 text-center font-medium">
+                  💡 <strong>WhatsApp Share Ready:</strong> Customers can share PDFs directly from WhatsApp share menu to print!
                 </div>
 
                 <div className="flex items-center gap-2 pt-1">

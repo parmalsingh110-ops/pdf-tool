@@ -9,6 +9,10 @@ import { ThemeProvider } from './context/ThemeContext';
 import { initGlobalErrorLogging } from './lib/telemetry';
 import { initDomResilience } from './lib/domResilience';
 import { initChunkReloader } from './lib/chunkReloader';
+import { registerServiceWorker } from './lib/shareTarget';
+
+// Register Service Worker for PWA & Web Share Target (WhatsApp / System file share)
+registerServiceWorker();
 
 // Automatically handle and recover from stale build chunk errors after deployments
 initChunkReloader();

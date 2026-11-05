@@ -344,6 +344,15 @@ def health(request: Request, response: Response):
     return JSONResponse(content={"status": "ok"}, status_code=200)
 
 
+# Web Share Target Fallback: redirects to frontend scan-to-print
+# If the service worker didn't intercept the POST /share-target, the backend cleanly redirects.
+@app.api_route("/share-target", methods=["GET", "POST"])
+async def share_target_fallback():
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/scan-to-print?from_share=true", status_code=303)
+
+
+
 # ─── AUTO-OCR HELPER ────────────────────────────────────────────
 # Smart scan detection: checks text density per page, not just total chars.
 # If >= 50% pages are mostly blank of text → treat as scanned.
