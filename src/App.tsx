@@ -379,6 +379,7 @@ export default function App() {
         <Route path="zero-trace-print" element={<ZeroTracePrint />} />
         <Route path="counter-kiosk" element={<CounterKiosk />} />
         <Route path="talking-notes" element={<TalkingNotes />} />
+        <Route path="audio-note" element={<TalkingNotes />} />
         <Route path="admit-card-optimizer" element={<AdmitCardOptimizer />} />
         <Route path="court-evidence-formatter" element={<CourtEvidenceFormatter />} />
         <Route path="smart-kyc-slip" element={<SmartKycSlip />} />

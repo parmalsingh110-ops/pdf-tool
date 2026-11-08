@@ -33,6 +33,7 @@ import asyncio
 from pathlib import Path
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form, BackgroundTasks, Request, Response
+from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse
@@ -79,9 +80,33 @@ ALLOWED_ORIGINS: list[str] = [o.strip() for o in _raw_origins.split(",") if o.st
 LIBREOFFICE_SEMAPHORE = asyncio.Semaphore(int(os.environ.get("MAX_CONCURRENT_LIBREOFFICE", "2")))
 
 # ─── Rate Limiter Setup ─────────────────────────────────────────
-# Uses client IP to track requests.
-# X-Forwarded-For header is used behind Render's proxy.
-limiter = Limiter(key_func=get_remote_address)
+# Uses genuine client IP behind Cloudflare, Render, and reverse proxies.
+def get_real_client_ip(request: Request) -> str:
+    """
+    Extract genuine client IP behind Cloudflare, Render, or reverse proxies.
+    Falls back to request.client.host if no proxy headers are present.
+    """
+    cf_ip = request.headers.get("cf-connecting-ip")
+    if cf_ip and cf_ip.strip():
+        return cf_ip.strip()
+
+    true_client_ip = request.headers.get("true-client-ip")
+    if true_client_ip and true_client_ip.strip():
+        return true_client_ip.strip()
+
+    forwarded_for = request.headers.get("x-forwarded-for")
+    if forwarded_for:
+        parts = [p.strip() for p in forwarded_for.split(",") if p.strip()]
+        if parts:
+            return parts[0]
+
+    if request.client and request.client.host:
+        return request.client.host
+
+    return "127.0.0.1"
+
+
+limiter = Limiter(key_func=get_real_client_ip)
 
 # ─── FastAPI App ─────────────────────────────────────────────────
 docs_url = "/docs" if ENABLE_DOCS else None
@@ -125,7 +150,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     # The backend only serves JSON / binary file downloads (no HTML pages),
     # so we lock it down very tightly.  The permissive CSP for the React SPA
     # lives in index.html (served by Vite/Render static hosting).
-    _CSP = (
+    _STRICT_CSP = (
         "default-src 'none'; "
         "script-src  'none'; "
         "style-src   'none'; "
@@ -134,10 +159,23 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         "frame-ancestors 'none'; "
         "form-action 'self';"
     )
+    _HTML_CSP = (
+        "default-src 'self'; "
+        "script-src  'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+        "style-src   'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+        "img-src     'self' data: https://fastapi.tiangolo.com; "
+        "connect-src 'self'; "
+        "frame-ancestors 'none'; "
+        "form-action 'self';"
+    )
 
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
-        response.headers["Content-Security-Policy"] = self._CSP
+        path = request.url.path
+        if path.startswith("/share-target") or path in ("/docs", "/redoc", "/openapi.json"):
+            response.headers["Content-Security-Policy"] = self._HTML_CSP
+        else:
+            response.headers["Content-Security-Policy"] = self._STRICT_CSP
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
@@ -355,12 +393,13 @@ async def share_target_fallback(request: Request):
         return RedirectResponse(url="/scan-to-print?from_share=true", status_code=303)
 
     try:
+        MAX_SHARE_FILE_BYTES = 25 * 1024 * 1024  # 25 MB max per shared file
         form = await request.form()
         extracted_files = []
         for _, value in form.multi_items():
             if hasattr(value, "read") and hasattr(value, "filename"):
-                raw_bytes = await value.read()
-                if raw_bytes:
+                raw_bytes = await value.read(MAX_SHARE_FILE_BYTES + 1024)
+                if raw_bytes and len(raw_bytes) <= MAX_SHARE_FILE_BYTES:
                     extracted_files.append({
                         "name": getattr(value, "filename", None) or f"Shared_Document_{int(time.time())}.pdf",
                         "type": getattr(value, "content_type", None) or "application/pdf",
@@ -1721,21 +1760,25 @@ async def pdf_to_word_plaintext(request: Request, file: UploadFile = File(...), 
         # 1. OCR if necessary — raises HTTP 422 on failure, never silently continues
         inp = await ensure_auto_ocr(inp, force=force_ocr)
 
-        # 2. Extract plain text using fitz
+        # 2. Extract plain text using fitz in threadpool to avoid blocking async event loop
         logger.info(f"[PDF2Word-Plaintext] Extracting text from {inp.name}")
-        doc = fitz.open(str(inp))
 
-        # 3. Write to a fresh Word file
-        docx_doc = Document()
-        total_text_added = 0
-        for page in doc:
-            text = page.get_text("text")
-            if text.strip():
-                docx_doc.add_paragraph(text.strip())
-                docx_doc.add_page_break()
-                total_text_added += len(text.strip())
+        def _build_plaintext_docx():
+            doc = fitz.open(str(inp))
+            docx_doc = Document()
+            added = 0
+            for page in doc:
+                text = page.get_text("text")
+                if text.strip():
+                    docx_doc.add_paragraph(text.strip())
+                    docx_doc.add_page_break()
+                    added += len(text.strip())
+            doc.close()
+            if added >= 5:
+                docx_doc.save(str(out))
+            return added
 
-        doc.close()
+        total_text_added = await run_in_threadpool(_build_plaintext_docx)
 
         # 4. Guard: do not return a blank document
         if total_text_added < 5:
@@ -1746,8 +1789,6 @@ async def pdf_to_word_plaintext(request: Request, file: UploadFile = File(...), 
                     "If this is a scanned document, please ensure OCR was performed successfully."
                 )
             )
-
-        docx_doc.save(str(out))
 
         stem = safe_filename(file.filename, "document")
         out_name = Path(stem).stem + "_plaintext.docx"
@@ -1768,12 +1809,101 @@ async def pdf_to_word_plaintext(request: Request, file: UploadFile = File(...), 
 
 # ─── 2. PDF → Excel ────────────────────────────────────────────
 
+def _extract_tables_to_excel(inp: Path, out: Path, method: str) -> int:
+    """Synchronous CPU/IO worker function executed in threadpool."""
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)
+    tables_found = False
+    total_cells_written = 0
+
+    # Try camelot (best for bordered tables)
+    try:
+        import camelot
+        for flavor in (["lattice", "stream"] if method == "auto" else [method]):
+            tables = camelot.read_pdf(str(inp), pages="all", flavor=flavor)
+            if tables and len(tables) > 0:
+                tables_found = True
+                for i, tbl in enumerate(tables):
+                    sheet_name = f"Table_{i+1}_p{tbl.page}"[:31]
+                    ws = wb.create_sheet(sheet_name)
+                    for r_idx, row in enumerate(tbl.df.values, 1):
+                        for c_idx, val in enumerate(row, 1):
+                            cell_val = str(val).strip() if val else ""
+                            cell = ws.cell(r_idx, c_idx, cell_val)
+                            if cell_val:
+                                total_cells_written += 1
+                            if r_idx == 1:
+                                cell.font = Font(bold=True)
+                                cell.fill = PatternFill("solid", fgColor="D9E1F2")
+                            cell.border = Border(
+                                left=Side(style="thin"), right=Side(style="thin"),
+                                top=Side(style="thin"), bottom=Side(style="thin")
+                            )
+                            cell.alignment = Alignment(wrap_text=True)
+                break
+    except Exception as camelot_err:
+        logger.warning(f"[PDF2Excel] Camelot failed, using pdfplumber fallback: {type(camelot_err).__name__}")
+
+    # Fallback: pdfplumber
+    if not tables_found:
+        import pdfplumber
+        with pdfplumber.open(str(inp)) as pdf:
+            for pg_num, pg in enumerate(pdf.pages, 1):
+                ws = wb.create_sheet(f"Page_{pg_num}")
+                row_idx = 1
+                pg_tables = pg.extract_tables(table_settings={
+                    "vertical_strategy": "text",
+                    "horizontal_strategy": "text",
+                    "intersection_y_tolerance": 15
+                })
+                if pg_tables:
+                    for tbl in pg_tables:
+                        for row in tbl:
+                            for c_idx, v in enumerate(row, 1):
+                                cell_val = str(v).strip() if v else ""
+                                ws.cell(row_idx, c_idx, cell_val)
+                                if cell_val:
+                                    total_cells_written += 1
+                            row_idx += 1
+                        row_idx += 2  # gap between tables
+                else:
+                    words = pg.extract_words()
+                    if words:
+                        lines = {}
+                        for w in words:
+                            y = round(w['top'] / 5) * 5
+                            lines.setdefault(y, []).append(w)
+
+                        for y in sorted(lines.keys()):
+                            line_words = sorted(lines[y], key=lambda w: w['x0'])
+                            for w in line_words:
+                                col_idx = max(1, int(w['x0'] / 50) + 1)
+                                ws.cell(row_idx, col_idx, w['text'])
+                                total_cells_written += 1
+                            row_idx += 1
+
+    if total_cells_written == 0:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "No readable table or text data was detected in this PDF. "
+                "If this is a scanned document, ensure it contains legible text."
+            )
+        )
+
+    logger.info(f"[PDF2Excel] Extracted {total_cells_written} non-empty cells")
+    wb.save(str(out))
+    return total_cells_written
+
+
 @app.post("/convert/pdf-to-excel")
 @limiter.limit("10/minute")
 async def pdf_to_excel(request: Request, file: UploadFile = File(...), method: str = Form("auto"), force_ocr: bool = Form(False)):
     try:
         import pdfplumber, openpyxl
-        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
     except ImportError:
         raise HTTPException(500, "Run: pip install pdfplumber openpyxl")
 
@@ -1785,92 +1915,8 @@ async def pdf_to_excel(request: Request, file: UploadFile = File(...), method: s
         # Raises HTTP 422 on OCR failure — never silently continues with image-only PDF
         inp = await ensure_auto_ocr(inp, force=force_ocr)
 
-        wb = openpyxl.Workbook()
-        wb.remove(wb.active)
-        tables_found = False
-        total_cells_written = 0
-
-        # Try camelot (best for bordered tables)
-        try:
-            import camelot
-            for flavor in (["lattice", "stream"] if method == "auto" else [method]):
-                tables = camelot.read_pdf(str(inp), pages="all", flavor=flavor)
-                if tables and len(tables) > 0:
-                    tables_found = True
-                    for i, tbl in enumerate(tables):
-                        sheet_name = f"Table_{i+1}_p{tbl.page}"[:31]
-                        ws = wb.create_sheet(sheet_name)
-                        for r_idx, row in enumerate(tbl.df.values, 1):
-                            for c_idx, val in enumerate(row, 1):
-                                cell_val = str(val).strip() if val else ""
-                                cell = ws.cell(r_idx, c_idx, cell_val)
-                                if cell_val:
-                                    total_cells_written += 1
-                                if r_idx == 1:
-                                    cell.font = Font(bold=True)
-                                    cell.fill = PatternFill("solid", fgColor="D9E1F2")
-                                cell.border = Border(
-                                    left=Side(style="thin"), right=Side(style="thin"),
-                                    top=Side(style="thin"), bottom=Side(style="thin")
-                                )
-                                cell.alignment = Alignment(wrap_text=True)
-                    break
-        except Exception as camelot_err:
-            logger.warning(f"[PDF2Excel] Camelot failed, using pdfplumber fallback: {type(camelot_err).__name__}")
-
-        # Fallback: pdfplumber
-        if not tables_found:
-            with pdfplumber.open(str(inp)) as pdf:
-                for pg_num, pg in enumerate(pdf.pages, 1):
-                    ws = wb.create_sheet(f"Page_{pg_num}")
-                    row_idx = 1
-                    # Use text-based geometry for borderless tables
-                    pg_tables = pg.extract_tables(table_settings={
-                        "vertical_strategy": "text",
-                        "horizontal_strategy": "text",
-                        "intersection_y_tolerance": 15
-                    })
-                    if pg_tables:
-                        for tbl in pg_tables:
-                            for row in tbl:
-                                for c_idx, v in enumerate(row, 1):
-                                    cell_val = str(v).strip() if v else ""
-                                    ws.cell(row_idx, c_idx, cell_val)
-                                    if cell_val:
-                                        total_cells_written += 1
-                                row_idx += 1
-                            row_idx += 2  # gap between tables
-                    else:
-                        # Fallback for completely unstructured text: try to align by X-coordinates
-                        words = pg.extract_words()
-                        if words:
-                            # Group words into lines based on Y coordinate
-                            lines = {}
-                            for w in words:
-                                y = round(w['top'] / 5) * 5  # group within 5pts
-                                lines.setdefault(y, []).append(w)
-
-                            for y in sorted(lines.keys()):
-                                line_words = sorted(lines[y], key=lambda w: w['x0'])
-                                # simple column mapping: roughly every 50pts is a column
-                                for w in line_words:
-                                    col_idx = max(1, int(w['x0'] / 50) + 1)
-                                    ws.cell(row_idx, col_idx, w['text'])
-                                    total_cells_written += 1
-                                row_idx += 1
-
-        # Guard: do not return a blank workbook
-        if total_cells_written == 0:
-            raise HTTPException(
-                status_code=422,
-                detail=(
-                    "No readable table or text data was detected in this PDF. "
-                    "If this is a scanned document, ensure it contains legible text."
-                )
-            )
-
-        logger.info(f"[PDF2Excel] Extracted {total_cells_written} non-empty cells")
-        wb.save(str(out))
+        from fastapi.concurrency import run_in_threadpool
+        await run_in_threadpool(_extract_tables_to_excel, inp, out, method)
 
         stem = safe_filename(file.filename, "document")
         out_name = Path(stem).stem + ".xlsx"
@@ -2026,8 +2072,9 @@ def _build_structural_pptx(pdf_path: Path, out_path: Path):
                         tbl = tbl_shape.table
 
                         # Normalize column widths proportionally
+                        col_width_emu = int(int(tbl_w) // max(1, cols))
                         for ci in range(cols):
-                            tbl.columns[ci].width = Emu(tbl_w.twips * 914400 // (cols * 914400 // Emu(tbl_w)))
+                            tbl.columns[ci].width = Emu(col_width_emu)
 
                         for r_idx, row in enumerate(tbl_data):
                             # Pad short rows
@@ -2079,7 +2126,22 @@ def _build_structural_pptx(pdf_path: Path, out_path: Path):
             fitz_blocks = page_fitz.get_text("dict", sort=True).get("blocks", [])
 
             for block in fitz_blocks:
-                if block["type"] != 0:   # skip embedded image blocks
+                if block["type"] == 1:
+                    # Preserve embedded PDF images/logos on the slide
+                    img_bytes = block.get("image")
+                    if img_bytes and len(img_bytes) >= 32:
+                        try:
+                            import io as _io
+                            ibx0, iby0, ibx1, iby1 = block["bbox"]
+                            img_x = Inches(max(0.0, ibx0) / 72.0)
+                            img_y = Inches(max(0.0, iby0) / 72.0)
+                            img_w = Inches(max(0.25, ibx1 - ibx0) / 72.0)
+                            img_h = Inches(max(0.25, iby1 - iby0) / 72.0)
+                            slide.shapes.add_picture(_io.BytesIO(img_bytes), img_x, img_y, width=img_w, height=img_h)
+                        except Exception as img_err:
+                            logger.debug(f"[PDF2PPT] Image block skip on p{page_idx+1}: {img_err}")
+                    continue
+                if block["type"] != 0:
                     continue
 
                 bx0, by0, bx1, by1 = block["bbox"]
@@ -2241,15 +2303,23 @@ def _find_libreoffice() -> str:
 def libreoffice_convert(inp: Path, out_dir: Path) -> Path:
     """
     Convert a file to PDF using LibreOffice.
-    Arguments are passed as a list (no shell=True) to prevent injection.
+    Uses an isolated UserInstallation profile directory to prevent concurrent worker lockups.
     """
     lo = _find_libreoffice()
-    r = subprocess.run(
-        [lo, "--headless", "--convert-to", "pdf", "--outdir", str(out_dir), str(inp)],
-        capture_output=True, text=True, timeout=MAX_PROCESSING_SECONDS
-    )
+    with tempfile.TemporaryDirectory(prefix="lo_prof_") as tmp_prof:
+        profile_url = f"file://{Path(tmp_prof).resolve()}"
+        r = subprocess.run(
+            [
+                lo,
+                f"-env:UserInstallation={profile_url}",
+                "--headless",
+                "--convert-to", "pdf",
+                "--outdir", str(out_dir),
+                str(inp)
+            ],
+            capture_output=True, text=True, timeout=MAX_PROCESSING_SECONDS
+        )
     if r.returncode != 0:
-        # Log stderr internally but only expose a generic message
         logger.error(f"[LibreOffice] Conversion failed: {r.stderr[:300]}")
         raise RuntimeError("LibreOffice conversion failed.")
     out_pdf = out_dir / (inp.stem + ".pdf")
@@ -2354,22 +2424,26 @@ async def ppt_to_word(request: Request, file: UploadFile = File(...)):
     out = temp_path(".docx")
     try:
         inp.write_bytes(await safe_read_upload(file))
-        prs = Pptx(str(inp))
-        doc = Document()
-        doc.add_heading("Presentation Content", 0)
 
-        for i, slide in enumerate(prs.slides, 1):
-            doc.add_heading(f"Slide {i}", 1)
-            for shape in slide.shapes:
-                if shape.has_text_frame:
-                    for para in shape.text_frame.paragraphs:
-                        txt = para.text.strip()
-                        if txt:
-                            p = doc.add_paragraph(txt)
-                            if para.runs and para.runs[0].font.size:
-                                p.runs[0].font.size = para.runs[0].font.size
+        def _convert_ppt_to_word():
+            prs = Pptx(str(inp))
+            doc = Document()
+            doc.add_heading("Presentation Content", 0)
 
-        doc.save(str(out))
+            for i, slide in enumerate(prs.slides, 1):
+                doc.add_heading(f"Slide {i}", 1)
+                for shape in slide.shapes:
+                    if shape.has_text_frame:
+                        for para in shape.text_frame.paragraphs:
+                            txt = para.text.strip()
+                            if txt:
+                                p = doc.add_paragraph(txt)
+                                if para.runs and para.runs[0].font.size:
+                                    p.runs[0].font.size = para.runs[0].font.size
+
+            doc.save(str(out))
+
+        await run_in_threadpool(_convert_ppt_to_word)
         stem = safe_filename(file.filename, "document")
         out_name = Path(stem).stem + ".docx"
         return FileResponse(
@@ -2405,136 +2479,147 @@ async def word_to_ppt(request: Request, file: UploadFile = File(...)):
     out = temp_path(".pptx")
     try:
         inp.write_bytes(await safe_read_upload(file))
-        doc = Document(str(inp))
-        prs = Presentation()
-        prs.slide_width  = Inches(13.33)
-        prs.slide_height = Inches(7.5)
 
-        TITLE_LAYOUT   = prs.slide_layouts[0]   # Title Slide
-        CONTENT_LAYOUT = prs.slide_layouts[1]   # Title + Content
-        BLANK_LAYOUT   = prs.slide_layouts[6]   # Blank
+        def _convert_word_to_ppt():
+            doc = Document(str(inp))
+            prs = Presentation()
+            prs.slide_width  = Inches(13.33)
+            prs.slide_height = Inches(7.5)
 
-        def _add_content_slide(title_text: str) -> any:
-            sl = prs.slides.add_slide(CONTENT_LAYOUT)
-            sl.shapes.title.text = title_text[:200]
-            return sl
+            TITLE_LAYOUT   = prs.slide_layouts[0]   # Title Slide
+            CONTENT_LAYOUT = prs.slide_layouts[1]   # Title + Content
+            BLANK_LAYOUT   = prs.slide_layouts[6]   # Blank
 
-        def _tf_for_slide(sl) -> any:
-            for ph in sl.placeholders:
-                if ph.placeholder_format.idx == 1:
-                    return ph.text_frame
-            return None
+            def _add_content_slide(title_text: str) -> any:
+                sl = prs.slides.add_slide(CONTENT_LAYOUT)
+                sl.shapes.title.text = title_text[:200]
+                return sl
 
-        def _hex_to_rgb(hex_str: str):
-            h = hex_str.lstrip('#')
-            if len(h) == 6:
-                return RGBColor(int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
-            return None
+            def _tf_for_slide(sl) -> any:
+                for ph in sl.placeholders:
+                    if ph.placeholder_format.idx == 1:
+                        return ph.text_frame
+                return None
 
-        current_slide: any = None
-        current_tf: any = None
-        first_slide = True
+            current_slide: any = None
+            current_tf: any = None
+            current_title: str = "Content"
+            para_count_on_slide: int = 0
+            first_slide = True
 
-        for elem in doc.element.body:
-            tag = elem.tag.split('}')[-1] if '}' in elem.tag else elem.tag
+            for elem in doc.element.body:
+                tag = elem.tag.split('}')[-1] if '}' in elem.tag else elem.tag
 
-            if tag == 'p':
-                from docx import Document as _D
-                from docx.text.paragraph import Paragraph as _P
-                para = _P(elem, doc)
-                txt  = para.text.strip()
-                style = para.style.name if para.style else ''
+                if tag == 'p':
+                    from docx.text.paragraph import Paragraph as _P
+                    para = _P(elem, doc)
+                    txt  = para.text.strip()
+                    style = para.style.name if para.style else ''
 
-                is_h1 = 'Heading 1' in style or 'Title' in style
-                is_h2 = 'Heading 2' in style
-                is_h3 = 'Heading 3' in style or 'Heading 4' in style
+                    is_h1 = 'Heading 1' in style or 'Title' in style
+                    is_h2 = 'Heading 2' in style
+                    is_h3 = 'Heading 3' in style or 'Heading 4' in style
 
-                if is_h1:
-                    current_slide = _add_content_slide(txt or 'Slide')
-                    current_tf    = _tf_for_slide(current_slide)
+                    if is_h1:
+                        current_title = txt or 'Slide'
+                        current_slide = _add_content_slide(current_title)
+                        current_tf    = _tf_for_slide(current_slide)
+                        if current_tf:
+                            current_tf.clear()
+                        para_count_on_slide = 0
+                        first_slide = False
+                        continue
+
+                    if first_slide and txt:
+                        current_title = txt[:120] or 'Content'
+                        current_slide = _add_content_slide(current_title)
+                        current_tf    = _tf_for_slide(current_slide)
+                        if current_tf:
+                            current_tf.clear()
+                        para_count_on_slide = 0
+                        first_slide = False
+                        continue
+
+                    if not txt:
+                        continue
+
+                    # Auto-paginate after 8 paragraphs on a single slide so content never overflows
+                    if current_slide is None or para_count_on_slide >= 8:
+                        cont_title = f"{current_title} (Cont.)" if current_slide is not None else current_title
+                        current_slide = _add_content_slide(cont_title)
+                        current_tf    = _tf_for_slide(current_slide)
+                        if current_tf:
+                            current_tf.clear()
+                        para_count_on_slide = 0
+
                     if current_tf:
-                        current_tf.clear()
-                    first_slide = False
-                    continue
+                        level = 0
+                        if is_h2:     level = 0
+                        elif is_h3:   level = 1
+                        elif para.paragraph_format.left_indent and para.paragraph_format.left_indent > 0:
+                            level = min(4, int(para.paragraph_format.left_indent / 360000))
 
-                if first_slide and txt:
-                    current_slide = _add_content_slide(txt or 'Content')
-                    current_tf    = _tf_for_slide(current_slide)
-                    if current_tf:
-                        current_tf.clear()
-                    first_slide = False
-                    continue
-
-                if not txt:
-                    continue
-
-                if current_slide is None:
-                    current_slide = _add_content_slide('Content')
-                    current_tf    = _tf_for_slide(current_slide)
-                    if current_tf:
-                        current_tf.clear()
-
-                if current_tf:
-                    # determine indent level
-                    level = 0
-                    if is_h2:     level = 0
-                    elif is_h3:   level = 1
-                    elif para.paragraph_format.left_indent and para.paragraph_format.left_indent > 0:
-                        level = min(4, int(para.paragraph_format.left_indent / 360000))
-
-                    # add paragraph with per-run formatting
-                    pptx_para = current_tf.add_paragraph()
-                    pptx_para.level = level
-                    added_run = False
-                    for run in para.runs:
-                        run_text = run.text
-                        if not run_text:
-                            continue
-                        pptx_run = pptx_para.add_run()
-                        pptx_run.text = run_text
-                        pptx_run.font.bold   = run.bold
-                        pptx_run.font.italic = run.italic
-                        if run.font.size:
-                            pptx_run.font.size = run.font.size
-                        else:
+                        pptx_para = current_tf.add_paragraph() if para_count_on_slide > 0 else current_tf.paragraphs[0]
+                        pptx_para.level = level
+                        para_count_on_slide += 1
+                        added_run = False
+                        for run in para.runs:
+                            run_text = run.text
+                            if not run_text:
+                                continue
+                            pptx_run = pptx_para.add_run()
+                            pptx_run.text = run_text
+                            pptx_run.font.bold   = run.bold
+                            pptx_run.font.italic = run.italic
+                            if run.font.size:
+                                pptx_run.font.size = run.font.size
+                            else:
+                                pptx_run.font.size = Pt(20 if is_h2 else 18)
+                            if run.font.color and run.font.color.type:
+                                try:
+                                    col = run.font.color.rgb
+                                    pptx_run.font.color.rgb = RGBColor(col.red, col.green, col.blue)
+                                except Exception:
+                                    pass
+                            added_run = True
+                        if not added_run:
+                            pptx_run = pptx_para.add_run()
+                            pptx_run.text = txt
                             pptx_run.font.size = Pt(20 if is_h2 else 18)
-                        if run.font.color and run.font.color.type:
-                            try:
-                                col = run.font.color.rgb
-                                pptx_run.font.color.rgb = RGBColor(col.red, col.green, col.blue)
-                            except Exception:
-                                pass
-                        added_run = True
-                    if not added_run:
-                        pptx_run = pptx_para.add_run()
-                        pptx_run.text = txt
-                        pptx_run.font.size = Pt(20 if is_h2 else 18)
 
-            elif tag == 'tbl':
-                # Word table → insert as text table on a new slide
-                from docx.table import Table as _T
-                tbl = _T(elem, doc)
-                if current_slide is None:
-                    current_slide = _add_content_slide('Table')
-                    current_tf    = _tf_for_slide(current_slide)
-                    if current_tf:
-                        current_tf.clear()
-                # Render table rows as bullet list (PPTX doesn't have native editable tables in placeholders easily)
-                if current_tf:
-                    for ri, row in enumerate(tbl.rows):
-                        cells_txt = ' | '.join(c.text.strip() for c in row.cells if c.text.strip())
-                        if not cells_txt:
-                            continue
-                        pp = current_tf.add_paragraph()
-                        pp.level = 1
-                        r = pp.add_run()
-                        r.text = cells_txt
-                        r.font.bold = (ri == 0)
-                        r.font.size = Pt(14)
+                elif tag == 'tbl':
+                    # Word table → native editable PPTX table shape
+                    from docx.table import Table as _T
+                    tbl = _T(elem, doc)
+                    rows_count = len(tbl.rows)
+                    cols_count = len(tbl.columns) if rows_count > 0 else 0
+                    if rows_count > 0 and cols_count > 0:
+                        tbl_slide = prs.slides.add_slide(BLANK_LAYOUT)
+                        max_rows = min(rows_count, 18)
+                        max_cols = min(cols_count, 10)
+                        t_shape = tbl_slide.shapes.add_table(
+                            max_rows, max_cols,
+                            Inches(0.6), Inches(0.8),
+                            Inches(12.1), Inches(min(6.0, max_rows * 0.42))
+                        )
+                        pptx_tbl = t_shape.table
+                        for r_idx in range(max_rows):
+                            row_cells = tbl.rows[r_idx].cells
+                            for c_idx in range(min(max_cols, len(row_cells))):
+                                cell_text = row_cells[c_idx].text.strip()
+                                cell = pptx_tbl.cell(r_idx, c_idx)
+                                cell.text = cell_text
+                                for p in cell.text_frame.paragraphs:
+                                    for r in p.runs:
+                                        r.font.size = Pt(12)
+                                        if r_idx == 0:
+                                            r.font.bold = True
 
-        if len(prs.slides) == 0:
-            prs.slides.add_slide(BLANK_LAYOUT)
-        prs.save(str(out))
+            if len(prs.slides) == 0:
+                prs.slides.add_slide(BLANK_LAYOUT)
+            prs.save(str(out))
+
+        await run_in_threadpool(_convert_word_to_ppt)
 
         stem     = safe_filename(file.filename, "presentation")
         out_name = Path(stem).stem + ".pptx"
@@ -3615,22 +3700,49 @@ ALLOWED_URL_SCHEMES = {"http", "https"}
 
 
 def _validate_url(url: str) -> str:
-    """Basic URL validation — only allow http/https, reject localhost/private IPs."""
+    """Enterprise SSRF hardening: validate protocol, resolve DNS, and block private/loopback/cloud metadata ranges."""
     from urllib.parse import urlparse
     import ipaddress
+    import socket
+
     parsed = urlparse(url)
     if parsed.scheme not in ALLOWED_URL_SCHEMES:
         raise HTTPException(400, "Only http:// and https:// URLs are allowed.")
-    hostname = parsed.hostname or ""
-    # Block SSRF targets
+
+    hostname = (parsed.hostname or "").strip().lower()
+    if not hostname:
+        raise HTTPException(400, "Invalid URL: missing hostname.")
+
+    # Direct name checks
+    if hostname in ("localhost", "127.0.0.1", "::1", "metadata.google.internal", "instance-data"):
+        raise HTTPException(400, "Access to localhost and cloud metadata endpoints is prohibited.")
+
+    # Resolve hostname to actual IP addresses
     try:
-        ip = ipaddress.ip_address(hostname)
-        if ip.is_private or ip.is_loopback or ip.is_link_local:
-            raise HTTPException(400, "Private/internal IP addresses are not allowed.")
-    except ValueError:
-        pass  # Not an IP — that's fine
-    if hostname in ("localhost", "127.0.0.1", "::1"):
-        raise HTTPException(400, "localhost is not allowed.")
+        addr_info = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
+    except socket.gaierror:
+        raise HTTPException(400, f"Cannot resolve hostname: {hostname}")
+
+    if not addr_info:
+        raise HTTPException(400, f"No IP addresses resolved for: {hostname}")
+
+    for entry in addr_info:
+        sockaddr = entry[4]
+        raw_ip = sockaddr[0]
+        try:
+            ip = ipaddress.ip_address(raw_ip)
+            if (
+                ip.is_private
+                or ip.is_loopback
+                or ip.is_link_local
+                or ip.is_reserved
+                or ip.is_multicast
+                or ip.is_unspecified
+            ):
+                raise HTTPException(400, f"Access to private/internal network addresses ({raw_ip}) is prohibited.")
+        except ValueError:
+            raise HTTPException(400, "Invalid IP resolution result.")
+
     return url
 
 
@@ -3701,6 +3813,10 @@ async def webpage_to_pdf(
                         await page.goto(url, wait_until="domcontentloaded", timeout=10000)
                     except Exception:
                         pass  # If page is already partially loaded, proceed to render
+
+                # Post-navigation SSRF guard: ensure HTTP 301/302 redirects did not land on internal/private IPs
+                if page.url and page.url != "about:blank":
+                    _validate_url(page.url)
 
                 import asyncio
                 await asyncio.sleep(1.0)
@@ -4148,7 +4264,7 @@ async def search_replace(
     request: Request,
     file: UploadFile = File(...),
     search_term: str = Form(...),
-    replace_term: str = Form(...)
+    replace_term: str = Form("")
 ):
     inp = temp_path(".pdf")
     out = temp_path("_replaced.pdf")
@@ -4209,14 +4325,15 @@ async def search_replace(
                     except Exception:
                         pass  # Already registered on this page
 
-            for inst in instances:
-                page.insert_text(
-                    fitz.Point(inst.x0, inst.y1 - 1),
-                    replace_term,
-                    fontname=_sr_fontname,
-                    fontsize=font_size,
-                    color=text_color
-                )
+            if replace_term:
+                for inst in instances:
+                    page.insert_text(
+                        fitz.Point(inst.x0, inst.y1 - 1),
+                        replace_term,
+                        fontname=_sr_fontname,
+                        fontsize=font_size,
+                        color=text_color
+                    )
 
         doc.save(str(out))
         doc.close()
@@ -4482,7 +4599,9 @@ async def report_telemetry_error(request: Request):
 async def get_admin_telemetry(request: Request):
     """Retrieve full telemetry, ratings, and error analytics for admin dashboard."""
     import telemetry
-    key = request.headers.get("X-Admin-Key") or request.query_params.get("key", "")
+    auth_header = request.headers.get("Authorization", "")
+    bearer_key = auth_header.replace("Bearer ", "").strip() if auth_header.startswith("Bearer ") else ""
+    key = request.headers.get("X-Admin-Key") or bearer_key or request.query_params.get("key", "")
     if not telemetry.verify_admin_key(key):
         raise HTTPException(status_code=401, detail="Unauthorized: Access denied")
 
@@ -4494,7 +4613,9 @@ async def get_admin_telemetry(request: Request):
 async def change_admin_passcode(request: Request):
     """Allow authorized admin to update their passcode directly."""
     import telemetry
-    key = request.headers.get("X-Admin-Key") or request.query_params.get("key", "")
+    auth_header = request.headers.get("Authorization", "")
+    bearer_key = auth_header.replace("Bearer ", "").strip() if auth_header.startswith("Bearer ") else ""
+    key = request.headers.get("X-Admin-Key") or bearer_key or request.query_params.get("key", "")
     if not telemetry.verify_admin_key(key):
         raise HTTPException(status_code=401, detail="Unauthorized: Access denied")
 
@@ -4521,7 +4642,9 @@ async def change_admin_passcode(request: Request):
 async def test_webhook(request: Request):
     """Send test alert to verify Discord or Telegram notifications."""
     import telemetry
-    key = request.headers.get("X-Admin-Key") or request.query_params.get("key", "")
+    auth_header = request.headers.get("Authorization", "")
+    bearer_key = auth_header.replace("Bearer ", "").strip() if auth_header.startswith("Bearer ") else ""
+    key = request.headers.get("X-Admin-Key") or bearer_key or request.query_params.get("key", "")
     if not telemetry.verify_admin_key(key):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
@@ -4692,17 +4815,20 @@ async def print_drop_upload(
     return {"success": True, "job_id": final_job_id, "token_num": room_token, "session_id": clean_session}
 
 @app.get("/api/print-drop/jobs/{session_id}")
-async def print_drop_poll(session_id: str):
-    """Retrieve and clear new jobs for the counter PC queue."""
+async def print_drop_poll(session_id: str, peek: bool = False):
+    """Retrieve and clear new jobs for the counter PC queue (or non-destructively peek when peek=true)."""
     clean_session = re.sub(r"[^A-Z0-9]", "", session_id.strip().upper())
-    jobs = PRINT_DROP_ROOMS.pop(clean_session, [])
+    if peek:
+        jobs = list(PRINT_DROP_ROOMS.get(clean_session, []))
+    else:
+        jobs = PRINT_DROP_ROOMS.pop(clean_session, [])
     if clean_session in PRINT_DROP_ROOM_TIMESTAMPS:
         PRINT_DROP_ROOM_TIMESTAMPS[clean_session] = time.time()
     return {"success": True, "jobs": jobs}
 
 @app.get("/api/print-drop/file/{session_id}/{job_id}")
-async def print_drop_download_file(session_id: str, job_id: str):
-    """Serve spooled document to counter PC with immediate streaming and instant post-delivery deletion."""
+async def print_drop_download_file(session_id: str, job_id: str, keep: bool = False):
+    """Serve spooled document to counter PC with immediate streaming and post-delivery deletion (unless keep=true or persistent room)."""
     clean_session = re.sub(r"[^A-Z0-9]", "", session_id.strip().upper())
     safe_job_id = re.sub(r"[^a-zA-Z0-9_-]", "", job_id)
 
@@ -4710,14 +4836,17 @@ async def print_drop_download_file(session_id: str, job_id: str):
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="Document expired or already processed")
 
+    persist_file = keep or clean_session in ("AUDIONOTES", "KIOSKSTATION")
+    media_type = "audio/webm" if clean_session == "AUDIONOTES" else "application/octet-stream"
+
     return FileResponse(
         path=str(file_path),
-        media_type="application/octet-stream",
+        media_type=media_type,
         headers={
             "Cache-Control": "private, no-cache, no-store, must-revalidate",
             "Content-Disposition": f'inline; filename="{safe_job_id}.bin"',
         },
-        background=BackgroundTask(lambda: file_path.unlink(missing_ok=True)),
+        background=None if persist_file else BackgroundTask(lambda: file_path.unlink(missing_ok=True)),
     )
 
 

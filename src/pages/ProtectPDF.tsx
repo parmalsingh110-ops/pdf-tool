@@ -91,8 +91,8 @@ export default function ProtectPDF() {
 
   const protectPdf = async () => {
     if (!file || !userPassword) return;
-    if (confirmPassword && userPassword !== confirmPassword) {
-      setErrorMsg('Passwords do not match. Please verify your password.');
+    if (userPassword !== confirmPassword) {
+      setErrorMsg('Passwords do not match. Please verify your password in both fields.');
       return;
     }
 
@@ -107,7 +107,13 @@ export default function ProtectPDF() {
       else if (printPerm === 'low') printingVal = 'lowResolution';
       else printingVal = false;
 
-      const finalOwnerPassword = useOwnerPassword && ownerPassword.trim() ? ownerPassword : userPassword;
+      // Ensure that if restrictions (e.g. copying/printing disabled) are set without a custom owner password,
+      // a distinct owner password is generated so opening as User actually enforces the restrictions!
+      const finalOwnerPassword = useOwnerPassword && ownerPassword.trim()
+        ? ownerPassword
+        : (allowCopying && allowModifying && printingVal === 'highResolution')
+          ? userPassword
+          : crypto.randomUUID();
 
       await pdfDoc.encrypt({
         userPassword,

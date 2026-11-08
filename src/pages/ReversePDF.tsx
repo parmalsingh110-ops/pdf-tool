@@ -34,6 +34,7 @@ export default function ReversePDF() {
   const [rangeEnd, setRangeEnd] = useState<number>(1);
 
   const [isProcessing, setIsProcessing] = useState(false);
+  const [pageCount, setPageCount] = useState<number>(0);
   const [reversedUrl, setReversedUrl] = useState<string | null>(null);
   const [showPreview, setShowPreview] = useState(true);
 
@@ -57,6 +58,7 @@ export default function ReversePDF() {
       const arrayBuffer = await selectedFile.arrayBuffer();
       const pdfjsDoc = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
       const count = pdfjsDoc.numPages;
+      setPageCount(count);
 
       setRangeStart(1);
       setRangeEnd(count);
@@ -148,9 +150,10 @@ export default function ReversePDF() {
     setFile(null);
     setReversedUrl(null);
     setThumbnails([]);
+    setPageCount(0);
   };
 
-  const totalPages = thumbnails.length;
+  const totalPages = pageCount || thumbnails.length;
   const simulatedSequence = totalPages > 0 ? getReversedIndices(totalPages) : [];
 
   return (

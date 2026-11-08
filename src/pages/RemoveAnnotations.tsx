@@ -434,6 +434,30 @@ export default function RemoveAnnotations() {
                       {stats.freetext}
                     </span>
                   </label>
+
+                  {/* Web & Document Links */}
+                  <label
+                    className={`flex items-center justify-between p-3.5 rounded-xl border transition-all cursor-pointer ${
+                      removeLinks
+                        ? 'border-rose-400 bg-rose-50/50 dark:bg-rose-950/30 text-rose-950 dark:text-rose-200'
+                        : 'border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="checkbox"
+                        checked={removeLinks}
+                        onChange={(e) => setRemoveLinks(e.target.checked)}
+                        className="w-4 h-4 rounded text-rose-600 focus:ring-rose-500 cursor-pointer"
+                      />
+                      <div className="flex items-center gap-2 text-sm font-semibold">
+                        <LinkIcon className="w-4 h-4 text-indigo-500" /> Web Links & URL Annotations
+                      </div>
+                    </div>
+                    <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                      {stats.links}
+                    </span>
+                  </label>
                 </div>
               </div>
 

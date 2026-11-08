@@ -11,7 +11,7 @@ import {
   FileText,
   FileCheck2,
 } from 'lucide-react';
-import { PDFDocument, rgb } from 'pdf-lib';
+import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 import { useSEO } from '../hooks/useSEO';
 import { usePageSEO } from '../lib/usePageSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
@@ -99,6 +99,7 @@ export default function MicroPocketNotes() {
 
       // Copy all source pages into new document
       const embeddedPages = await outDoc.embedPdf(srcDoc, Array.from({ length: srcPageCount }, (_, i) => i));
+      const boldFont = await outDoc.embedFont(StandardFonts.HelveticaBold);
 
       for (let s = 0; s < totalSheets; s++) {
         const sheet = outDoc.addPage([sheetW, sheetH]);
@@ -132,13 +133,25 @@ export default function MicroPocketNotes() {
 
               // Optional bold corner number for easy reading
               if (includeCornerNumbers) {
+                const badgeText = `${pageIndex + 1}`;
+                const textWidth = boldFont.widthOfTextAtSize(badgeText, 7.5);
+                const badgeW = Math.max(20, textWidth + 8);
                 // Background badge
                 sheet.drawRectangle({
                   x: c * slotW + 4,
                   y: sheetH - (r * slotH) - 16,
-                  width: 24,
+                  width: badgeW,
                   height: 12,
                   color: rgb(0.94, 0.94, 0.96),
+                  borderColor: rgb(0.75, 0.75, 0.8),
+                  borderWidth: 0.5,
+                });
+                sheet.drawText(badgeText, {
+                  x: c * slotW + 4 + (badgeW - textWidth) / 2,
+                  y: sheetH - (r * slotH) - 13,
+                  size: 7.5,
+                  font: boldFont,
+                  color: rgb(0.2, 0.2, 0.3),
                 });
               }
             }

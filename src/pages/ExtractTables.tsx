@@ -154,21 +154,6 @@ export default function ExtractTables() {
         extracted = await extractClientSpatial(f);
       }
 
-      // Default sample if no tables found
-      if (extracted.length === 0) {
-        extracted.push({
-          id: 'tbl_default',
-          pageIndex: 1,
-          name: 'Extracted Content (Manual Layout)',
-          rows: [
-            ['Column 1', 'Column 2', 'Column 3', 'Column 4'],
-            ['Sample Data A1', 'Data B1', 'Data C1', 'Data D1'],
-            ['Sample Data A2', 'Data B2', 'Data C2', 'Data D2'],
-            ['Sample Data A3', 'Data B3', 'Data C3', 'Data D3']
-          ]
-        });
-      }
-
       setTables(extracted);
       setActiveTableIdx(0);
     } catch (err: any) {
@@ -365,6 +350,19 @@ export default function ExtractTables() {
             {statusMsg || 'Extracting tables from document...'}
           </p>
           <p className="text-xs text-slate-500">Parsing rows, columns, and data cells</p>
+        </div>
+      ) : tables.length === 0 ? (
+        <div className="w-full max-w-lg py-16 text-center space-y-4 bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-8 shadow-sm">
+          <div className="w-12 h-12 bg-amber-50 dark:bg-amber-950/40 text-amber-600 rounded-2xl flex items-center justify-center mx-auto mb-2">
+            <Table className="w-6 h-6" />
+          </div>
+          <h3 className="text-lg font-bold text-slate-900 dark:text-white">No Structured Tables Detected</h3>
+          <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto leading-relaxed">
+            We could not detect clear grid or column-aligned tables in this PDF. Try switching between Camelot-py and Fast Client-Side modes, or upload a document with clear borders.
+          </p>
+          <button onClick={reset} className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold text-xs rounded-xl transition">
+            Choose Another File
+          </button>
         </div>
       ) : (
         /* Extracted Spreadsheet Studio */

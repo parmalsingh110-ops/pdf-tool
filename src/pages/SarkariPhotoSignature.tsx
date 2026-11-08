@@ -42,6 +42,7 @@ export default function SarkariPhotoSignature() {
   const [targetSizeKb, setTargetSizeKb] = useState<number>(45); // default 45 KB for SSC
   const [resultSizeKb, setResultSizeKb] = useState<number | null>(null);
   const [previewDataUrl, setPreviewDataUrl] = useState<string | null>(null);
+  const lastRenderedCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
@@ -320,6 +321,7 @@ export default function SarkariPhotoSignature() {
 
     const finalBytes = Math.round((dataUrl.length - 22) * 0.75);
     setResultSizeKb(Math.round(finalBytes / 1024));
+    lastRenderedCanvasRef.current = canvas;
     setPreviewDataUrl(dataUrl);
   }, [photoUrl, signUrl, candidateName, photoDate, dopPrefix, showBorder, layoutMode, targetSizeKb]);
 
@@ -331,10 +333,26 @@ export default function SarkariPhotoSignature() {
   const downloadResult = async (format: 'jpg' | 'png' | 'pdf') => {
     if (!previewDataUrl) return;
 
-    if (format === 'jpg' || format === 'png') {
+    if (format === 'jpg') {
       const a = document.createElement('a');
       a.href = previewDataUrl;
-      a.download = `sarkari_photo_signature_${candidateName.replace(/\s+/g, '_') || 'exam'}.${format}`;
+      a.download = `sarkari_photo_signature_${candidateName.replace(/\s+/g, '_') || 'exam'}.jpg`;
+      a.click();
+    } else if (format === 'png') {
+      let pngDataUrl = lastRenderedCanvasRef.current?.toDataURL('image/png');
+      if (!pngDataUrl) {
+        const img = new Image();
+        img.src = previewDataUrl;
+        await new Promise((res) => { img.onload = res; });
+        const c = document.createElement('canvas');
+        c.width = img.naturalWidth;
+        c.height = img.naturalHeight;
+        c.getContext('2d')?.drawImage(img, 0, 0);
+        pngDataUrl = c.toDataURL('image/png');
+      }
+      const a = document.createElement('a');
+      a.href = pngDataUrl;
+      a.download = `sarkari_photo_signature_${candidateName.replace(/\s+/g, '_') || 'exam'}.png`;
       a.click();
     } else if (format === 'pdf') {
       const pdfDoc = await PDFDocument.create();

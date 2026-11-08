@@ -18,6 +18,7 @@ import { useSEO } from '../hooks/useSEO';
 import { usePageSEO } from '../lib/usePageSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
 import { downloadBlob } from '../lib/utils';
+import { embedSmartFont } from '../lib/pdfFontHelper';
 
 interface PresetTemplate {
   id: string;
@@ -123,7 +124,7 @@ function cleanWinAnsi(str: string): string {
     .replace(/[‘’]/g, "'")
     .replace(/[•·]/g, '*')
     .replace(/…/g, '...')
-    .replace(/[^\x00-\x7F]/g, ' ');
+    .replace(/[^\x00-\x7F\u0900-\u097F]/g, ' ');
 }
 
 export default function PamphletMaker() {
@@ -181,8 +182,9 @@ export default function PamphletMaker() {
       const pageHeight = 841.89;
 
       const page = doc.addPage([pageWidth, pageHeight]);
-      const fontBold = await doc.embedFont(StandardFonts.HelveticaBold);
-      const fontReg = await doc.embedFont(StandardFonts.Helvetica);
+      const allPamphletText = `${title}${punchline}${badge}${bullet1}${bullet2}${bullet3}${bullet4}${contact}${address}`;
+      const fontBold = await embedSmartFont(doc, allPamphletText, { bold: true, fallback: StandardFonts.HelveticaBold });
+      const fontReg = await embedSmartFont(doc, allPamphletText, { fallback: StandardFonts.Helvetica });
 
       // Helper to render a single pamphlet box within bounding box (x, y, w, h)
       const renderFlyer = (bx: number, by: number, bw: number, bh: number) => {

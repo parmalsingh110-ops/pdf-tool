@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { Search, Zap, CheckCircle2, Download, RotateCcw, AlertTriangle, Cpu, Cloud, ShieldCheck } from 'lucide-react';
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
+import 'regenerator-runtime/runtime';
+import fontkit from '@pdf-lib/fontkit';
 import * as pdfjsLib from 'pdfjs-dist';
 import { createWorker } from 'tesseract.js';
 import '../lib/pdfWorker';
@@ -79,6 +81,20 @@ export default function SearchablePdf() {
       const total = pdfDoc.getPageCount();
       const helvetica = await pdfDoc.embedFont(StandardFonts.Helvetica);
 
+      let devanagariFont: any = null;
+      if (lang === 'hin' || lang === 'hin+eng') {
+        try {
+          const fontRes = await fetch('/fonts/NotoSansDevanagari-Regular.ttf');
+          if (fontRes.ok) {
+            const fontBytes = await fontRes.arrayBuffer();
+            pdfDoc.registerFontkit(fontkit);
+            devanagariFont = await pdfDoc.embedFont(fontBytes);
+          }
+        } catch (fErr) {
+          console.warn('Devanagari font load fallback:', fErr);
+        }
+      }
+
       setBrowserProgress({
         currentPage: 0,
         totalPages: total,
@@ -153,12 +169,14 @@ export default function SearchablePdf() {
           const pdfY = pdfH - y1;
 
           try {
+            const hasDevanagari = /[\u0900-\u097F]/.test(text);
+            const fontToUse = (hasDevanagari && devanagariFont) ? devanagariFont : helvetica;
             // Draw invisible searchable text exactly over the scanned word image
             pdfLibPage.drawText(text, {
               x: x0,
               y: pdfY,
               size: Math.max(6, Math.min(36, wordH * 0.85)),
-              font: helvetica,
+              font: fontToUse,
               color: rgb(0, 0, 0),
               opacity: 0, // 100% invisible so scan looks pristine, but text is selectable & searchable!
             });

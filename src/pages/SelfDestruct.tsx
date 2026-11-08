@@ -106,7 +106,10 @@ export default function SelfDestruct() {
             color: rgb(0.85, 0.15, 0.15)
           });
 
-          page.drawText(`⚠ EXPIRING DOCUMENT: VALID ONLY UNTIL ${expDateFormatted.toUpperCase()} • ${recipientNote}`, {
+          const safeNote = (recipientNote || '').replace(/[^\x20-\x7E]/g, ' ').trim();
+          const noteSuffix = safeNote ? ` - ${safeNote}` : '';
+
+          page.drawText(`[CONFIDENTIAL] VALID ONLY UNTIL ${expDateFormatted.toUpperCase()}${noteSuffix}`, {
             x: 14,
             y: height - 17,
             size: 8,
@@ -123,7 +126,7 @@ export default function SelfDestruct() {
             color: rgb(0.1, 0.15, 0.2)
           });
 
-          page.drawText(`Self-Destruct Timer Active • Unauthorized copying or viewing after ${expDateFormatted} violates confidentiality`, {
+          page.drawText(`Security Policy Active: Unauthorized copying or viewing after ${expDateFormatted} violates confidentiality`, {
             x: 14,
             y: 5,
             size: 7,

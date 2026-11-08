@@ -5,6 +5,7 @@ import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { dataUrlToBytes } from '../lib/utils';
+import { apiFetch } from '../lib/api';
 
 interface DocPreset {
   id: string;
@@ -439,7 +440,7 @@ export default function UnlockPDF() {
 
         try {
           const loadingTask = pdfjsLib.getDocument({
-            data: new Uint8Array(arrayBuffer),
+            data: new Uint8Array(arrayBuffer.slice(0)),
             password: pass,
           });
           pdfjsDoc = await loadingTask.promise;
@@ -473,7 +474,7 @@ export default function UnlockPDF() {
         const formData = new FormData();
         formData.append('file', file);
         formData.append('password', successfulPassword);
-        const backendResp = await fetch('http://127.0.0.1:8000/unlock-pdf', {
+        const backendResp = await apiFetch('/unlock-pdf', {
           method: 'POST',
           body: formData,
         });
@@ -489,7 +490,7 @@ export default function UnlockPDF() {
         console.warn('Backend unlock unavailable, using client raster fallback.');
       }
 
-      // ── Step 2: Client-side raster fallback (canvas PNG embed) ──
+      // ── Step 2: Client-side raster fallback (canvas high-quality embed) ──
       setProgress(`Backend offline — rebuilding ${numPages} page(s) locally...`);
 
       // Render each page into a brand new clean unencrypted PDF
@@ -508,17 +509,19 @@ export default function UnlockPDF() {
 
         await page.render({ canvasContext: ctx, viewport, canvas } as any).promise;
 
-        const pngDataUrl = canvas.toDataURL('image/png');
-        const pngBytes = dataUrlToBytes(pngDataUrl);
+        const jpgDataUrl = canvas.toDataURL('image/jpeg', 0.92);
+        const jpgBytes = dataUrlToBytes(jpgDataUrl);
 
-        const pngImage = await newPdfDoc.embedPng(pngBytes);
+        const jpgImage = await newPdfDoc.embedJpg(jpgBytes);
         const pdfPage = newPdfDoc.addPage([viewport.width / scale, viewport.height / scale]);
-        pdfPage.drawImage(pngImage, {
+        pdfPage.drawImage(jpgImage, {
           x: 0,
           y: 0,
           width: viewport.width / scale,
           height: viewport.height / scale,
         });
+        canvas.width = 0;
+        canvas.height = 0;
       }
 
       setProgress('Finalizing unencrypted PDF...');

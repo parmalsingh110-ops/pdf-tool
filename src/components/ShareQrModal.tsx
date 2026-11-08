@@ -1,5 +1,6 @@
 import React, { useRef, useEffect } from 'react';
 import { X, QrCode, Smartphone, Share2, Check, Copy } from 'lucide-react';
+import QRCode from 'qrcode';
 
 interface ShareQrModalProps {
   isOpen: boolean;
@@ -13,6 +14,7 @@ export default function ShareQrModal({
   isOpen,
   onClose,
   title,
+  fileBlobUrl,
   fileName = 'document.pdf',
 }: ShareQrModalProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -24,62 +26,24 @@ export default function ShareQrModal({
   useEffect(() => {
     if (!isOpen || !canvasRef.current) return;
     const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
 
-    // Render a high-contrast clean QR-like pattern matrix for the current URL
-    const size = 200;
-    canvas.width = size;
-    canvas.height = size;
-
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, size, size);
-
-    const gridSize = 25;
-    const cellSize = Math.floor(size / gridSize);
-    const offset = Math.floor((size - gridSize * cellSize) / 2);
-
-    // Draw finder patterns at 3 corners
-    const drawFinder = (gx: number, gy: number) => {
-      ctx.fillStyle = '#0f172a';
-      ctx.fillRect(offset + gx * cellSize, offset + gy * cellSize, 7 * cellSize, 7 * cellSize);
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(offset + (gx + 1) * cellSize, offset + (gy + 1) * cellSize, 5 * cellSize, 5 * cellSize);
-      ctx.fillStyle = '#0f172a';
-      ctx.fillRect(offset + (gx + 2) * cellSize, offset + (gy + 2) * cellSize, 3 * cellSize, 3 * cellSize);
-    };
-
-    drawFinder(0, 0);
-    drawFinder(gridSize - 7, 0);
-    drawFinder(0, gridSize - 7);
-
-    // Draw timing patterns
-    ctx.fillStyle = '#0f172a';
-    for (let i = 8; i < gridSize - 8; i += 2) {
-      ctx.fillRect(offset + i * cellSize, offset + 6 * cellSize, cellSize, cellSize);
-      ctx.fillRect(offset + 6 * cellSize, offset + i * cellSize, cellSize, cellSize);
-    }
-
-    // Hash data pattern
-    let hash = 0;
-    const text = currentUrl;
-    for (let i = 0; i < text.length; i++) {
-      hash = ((hash << 5) - hash + text.charCodeAt(i)) | 0;
-    }
-
-    for (let y = 0; y < gridSize; y++) {
-      for (let x = 0; x < gridSize; x++) {
-        // Skip finder areas
-        if ((x < 8 && y < 8) || (x >= gridSize - 8 && y < 8) || (x < 8 && y >= gridSize - 8)) continue;
-        if (x === 6 || y === 6) continue;
-
-        const val = Math.sin(x * 12.9898 + y * 78.233 + hash) * 43758.5453;
-        const bit = Math.abs(val - Math.floor(val)) > 0.55;
-        if (bit) {
-          ctx.fillRect(offset + x * cellSize, offset + y * cellSize, cellSize, cellSize);
-        }
+    // Render a 100% genuine, standard scannable QR code
+    QRCode.toCanvas(
+      canvas,
+      currentUrl,
+      {
+        width: 200,
+        margin: 1,
+        color: {
+          dark: '#0f172a',
+          light: '#ffffff',
+        },
+        errorCorrectionLevel: 'M',
+      },
+      (err) => {
+        if (err) console.error('Failed to render QR Code:', err);
       }
-    }
+    );
   }, [isOpen, currentUrl]);
 
   if (!isOpen) return null;
@@ -95,6 +59,37 @@ export default function ShareQrModal({
       `Open and use ${title} on PDF Media Suite (Free, fast & private): ${currentUrl}`
     );
     window.open(`https://api.whatsapp.com/send?text=${text}`, '_blank');
+  };
+
+  const handleNativeShare = async () => {
+    if (fileBlobUrl && navigator.canShare) {
+      try {
+        const resp = await fetch(fileBlobUrl);
+        const blob = await resp.blob();
+        const shareFile = new File([blob], fileName, { type: blob.type || 'application/pdf' });
+        if (navigator.canShare({ files: [shareFile] })) {
+          await navigator.share({
+            title,
+            text: `Processed ${fileName} on PDF Media Suite`,
+            files: [shareFile],
+          });
+          return;
+        }
+      } catch (e) {
+        console.warn('Native file share failed:', e);
+      }
+    }
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title,
+          text: `Use ${title} on PDF Media Suite:`,
+          url: currentUrl,
+        });
+        return;
+      } catch {}
+    }
+    handleWhatsAppShare();
   };
 
   return (
@@ -130,11 +125,11 @@ export default function ShareQrModal({
 
         <div className="grid grid-cols-2 gap-2.5">
           <button
-            onClick={handleWhatsAppShare}
+            onClick={handleNativeShare}
             className="flex items-center justify-center gap-1.5 py-2.5 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-md transition"
           >
             <Share2 className="w-3.5 h-3.5" />
-            WhatsApp
+            {fileBlobUrl && typeof navigator !== 'undefined' && 'canShare' in navigator ? 'Share File' : 'WhatsApp'}
           </button>
           <button
             onClick={handleCopyLink}

@@ -29,21 +29,37 @@ interface SummaryResult {
 }
 
 // ─── Zero-API-Key Extractive Summarization Engine ─────────────────────
-// Uses frequency-weighted centroid scoring to identify the most salient sentences
+// Uses Unicode-aware frequency-weighted centroid scoring to identify the most salient sentences
 function generateExtractiveSummary(fullText: string, pageCount: number): SummaryResult {
-  // Normalize & split into sentences
+  // Normalize whitespace
   const cleaned = fullText.replace(/\s+/g, ' ').trim();
-  const rawSentences = cleaned.match(/[^.!?]+[.!?]+/g) || [cleaned];
+  if (!cleaned) {
+    return {
+      executiveSummary: 'Document contains no extractable text.',
+      keyPoints: ['No readable text found in document.'],
+      stats: { totalPages: pageCount, totalWords: 0, readingTimeMin: 1, sentenceCount: 0 },
+      keyTopics: [],
+    };
+  }
+
+  // Split into sentences using Unicode punctuation (. ! ? । ॥ and linebreaks)
+  const rawSentences = cleaned.split(/(?<=[.!?।॥\n])\s+/u).filter(Boolean);
   const sentences = rawSentences
     .map(s => s.trim())
-    .filter(s => s.length > 25 && s.length < 350);
+    .filter(s => s.length > 20 && s.length < 400);
 
-  const words = cleaned.toLowerCase().match(/\b[a-z]{3,}\b/g) || [];
+  // Unicode letter tokenization (\p{L} matches Latin, Devanagari, and all international scripts)
+  const words = cleaned.toLowerCase().match(/\p{L}{2,}/gu) || [];
   const stopWords = new Set([
+    // English Stop Words
     'the', 'and', 'for', 'that', 'this', 'with', 'from', 'have', 'were', 'which',
     'their', 'about', 'there', 'would', 'could', 'should', 'been', 'each', 'they',
     'these', 'those', 'when', 'where', 'will', 'more', 'also', 'such', 'other',
-    'into', 'some', 'than', 'them', 'then', 'only', 'very', 'what', 'your', 'shall'
+    'into', 'some', 'than', 'them', 'then', 'only', 'very', 'what', 'your', 'shall',
+    // Hindi / Devanagari Stop Words
+    'और', 'का', 'की', 'के', 'में', 'पर', 'से', 'को', 'ने', 'है', 'हैं', 'था', 'थी', 'थे',
+    'यह', 'वह', 'इस', 'उस', 'भी', 'कि', 'हो', 'गया', 'गई', 'जाता', 'किया', 'दिया', 'एवं',
+    'तथा', 'अथवा', 'या', 'तक', 'द्वारा', 'साथ', 'लिए', 'हुए', 'होने', 'सकते', 'सकता'
   ]);
 
   // Term Frequency
@@ -62,7 +78,7 @@ function generateExtractiveSummary(fullText: string, pageCount: number): Summary
 
   // Score Sentences
   const scoredSentences = sentences.map((sent, index) => {
-    const sentWords = sent.toLowerCase().match(/\b[a-z]{3,}\b/g) || [];
+    const sentWords = sent.toLowerCase().match(/\p{L}{2,}/gu) || [];
     let score = 0;
     for (const w of sentWords) {
       if (freqMap[w]) score += freqMap[w];
@@ -79,7 +95,7 @@ function generateExtractiveSummary(fullText: string, pageCount: number): Summary
   // Pick top sentences maintaining original document flow
   const topSentences = [...scoredSentences]
     .sort((a, b) => b.score - a.score)
-    .slice(0, Math.min(8, Math.max(4, Math.floor(sentences.length * 0.15))))
+    .slice(0, Math.min(8, Math.max(3, Math.floor(sentences.length * 0.15))))
     .sort((a, b) => a.index - b.index);
 
   const keyPoints = topSentences.map(s => s.sentence);
@@ -89,7 +105,7 @@ function generateExtractiveSummary(fullText: string, pageCount: number): Summary
   const readingTimeMin = Math.max(1, Math.ceil(totalWords / 200));
 
   return {
-    executiveSummary: executiveSummary || 'Document summary could not be extracted.',
+    executiveSummary: executiveSummary || cleaned.substring(0, 250) + '...',
     keyPoints: keyPoints.length > 0 ? keyPoints : [cleaned.substring(0, 200) + '...'],
     stats: {
       totalPages: pageCount,
@@ -255,7 +271,9 @@ export default function AiPdfSummarizer() {
 
     // Wrap summary text
     let curY = 720;
-    const words = summary.executiveSummary.split(' ');
+    const safeAscii = (str: string) => str.replace(/[^\x20-\x7E]/g, ' ');
+    const safeSummary = safeAscii(summary.executiveSummary);
+    const words = safeSummary.split(' ');
     let line = '';
     for (const w of words) {
       if ((line + w).length > 80) {
@@ -282,7 +300,7 @@ export default function AiPdfSummarizer() {
     curY -= 20;
 
     summary.keyPoints.slice(0, 6).forEach((kp) => {
-      const kpText = `• ${kp.substring(0, 95)}...`;
+      const kpText = `- ${safeAscii(kp).substring(0, 95)}...`;
       page.drawText(kpText, { x: 40, y: curY, size: 8.5, font: helvetica, color: rgb(0.2, 0.25, 0.3) });
       curY -= 16;
     });

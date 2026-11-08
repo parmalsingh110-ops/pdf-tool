@@ -57,6 +57,94 @@ export default function XeroxCleaner() {
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [showQrModal, setShowQrModal] = useState<boolean>(false);
 
+  // Pure processing function for a single page canvas
+  const processCleanCanvas = (
+    orig: HTMLCanvasElement,
+    mode: CleanMode,
+    thresh: number,
+    darknessPct: number,
+    _contrast: number
+  ) => {
+    const w = orig.width;
+    const h = orig.height;
+    const out = document.createElement('canvas');
+    out.width = w;
+    out.height = h;
+    const ctx = out.getContext('2d');
+    if (!ctx) return { canvas: orig, dataUrl: orig.toDataURL('image/jpeg', 0.90) };
+
+    ctx.drawImage(orig, 0, 0);
+    const imgData = ctx.getImageData(0, 0, w, h);
+    const data = imgData.data;
+    const darkness = darknessPct / 100;
+
+    for (let i = 0; i < data.length; i += 4) {
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
+      const gray = 0.299 * r + 0.587 * g + 0.114 * b;
+
+      if (mode === 'crisp_xerox') {
+        if (gray >= thresh) {
+          data[i] = 255;
+          data[i + 1] = 255;
+          data[i + 2] = 255;
+        } else {
+          const darkVal = Math.max(0, Math.floor(gray * (1 - darkness)));
+          data[i] = darkVal;
+          data[i + 1] = darkVal;
+          data[i + 2] = darkVal;
+        }
+      } else if (mode === 'grayscale') {
+        if (gray >= thresh) {
+          data[i] = 255;
+          data[i + 1] = 255;
+          data[i + 2] = 255;
+        } else {
+          const remapped = (gray / thresh) * 220;
+          data[i] = remapped;
+          data[i + 1] = remapped;
+          data[i + 2] = remapped;
+        }
+      } else if (mode === 'toner_saver') {
+        if (gray >= thresh - 20) {
+          data[i] = 255;
+          data[i + 1] = 255;
+          data[i + 2] = 255;
+        } else {
+          const lightened = Math.min(180, Math.max(80, gray));
+          data[i] = lightened;
+          data[i + 1] = lightened;
+          data[i + 2] = lightened;
+        }
+      } else if (mode === 'magic_color') {
+        const maxChannel = Math.max(r, g, b);
+        const minChannel = Math.min(r, g, b);
+        const saturation = maxChannel > 0 ? (maxChannel - minChannel) / maxChannel : 0;
+
+        if (saturation < 0.18 && gray >= thresh - 15) {
+          data[i] = 255;
+          data[i + 1] = 255;
+          data[i + 2] = 255;
+        } else if (saturation >= 0.18) {
+          data[i] = Math.min(255, r + 15);
+          data[i + 1] = Math.min(255, g + 15);
+          data[i + 2] = Math.min(255, b + 15);
+        } else {
+          data[i] = Math.max(0, r - 30);
+          data[i + 1] = Math.max(0, g - 30);
+          data[i + 2] = Math.max(0, b - 30);
+        }
+      }
+    }
+
+    ctx.putImageData(imgData, 0, 0);
+    return {
+      canvas: out,
+      dataUrl: out.toDataURL('image/jpeg', 0.90),
+    };
+  };
+
   // Load uploaded files (multiple images or multi-page PDF)
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFiles = Array.from(e.target.files || []);
@@ -83,11 +171,12 @@ export default function XeroxCleaner() {
             const ctx = canvas.getContext('2d');
             if (ctx) {
               await page.render({ canvasContext: ctx, viewport, canvas } as any).promise;
+              const res = processCleanCanvas(canvas, cleanMode, whitenessThreshold, textDarkness, contrastBoost);
               loadedPages.push({
                 id: pId++,
                 originalCanvas: canvas,
-                cleanedCanvas: null,
-                cleanedDataUrl: null,
+                cleanedCanvas: res.canvas,
+                cleanedDataUrl: res.dataUrl,
               });
             }
           }
@@ -104,11 +193,12 @@ export default function XeroxCleaner() {
                 const ctx = canvas.getContext('2d');
                 if (ctx) {
                   ctx.drawImage(img, 0, 0);
+                  const res = processCleanCanvas(canvas, cleanMode, whitenessThreshold, textDarkness, contrastBoost);
                   loadedPages.push({
                     id: pId++,
                     originalCanvas: canvas,
-                    cleanedCanvas: null,
-                    cleanedDataUrl: null,
+                    cleanedCanvas: res.canvas,
+                    cleanedDataUrl: res.dataUrl,
                   });
                 }
                 resolve();
@@ -129,109 +219,31 @@ export default function XeroxCleaner() {
     }
   };
 
-  // Re-process all pages when filter settings change
+  // Re-process pages when filter settings or loaded pages change (debounced for smooth 60fps sliders)
   useEffect(() => {
     if (pages.length === 0) return;
 
-    const updatedPages = pages.map((page) => {
-      const orig = page.originalCanvas;
-      const w = orig.width;
-      const h = orig.height;
+    const timer = setTimeout(() => {
+      setPages((prevPages) =>
+        prevPages.map((page) => {
+          const res = processCleanCanvas(
+            page.originalCanvas,
+            cleanMode,
+            whitenessThreshold,
+            textDarkness,
+            contrastBoost
+          );
+          return {
+            ...page,
+            cleanedCanvas: res.canvas,
+            cleanedDataUrl: res.dataUrl,
+          };
+        })
+      );
+    }, 80);
 
-      const out = document.createElement('canvas');
-      out.width = w;
-      out.height = h;
-      const ctx = out.getContext('2d');
-      if (!ctx) return page;
-
-      ctx.drawImage(orig, 0, 0);
-      const imgData = ctx.getImageData(0, 0, w, h);
-      const data = imgData.data;
-
-      // Threshold parameters
-      const thresh = whitenessThreshold;
-      const darkness = textDarkness / 100;
-
-      for (let i = 0; i < data.length; i += 4) {
-        const r = data[i];
-        const g = data[i + 1];
-        const b = data[i + 2];
-        const gray = 0.299 * r + 0.587 * g + 0.114 * b;
-
-        if (cleanMode === 'crisp_xerox') {
-          // 1-bit style high-contrast black & white
-          if (gray >= thresh) {
-            data[i] = 255;
-            data[i + 1] = 255;
-            data[i + 2] = 255;
-          } else {
-            // Darken ink
-            const darkVal = Math.max(0, Math.floor(gray * (1 - darkness)));
-            data[i] = darkVal;
-            data[i + 1] = darkVal;
-            data[i + 2] = darkVal;
-          }
-        } else if (cleanMode === 'grayscale') {
-          // Smooth grayscale with pure white background
-          if (gray >= thresh) {
-            data[i] = 255;
-            data[i + 1] = 255;
-            data[i + 2] = 255;
-          } else {
-            // Remap 0..thresh to 0..220
-            const remapped = (gray / thresh) * 220;
-            data[i] = remapped;
-            data[i + 1] = remapped;
-            data[i + 2] = remapped;
-          }
-        } else if (cleanMode === 'toner_saver') {
-          // Lighten ink density to save toner
-          if (gray >= thresh - 20) {
-            data[i] = 255;
-            data[i + 1] = 255;
-            data[i + 2] = 255;
-          } else {
-            // Cap darkest black to 90 (dark gray instead of pitch black)
-            const lightened = Math.min(180, Math.max(80, gray));
-            data[i] = lightened;
-            data[i + 1] = lightened;
-            data[i + 2] = lightened;
-          }
-        } else if (cleanMode === 'magic_color') {
-          // Preserve colors (blue pens, red stamps) while bleaching yellow paper
-          const maxChannel = Math.max(r, g, b);
-          const minChannel = Math.min(r, g, b);
-          const saturation = maxChannel > 0 ? (maxChannel - minChannel) / maxChannel : 0;
-
-          if (saturation < 0.18 && gray >= thresh - 15) {
-            // Bleach neutral paper background
-            data[i] = 255;
-            data[i + 1] = 255;
-            data[i + 2] = 255;
-          } else if (saturation >= 0.18) {
-            // Boost color saturation (signature, stamp)
-            data[i] = Math.min(255, r + 15);
-            data[i + 1] = Math.min(255, g + 15);
-            data[i + 2] = Math.min(255, b + 15);
-          } else {
-            // Darken neutral text
-            data[i] = Math.max(0, r - 30);
-            data[i + 1] = Math.max(0, g - 30);
-            data[i + 2] = Math.max(0, b - 30);
-          }
-        }
-      }
-
-      ctx.putImageData(imgData, 0, 0);
-      return {
-        ...page,
-        cleanedCanvas: out,
-        cleanedDataUrl: out.toDataURL('image/jpeg', 0.90),
-      };
-    });
-
-    setPages(updatedPages);
-  }, [cleanMode, whitenessThreshold, textDarkness, contrastBoost]);
+    return () => clearTimeout(timer);
+  }, [cleanMode, whitenessThreshold, textDarkness, contrastBoost, pages.length]);
 
   // Export all cleaned pages to single PDF
   const handleDownloadPdf = async () => {

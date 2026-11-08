@@ -6,6 +6,7 @@ import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
+import { embedSmartFont } from '../lib/pdfFontHelper';
 
 // Initialize pdf.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
@@ -178,7 +179,8 @@ export default function HeadersFooters() {
     try {
       const arrayBuffer = await file.arrayBuffer();
       const pdfDoc = await PDFDocument.load(arrayBuffer);
-      const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+      const combinedSample = `${headerLeft}${headerCenter}${headerRight}${footerLeft}${footerCenter}${footerRight}${file.name}`;
+      const font = await embedSmartFont(pdfDoc, combinedSample, { fallback: StandardFonts.Helvetica });
       const pages = pdfDoc.getPages();
       const totalPages = pages.length;
       const { r, g, b } = hexToRgb(fontColor);

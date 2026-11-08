@@ -74,7 +74,9 @@ export default function ValidateSignatures() {
       const incrementalUpdates = eofMatches ? Math.max(eofMatches.length - 1, 0) : 0;
 
       // Check for standard signature dictionaries (/Type /Sig, /ByteRange, /Contents)
-      const hasSigDict = rawText.includes('/Type /Sig') || rawText.includes('/Type/Sig') || rawText.includes('/ByteRange');
+      const byteRangeMatch = rawText.match(/\/ByteRange\s*\[\s*(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s*\]/);
+      const hasRealByteRange = !!byteRangeMatch;
+      const hasSigDict = rawText.includes('/Type /Sig') || rawText.includes('/Type/Sig') || hasRealByteRange;
       const hasDigitalCertStamp = rawText.includes('DIGITALLY SIGNED') || rawText.includes('DigitalSignature:') || rawText.includes('NOTARIAL DIGITAL SEAL');
 
       // Attempt to extract signer metadata from pdf-lib
@@ -121,17 +123,24 @@ export default function ValidateSignatures() {
       const details: string[] = [];
       let integrityStatus: 'VALID' | 'WARNING' | 'NO_SIGNATURE' = 'NO_SIGNATURE';
 
-      if (hasSigDict || hasDigitalCertStamp || signerName) {
+      if (hasRealByteRange) {
         integrityStatus = 'VALID';
-        details.push('Cryptographic Digital Signature or PKI Seal detected in document structure.');
+        details.push('Standard PKCS#7 / PAdES Digital Signature dictionary with ByteRange detected.');
         if (signerName) details.push(`Identified Signer: "${signerName}".`);
         if (reason) details.push(`Signing Purpose / Reason: "${reason}".`);
         if (incrementalUpdates > 0) {
-          details.push(`Document contains ${incrementalUpdates} revision layer(s) following initial compilation.`);
+          details.push(`Document contains ${incrementalUpdates} revision layer(s) following initial signing.`);
         } else {
           details.push('Document byte structure is intact with zero unauthorized post-signing revisions.');
         }
+      } else if (hasSigDict || signerName || hasDigitalCertStamp) {
+        integrityStatus = 'WARNING';
+        details.push('Visual Certificate Stamp or Notary Metadata detected.');
+        details.push('NOTICE: No cryptographic PKCS#7 / PAdES ByteRange dictionary found in PDF structure.');
+        if (signerName) details.push(`Signer metadata references: "${signerName}".`);
+        details.push('This document contains visual attestation markings but is not cryptographically sealed against byte tampering.');
       } else {
+        integrityStatus = 'NO_SIGNATURE';
         details.push('No standard PKCS#7 or PKI Digital Signature dictionary found in this PDF.');
         details.push('Document SHA-256 fingerprint generated for tamper-verification audit baseline.');
       }

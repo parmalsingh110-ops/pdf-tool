@@ -1968,12 +1968,9 @@ export default function UniversalConverter() {
           if (backendBlob) {
             blob = backendBlob;
           } else {
-            setProgress('Server offline — extracting Word content in browser…');
+            setProgress('Server offline — generating PDF in browser…');
             const docxContent = await extractDocxContent(file);
-            const doc2 = buildDocxFromStructured(docxContent.elements, name);
-            // Can't produce PDF client-side without a PDF library — generate DOCX copy instead
-            blob = await Packer.toBlob(doc2);
-            setError('⚠️ Server offline: PDF output unavailable. Downloaded as DOCX instead.');
+            blob = await pdfFromDocxContent(docxContent.elements, name);
           }
         } else {
           setProgress('Extracting Word content (tables, headings, formatting)…');
@@ -2014,10 +2011,8 @@ export default function UniversalConverter() {
             if (backendBlob) {
               blob = backendBlob;
             } else {
-              // Fallback: export as plain text
-              setProgress('Server offline — exporting Word as text…');
-              blob = txtFromParagraphs(docxContent.flatText);
-              setError('⚠️ Server offline: PPT output unavailable. Downloaded as TXT instead.');
+              setProgress('Server offline — generating PowerPoint slides in browser…');
+              blob = await pptxFromParagraphs(docxContent.flatText, name);
             }
           } else {
             const doc2 = buildDocxFromStructured(docxContent.elements, name);
@@ -2034,10 +2029,8 @@ export default function UniversalConverter() {
           if (backendBlob) {
             blob = backendBlob;
           } else {
-            setProgress('Server offline — exporting Excel as text…');
-            const sheets = await extractXlsxSheets(file);
-            blob = txtFromXlsxSheets(sheets);
-            setError('⚠️ Server offline: PDF output unavailable. Downloaded as TXT instead.');
+            setProgress('Server offline — converting Excel to PDF in browser…');
+            blob = await xlsxFileToPdf(file);
           }
         } else if (target === 'docx') {
           // ── XLSX → Word: Backend ──
@@ -2046,10 +2039,9 @@ export default function UniversalConverter() {
           if (backendBlob) {
             blob = backendBlob;
           } else {
-            setProgress('Server offline — exporting Excel as text…');
+            setProgress('Server offline — converting Excel to Word in browser…');
             const sheets = await extractXlsxSheets(file);
-            blob = txtFromXlsxSheets(sheets);
-            setError('⚠️ Server offline: DOCX output unavailable. Downloaded as TXT instead.');
+            blob = await docxFromXlsxSheets(sheets);
           }
         } else if (target === 'pptx') {
           // ── XLSX → PPT: Backend ──
@@ -2058,10 +2050,9 @@ export default function UniversalConverter() {
           if (backendBlob) {
             blob = backendBlob;
           } else {
-            setProgress('Server offline — exporting Excel as CSV…');
+            setProgress('Server offline — converting Excel to PowerPoint in browser…');
             const sheets = await extractXlsxSheets(file);
-            blob = csvFromXlsxSheets(sheets);
-            setError('⚠️ Server offline: PPT output unavailable. Downloaded as CSV instead.');
+            blob = await pptxFromXlsxSheets(sheets);
           }
         } else {
           setProgress('Reading Excel sheets…');
@@ -2079,10 +2070,10 @@ export default function UniversalConverter() {
           if (backendBlob) {
             blob = backendBlob;
           } else {
-            setProgress('Server offline — extracting slides as text…');
+            setProgress('Server offline — converting PowerPoint to PDF in browser…');
             const slides = await extractPptxSlides(file);
-            blob = txtFromSlides(slides);
-            setError('⚠️ Server offline: PDF output unavailable. Downloaded as TXT instead.');
+            const slideTexts = slides.map(s => [s.title, ...s.body].filter(Boolean).join('\n'));
+            blob = await pdfFromSlides(slideTexts, name);
           }
         } else if (target === 'docx') {
           // ── PPTX → Word: Backend ──
@@ -2091,10 +2082,9 @@ export default function UniversalConverter() {
           if (backendBlob) {
             blob = backendBlob;
           } else {
-            setProgress('Server offline — extracting slides as text…');
+            setProgress('Server offline — converting PowerPoint to Word in browser…');
             const slides = await extractPptxSlides(file);
-            blob = txtFromSlides(slides);
-            setError('⚠️ Server offline: DOCX output unavailable. Downloaded as TXT instead.');
+            blob = await docxFromSlides(slides, name);
           }
         } else if (target === 'xlsx') {
           // ── PPTX → Excel: Backend ──
@@ -2103,10 +2093,9 @@ export default function UniversalConverter() {
           if (backendBlob) {
             blob = backendBlob;
           } else {
-            setProgress('Server offline — extracting slides as text…');
+            setProgress('Server offline — converting PowerPoint to Excel in browser…');
             const slides = await extractPptxSlides(file);
-            blob = txtFromSlides(slides);
-            setError('⚠️ Server offline: XLSX output unavailable. Downloaded as TXT instead.');
+            blob = xlsxFromSlides(slides);
           }
         } else {
           setProgress('Extracting slides (titles, body, tables)…');

@@ -122,48 +122,46 @@ export default function LandRecordDarkener() {
     }
   };
 
-  // Process image with adaptive darkening algorithms
-  const processImage = () => {
-    if (!sourceCanvas) return;
-
+  // Process canvas with adaptive darkening algorithms
+  const processDarkenCanvas = (
+    src: HTMLCanvasElement,
+    threshold: number,
+    contrastLvl: number,
+    bgTintRemove: boolean,
+    thickBoost: boolean
+  ): HTMLCanvasElement => {
     const canvas = document.createElement('canvas');
-    canvas.width = sourceCanvas.width;
-    canvas.height = sourceCanvas.height;
+    canvas.width = src.width;
+    canvas.height = src.height;
     const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+    if (!ctx) return src;
 
-    ctx.drawImage(sourceCanvas, 0, 0);
+    ctx.drawImage(src, 0, 0);
     const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
     const data = imgData.data;
 
-    const threshold = blackThreshold;
-    const contrastFactor = (259 * (contrastLevel + 255)) / (255 * (259 - contrastLevel));
+    // Clamp contrast to 254 max so denominator (259 - contrast) is always positive (>= 5)
+    const clampedContrast = Math.min(254, Math.max(0, contrastLvl));
+    const contrastFactor = (259 * (clampedContrast + 255)) / (255 * (259 - clampedContrast));
 
     for (let i = 0; i < data.length; i += 4) {
-      let r = data[i];
-      let g = data[i + 1];
-      let b = data[i + 2];
-
-      // Convert to luminance (human eye perception)
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
       const lum = 0.299 * r + 0.587 * g + 0.114 * b;
 
-      // Special blue/grey revenue line detection:
-      // Government land maps often use light blue or faint grey survey numbers
       const isBlueLine = b > r && b > g && lum < 225;
       const isGreyLine = Math.abs(r - g) < 20 && Math.abs(g - b) < 20 && lum < 215;
 
       if (isBlueLine || isGreyLine || lum < threshold) {
-        // Deep pitch black for land map lines
         data[i] = 0;
         data[i + 1] = 0;
         data[i + 2] = 0;
-      } else if (removeBackgroundTint && lum >= threshold) {
-        // Pure crisp white for background paper
+      } else if (bgTintRemove && lum >= threshold) {
         data[i] = 255;
         data[i + 1] = 255;
         data[i + 2] = 255;
       } else {
-        // Apply contrast curve
         let newLum = contrastFactor * (lum - 128) + 128;
         newLum = Math.max(0, Math.min(255, newLum));
         data[i] = newLum;
@@ -174,15 +172,26 @@ export default function LandRecordDarkener() {
 
     ctx.putImageData(imgData, 0, 0);
 
-    // Optional line thickness morphological dilation (boosts 1px lines so cheap toner catches it)
-    if (lineThicknessBoost) {
+    if (thickBoost) {
       ctx.globalCompositeOperation = 'multiply';
       ctx.drawImage(canvas, 1, 0);
       ctx.drawImage(canvas, 0, 1);
       ctx.globalCompositeOperation = 'source-over';
     }
 
-    setProcessedDataUrl(canvas.toDataURL('image/jpeg', 0.94));
+    return canvas;
+  };
+
+  const processImage = () => {
+    if (!sourceCanvas) return;
+    const res = processDarkenCanvas(
+      sourceCanvas,
+      blackThreshold,
+      contrastLevel,
+      removeBackgroundTint,
+      lineThicknessBoost
+    );
+    setProcessedDataUrl(res.toDataURL('image/jpeg', 0.94));
   };
 
   useEffect(() => {
@@ -191,7 +200,7 @@ export default function LandRecordDarkener() {
     }
   }, [sourceCanvas, contrastLevel, blackThreshold, removeBackgroundTint, lineThicknessBoost]);
 
-  // Export as PDF
+  // Export as PDF (Supports full multi-page PDF records)
   const handleDownloadPdf = async () => {
     if (!processedDataUrl || !sourceCanvas) return;
     setIsProcessing(true);
@@ -200,26 +209,63 @@ export default function LandRecordDarkener() {
       const pdfDoc = await PDFDocument.create();
       const ptWidth = 595.28; // A4 pt
       const ptHeight = 841.89;
-
-      const page = pdfDoc.addPage([ptWidth, ptHeight]);
-      const imgBytes = await fetch(processedDataUrl).then((r) => r.arrayBuffer());
-      const embeddedImg = await pdfDoc.embedJpg(imgBytes);
-
-      // Fit inside A4 with 15pt margins
       const margin = 20;
       const maxWidth = ptWidth - margin * 2;
       const maxHeight = ptHeight - margin * 2;
-      const scale = Math.min(maxWidth / sourceCanvas.width, maxHeight / sourceCanvas.height);
 
-      const drawW = sourceCanvas.width * scale;
-      const drawH = sourceCanvas.height * scale;
+      if (file && (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf'))) {
+        const arrayBuffer = await file.arrayBuffer();
+        const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
 
-      page.drawImage(embeddedImg, {
-        x: (ptWidth - drawW) / 2,
-        y: (ptHeight - drawH) / 2,
-        width: drawW,
-        height: drawH,
-      });
+        for (let p = 1; p <= pdf.numPages; p++) {
+          const page = await pdf.getPage(p);
+          const viewport = page.getViewport({ scale: 2.2 });
+          const canvas = document.createElement('canvas');
+          canvas.width = viewport.width;
+          canvas.height = viewport.height;
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            await page.render({ canvasContext: ctx, viewport, canvas } as any).promise;
+            const darkened = processDarkenCanvas(
+              canvas,
+              blackThreshold,
+              contrastLevel,
+              removeBackgroundTint,
+              lineThicknessBoost
+            );
+            const jpgDataUrl = darkened.toDataURL('image/jpeg', 0.92);
+            const jpgBytes = await fetch(jpgDataUrl).then((r) => r.arrayBuffer());
+            const embeddedImg = await pdfDoc.embedJpg(jpgBytes);
+
+            const docPage = pdfDoc.addPage([ptWidth, ptHeight]);
+            const scale = Math.min(maxWidth / canvas.width, maxHeight / canvas.height);
+            const drawW = canvas.width * scale;
+            const drawH = canvas.height * scale;
+
+            docPage.drawImage(embeddedImg, {
+              x: (ptWidth - drawW) / 2,
+              y: (ptHeight - drawH) / 2,
+              width: drawW,
+              height: drawH,
+            });
+          }
+        }
+      } else {
+        const page = pdfDoc.addPage([ptWidth, ptHeight]);
+        const imgBytes = await fetch(processedDataUrl).then((r) => r.arrayBuffer());
+        const embeddedImg = await pdfDoc.embedJpg(imgBytes);
+
+        const scale = Math.min(maxWidth / sourceCanvas.width, maxHeight / sourceCanvas.height);
+        const drawW = sourceCanvas.width * scale;
+        const drawH = sourceCanvas.height * scale;
+
+        page.drawImage(embeddedImg, {
+          x: (ptWidth - drawW) / 2,
+          y: (ptHeight - drawH) / 2,
+          width: drawW,
+          height: drawH,
+        });
+      }
 
       const pdfBytes = await pdfDoc.save();
       const blob = new Blob([pdfBytes as any], { type: 'application/pdf' });

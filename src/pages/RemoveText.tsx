@@ -10,6 +10,7 @@ import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { dataUrlToBytes } from '../lib/utils';
+import { apiFetch } from '../lib/api';
 
 type RemovalScope = 'keywords' | 'headers-footers' | 'all-text';
 
@@ -151,6 +152,42 @@ export default function RemoveText() {
     setBusy(true);
 
     try {
+      // ── 1. Enterprise Backend Vector Stream Redaction (genuinely deletes text from PDF content stream) ──
+      if (scope === 'keywords' && eraseColor.toLowerCase() === '#ffffff') {
+        try {
+          const keywords = targetKeywords
+            .split(',')
+            .map((k) => k.trim())
+            .filter(Boolean);
+          let currentBlob: Blob = file;
+          let allSucceeded = keywords.length > 0;
+          for (const kw of keywords) {
+            const fd = new FormData();
+            fd.append('file', currentBlob, file.name);
+            fd.append('search_term', kw);
+            fd.append('replace_term', '');
+            const res = await apiFetch('/search-replace', {
+              method: 'POST',
+              body: fd,
+            });
+            if (res.ok) {
+              currentBlob = await res.blob();
+            } else {
+              allSucceeded = false;
+              break;
+            }
+          }
+          if (allSucceeded) {
+            if (resultUrl) URL.revokeObjectURL(resultUrl);
+            setResultUrl(URL.createObjectURL(currentBlob));
+            setResultFileName(`${file.name.replace(/\.pdf$/i, '')}_Text_Removed.pdf`);
+            return;
+          }
+        } catch {
+          // Fall through to client-side processor if backend is offline
+        }
+      }
+
       const buf = await file.arrayBuffer();
 
       // ── Vector path: pdf-lib drawRectangle (preserves searchable text, links, vectors) ──
@@ -191,30 +228,41 @@ export default function RemoveText() {
         return;
       }
 
-      // ── Raster path: only for "all-text" scope (wipe entire page content) ──
-      const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buf) }).promise;
-      const newDoc = await PDFDocument.create();
+      // ── Clean Vector Erase for "all-text" scope (erases all text boxes, preserves images & graphics) ──
+      const pdfDoc = await PDFDocument.load(buf, { ignoreEncryption: true });
+      const pages = pdfDoc.getPages();
+      const pdfjs = await pdfjsLib.getDocument({ data: new Uint8Array(buf.slice(0)) }).promise;
 
-      for (let p = 1; p <= pdf.numPages; p++) {
-        const page = await pdf.getPage(p);
-        const origVp = page.getViewport({ scale: 1.0 });
-        const canvas = document.createElement('canvas');
-        canvas.width = Math.round(origVp.width * 2);
-        canvas.height = Math.round(origVp.height * 2);
-        const ctx = canvas.getContext('2d')!;
-        ctx.fillStyle = eraseColor;
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
+      const hex = eraseColor.replace('#', '');
+      const cr = parseInt(hex.substring(0, 2), 16) / 255;
+      const cg = parseInt(hex.substring(2, 4), 16) / 255;
+      const cb = parseInt(hex.substring(4, 6), 16) / 255;
+      const fillColor = rgb(cr, cg, cb);
 
-        const imgData = canvas.toDataURL('image/jpeg', 0.94);
-        const imgBytes = dataUrlToBytes(imgData);
-        const pdfImg = await newDoc.embedJpg(imgBytes);
-        const newPage = newDoc.addPage([origVp.width, origVp.height]);
-        newPage.drawImage(pdfImg, { x: 0, y: 0, width: origVp.width, height: origVp.height });
-        canvas.width = 0;
-        canvas.height = 0;
+      for (let p = 1; p <= pdfjs.numPages; p++) {
+        const jsPage = await pdfjs.getPage(p);
+        const docPage = pages[p - 1];
+        if (!docPage) continue;
+        const tc = await jsPage.getTextContent();
+        for (const item of tc.items as any[]) {
+          if (!item.str || !item.transform) continue;
+          const tx = item.transform[4];
+          const ty = item.transform[5];
+          const fontSize = Math.abs(item.transform[0] || item.transform[3] || 12);
+          const width = item.width || fontSize * item.str.length * 0.6;
+          const height = item.height || fontSize * 1.15;
+          docPage.drawRectangle({
+            x: Math.max(0, tx - 1),
+            y: Math.max(0, ty - 2),
+            width: width + 2,
+            height: height + 3,
+            color: fillColor,
+            borderWidth: 0,
+          });
+        }
       }
 
-      const finalBytes = await newDoc.save();
+      const finalBytes = await pdfDoc.save();
       const blob = new Blob([finalBytes as any], { type: 'application/pdf' });
       if (resultUrl) URL.revokeObjectURL(resultUrl);
       setResultUrl(URL.createObjectURL(blob));

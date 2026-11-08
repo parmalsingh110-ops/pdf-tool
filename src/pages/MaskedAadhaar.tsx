@@ -133,15 +133,18 @@ export default function MaskedAadhaar() {
     setMasks((prev) => prev.filter((m) => m.id !== id));
   };
 
-  // Pointer dragging handlers for mask boxes
-  const handleMouseDown = (e: React.MouseEvent, maskId: string) => {
+  // Pointer / Touch dragging handlers for mask boxes (works on desktop & mobile)
+  const handlePointerDown = (e: React.PointerEvent, maskId: string) => {
     e.preventDefault();
     setSelectedMaskId(maskId);
     draggingMaskId.current = maskId;
     dragStartPos.current = { x: e.clientX, y: e.clientY };
+    try {
+      (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    } catch {}
   };
 
-  const handleMouseMove = (e: React.MouseEvent) => {
+  const handlePointerMove = (e: React.PointerEvent) => {
     if (!draggingMaskId.current || !dragStartPos.current || !imageContainerRef.current) return;
 
     const rect = imageContainerRef.current.getBoundingClientRect();
@@ -164,9 +167,12 @@ export default function MaskedAadhaar() {
     dragStartPos.current = { x: e.clientX, y: e.clientY };
   };
 
-  const handleMouseUp = () => {
+  const handlePointerUp = (e: React.PointerEvent) => {
     draggingMaskId.current = null;
     dragStartPos.current = null;
+    try {
+      (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+    } catch {}
   };
 
   // Generate Masked Canvas & Export
@@ -255,17 +261,32 @@ export default function MaskedAadhaar() {
         document.body.removeChild(a);
       } else {
         const pdfDoc = await PDFDocument.create();
-        const page = pdfDoc.addPage([canvas.width * 0.5, canvas.height * 0.5]);
+        const page1 = pdfDoc.addPage([canvas.width * 0.5, canvas.height * 0.5]);
         const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
         const imgBytes = dataUrlToBytes(dataUrl);
         const jpgImg = await pdfDoc.embedJpg(imgBytes);
 
-        page.drawImage(jpgImg, {
+        page1.drawImage(jpgImg, {
           x: 0,
           y: 0,
           width: canvas.width * 0.5,
           height: canvas.height * 0.5,
         });
+
+        // If source was a multi-page PDF, preserve pages 2..N (e.g. Aadhaar Back side with address)
+        if (file && (file.type === 'application/pdf' || file.name.endsWith('.pdf')) && pdfPageCount > 1) {
+          try {
+            const srcBytes = await file.arrayBuffer();
+            const srcDoc = await PDFDocument.load(srcBytes, { ignoreEncryption: true });
+            const extraIndices = Array.from({ length: srcDoc.getPageCount() - 1 }, (_, i) => i + 1);
+            const copiedPages = await pdfDoc.copyPages(srcDoc, extraIndices);
+            for (const cp of copiedPages) {
+              pdfDoc.addPage(cp);
+            }
+          } catch (e) {
+            console.warn('[MaskedAadhaar] Could not copy remaining pages:', e);
+          }
+        }
 
         const pdfBytes = await pdfDoc.save();
         const blob = new Blob([pdfBytes as any], { type: 'application/pdf' });
@@ -398,9 +419,9 @@ export default function MaskedAadhaar() {
             {/* Document Workspace with Draggable Overlays */}
             <div
               ref={imageContainerRef}
-              onMouseMove={handleMouseMove}
-              onMouseUp={handleMouseUp}
-              className="relative border-2 border-dashed border-gray-300 rounded-2xl overflow-hidden bg-gray-100 select-none shadow-inner"
+              onPointerMove={handlePointerMove}
+              onPointerUp={handlePointerUp}
+              className="relative border-2 border-dashed border-gray-300 rounded-2xl overflow-hidden bg-gray-100 select-none shadow-inner touch-none"
             >
               <img
                 src={renderedImageUrl}
@@ -412,12 +433,13 @@ export default function MaskedAadhaar() {
               {masks.map((mask) => (
                 <div
                   key={mask.id}
-                  onMouseDown={(e) => handleMouseDown(e, mask.id)}
+                  onPointerDown={(e) => handlePointerDown(e, mask.id)}
                   style={{
                     left: `${mask.xPercent}%`,
                     top: `${mask.yPercent}%`,
                     width: `${mask.wPercent}%`,
                     height: `${mask.hPercent}%`,
+                    touchAction: 'none',
                   }}
                   className={`absolute cursor-move flex items-center justify-center font-bold text-xs select-none transition-shadow ${
                     selectedMaskId === mask.id

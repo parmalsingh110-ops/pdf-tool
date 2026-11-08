@@ -207,6 +207,21 @@ export default function CryptographicSignatures() {
       );
       const signatureHex = bufferToHex(signatureBytes);
 
+      // Export public key to SPKI format and encode to PEM for independent verification
+      let pubKeyPem = '';
+      try {
+        const exportedPub = await window.crypto.subtle.exportKey('spki', keyPair.publicKey);
+        const pubBytes = new Uint8Array(exportedPub);
+        let binaryStr = '';
+        for (let i = 0; i < pubBytes.byteLength; i++) {
+          binaryStr += String.fromCharCode(pubBytes[i]);
+        }
+        const b64Pub = btoa(binaryStr);
+        pubKeyPem = `-----BEGIN PUBLIC KEY-----\n${b64Pub.match(/.{1,64}/g)?.join('\n')}\n-----END PUBLIC KEY-----`;
+      } catch (pkErr) {
+        console.warn('Could not export public key PEM:', pkErr);
+      }
+
       // Step 3: Embed Visual Signature Stamp & Metadata into the PDF using pdf-lib
       const pdfDoc = await PDFDocument.load(fileBytes);
       const pageIndex = Math.min(Math.max(targetPage - 1, 0), pdfDoc.getPageCount() - 1);
@@ -257,6 +272,7 @@ export default function CryptographicSignatures() {
         sha256Hash: hashHex,
         digitalSignature: signatureHex,
         keyAlgorithm: 'RSA-2048 / RSASSA-PKCS1-v1_5',
+        publicKeyPem: pubKeyPem,
         verificationStatus: 'VALID_CRYPTOGRAPHIC_INTEGRITY'
       };
       setAuditReceipt(receipt);
@@ -266,6 +282,15 @@ export default function CryptographicSignatures() {
     } finally {
       setIsProcessing(false);
     }
+  };
+
+  const downloadPublicKeyPem = () => {
+    if (!auditReceipt || !(auditReceipt as any).publicKeyPem) return;
+    const blob = new Blob([(auditReceipt as any).publicKeyPem], { type: 'application/x-pem-file' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `${file?.name.replace(/\.pdf$/i, '')}_Signer_PublicKey.pem`;
+    a.click();
   };
 
   const downloadAuditCertificate = () => {
@@ -547,6 +572,13 @@ export default function CryptographicSignatures() {
               <Download className="w-5 h-5" />
               Download Signed PDF
             </a>
+            <button
+              onClick={downloadPublicKeyPem}
+              className="py-4 px-5 bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 dark:hover:bg-blue-900/50 text-blue-700 dark:text-blue-300 font-bold rounded-2xl border border-blue-200 dark:border-blue-800 transition-all text-xs flex items-center justify-center gap-1.5"
+            >
+              <Key className="w-4 h-4 text-blue-600" />
+              Public Key (.pem)
+            </button>
             <button
               onClick={downloadAuditCertificate}
               className="py-4 px-5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold rounded-2xl transition-all text-xs flex items-center justify-center gap-1.5"

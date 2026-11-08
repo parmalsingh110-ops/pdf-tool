@@ -214,12 +214,20 @@ export default function PdfFormFiller() {
           }
         } else if (cf.type === 'checkbox') {
           if (cf.checked) {
-            page.drawText('✔', {
-              x,
-              y: y - 10,
-              size: 14,
-              font: helvetica,
-              color: rgb(0.1, 0.3, 0.8)
+            // Crisp vector checkmark that never throws WinAnsi encoding errors
+            const startX = x + 2;
+            const startY = y - 5;
+            page.drawLine({
+              start: { x: startX, y: startY },
+              end: { x: startX + 3.5, y: startY - 4 },
+              thickness: 1.8,
+              color: rgb(0.1, 0.3, 0.8),
+            });
+            page.drawLine({
+              start: { x: startX + 3.5, y: startY - 4 },
+              end: { x: startX + 10, y: startY + 5 },
+              thickness: 1.8,
+              color: rgb(0.1, 0.3, 0.8),
             });
           }
         }

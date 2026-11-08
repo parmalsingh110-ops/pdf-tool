@@ -31,6 +31,7 @@ import JsBarcode from 'jsbarcode';
 import { useSEO } from '../hooks/useSEO';
 import { usePageSEO } from '../lib/usePageSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
+import { escapeHtml } from '../lib/utils';
 
 // Color theme presets
 const COLOR_PRESETS = [
@@ -374,11 +375,12 @@ export default function QrCodeGenerator() {
       }
 
       const totalStickers = isSheet ? printCols * printRows : 1;
+      const safeTitle = printLabelTitle ? escapeHtml(printLabelTitle) : '';
       const stickersHtml = Array.from({ length: totalStickers })
         .map(
           () => `
           <div class="sticker">
-            ${printLabelTitle ? `<div class="lbl-title">${printLabelTitle}</div>` : ''}
+            ${safeTitle ? `<div class="lbl-title">${safeTitle}</div>` : ''}
             <img src="${dataUrl}" alt="Code" />
             <div class="lbl-sub">${mode === 'qr' ? qrType.toUpperCase() : barcodeFormat} • SCAN VERIFIED</div>
           </div>

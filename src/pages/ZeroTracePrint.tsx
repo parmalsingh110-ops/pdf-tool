@@ -23,6 +23,7 @@ import '../lib/pdfWorker';
 import { useSEO } from '../hooks/useSEO';
 import { usePageSEO } from '../lib/usePageSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
+import { escapeHtml } from '../lib/utils';
 
 interface DestructionCert {
   fileName: string;
@@ -93,10 +94,11 @@ export default function ZeroTracePrint() {
 
     try {
       const buffer = await file.arrayBuffer();
+      // Keep an isolated copy for cryptographic hashing & zero-fill shredding so PDF.js doesn't detach it
       const u8 = new Uint8Array(buffer);
-      rawBufferRef.current = u8;
+      rawBufferRef.current = new Uint8Array(u8);
 
-      const doc = await pdfjsLib.getDocument({ data: u8 }).promise;
+      const doc = await pdfjsLib.getDocument({ data: new Uint8Array(buffer.slice(0)) }).promise;
       setPdfDoc(doc);
       setTotalPages(doc.numPages);
       setCurrentPage(1);
@@ -218,7 +220,7 @@ export default function ZeroTracePrint() {
         <!DOCTYPE html>
         <html>
           <head>
-            <title>Confidential Print - ${fileName}</title>
+            <title>Confidential Print - ${escapeHtml(fileName)}</title>
             <style>
               @page { size: auto; margin: 0; }
               body { margin: 0; padding: 0; background: #fff; }

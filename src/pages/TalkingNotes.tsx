@@ -24,6 +24,7 @@ import { useSEO } from '../hooks/useSEO';
 import { usePageSEO } from '../lib/usePageSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
 import { downloadBlob } from '../lib/utils';
+import { apiFetch, API_BASE } from '../lib/api';
 
 interface AudioAnnotation {
   id: string;
@@ -68,6 +69,18 @@ export default function TalkingNotes() {
   const [isProcessing, setIsProcessing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Student QR Scan Playback State (?id=...&note=...)
+  const [scannedNoteId, setScannedNoteId] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return null;
+    const params = new URLSearchParams(window.location.search);
+    return params.get('id') || params.get('play');
+  });
+  const [scannedNoteLabel, setScannedNoteLabel] = useState<string>(() => {
+    if (typeof window === 'undefined') return 'Teacher Voice Note';
+    const params = new URLSearchParams(window.location.search);
+    return params.get('note') || 'Teacher Voice Note';
+  });
+
   const handleFileUpload = async (file: File) => {
     if (file.type !== 'application/pdf') {
       alert('Please select a PDF document.');
@@ -81,7 +94,7 @@ export default function TalkingNotes() {
       const u8 = new Uint8Array(buffer);
       setPdfBytes(u8);
 
-      const doc = await pdfjsLib.getDocument({ data: u8 }).promise;
+      const doc = await pdfjsLib.getDocument({ data: u8.slice(0) }).promise;
       setTotalPages(doc.numPages);
       setCurrentPage(1);
     } catch (err) {
@@ -97,7 +110,7 @@ export default function TalkingNotes() {
     let isCancelled = false;
 
     const render = async () => {
-      const doc = await pdfjsLib.getDocument({ data: pdfBytes }).promise;
+      const doc = await pdfjsLib.getDocument({ data: pdfBytes.slice(0) }).promise;
       if (isCancelled) return;
       const page = await doc.getPage(currentPage);
       const viewport = page.getViewport({ scale: 1.0 });
@@ -200,12 +213,60 @@ export default function TalkingNotes() {
       const fontRegular = await doc.embedFont(StandardFonts.Helvetica);
 
       for (const anno of annotations) {
+        // Embed the actual voice audio directly into the PDF as an embedded file attachment!
+        if (anno.audioBlob) {
+          try {
+            const audioBuffer = await anno.audioBlob.arrayBuffer();
+            const audioBytes = new Uint8Array(audioBuffer);
+            const safeLabel = (anno.label || 'voice_note').replace(/[^a-zA-Z0-9_-]/g, '_');
+            await doc.attach(
+              audioBytes,
+              `Voice_Note_Page_${anno.pageNum}_${safeLabel}.webm`,
+              {
+                mimeType: 'audio/webm',
+                description: `Voice Note for Page ${anno.pageNum}: ${anno.label || 'Talking Note'}`,
+                creationDate: new Date(),
+                modificationDate: new Date(),
+              }
+            );
+          } catch (e) {
+            console.warn('[TalkingNotes] Could not attach audio into PDF:', e);
+          }
+        }
+
         if (anno.pageNum <= doc.getPageCount()) {
           const page = doc.getPage(anno.pageNum - 1);
           const { width, height } = page.getSize();
 
-          // Standard QR Code encoding link (Audio note player or data link)
-          const targetUrl = `https://pdfmediasuite.in/audio-note?id=${anno.id}&note=${encodeURIComponent(anno.label)}`;
+          // Upload audio blob to cloud spool so scanning the printed QR code plays the teacher's voice note on any phone
+          if (anno.audioBlob) {
+            try {
+              const fd = new FormData();
+              fd.append('session_id', 'AUDIONOTES');
+              fd.append('job_id', anno.id);
+              fd.append('sender_device_id', 'talking_notes');
+              fd.append('device_label', anno.label || 'Voice Note');
+              fd.append('copies', '1');
+              fd.append('color_mode', 'bw');
+              fd.append('orientation', 'auto');
+              fd.append('file', anno.audioBlob, `${anno.id}.webm`);
+              await apiFetch('/api/print-drop/upload', {
+                method: 'POST',
+                body: fd,
+              });
+            } catch (uploadErr) {
+              console.warn('[TalkingNotes] Cloud audio upload skipped:', uploadErr);
+            }
+          }
+
+          // Standard QR Code encoding link (Audio note player route)
+          const origin =
+            typeof window !== 'undefined' &&
+            window.location.hostname !== 'localhost' &&
+            window.location.hostname !== '127.0.0.1'
+              ? window.location.origin
+              : 'https://pdfmediasuite.in';
+          const targetUrl = `${origin}/audio-note?id=${encodeURIComponent(anno.id)}&note=${encodeURIComponent(anno.label)}`;
 
           try {
             // Instant 100% Local In-Browser QR Generation
@@ -220,7 +281,7 @@ export default function TalkingNotes() {
 
             // Stamp dimensions
             const qrSize = 65;
-            const bannerWidth = 140;
+            const bannerWidth = 145;
             const bannerHeight = 80;
 
             const stampX = (anno.xPos / 100) * width - bannerWidth / 2;
@@ -247,27 +308,35 @@ export default function TalkingNotes() {
 
             // Draw text banner next to QR
             page.drawText('TALKING NOTE', {
-              x: stampX + qrSize + 14,
-              y: stampY + bannerHeight - 20,
+              x: stampX + qrSize + 12,
+              y: stampY + bannerHeight - 18,
               size: 8,
               font,
               color: rgb(0.1, 0.3, 0.8),
             });
 
-            page.drawText('Scan with Phone', {
-              x: stampX + qrSize + 14,
-              y: stampY + bannerHeight - 34,
+            page.drawText('Audio Attached', {
+              x: stampX + qrSize + 12,
+              y: stampY + bannerHeight - 32,
               size: 7,
-              font: fontRegular,
-              color: rgb(0.2, 0.2, 0.2),
+              font,
+              color: rgb(0.05, 0.6, 0.3),
             });
 
-            page.drawText('to Hear Audio', {
-              x: stampX + qrSize + 14,
-              y: stampY + bannerHeight - 45,
+            page.drawText('In PDF or Scan', {
+              x: stampX + qrSize + 12,
+              y: stampY + bannerHeight - 44,
               size: 7,
               font: fontRegular,
-              color: rgb(0.2, 0.2, 0.2),
+              color: rgb(0.3, 0.3, 0.3),
+            });
+
+            page.drawText('with Phone QR', {
+              x: stampX + qrSize + 12,
+              y: stampY + bannerHeight - 56,
+              size: 7,
+              font: fontRegular,
+              color: rgb(0.3, 0.3, 0.3),
             });
           } catch (e) {
             console.warn('Could not embed QR for annotation', e);
@@ -314,6 +383,35 @@ export default function TalkingNotes() {
             </button>
           )}
         </div>
+
+        {/* Student Scanned Audio Note Player Banner */}
+        {scannedNoteId && (
+          <div className="p-6 rounded-3xl bg-indigo-600 text-white shadow-xl flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div className="space-y-1">
+              <div className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-indigo-200">
+                <Volume2 className="w-4 h-4" /> Scanned Talking Handout Audio
+              </div>
+              <h2 className="text-xl font-extrabold">{scannedNoteLabel}</h2>
+              <p className="text-xs text-indigo-100">
+                Press play below to listen to the recorded voice explanation for this handout section.
+              </p>
+            </div>
+            <div className="flex items-center gap-3 w-full sm:w-auto">
+              <audio
+                controls
+                autoPlay
+                src={`${API_BASE}/api/print-drop/file/AUDIONOTES/${encodeURIComponent(scannedNoteId)}?keep=1`}
+                className="w-full sm:w-72 h-10 rounded-xl"
+              />
+              <button
+                onClick={() => setScannedNoteId(null)}
+                className="px-3 py-2 rounded-xl bg-indigo-700 hover:bg-indigo-800 text-xs font-bold"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Upload State */}
         {!pdfBytes && (

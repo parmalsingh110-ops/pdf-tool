@@ -17,6 +17,7 @@ import { useSEO } from '../hooks/useSEO';
 import { usePageSEO } from '../lib/usePageSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
 import { downloadBlob } from '../lib/utils';
+import { embedSmartFont } from '../lib/pdfFontHelper';
 
 interface ChatMessage {
   date: string;
@@ -34,7 +35,7 @@ function cleanWinAnsi(str: string): string {
     .replace(/[‘’]/g, "'")
     .replace(/[•·]/g, '*')
     .replace(/…/g, '...')
-    .replace(/[^\x00-\x7F]/g, ' ');
+    .replace(/[^\x00-\x7F\u0900-\u097F]/g, ' ');
 }
 
 export default function CourtEvidenceFormatter() {
@@ -118,8 +119,9 @@ export default function CourtEvidenceFormatter() {
 
     try {
       const doc = await PDFDocument.create();
-      const fontBold = await doc.embedFont(StandardFonts.TimesRomanBold);
-      const fontRegular = await doc.embedFont(StandardFonts.TimesRoman);
+      const allChatSample = `${courtName}${caseNumber}${partyA}${partyB}${deponentName}${chatText}${messages.map((m) => m.sender + m.text).join('')}`;
+      const fontBold = await embedSmartFont(doc, allChatSample, { bold: true, fallback: StandardFonts.TimesRomanBold });
+      const fontRegular = await embedSmartFont(doc, allChatSample, { fallback: StandardFonts.TimesRoman });
       const fontItalic = await doc.embedFont(StandardFonts.TimesRomanItalic);
 
       // Legal Paper dimensions: 8.5 x 14 inches (612 x 1008 pt)

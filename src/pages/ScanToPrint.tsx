@@ -47,6 +47,7 @@ import { useSEO } from '../hooks/useSEO';
 import { usePageSEO } from '../lib/usePageSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
 import { apiFetch, API_BASE } from '../lib/api';
+import { escapeHtml } from '../lib/utils';
 import {
   getSharedFilesFromCache,
   clearSharedFilesCache,
@@ -258,7 +259,8 @@ export default function ScanToPrint() {
   const [isPrintingCustomerToken, setIsPrintingCustomerToken] = useState<number | null>(null);
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
   const [copiedLink, setCopiedLink] = useState(false);
-  const [peerStatus, setPeerStatus] = useState<'connecting' | 'online' | 'error'>('connecting');
+  const [peerStatus, setPeerStatus] = useState<'connecting' | 'online' | 'cloud' | 'error'>('connecting');
+  const peerRetryCountRef = useRef<number>(0);
   const [connectedMobiles, setConnectedMobiles] = useState<number>(0);
   const [incomingProgress, setIncomingProgress] = useState<{ name: string; progress: number } | null>(null);
   const [printingJobId, setPrintingJobId] = useState<string | null>(null);
@@ -836,8 +838,15 @@ export default function ScanToPrint() {
   }, [sessionCode, targetCounterPin, isSenderMode, addIncomingJob]);
 
   // ─── QR Code Generation ──────────────────────────────────────────────────
+  // On localhost, a phone cannot resolve http://localhost:3000.
+  // Use the live production URL so phones scanning the screen QR work instantly!
+  const isLocalHostEnv = typeof window !== 'undefined' &&
+    (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+
   const mobileLink = typeof window !== 'undefined'
-    ? `${window.location.origin}/scan-to-print?session=${sessionCode}`
+    ? isLocalHostEnv
+      ? `https://www.pdfmediasuite.in/scan-to-print?session=${sessionCode}`
+      : `${window.location.origin}/scan-to-print?session=${sessionCode}`
     : `https://www.pdfmediasuite.in/scan-to-print?session=${sessionCode}`;
 
   useEffect(() => {
@@ -890,15 +899,16 @@ export default function ScanToPrint() {
         });
         peerRef.current = peer;
 
-        // If signaling handshake stalls in 'connecting' for >7s, automatically retry
+        // If signaling handshake stalls in 'connecting' for >5s, do NOT destroy peer in an infinite loop!
+        // Keep peer listening in background and mark station ready via cloud relay
         connectTimeoutTimer = setTimeout(() => {
           if (!cancelled && peer && !peer.open) {
             try {
               channelRef.current?.postMessage({ action: 'PING_LEADER' });
             } catch {}
-            setPeerReconnectKey((k) => k + 1);
+            setPeerStatus((current) => (current === 'online' ? 'online' : 'cloud'));
           }
-        }, 7000);
+        }, 5000);
 
         peer.on('open', () => {
           if (connectTimeoutTimer) clearTimeout(connectTimeoutTimer);
@@ -995,9 +1005,17 @@ export default function ScanToPrint() {
                 let assembledBlob: Blob | null = null;
                 try {
                   const validChunks = (transfer.chunks as any[]).filter((c) => c !== undefined && c !== null);
-                  if (validChunks.length > 0) {
+                  if (
+                    validChunks.length > 0 &&
+                    validChunks.length >= (transfer.totalChunks || 1) &&
+                    (!transfer.size || transfer.receivedBytes >= transfer.size * 0.95)
+                  ) {
                     assembledBlob = new Blob(validChunks, { type: transfer.type });
                     blobUrl = URL.createObjectURL(assembledBlob);
+                  } else {
+                    console.warn(
+                      `[ScanToPrint] Incomplete WebRTC transfer for ${transfer.name}: chunks=${validChunks.length}/${transfer.totalChunks}, bytes=${transfer.receivedBytes}/${transfer.size}`
+                    );
                   }
                 } catch {
                   blobUrl = '';
@@ -1082,20 +1100,29 @@ export default function ScanToPrint() {
             try {
               channelRef.current?.postMessage({ action: 'PING_LEADER' });
             } catch {}
-            // Also schedule automatic retry in 2.5s (in case the previous tab just refreshed/closed on 0.peerjs.com)
-            retryTimer = setTimeout(() => {
-              if (!cancelled) {
-                setPeerReconnectKey((k) => k + 1);
-              }
-            }, 2500);
+            // Keep station ready via Cloud Relay so user is never stuck on amber spinner
+            setPeerStatus((current) => (current === 'online' ? 'online' : 'cloud'));
+            if (peerRetryCountRef.current < 2) {
+              peerRetryCountRef.current++;
+              const delay = peerRetryCountRef.current * 4000;
+              retryTimer = setTimeout(() => {
+                if (!cancelled) {
+                  setPeerReconnectKey((k) => k + 1);
+                }
+              }, delay);
+            }
           } else if (err.type === 'peer-unavailable') {
             // Expected when a mobile client disconnects
           } else {
-            retryTimer = setTimeout(() => {
-              if (!cancelled) {
-                setPeerReconnectKey((k) => k + 1);
-              }
-            }, 3000);
+            setPeerStatus((current) => (current === 'online' ? 'online' : 'cloud'));
+            if (peerRetryCountRef.current < 2) {
+              peerRetryCountRef.current++;
+              retryTimer = setTimeout(() => {
+                if (!cancelled) {
+                  setPeerReconnectKey((k) => k + 1);
+                }
+              }, 5000);
+            }
           }
         });
       } else {
@@ -1178,6 +1205,8 @@ export default function ScanToPrint() {
         const res = await fetch(`${baseUrl}/api/print-drop/jobs/${sessionCode}`, { signal: ctrl.signal });
         clearTimeout(tid);
         if (!res.ok) return false;
+        // Mark station online via cloud relay as soon as any relay endpoint responds
+        setPeerStatus((curr) => (curr === 'online' ? 'online' : 'cloud'));
         const data = await res.json();
         if (data.jobs?.length) {
           for (const j of data.jobs) {
@@ -1224,17 +1253,24 @@ export default function ScanToPrint() {
         // 1. Poll configured API_BASE (or same-origin Vite dev/preview server if localhost:8000 is not running)
         const gotPrimary = await fetchRelayJobsFromBase(API_BASE);
         let gotSecondary = false;
-        if (typeof window !== 'undefined' && API_BASE.includes('localhost:8000')) {
-          // On localhost:3000, also check same-origin Vite relay so it works even without Python port 8000 running
-          gotSecondary = await fetchRelayJobsFromBase('');
+        let gotCloud = false;
+
+        if (typeof window !== 'undefined') {
+          const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+          if (isLocal) {
+            // Check same-origin Vite relay
+            gotSecondary = await fetchRelayJobsFromBase('');
+            // ALSO check production cloud relay so phone scanning QR on live web works seamlessly on localhost!
+            gotCloud = await fetchRelayJobsFromBase('https://www.pdfmediasuite.in');
+          }
         }
-        if (gotPrimary || gotSecondary) {
-          pollBackoffRef.current = 3000;
+        if (gotPrimary || gotSecondary || gotCloud) {
+          pollBackoffRef.current = 2500;
         } else {
-          pollBackoffRef.current = Math.min(pollBackoffRef.current + 500, 10000);
+          pollBackoffRef.current = Math.min(pollBackoffRef.current + 500, 8000);
         }
       } catch {
-        pollBackoffRef.current = Math.min(pollBackoffRef.current + 1000, 10000);
+        pollBackoffRef.current = Math.min(pollBackoffRef.current + 1000, 8000);
       }
 
       if (!cancelled) {
@@ -1242,7 +1278,7 @@ export default function ScanToPrint() {
       }
     };
 
-    pollTimerRef.current = setTimeout(poll, 2500);
+    pollTimerRef.current = setTimeout(poll, 200);
 
     return () => {
       cancelled = true;
@@ -1428,7 +1464,12 @@ export default function ScanToPrint() {
       if (okPrimary) return true;
       // If localhost:8000 is not running during npm run dev, fall back to same-origin Vite relay (/api/print-drop/upload)
       if (API_BASE.includes('localhost:8000')) {
-        return await attemptUploadToBase('');
+        const okSecondary = await attemptUploadToBase('');
+        if (okSecondary) return true;
+      }
+      // If on localhost/private network and local relays didn't resolve, fall back to production cloud relay
+      if (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
+        return await attemptUploadToBase('https://www.pdfmediasuite.in');
       }
       return false;
     })();
@@ -1805,7 +1846,7 @@ export default function ScanToPrint() {
 
         printWindow.document.write(`
           <!DOCTYPE html><html>
-          <head><title>${job.name} — Print (×${job.copies}${isImgLandscape ? ' · Landscape' : ''})</title>
+          <head><title>${escapeHtml(job.name)} — Print (×${job.copies}${isImgLandscape ? ' · Landscape' : ''})</title>
           <style>
             @page { size: ${pageSize}; margin: 6mm; }
             * { box-sizing: border-box; }
@@ -1912,7 +1953,7 @@ export default function ScanToPrint() {
 
         printWindow.document.write(`
           <!DOCTYPE html><html>
-          <head><title>${job.name} (${totalPages}p ×${job.copies}${isDocLandscape ? ' · Landscape' : ''})</title>
+          <head><title>${escapeHtml(job.name)} (${totalPages}p ×${job.copies}${isDocLandscape ? ' · Landscape' : ''})</title>
           <style>
             @page {
               size: ${defaultPageSize};
@@ -3038,15 +3079,17 @@ export default function ScanToPrint() {
 
           <div className="flex items-center gap-2 flex-wrap">
             {/* Connection status pill */}
-            <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold border ${
-              peerStatus === 'online'
+            <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold border transition-all ${
+              peerStatus === 'online' || peerStatus === 'cloud'
                 ? 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-300 text-emerald-700 dark:text-emerald-300'
                 : peerStatus === 'error'
                 ? 'bg-red-50 dark:bg-red-950/60 border-red-300 text-red-700 dark:text-red-300'
                 : 'bg-amber-50 dark:bg-amber-950/60 border-amber-300 text-amber-700'
             }`}>
               {peerStatus === 'online' ? (
-                <><span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />Station Online</>
+                <><span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />Station Online (P2P + Cloud)</>
+              ) : peerStatus === 'cloud' ? (
+                <><span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />Station Online (Cloud Active)</>
               ) : peerStatus === 'error' ? (
                 <div className="flex items-center gap-1.5">
                   <AlertCircle className="w-3.5 h-3.5" />
@@ -3054,6 +3097,7 @@ export default function ScanToPrint() {
                   <button
                     onClick={() => {
                       setPeerStatus('connecting');
+                      peerRetryCountRef.current = 0;
                       setPeerReconnectKey((k) => k + 1);
                     }}
                     className="ml-1 underline font-bold cursor-pointer hover:text-red-900 dark:hover:text-red-200"

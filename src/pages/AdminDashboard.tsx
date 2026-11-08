@@ -119,7 +119,7 @@ export default function AdminDashboard() {
         return;
       }
 
-      const res = await fetch(`${targetUrl}/api/admin/telemetry?key=${encodeURIComponent(key)}`, {
+      const res = await fetch(`${targetUrl}/api/admin/telemetry`, {
         headers: {
           'X-Admin-Key': key,
         },
@@ -180,7 +180,7 @@ export default function AdminDashboard() {
     const targetUrl = backendUrl || getBackendUrl();
     setTestWebhookStatus('Sending test notification...');
     try {
-      const res = await fetch(`${targetUrl}/api/admin/test-webhook?key=${encodeURIComponent(passcode)}`, {
+      const res = await fetch(`${targetUrl}/api/admin/test-webhook`, {
         method: 'POST',
         headers: { 'X-Admin-Key': passcode },
       });
@@ -213,7 +213,7 @@ export default function AdminDashboard() {
     const targetUrl = backendUrl || getBackendUrl();
     setChangingPasscode(true);
     try {
-      const res = await fetch(`${targetUrl}/api/admin/change-passcode?key=${encodeURIComponent(passcode)}`, {
+      const res = await fetch(`${targetUrl}/api/admin/change-passcode`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

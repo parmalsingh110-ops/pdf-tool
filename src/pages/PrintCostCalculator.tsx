@@ -23,6 +23,7 @@ import '../lib/pdfWorker';
 import { useSEO } from '../hooks/useSEO';
 import { usePageSEO } from '../lib/usePageSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
+import { escapeHtml } from '../lib/utils';
 
 interface PageBreakdown {
   pageNum: number;
@@ -232,11 +233,19 @@ export default function PrintCostCalculator() {
     const receiptNo = `INV-${Date.now().toString(36).toUpperCase().slice(-5)}`;
     const now = new Date().toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' });
 
+    const safeShopName = escapeHtml(shopName);
+    const safeReceiptNo = escapeHtml(receiptNo);
+    const safeNow = escapeHtml(now);
+    const safeFileName = file ? escapeHtml(file.name.slice(0, 18)) : 'Direct Print';
+    const safeMode = escapeHtml(printMode.toUpperCase());
+    const safePaper = escapeHtml(paperType);
+    const safeUpiId = escapeHtml(upiId);
+
     printWin.document.write(`
       <!DOCTYPE html>
       <html>
         <head>
-          <title>Bill Receipt - ${shopName}</title>
+          <title>Bill Receipt - ${safeShopName}</title>
           <style>
             @page { size: 80mm auto; margin: 4mm; }
             body {
@@ -261,14 +270,14 @@ export default function PrintCostCalculator() {
         </head>
         <body>
           <div class="header center">
-            <div class="title">${shopName}</div>
+            <div class="title">${safeShopName}</div>
             <div>Photo State, Print &amp; E-Mitra Services</div>
-            <div style="font-size: 10px; margin-top: 3px;">Date: ${now} | ${receiptNo}</div>
+            <div style="font-size: 10px; margin-top: 3px;">Date: ${safeNow} | ${safeReceiptNo}</div>
           </div>
 
           <div class="row">
             <span>Doc / File:</span>
-            <span class="bold">${file ? file.name.slice(0, 18) : 'Direct Print'}</span>
+            <span class="bold">${safeFileName}</span>
           </div>
           <div class="row">
             <span>Pages &amp; Copies:</span>
@@ -276,7 +285,7 @@ export default function PrintCostCalculator() {
           </div>
           <div class="row">
             <span>Mode / Paper:</span>
-            <span>${printMode.toUpperCase()} (${paperType})</span>
+            <span>${safeMode} (${safePaper})</span>
           </div>
 
           <div class="divider"></div>
@@ -308,7 +317,7 @@ export default function PrintCostCalculator() {
           <div class="qr-box">
             <img src="${upiQrDataUrl}" />
             <div style="font-size: 10px; font-weight: bold; margin-top: 2px;">SCAN TO PAY VIA UPI</div>
-            <div style="font-size: 9px; color: #555;">${upiId}</div>
+            <div style="font-size: 9px; color: #555;">${safeUpiId}</div>
           </div>` : ''}
 
           <div class="footer">

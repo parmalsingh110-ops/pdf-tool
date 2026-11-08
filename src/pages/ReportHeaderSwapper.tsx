@@ -15,6 +15,7 @@ import { useSEO } from '../hooks/useSEO';
 import { usePageSEO } from '../lib/usePageSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
 import { downloadBlob } from '../lib/utils';
+import { embedSmartFont } from '../lib/pdfFontHelper';
 
 export default function ReportHeaderSwapper() {
   useSEO(
@@ -76,8 +77,9 @@ export default function ReportHeaderSwapper() {
     try {
       const arrayBuffer = await file.arrayBuffer();
       const pdfDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
-      const helvetica = await pdfDoc.embedFont(StandardFonts.Helvetica);
-      const helveticaBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+      const headerSample = `${newCollegeName}${departmentText}${studentInfo}`;
+      const helvetica = await embedSmartFont(pdfDoc, headerSample, { fallback: StandardFonts.Helvetica });
+      const helveticaBold = await embedSmartFont(pdfDoc, headerSample, { bold: true, fallback: StandardFonts.HelveticaBold });
 
       const count = pdfDoc.getPageCount();
 

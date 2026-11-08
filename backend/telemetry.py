@@ -15,9 +15,11 @@ import urllib.parse
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, Any, List
+import concurrent.futures
 from dotenv import load_dotenv
 
 logger = logging.getLogger("pdf_tool.telemetry")
+_ALERT_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=4, thread_name_prefix="telemetry_alert")
 
 # Database Path
 BACKEND_DIR = Path(__file__).resolve().parent
@@ -160,6 +162,18 @@ def hash_ip(ip: str) -> str:
     return hashlib.sha256(f"{ip}_{salt}".encode()).hexdigest()[:16]
 
 
+def _sync_send_discord(target_url: str, payload_data: bytes):
+    try:
+        req = urllib.request.Request(
+            target_url,
+            data=payload_data,
+            headers={"Content-Type": "application/json", "User-Agent": "PdfTool-Telemetry"}
+        )
+        urllib.request.urlopen(req, timeout=5)
+    except Exception as e:
+        logger.warning("Discord webhook alert failed: %s", e)
+
+
 def send_discord_alert(
     title: str,
     description: str,
@@ -167,7 +181,7 @@ def send_discord_alert(
     color: int = 0x3498DB,
     webhook_url: Optional[str] = None
 ):
-    """Send formatted embed message to Discord webhook if configured."""
+    """Send formatted embed message to Discord webhook on background thread."""
     target_url = get_discord_webhook(webhook_url)
     if not target_url:
         return
@@ -183,18 +197,25 @@ def send_discord_alert(
             }]
         }
         data = json.dumps(payload).encode("utf-8")
+        _ALERT_EXECUTOR.submit(_sync_send_discord, target_url, data)
+    except Exception as e:
+        logger.warning("Failed to queue Discord webhook: %s", e)
+
+
+def _sync_send_telegram(url: str, payload_data: bytes):
+    try:
         req = urllib.request.Request(
-            target_url,
-            data=data,
-            headers={"Content-Type": "application/json", "User-Agent": "PdfTool-Telemetry"}
+            url,
+            data=payload_data,
+            headers={"Content-Type": "application/json"}
         )
         urllib.request.urlopen(req, timeout=5)
     except Exception as e:
-        logger.warning("Discord webhook alert failed: %s", e)
+        logger.warning("Telegram webhook alert failed: %s", e)
 
 
 def send_telegram_alert(text: str):
-    """Send message to Telegram chat if bot token and chat ID are configured."""
+    """Send message to Telegram chat on background thread."""
     token, chat_id = get_telegram_creds()
     if not token or not chat_id:
         return
@@ -206,14 +227,9 @@ def send_telegram_alert(text: str):
             "parse_mode": "Markdown"
         }
         data = json.dumps(payload).encode("utf-8")
-        req = urllib.request.Request(
-            url,
-            data=data,
-            headers={"Content-Type": "application/json"}
-        )
-        urllib.request.urlopen(req, timeout=5)
+        _ALERT_EXECUTOR.submit(_sync_send_telegram, url, data)
     except Exception as e:
-        logger.warning("Telegram webhook alert failed: %s", e)
+        logger.warning("Failed to queue Telegram alert: %s", e)
 
 
 def save_feedback(

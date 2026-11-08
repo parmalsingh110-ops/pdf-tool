@@ -17,6 +17,7 @@ import {
 import { useSEO } from '../hooks/useSEO';
 import { usePageSEO } from '../lib/usePageSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
+import { escapeHtml } from '../lib/utils';
 
 interface KycData {
   fullName: string;
@@ -125,8 +126,17 @@ export default function SmartKycSlip() {
         const pinMatch = text.match(/\b[1-9][0-9]{5}\b/);
         if (pinMatch) pincode = pinMatch[0];
 
-        // Name heuristics (find non-keyword lines)
+        // Name heuristics & text lines
         const lines = text.split('\n').map((l) => l.trim()).filter((l) => l.length > 2);
+
+        // Extract father/husband name if present
+        for (const l of lines) {
+          const fatherMatch = l.match(/(?:father['’]s?\s*name|s\/o|d\/o|w\/o)[:\s]+([A-Za-z\s]{3,30})/i);
+          if (fatherMatch && !fatherName) {
+            fatherName = fatherMatch[1].trim();
+          }
+        }
+
         for (const l of lines) {
           if (!fullName && /^[A-Z][a-zA-Z\s]{2,25}$/.test(l) && !/government|india|unique|authority|income|department|male|female|birth|father|card/i.test(l)) {
             fullName = l;
@@ -135,26 +145,26 @@ export default function SmartKycSlip() {
         }
 
         setKycData({
-          fullName: fullName || 'RAHUL SHARMA',
-          fatherName: fatherName || 'RAMESH SHARMA',
-          dob: dob || '15/08/1998',
-          gender,
-          idNumber: idNumber || 'XXXX-XXXX-4589',
+          fullName: fullName || '',
+          fatherName: fatherName || '',
+          dob: dob || '',
+          gender: gender || 'Male',
+          idNumber: idNumber || '',
           idType,
-          address: `House No. 12, Ward 4, Pincode: ${pincode || '302001'}`,
-          pincode: pincode || '302001',
+          address: pincode ? `Pincode: ${pincode}` : '',
+          pincode: pincode || '',
         });
       } catch (err) {
-        console.warn('OCR error, using fallback template', err);
+        console.warn('OCR error in SmartKycSlip', err);
         setKycData({
-          fullName: 'RAHUL SHARMA',
-          fatherName: 'RAMESH SHARMA',
-          dob: '15/08/1998',
+          fullName: '',
+          fatherName: '',
+          dob: '',
           gender: 'Male',
-          idNumber: '9845 2314 7890',
-          idType: 'Aadhaar Card',
-          address: 'Ward No. 4, Main Bazar, Jaipur (Raj)',
-          pincode: '302001',
+          idNumber: '',
+          idType: 'Identity Card',
+          address: '',
+          pincode: '',
         });
       } finally {
         setIsExtracting(false);
@@ -177,7 +187,7 @@ export default function SmartKycSlip() {
       <!DOCTYPE html>
       <html>
         <head>
-          <title>KYC Acknowledgement - ${tokenNo}</title>
+          <title>KYC Acknowledgement - ${escapeHtml(tokenNo)}</title>
           <style>
             @page { size: 80mm auto; margin: 4mm; }
             body {
@@ -200,41 +210,41 @@ export default function SmartKycSlip() {
         </head>
         <body>
           <div class="header center">
-            <div class="title">${shopName}</div>
+            <div class="title">${escapeHtml(shopName)}</div>
             <div>CUSTOMER APPLICATION ACKNOWLEDGEMENT SLIP</div>
-            <div style="font-size: 10px; margin-top: 3px;">Date: ${now} | Token: ${tokenNo}</div>
+            <div style="font-size: 10px; margin-top: 3px;">Date: ${escapeHtml(now)} | Token: ${escapeHtml(tokenNo)}</div>
           </div>
 
           <div class="row">
             <span>Applicant Name:</span>
-            <span class="bold">${kycData.fullName || 'N/A'}</span>
+            <span class="bold">${escapeHtml(kycData.fullName || 'N/A')}</span>
           </div>
           <div class="row">
             <span>Father/Spouse:</span>
-            <span>${kycData.fatherName || 'N/A'}</span>
+            <span>${escapeHtml(kycData.fatherName || 'N/A')}</span>
           </div>
           <div class="row">
             <span>Date of Birth:</span>
-            <span>${kycData.dob || 'N/A'}</span>
+            <span>${escapeHtml(kycData.dob || 'N/A')}</span>
           </div>
           <div class="row">
             <span>ID Proof:</span>
-            <span class="bold">${kycData.idType.toUpperCase()} - ${kycData.idNumber || 'N/A'}</span>
+            <span class="bold">${escapeHtml(kycData.idType.toUpperCase())} - ${escapeHtml(kycData.idNumber || 'N/A')}</span>
           </div>
           <div class="row">
             <span>Address / Pin:</span>
-            <span>${kycData.address ? kycData.address.slice(0, 24) : 'Verified'} ${kycData.pincode ? `(${kycData.pincode})` : ''}</span>
+            <span>${escapeHtml(kycData.address ? kycData.address.slice(0, 24) : 'Verified')} ${kycData.pincode ? `(${escapeHtml(kycData.pincode)})` : ''}</span>
           </div>
 
           <div class="divider"></div>
 
           <div class="row">
             <span>Service Availed:</span>
-            <span class="bold">${serviceName}</span>
+            <span class="bold">${escapeHtml(serviceName)}</span>
           </div>
           <div class="row" style="font-size: 14px; font-weight: bold;">
             <span>Charges Paid:</span>
-            <span>₹${feesCharged}</span>
+            <span>₹${escapeHtml(String(feesCharged))}</span>
           </div>
 
           <div class="sign-box">
@@ -340,8 +350,9 @@ export default function SmartKycSlip() {
                         <input
                           type="text"
                           value={kycData.fullName}
+                          placeholder="Enter customer full name"
                           onChange={(e) => setKycData({ ...kycData, fullName: e.target.value })}
-                          className="font-bold text-sm bg-transparent outline-none text-slate-900 dark:text-white"
+                          className="font-bold text-sm bg-transparent outline-none text-slate-900 dark:text-white w-full"
                         />
                       </div>
                       <button
@@ -355,13 +366,14 @@ export default function SmartKycSlip() {
 
                     {/* Father Name */}
                     <div className="flex items-center justify-between p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
-                      <div>
+                      <div className="flex-1 pr-2">
                         <span className="text-[10px] uppercase font-bold text-slate-400 block">Father&apos;s / Husband&apos;s Name</span>
                         <input
                           type="text"
                           value={kycData.fatherName}
+                          placeholder="Enter father or husband name"
                           onChange={(e) => setKycData({ ...kycData, fatherName: e.target.value })}
-                          className="font-bold text-sm bg-transparent outline-none text-slate-900 dark:text-white"
+                          className="font-bold text-sm bg-transparent outline-none text-slate-900 dark:text-white w-full"
                         />
                       </div>
                       <button
@@ -373,8 +385,8 @@ export default function SmartKycSlip() {
                       </button>
                     </div>
 
-                    {/* DOB & Gender */}
-                    <div className="grid grid-cols-2 gap-3">
+                    {/* DOB, Gender & ID Number */}
+                    <div className="grid grid-cols-3 gap-3">
                       <div className="flex items-center justify-between p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
                         <div>
                           <span className="text-[10px] uppercase font-bold text-slate-400 block">Date of Birth (DOB)</span>
@@ -382,7 +394,7 @@ export default function SmartKycSlip() {
                             type="text"
                             value={kycData.dob}
                             onChange={(e) => setKycData({ ...kycData, dob: e.target.value })}
-                            className="font-bold text-sm bg-transparent outline-none text-slate-900 dark:text-white"
+                            className="font-bold text-sm bg-transparent outline-none text-slate-900 dark:text-white w-full"
                           />
                         </div>
                         <button
@@ -395,12 +407,30 @@ export default function SmartKycSlip() {
 
                       <div className="flex items-center justify-between p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
                         <div>
+                          <span className="text-[10px] uppercase font-bold text-slate-400 block">Gender</span>
+                          <input
+                            type="text"
+                            value={kycData.gender}
+                            onChange={(e) => setKycData({ ...kycData, gender: e.target.value })}
+                            className="font-bold text-sm bg-transparent outline-none text-slate-900 dark:text-white w-full"
+                          />
+                        </div>
+                        <button
+                          onClick={() => handleCopy(kycData.gender, 'gender')}
+                          className="p-2 rounded-xl bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200"
+                        >
+                          {copiedField === 'gender' ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+                        </button>
+                      </div>
+
+                      <div className="flex items-center justify-between p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
+                        <div>
                           <span className="text-[10px] uppercase font-bold text-slate-400 block">ID Number</span>
                           <input
                             type="text"
                             value={kycData.idNumber}
                             onChange={(e) => setKycData({ ...kycData, idNumber: e.target.value })}
-                            className="font-bold text-sm bg-transparent outline-none text-slate-900 dark:text-white"
+                            className="font-bold text-sm bg-transparent outline-none text-slate-900 dark:text-white w-full"
                           />
                         </div>
                         <button

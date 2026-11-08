@@ -21,43 +21,140 @@ export default function PasswordStrength() {
   const [copied, setCopied] = useState(false);
   const [genLength, setGenLength] = useState(16);
 
-  // Entropy Calculation
+  // Common dictionary blacklist and leetspeak patterns
+  const COMMON_DICTIONARY_WORDS = [
+    'password', 'admin', 'qwerty', 'welcome', 'letmein', 'monkey', 'dragon',
+    'master', 'sunshine', 'princess', 'football', 'shadow', 'superman', 'trust',
+    'iloveyou', 'testing', 'secret', 'passcode', 'security', 'system', 'root',
+    'guest', 'operator', 'office', 'computer', 'student', 'school', 'india', 'delhi'
+  ];
+
+  const LEET_MAP: Record<string, string> = {
+    '@': 'a', '4': 'a', '8': 'b', '(': 'c', '<': 'c', '3': 'e', '9': 'g',
+    '#': 'h', '1': 'i', '!': 'i', '|': 'i', '0': 'o', '5': 's', '$': 's',
+    '7': 't', '+': 't',
+  };
+
+  // Entropy Calculation with Dictionary & Pattern Penalties
   const calculateMetrics = (pwd: string) => {
+    if (!pwd || pwd.length === 0) {
+      return {
+        entropyBits: 0,
+        crackTime: 'Instant',
+        grade: 'Empty',
+        color: 'text-slate-400',
+        bg: 'bg-slate-300',
+        poolSize: 0,
+        vulnerabilities: [] as string[],
+      };
+    }
+
     let poolSize = 0;
     if (/[a-z]/.test(pwd)) poolSize += 26;
     if (/[A-Z]/.test(pwd)) poolSize += 26;
     if (/[0-9]/.test(pwd)) poolSize += 10;
     if (/[^A-Za-z0-9]/.test(pwd)) poolSize += 33;
 
-    const entropyBits = pwd.length > 0 && poolSize > 0 
-      ? Math.round(pwd.length * Math.log2(poolSize)) 
-      : 0;
+    let baseEntropy = pwd.length * Math.log2(Math.max(2, poolSize));
+    const vulnerabilities: string[] = [];
 
-    // Hashcat 8x RTX 4090 rate: ~200 Billion guesses/sec
-    const guessesPerSec = 200_000_000_000;
-    const totalCombinations = poolSize > 0 ? Math.pow(poolSize, pwd.length) : 0;
-    const crackSeconds = totalCombinations / (guessesPerSec * 2);
+    // 1. Normalize leet speak to standard lowercase
+    const normalized = pwd
+      .toLowerCase()
+      .split('')
+      .map(char => LEET_MAP[char] || char)
+      .join('');
 
+    // 2. Check for common dictionary words
+    let matchedWord = '';
+    for (const word of COMMON_DICTIONARY_WORDS) {
+      if (normalized.includes(word)) {
+        matchedWord = word;
+        vulnerabilities.push(`Common dictionary root detected ("${word}")`);
+        break;
+      }
+    }
+
+    // 3. Check for year suffix (e.g. 1990 - 2030)
+    if (/(?:19[7-9]\d|20[0-3]\d)/.test(pwd)) {
+      vulnerabilities.push('Predictable 4-digit year suffix pattern');
+    }
+
+    // 4. Check for sequential keyboard patterns
+    const sequences = ['123456', '234567', '345678', 'qwerty', 'asdfgh', 'zxcvbn', 'abcdef'];
+    for (const seq of sequences) {
+      if (normalized.includes(seq)) {
+        vulnerabilities.push(`Sequential keyboard layout ("${seq}")`);
+        break;
+      }
+    }
+
+    // 5. Check for repeated characters
+    if (/(.)\1{2,}/.test(pwd)) {
+      vulnerabilities.push('Repeated consecutive character sequence');
+    }
+
+    // Apply severe entropy degradation for dictionary words / rule attacks
+    if (matchedWord) {
+      // Hashcat rules crack dictionary + year/symbols in seconds (~2^24 to 2^28 search space)
+      baseEntropy = Math.min(baseEntropy, 26 + (vulnerabilities.length > 2 ? 0 : 6));
+    } else if (vulnerabilities.length > 0) {
+      baseEntropy = Math.max(15, baseEntropy * 0.65);
+    }
+
+    const entropyBits = Math.round(baseEntropy);
+
+    // Crack time estimation based on realistic attack type:
     let crackTime = 'Instant';
-    if (crackSeconds > 31536000 * 1000) crackTime = `${Math.round(crackSeconds / (31536000 * 1000))} Million Years`;
-    else if (crackSeconds > 31536000) crackTime = `${Math.round(crackSeconds / 31536000)} Years`;
-    else if (crackSeconds > 86400 * 30) crackTime = `${Math.round(crackSeconds / (86400 * 30))} Months`;
-    else if (crackSeconds > 86400) crackTime = `${Math.round(crackSeconds / 86400)} Days`;
-    else if (crackSeconds > 3600) crackTime = `${Math.round(crackSeconds / 3600)} Hours`;
-    else if (crackSeconds > 60) crackTime = `${Math.round(crackSeconds / 60)} Minutes`;
-    else if (crackSeconds > 0) crackTime = `${Math.round(crackSeconds)} Seconds`;
+    if (matchedWord) {
+      crackTime = '< 2 Seconds (Dictionary Rule Attack)';
+    } else if (entropyBits >= 85) {
+      crackTime = 'Centuries (Immune to GPU Brute-Force)';
+    } else if (entropyBits >= 72) {
+      crackTime = '12,000+ Years';
+    } else if (entropyBits >= 60) {
+      crackTime = '450 Years';
+    } else if (entropyBits >= 50) {
+      crackTime = '8 Months';
+    } else if (entropyBits >= 40) {
+      crackTime = '18 Hours';
+    } else if (entropyBits >= 30) {
+      crackTime = '15 Minutes';
+    } else {
+      crackTime = '< 3 Seconds';
+    }
 
     let grade = 'Weak';
     let color = 'text-red-600';
     let bg = 'bg-red-500';
 
-    if (entropyBits >= 75) { grade = 'Military Grade'; color = 'text-emerald-600'; bg = 'bg-emerald-500'; }
-    else if (entropyBits >= 60) { grade = 'Very Strong'; color = 'text-emerald-500'; bg = 'bg-emerald-500'; }
-    else if (entropyBits >= 45) { grade = 'Moderate'; color = 'text-amber-500'; bg = 'bg-amber-500'; }
-    else if (entropyBits >= 30) { grade = 'Weak'; color = 'text-orange-500'; bg = 'bg-orange-500'; }
-    else { grade = 'Critical Vulnerability'; color = 'text-red-600'; bg = 'bg-red-600'; }
+    if (matchedWord) {
+      grade = 'Critical (Dictionary Vulnerability)';
+      color = 'text-red-600';
+      bg = 'bg-red-600';
+    } else if (entropyBits >= 75) {
+      grade = 'Military Grade';
+      color = 'text-emerald-600';
+      bg = 'bg-emerald-500';
+    } else if (entropyBits >= 60) {
+      grade = 'Very Strong';
+      color = 'text-emerald-500';
+      bg = 'bg-emerald-500';
+    } else if (entropyBits >= 45) {
+      grade = 'Moderate';
+      color = 'text-amber-500';
+      bg = 'bg-amber-500';
+    } else if (entropyBits >= 30) {
+      grade = 'Weak';
+      color = 'text-orange-500';
+      bg = 'bg-orange-500';
+    } else {
+      grade = 'Critical Vulnerability';
+      color = 'text-red-600';
+      bg = 'bg-red-600';
+    }
 
-    return { entropyBits, crackTime, grade, color, bg, poolSize };
+    return { entropyBits, crackTime, grade, color, bg, poolSize, vulnerabilities };
   };
 
   const metrics = calculateMetrics(password);
@@ -173,6 +270,24 @@ export default function PasswordStrength() {
             </div>
           </div>
         </div>
+
+        {/* Vulnerabilities & Rule Warnings */}
+        {metrics.vulnerabilities.length > 0 && (
+          <div className="p-4 bg-amber-50 dark:bg-amber-950/40 rounded-2xl border border-amber-200 dark:border-amber-800/60 space-y-2 text-xs">
+            <div className="flex items-center gap-1.5 font-bold text-amber-800 dark:text-amber-300">
+              <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+              <span>Dictionary & Pattern Vulnerabilities Found:</span>
+            </div>
+            <ul className="list-disc pl-5 space-y-1 text-amber-700 dark:text-amber-400/90 text-[11px]">
+              {metrics.vulnerabilities.map((v, i) => (
+                <li key={i}>{v}</li>
+              ))}
+            </ul>
+            <p className="text-[10px] text-amber-600 dark:text-amber-500 pt-1">
+              GPU attack tools like Hashcat apply rule-based permutation to test millions of dictionary substitutions per second.
+            </p>
+          </div>
+        )}
 
         {/* Generator Controls */}
         <div className="pt-2 border-t dark:border-slate-800 space-y-3">

@@ -24,6 +24,7 @@ import '../lib/pdfWorker';
 import { useSEO } from '../hooks/useSEO';
 import { usePageSEO } from '../lib/usePageSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
+import { apiFetch, API_BASE } from '../lib/api';
 
 interface KioskJob {
   id: string;
@@ -82,7 +83,7 @@ export default function CounterKiosk() {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // BroadcastChannel for cross-monitor sync (Counter tablet -> Main PC)
+  // BroadcastChannel + Cloud Relay Polling for cross-device sync (Counter tablet -> Main PC)
   useEffect(() => {
     const channel = new BroadcastChannel('pms_kiosk_sync');
     channel.onmessage = (event) => {
@@ -90,7 +91,42 @@ export default function CounterKiosk() {
         setQueue(event.data.queue);
       }
     };
-    return () => channel.close();
+
+    const pollInterval = setInterval(async () => {
+      try {
+        const res = await apiFetch('/api/print-drop/jobs/KIOSKSTATION');
+        if (!res.ok) return;
+        const data = await res.json();
+        if (Array.isArray(data?.jobs) && data.jobs.length > 0) {
+          const incomingJobs: KioskJob[] = data.jobs.map((j: any) => ({
+            id: j.id || `kiosk_${Date.now()}`,
+            tokenNumber: j.token_num || 1,
+            customerName: j.device_label || `Customer #${j.token_num || 1}`,
+            phone: j.sender_device_id !== 'kiosk_tablet' ? j.sender_device_id : '',
+            fileName: j.name || 'Document.pdf',
+            fileSize: j.size || 0,
+            fileDataUrl: `${API_BASE}/api/print-drop/file/KIOSKSTATION/${encodeURIComponent(j.id)}?keep=1`,
+            totalPages: 1,
+            printType: j.color_mode === 'color' ? 'color' : 'bw',
+            sides: 'single',
+            copies: j.copies || 1,
+            estimatedCost: Math.max(2, (j.copies || 1) * (j.color_mode === 'color' ? 10 : 2)),
+            timestamp: j.timestamp || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            status: 'pending',
+          }));
+          setQueue((prev) => {
+            const existingIds = new Set(prev.map((item) => item.id));
+            const uniqueNew = incomingJobs.filter((item) => !existingIds.has(item.id));
+            return uniqueNew.length > 0 ? [...prev, ...uniqueNew] : prev;
+          });
+        }
+      } catch {}
+    }, 3500);
+
+    return () => {
+      channel.close();
+      clearInterval(pollInterval);
+    };
   }, []);
 
   const saveQueue = (newQueue: KioskJob[]) => {
@@ -178,6 +214,23 @@ export default function CounterKiosk() {
 
     const updated = [...queue, newJob];
     saveQueue(updated);
+
+    // Also push to cloud relay so a separate Operator PC receives the Kiosk Tablet job automatically
+    if (uploadedFile) {
+      const fd = new FormData();
+      fd.append('session_id', 'KIOSKSTATION');
+      fd.append('job_id', newJob.id);
+      fd.append('sender_device_id', customerPhone.trim() || 'kiosk_tablet');
+      fd.append('device_label', newJob.customerName);
+      fd.append('copies', String(copies));
+      fd.append('color_mode', printType);
+      fd.append('orientation', 'auto');
+      fd.append('file', uploadedFile, uploadedFile.name);
+      void apiFetch('/api/print-drop/upload', {
+        method: 'POST',
+        body: fd,
+      }).catch(() => {});
+    }
     setCompletedJob(newJob);
     setIsSubmitting(false);
 

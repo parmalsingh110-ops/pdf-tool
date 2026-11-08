@@ -59,6 +59,7 @@ export default function RubberStampMaker() {
   const [stampPosY, setStampPosY] = useState(75); // % from top
   const [stampSize, setStampSize] = useState(140); // px size on PDF
   const [pdfPreviewUrl, setPdfPreviewUrl] = useState<string | null>(null);
+  const [previewTab, setPreviewTab] = useState<'stamp' | 'document'>('stamp');
 
   const [stampPngUrl, setStampPngUrl] = useState<string | null>(null);
   const [stampCanvas, setStampCanvas] = useState<HTMLCanvasElement | null>(null);
@@ -259,6 +260,7 @@ export default function RubberStampMaker() {
       if (ctx) {
         await page.render({ canvasContext: ctx, viewport, canvas } as any).promise;
         setPdfPreviewUrl(canvas.toDataURL('image/jpeg'));
+        setPreviewTab('document');
       }
     } catch (err) {
       console.error('Error rendering PDF:', err);
@@ -535,31 +537,83 @@ export default function RubberStampMaker() {
           <div className="lg:col-span-6 bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col items-center">
             <div className="w-full flex items-center justify-between mb-4">
               <span className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-                <Eye className="w-4 h-4 text-blue-500" /> Transparent Stamp Live Preview
+                <Eye className="w-4 h-4 text-blue-500" /> Live Stamp & Document Preview
               </span>
-              <span className="text-xs font-semibold px-2.5 py-1 bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-400 rounded-lg">
-                300 DPI HD
-              </span>
-            </div>
-
-            {/* Checkered pattern background to show transparency */}
-            <div
-              className="w-full h-[460px] flex items-center justify-center p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-inner"
-              style={{
-                backgroundImage:
-                  'linear-gradient(45deg, #e2e8f0 25%, transparent 25%), linear-gradient(-45deg, #e2e8f0 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #e2e8f0 75%), linear-gradient(-45deg, transparent 75%, #e2e8f0 75%)',
-                backgroundSize: '20px 20px',
-                backgroundPosition: '0 0, 0 10px, 10px -10px, -10px 0px',
-              }}
-            >
-              {stampPngUrl && (
-                <img
-                  src={stampPngUrl}
-                  alt="Rubber Stamp Preview"
-                  className="max-h-[380px] max-w-[380px] object-contain drop-shadow-md"
-                />
+              {attachedPdf && pdfPreviewUrl && (
+                <div className="inline-flex p-0.5 rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setPreviewTab('stamp')}
+                    className={`px-2.5 py-1 rounded-md font-semibold transition ${
+                      previewTab === 'stamp'
+                        ? 'bg-white dark:bg-slate-900 text-blue-600 shadow-xs'
+                        : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
+                    }`}
+                  >
+                    Stamp Only
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPreviewTab('document')}
+                    className={`px-2.5 py-1 rounded-md font-semibold transition ${
+                      previewTab === 'document'
+                        ? 'bg-white dark:bg-slate-900 text-emerald-600 shadow-xs'
+                        : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
+                    }`}
+                  >
+                    Stamped Document
+                  </button>
+                </div>
               )}
             </div>
+
+            {previewTab === 'document' && pdfPreviewUrl ? (
+              /* Live Stamped Document Overlay Preview */
+              <div className="w-full relative rounded-2xl overflow-hidden border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-950 flex items-center justify-center p-2 shadow-inner">
+                <div className="relative inline-block max-w-full">
+                  <img
+                    src={pdfPreviewUrl}
+                    alt="Document Background"
+                    className="max-h-[520px] w-auto block rounded shadow border border-slate-300 dark:border-slate-700 select-none pointer-events-none"
+                  />
+                  {stampPngUrl && (
+                    <img
+                      src={stampPngUrl}
+                      alt="Rubber Stamp Overlay"
+                      style={{
+                        position: 'absolute',
+                        left: `${stampPosX}%`,
+                        top: `${stampPosY}%`,
+                        width: `${Math.round(stampSize * 0.75)}px`,
+                        height: 'auto',
+                        transform: 'translate(-50%, -50%)',
+                        pointerEvents: 'none',
+                      }}
+                      className="drop-shadow-sm select-none"
+                    />
+                  )}
+                </div>
+              </div>
+            ) : (
+              /* Checkered pattern background to show stamp transparency */
+              <div
+                className="w-full h-[460px] flex items-center justify-center p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-inner"
+                style={{
+                  backgroundImage:
+                    'linear-gradient(45deg, #e2e8f0 25%, transparent 25%), linear-gradient(-45deg, #e2e8f0 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #e2e8f0 75%), linear-gradient(-45deg, transparent 75%, #e2e8f0 75%)',
+                  backgroundSize: '20px 20px',
+                  backgroundPosition: '0 0, 0 10px, 10px -10px, -10px 0px',
+                }}
+              >
+                {stampPngUrl && (
+                  <img
+                    src={stampPngUrl}
+                    alt="Rubber Stamp Preview"
+                    className="max-h-[380px] max-w-[380px] object-contain drop-shadow-md"
+                  />
+                )}
+              </div>
+            )}
           </div>
         </div>
 

@@ -46,20 +46,19 @@ export default function ConvertToTiff() {
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         await page.render({ canvasContext: ctx, viewport: vp, canvas }).promise;
 
-        // Export as high-quality PNG (browsers don't natively support TIFF)
-        const blob = await new Promise<Blob | null>(res => canvas.toBlob(b => res(b), 'image/png'));
-        if (blob) {
-          zip.file(`page_${p}.png`, blob);
-        }
+        // Export as real, lossless standard TIFF format
+        const imgData = ctx.getImageData(0, 0, vp.width, vp.height);
+        const tiffBytes = UTIF.encodeImage(imgData.data, vp.width, vp.height);
+        zip.file(`page_${p}.tiff`, new Uint8Array(tiffBytes));
         canvas.width = 0;
         canvas.height = 0;
       }
 
-      setProgress('Creating archive…');
+      setProgress('Creating TIFF archive…');
       const zipBlob = await zip.generateAsync({ type: 'blob' });
       setResultUrl(URL.createObjectURL(zipBlob));
-      setResultName(`${file.name.replace(/\.[^/.]+$/, '')}_images.zip`);
-      setProgress(`Done! ${pdf.numPages} page(s) exported as lossless PNG images.`);
+      setResultName(`${file.name.replace(/\.[^/.]+$/, '')}_tiff.zip`);
+      setProgress(`Done! ${pdf.numPages} page(s) exported as genuine TIFF images.`);
     } catch (e: any) {
       alert(e?.message || 'Conversion failed.');
     } finally {

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Shield, Download, CheckCircle, FileText, Loader2, AlertTriangle } from "lucide-react";
-import { PDFDocument } from "pdf-lib";
+import { PDFDocument, PDFName } from "pdf-lib";
 import * as pdfjsLib from "pdfjs-dist";
 import "../lib/pdfWorker";
 import FileDropzone from "../components/FileDropzone";
@@ -70,44 +70,53 @@ export default function PdfSanitizer() {
 
       // 2. Remove XMP metadata stream
       try {
-        const catalog = pdfDoc.catalog as any;
-        if (catalog.has("Metadata")) { catalog.delete("Metadata"); rep.xmpData = true; }
+        const catalog = pdfDoc.catalog;
+        const metaKey = PDFName.of("Metadata");
+        if (catalog.has(metaKey)) { catalog.delete(metaKey); rep.xmpData = true; }
       } catch { /* best-effort */ }
 
       // 3. Remove embedded files
       try {
-        const catalog = pdfDoc.catalog as any;
-        if (catalog.has("Names")) {
-          const names = catalog.lookup("Names") as any;
-          if (names && typeof names.has === "function" && names.has("EmbeddedFiles")) {
-            names.delete("EmbeddedFiles"); rep.embeddedFiles++;
+        const catalog = pdfDoc.catalog;
+        const namesKey = PDFName.of("Names");
+        const embKey = PDFName.of("EmbeddedFiles");
+        if (catalog.has(namesKey)) {
+          const names = catalog.lookup(namesKey) as any;
+          if (names && typeof names.has === "function" && names.has(embKey)) {
+            names.delete(embKey); rep.embeddedFiles++;
           }
         }
       } catch { /* best-effort */ }
 
       // 4. Remove JavaScript actions
       try {
-        const catalog = pdfDoc.catalog as any;
-        if (catalog.has("AA")) { catalog.delete("AA"); rep.javascript++; }
-        if (catalog.has("OpenAction")) { catalog.delete("OpenAction"); rep.javascript++; }
-        if (catalog.has("Names")) {
-          const names = catalog.lookup("Names") as any;
-          if (names && typeof names.has === "function" && names.has("JavaScript")) {
-            names.delete("JavaScript"); rep.javascript++;
+        const catalog = pdfDoc.catalog;
+        const aaKey = PDFName.of("AA");
+        const openActionKey = PDFName.of("OpenAction");
+        const namesKey = PDFName.of("Names");
+        const jsKey = PDFName.of("JavaScript");
+        if (catalog.has(aaKey)) { catalog.delete(aaKey); rep.javascript++; }
+        if (catalog.has(openActionKey)) { catalog.delete(openActionKey); rep.javascript++; }
+        if (catalog.has(namesKey)) {
+          const names = catalog.lookup(namesKey) as any;
+          if (names && typeof names.has === "function" && names.has(jsKey)) {
+            names.delete(jsKey); rep.javascript++;
           }
         }
       } catch { /* best-effort */ }
 
       // 5. Remove bookmarks/outline
       try {
-        const catalog = pdfDoc.catalog as any;
-        if (catalog.has("Outlines")) { catalog.delete("Outlines"); rep.bookmarks++; }
+        const catalog = pdfDoc.catalog;
+        const outlinesKey = PDFName.of("Outlines");
+        if (catalog.has(outlinesKey)) { catalog.delete(outlinesKey); rep.bookmarks++; }
       } catch { /* best-effort */ }
 
       // 6. Remove thumbnails
       try {
+        const thumbKey = PDFName.of("Thumb");
         for (const page of pdfDoc.getPages()) {
-          if ((page.node as any).has("Thumb")) { (page.node as any).delete("Thumb"); rep.thumbnails++; }
+          if (page.node.has(thumbKey)) { page.node.delete(thumbKey); rep.thumbnails++; }
         }
       } catch { /* best-effort */ }
 
@@ -121,19 +130,21 @@ export default function PdfSanitizer() {
 
       // 8. Remove annotations (comments, links)
       try {
+        const annotsKey = PDFName.of("Annots");
+        const subtypeKey = PDFName.of("Subtype");
         for (const page of pdfDoc.getPages()) {
-          if ((page.node as any).has("Annots")) {
-            const annots = (page.node as any).lookup("Annots") as any;
+          if (page.node.has(annotsKey)) {
+            const annots = page.node.lookup(annotsKey) as any;
             if (annots && typeof annots.asArray === "function") {
               for (const annot of annots.asArray()) {
                 try {
-                  const subtype = (annot as any)?.lookup?.("Subtype")?.encodedName;
+                  const subtype = annot?.lookup?.(subtypeKey)?.encodedName;
                   if (subtype === "/Link") rep.links++;
                   else rep.annotations++;
                 } catch { rep.annotations++; }
               }
             }
-            (page.node as any).delete("Annots");
+            page.node.delete(annotsKey);
           }
         }
       } catch { /* best-effort */ }
@@ -177,10 +188,10 @@ export default function PdfSanitizer() {
     { label: "Annotations/Comments", value: report.annotations, color: "text-teal-500" },
     { label: "Hyperlinks", value: report.links, color: "text-cyan-500" },
     { label: "Page Thumbnails", value: report.thumbnails, color: "text-emerald-500" },
-    { label: "Hidden Text Layers", value: report.hiddenTextPages, color: "text-red-600" },
+    { label: "Hidden OCR Text Layers", value: report.hiddenTextPages, color: "text-amber-500", isStatus: true },
   ] : [];
 
-  const totalRemoved = layers.reduce((s, l) => s + l.value, 0);
+  const totalRemoved = layers.filter((l: any) => !l.isStatus).reduce((s, l) => s + l.value, 0);
 
   return (
     <div className="flex-1 flex flex-col items-center justify-center p-8">
@@ -257,7 +268,7 @@ export default function PdfSanitizer() {
                 <div key={layer.label} className="flex items-center justify-between text-sm">
                   <span className="text-gray-600 dark:text-slate-400">{layer.label}</span>
                   <span className={`font-bold ${layer.value > 0 ? layer.color : "text-gray-400 dark:text-slate-600"}`}>
-                    {layer.value > 0 ? `✕ ${layer.value} removed` : "✓ None found"}
+                    {(layer as any).isStatus ? (layer.value > 0 ? `ℹ️ ${layer.value} page(s) inspected` : "✓ None found") : (layer.value > 0 ? `✕ ${layer.value} removed` : "✓ None found")}
                   </span>
                 </div>
               ))}

@@ -107,18 +107,17 @@ export default function InvisibleWatermark() {
         ts: new Date().toISOString()
       });
 
-      const zeroWidthString = encodeToZeroWidth(payload);
+      const asciiTracer = `PMS_TRACER_${btoa(payload)}`;
 
-      // 1. Inject zero-width steganographic string into text stream of each page
+      // 1. Inject forensic tracer into page content stream (size 0.01, opacity 0 — completely invisible to human eyes)
       const helvetica = await pdfDoc.embedFont(StandardFonts.Helvetica);
       const pages = pdfDoc.getPages();
 
       for (const page of pages) {
-        // Draw with opacity 0 at origin — completely invisible to human eyes
-        page.drawText(zeroWidthString, {
+        page.drawText(asciiTracer, {
           x: 0,
           y: 0,
-          size: 1,
+          size: 0.01,
           font: helvetica,
           color: rgb(1, 1, 1),
           opacity: 0,
@@ -127,10 +126,11 @@ export default function InvisibleWatermark() {
 
       // 2. Also inject hidden XMP & Document Metadata stream
       pdfDoc.setSubject(`FORENSIC_TRACER:${payload}`);
+      pdfDoc.setProducer(`PDF Media Suite [${asciiTracer}]`);
       pdfDoc.setKeywords([
         `ForensicID:${trackingId.trim()}`,
         `Licensee:${recipient.trim()}`,
-        `ZW:${zeroWidthString}`
+        `Tracer:${asciiTracer}`
       ]);
 
       const watermarkedBytes = await pdfDoc.save();
@@ -184,6 +184,27 @@ export default function InvisibleWatermark() {
           const page = await pdf.getPage(p);
           const tc = await page.getTextContent();
           combinedText += tc.items.map((it: any) => it.str || '').join(' ');
+        }
+      }
+
+      // Step 3: Check Forensic Tracer token in extracted content
+      if (combinedText.includes('PMS_TRACER_')) {
+        const tracerMatch = combinedText.match(/PMS_TRACER_([A-Za-z0-9+/=]+)/);
+        if (tracerMatch && tracerMatch[1]) {
+          try {
+            const jsonStr = atob(tracerMatch[1]);
+            const parsed = JSON.parse(jsonStr);
+            setDecodeResult({
+              found: true,
+              recipient: parsed.rec,
+              trackingId: parsed.id,
+              timestamp: parsed.ts,
+              source: 'zero_width_text',
+              rawPayload: jsonStr,
+            });
+            setIsDecoding(false);
+            return;
+          } catch {}
         }
       }
 

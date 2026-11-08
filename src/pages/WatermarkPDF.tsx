@@ -8,6 +8,7 @@ import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { dataUrlToBytes } from '../lib/utils';
 import { useToast } from '../components/Toast';
+import { embedSmartFont } from '../lib/pdfFontHelper';
 
 type WatermarkType = 'text' | 'image';
 type Position = 'center' | 'diagonal' | 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' | 'top-center' | 'bottom-center';
@@ -168,7 +169,7 @@ export default function WatermarkPDF() {
       const pages = pdfDoc.getPages();
 
       if (type === 'text') {
-        const font = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+        const font = await embedSmartFont(pdfDoc, watermarkText, { bold: true, fallback: StandardFonts.HelveticaBold });
         const { r, g, b } = hexToRgb01(color);
 
         for (const page of pages) {

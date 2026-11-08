@@ -360,6 +360,11 @@ export default function SlideHandouts() {
                       title: '2 Slides per Page (Large)',
                       desc: 'Extra large diagrams and detailed code slides',
                     },
+                    {
+                      id: '9_slides',
+                      title: '9 Slides per Page (3×3 Ultra Grid)',
+                      desc: 'Compact thumbnail overview for slide decks and quick indexing',
+                    },
                   ].map((opt) => (
                     <button
                       key={opt.id}

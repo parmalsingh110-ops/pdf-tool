@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Lock, Download, Loader2, Package } from 'lucide-react';
-import { PDFDocument } from 'pdf-lib';
+import { PDFDocument } from 'pdf-lib-plus-encrypt';
 import JSZip from 'jszip';
 import FileDropzone from '../components/FileDropzone';
 import { useSEO } from '../hooks/useSEO';
@@ -35,25 +35,16 @@ export default function BatchProtect() {
       const zip = new JSZip();
       
       for (let i = 0; i < files.length; i++) {
-        setProgress(`Processing ${i + 1} of ${files.length}: ${files[i].name}`);
+        setProgress(`Protecting ${i + 1} of ${files.length}: ${files[i].name}`);
         const buf = await files[i].arrayBuffer();
         
-        try {
-          // Load and re-save with password using pdf-lib-plus-encrypt
-          const { default: encrypt } = await import('pdf-lib-plus-encrypt');
-          const pdfDoc = await PDFDocument.load(buf);
-          // @ts-ignore - encrypt extends PDFDocument
-          const encrypted = await encrypt.encrypt(pdfDoc, {
-            userPassword: password,
-            ownerPassword: password,
-          });
-          zip.file(`protected_${files[i].name}`, encrypted);
-        } catch {
-          // Fallback: just copy without encryption if encrypt module fails
-          const pdfDoc = await PDFDocument.load(buf);
-          const bytes = await pdfDoc.save();
-          zip.file(`protected_${files[i].name}`, bytes);
-        }
+        const pdfDoc = await PDFDocument.load(buf);
+        await pdfDoc.encrypt({
+          userPassword: password,
+          ownerPassword: password,
+        });
+        const encrypted = await pdfDoc.save();
+        zip.file(`protected_${files[i].name}`, encrypted);
       }
       
       setProgress('Creating ZIP archive…');

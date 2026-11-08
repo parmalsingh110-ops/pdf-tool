@@ -12,6 +12,8 @@ import {
   Layers,
 } from 'lucide-react';
 import { PDFDocument, rgb } from 'pdf-lib';
+import * as pdfjsLib from 'pdfjs-dist';
+import '../lib/pdfWorker';
 import { useSEO } from '../hooks/useSEO';
 import { usePageSEO } from '../lib/usePageSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
@@ -91,14 +93,13 @@ export default function ResumeCompactor() {
       const pageH = 841.89;
 
       const singlePage = outDoc.addPage([pageW, pageH]);
-      const embeddedPages = await outDoc.embedPdf(srcDoc, Array.from({ length: pageCount }, (_, i) => i));
 
       if (pageCount === 1) {
         // Already 1 page: apply subtle margin optimization
-        const emb = embeddedPages[0];
+        const [emb] = await outDoc.embedPdf(srcDoc, [0]);
         const scale = contentScale / 100;
-        const drawW = emb.width * scale;
-        const drawH = emb.height * scale;
+        const drawW = Math.min(pageW - marginScale * 2, emb.width * scale);
+        const drawH = Math.min(pageH - marginScale * 2, emb.height * scale);
 
         singlePage.drawPage(emb, {
           x: (pageW - drawW) / 2,
@@ -107,37 +108,124 @@ export default function ResumeCompactor() {
           height: drawH,
         });
       } else {
-        // Multi-page (e.g. 2 pages): Compact vertically onto single page!
-        const scale = (contentScale / 100) * (pageCount === 2 ? 0.95 : 0.85);
+        // Multi-page resume: Analyze text bounds to detect trailing lines on overflow pages
+        let p2CropBottom = 0;
+        let p2CropHeight = 0;
+        let isP2Sparse = false;
 
-        // Embed Page 1 top half, Page 2 bottom half with overlap reduction
-        const slotH = (pageH - marginScale * 2) / pageCount;
+        try {
+          const srcPdfJs = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer.slice(0)) }).promise;
+          if (pageCount >= 2) {
+            const p2Obj = await srcPdfJs.getPage(2);
+            const tc2 = await p2Obj.getTextContent();
+            const vp2 = p2Obj.getViewport({ scale: 1.0 });
 
-        for (let i = 0; i < pageCount; i++) {
-          const emb = embeddedPages[i];
-          const fitScale = Math.min((pageW - marginScale * 2) / emb.width, slotH / emb.height) * (contentScale / 100);
+            let p2MinY = vp2.height;
+            let p2MaxY = 0;
+            let p2HasText = false;
 
-          const drawW = emb.width * fitScale;
-          const drawH = emb.height * fitScale;
+            for (const item of tc2.items as any[]) {
+              if (item.str && item.str.trim().length > 0 && item.transform) {
+                p2HasText = true;
+                const ty = item.transform[5];
+                if (ty < p2MinY) p2MinY = Math.max(0, ty);
+                if (ty > p2MaxY) p2MaxY = Math.min(vp2.height, ty);
+              }
+            }
 
-          const yPos = pageH - marginScale - (i + 1) * slotH + (slotH - drawH) / 2;
-          const xPos = (pageW - drawW) / 2;
+            if (p2HasText && p2MaxY > 0) {
+              // The text on page 2 spans from p2MinY to p2MaxY
+              // If p2MinY is high up (e.g. > 30% from bottom), the bottom portion is empty white space!
+              const textSpanHeight = p2MaxY - p2MinY + 36;
+              const emptyBottom = p2MinY - 18;
+              if (emptyBottom > vp2.height * 0.25) {
+                isP2Sparse = true;
+                p2CropBottom = Math.max(0, emptyBottom);
+                p2CropHeight = Math.min(vp2.height - p2CropBottom, textSpanHeight + 24);
+              }
+            }
+          }
+        } catch (scanErr) {
+          console.warn('PDF.js text bounds detection fallback:', scanErr);
+        }
 
-          singlePage.drawPage(emb, {
-            x: xPos,
-            y: yPos,
-            width: drawW,
-            height: drawH,
+        if (pageCount === 2 && (compactionMode === 'smart_auto' || compactionMode === 'tight_margin') && isP2Sparse && p2CropHeight > 0) {
+          // Crop Page 2 to only its active content slice
+          const p2 = srcDoc.getPage(1);
+          p2.setCropBox(0, p2CropBottom, p2.getWidth(), p2CropHeight);
+
+          // If smart_auto or tight_margin, also trim top/bottom empty margins of Page 1
+          const p1 = srcDoc.getPage(0);
+          const p1Trim = compactionMode === 'tight_margin' ? 24 : 16;
+          const p1Height = Math.max(100, p1.getHeight() - p1Trim * 2);
+          p1.setCropBox(0, p1Trim, p1.getWidth(), p1Height);
+
+          const [emb1, emb2] = await outDoc.embedPdf(srcDoc, [0, 1]);
+
+          const availH = pageH - marginScale * 2 - 12; // 12pt gap
+          const totalContentH = emb1.height + emb2.height;
+          const scale = Math.min(1.0, availH / totalContentH) * (contentScale / 100);
+
+          const drawW1 = emb1.width * scale;
+          const drawH1 = emb1.height * scale;
+          const drawW2 = emb2.width * scale;
+          const drawH2 = emb2.height * scale;
+
+          const startY = pageH - marginScale;
+          const y1 = startY - drawH1;
+          const y2 = y1 - 12 - drawH2;
+
+          singlePage.drawPage(emb1, {
+            x: (pageW - drawW1) / 2,
+            y: Math.max(marginScale, y1),
+            width: drawW1,
+            height: drawH1,
           });
 
-          // Draw subtle divider between previous page 1 and page 2 content
-          if (i > 0) {
-            singlePage.drawLine({
-              start: { x: marginScale + 30, y: yPos + drawH + (slotH - drawH) / 2 },
-              end: { x: pageW - marginScale - 30, y: yPos + drawH + (slotH - drawH) / 2 },
-              thickness: 0.5,
-              color: rgb(0.85, 0.85, 0.88),
+          // Divider line between sections
+          singlePage.drawLine({
+            start: { x: marginScale + 30, y: y1 - 6 },
+            end: { x: pageW - marginScale - 30, y: y1 - 6 },
+            thickness: 0.5,
+            color: rgb(0.85, 0.85, 0.88),
+          });
+
+          singlePage.drawPage(emb2, {
+            x: (pageW - drawW2) / 2,
+            y: Math.max(marginScale, y2),
+            width: drawW2,
+            height: drawH2,
+          });
+        } else {
+          // Standard proportional multi-page compaction
+          const embeddedPages = await outDoc.embedPdf(srcDoc, Array.from({ length: pageCount }, (_, i) => i));
+          const slotH = (pageH - marginScale * 2) / pageCount;
+
+          for (let i = 0; i < pageCount; i++) {
+            const emb = embeddedPages[i];
+            const fitScale = Math.min((pageW - marginScale * 2) / emb.width, slotH / emb.height) * (contentScale / 100);
+
+            const drawW = emb.width * fitScale;
+            const drawH = emb.height * fitScale;
+
+            const yPos = pageH - marginScale - (i + 1) * slotH + (slotH - drawH) / 2;
+            const xPos = (pageW - drawW) / 2;
+
+            singlePage.drawPage(emb, {
+              x: xPos,
+              y: yPos,
+              width: drawW,
+              height: drawH,
             });
+
+            if (i > 0) {
+              singlePage.drawLine({
+                start: { x: marginScale + 30, y: yPos + drawH + (slotH - drawH) / 2 },
+                end: { x: pageW - marginScale - 30, y: yPos + drawH + (slotH - drawH) / 2 },
+                thickness: 0.5,
+                color: rgb(0.85, 0.85, 0.88),
+              });
+            }
           }
         }
       }

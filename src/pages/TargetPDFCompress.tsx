@@ -149,40 +149,45 @@ export default function TargetPDFCompress() {
             width: viewport.width,
             height: viewport.height,
           });
+          canvas.width = 0;
+          canvas.height = 0;
         }
         return new Uint8Array(await newPdfDoc.save());
       };
 
-      const bestQualityUnderTarget = async (scale: number) => {
+      // Fast calibration on a single representative page to avoid 50+ full-PDF canvas re-renders
+      const samplePageNum = Math.floor((from + to) / 2);
+      const samplePage = await pdf.getPage(samplePageNum);
+
+      const calibrateOnSamplePage = async (scale: number): Promise<{ bestQ: number; estTotalBytes: number }> => {
+        const viewport = samplePage.getViewport({ scale });
+        const canvas = document.createElement('canvas');
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return { bestQ: 0.5, estTotalBytes: targetBytes };
+        await samplePage.render({ canvasContext: ctx, viewport, canvas }).promise;
+
         let lo = 0.08;
         let hi = 0.92;
-        let best = await rasterize(scale, 0.5);
         let bestQ = 0.5;
-        for (let k = 0; k < 18 && hi - lo > 0.015; k++) {
+        let bestPageBytes = (await canvasToJpegBytes(canvas, 0.5)).byteLength;
+        const targetPerPage = Math.max(4000, (targetBytes - 1500) / pageCount);
+
+        for (let k = 0; k < 8 && hi - lo > 0.02; k++) {
           const mid = (lo + hi) / 2;
-          const b = await rasterize(scale, mid);
-          if (b.length <= targetBytes) {
-            best = b;
+          const bLen = (await canvasToJpegBytes(canvas, mid)).byteLength + 600;
+          if (bLen <= targetPerPage) {
             bestQ = mid;
+            bestPageBytes = bLen;
             lo = mid;
           } else {
             hi = mid;
           }
         }
-        if (best.length < targetBytes * 0.82) {
-          let q = bestQ;
-          for (let k = 0; k < 12; k++) {
-            const tryQ = Math.min(0.95, q + 0.03);
-            if (tryQ <= q + 0.005) break;
-            const b = await rasterize(scale, tryQ);
-            if (b.length <= targetBytes) {
-              best = b;
-              bestQ = tryQ;
-              q = tryQ;
-            } else break;
-          }
-        }
-        return best;
+        canvas.width = 0;
+        canvas.height = 0;
+        return { bestQ, estTotalBytes: bestPageBytes * pageCount + 1200 };
       };
 
       let scale = 1.65;
@@ -190,30 +195,28 @@ export default function TargetPDFCompress() {
       if (perPageBudget < 25_000) scale = 0.78;
       if (perPageBudget < 12_000) scale = 0.58;
 
-      setProcessingStep('Tuning quality to your target size…');
-      let bestPdfBytes = await bestQualityUnderTarget(scale);
+      setProcessingStep('Calibrating optimal scale & quality…');
+      let { bestQ, estTotalBytes } = await calibrateOnSamplePage(scale);
 
       let guard = 0;
-      while (bestPdfBytes.length > targetBytes && scale > 0.38 && guard < 14) {
-        setProcessingStep(`Shrinking raster… (${guard + 1})`);
-        scale *= 0.88;
-        bestPdfBytes = await bestQualityUnderTarget(scale);
+      while (estTotalBytes > targetBytes && scale > 0.38 && guard < 6) {
+        scale *= 0.85;
+        const cal = await calibrateOnSamplePage(scale);
+        bestQ = cal.bestQ;
+        estTotalBytes = cal.estTotalBytes;
         guard++;
       }
 
-      if (bestPdfBytes.length < targetBytes * 0.78) {
-        let tryScale = Math.min(2.4, scale * 1.1);
-        for (let k = 0; k < 10 && tryScale <= 2.5; k++) {
-          setProcessingStep('Increasing detail toward target…');
-          const candidate = await bestQualityUnderTarget(tryScale);
-          if (candidate.length <= targetBytes && candidate.length > bestPdfBytes.length) {
-            bestPdfBytes = candidate;
-            scale = tryScale;
-            tryScale *= 1.06;
-          } else {
-            break;
-          }
-        }
+      setProcessingStep('Rendering compressed pages…');
+      let bestPdfBytes = await rasterize(scale, bestQ);
+
+      // Single corrective pass if multi-page variance caused total bytes to exceed targetBytes
+      if (bestPdfBytes.length > targetBytes) {
+        setProcessingStep('Fine-tuning to exact target size…');
+        const ratio = (targetBytes * 0.94) / bestPdfBytes.length;
+        const adjustedQ = Math.max(0.08, bestQ * ratio);
+        const adjustedScale = ratio < 0.65 ? Math.max(0.38, scale * Math.sqrt(ratio)) : scale;
+        bestPdfBytes = await rasterize(adjustedScale, adjustedQ);
       }
 
       finishCompression(bestPdfBytes);

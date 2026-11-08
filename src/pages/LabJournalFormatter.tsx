@@ -16,6 +16,7 @@ import { useSEO } from '../hooks/useSEO';
 import { usePageSEO } from '../lib/usePageSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
 import { downloadBlob } from '../lib/utils';
+import { embedSmartFont } from '../lib/pdfFontHelper';
 
 type LeftPageType = 'green_graph' | 'blue_graph' | 'grey_grid' | 'blank_diagram';
 type RuledStyle = 'single_line' | 'engineering_ruled' | 'plain';
@@ -59,8 +60,9 @@ export default function LabJournalFormatter() {
 
     try {
       const pdfDoc = await PDFDocument.create();
-      const helvetica = await pdfDoc.embedFont(StandardFonts.Helvetica);
-      const helveticaBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+      const allLabSample = `${collegeName}${department}${subject}${studentName}${rollNo}${experimentNo}${aimTitle}`;
+      const helvetica = await embedSmartFont(pdfDoc, allLabSample, { fallback: StandardFonts.Helvetica });
+      const helveticaBold = await embedSmartFont(pdfDoc, allLabSample, { bold: true, fallback: StandardFonts.HelveticaBold });
 
       // A4 portrait: 595.28 × 841.89 pt
       const pageW = 595.28;
