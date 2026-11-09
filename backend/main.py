@@ -4877,7 +4877,7 @@ async def analyze_forensics(request: Request, file: UploadFile = File(...)):
         anomalies = []
         tamper_points = 0
 
-        # 1. METADATA & REVISION AUDIT
+        # 1. METADATA & REVISION AUDIT (Document-Level Anomalies: bbox=None to avoid fake boxes on page text)
         meta = doc.metadata or {}
         producer = (meta.get("producer") or "").strip().lower()
         creator = (meta.get("creator") or "").strip().lower()
@@ -4903,16 +4903,16 @@ async def analyze_forensics(request: Request, file: UploadFile = File(...)):
         }
 
         if suspicious_tool:
-            tamper_points += 30
-            warning_msg = f"Document modified using graphic design / online editor software ({suspicious_tool}). Official salary slips, bank statements, and degree certificates are typically generated via automated enterprise billing systems, not graphic design tools."
+            tamper_points += 25
+            warning_msg = f"Document traces indicate graphic design software ({suspicious_tool}). Official banking/legal documents are generated via automated enterprise systems."
             meta_audit["software_warning"] = warning_msg
             anomalies.append({
                 "id": "anom_meta_tool",
-                "page": 1,
+                "page": 0,
                 "type": "GRAPHIC_EDITOR_METADATA",
                 "title": f"Editing Software Detected: {suspicious_tool}",
                 "description": warning_msg,
-                "bbox": [20, 20, 250, 60],
+                "bbox": None,
                 "severity": "HIGH",
             })
 
@@ -4921,80 +4921,99 @@ async def analyze_forensics(request: Request, file: UploadFile = File(...)):
             raw_bytes = inp.read_bytes()
             startxref_count = len(re.findall(rb"startxref", raw_bytes))
             if startxref_count > 1:
-                tamper_points += 20
+                tamper_points += 15
                 rev_msg = f"Document contains {startxref_count} incremental revisions. Content was modified and re-saved on top of the original stream."
                 meta_audit["revision_warning"] = rev_msg
                 anomalies.append({
                     "id": "anom_incremental_update",
-                    "page": 1,
+                    "page": 0,
                     "type": "INCREMENTAL_REVISION",
-                    "title": "Multiple Revisions & Post-Save Edits",
+                    "title": f"Multiple Revisions Detected ({startxref_count} Saves)",
                     "description": rev_msg,
-                    "bbox": [20, 70, 250, 110],
+                    "bbox": None,
                     "severity": "HIGH",
                 })
         except Exception:
             pass
 
-        # 2. PAGE LEVEL DEEP VECTOR & FONT AUDIT
+        # 2. PAGE LEVEL DEEP FORENSICS AUDIT
         for p_idx in range(len(doc)):
             page = doc[p_idx]
             page_rect = page.rect
             pw, ph = page_rect.width, page_rect.height
 
-            # A. WHITEOUT / COVERED TEXT DETECTION
+            # Detect if page is a scanned document (contains a large background image)
+            img_info_list = page.get_image_info()
+            has_bg_scan = any(
+                fitz.Rect(info["bbox"]).width > pw * 0.65 and fitz.Rect(info["bbox"]).height > ph * 0.65
+                for info in img_info_list
+            )
+
+            # A. ANNOTATIONS & FREETEXT LAYERS (Acrobat / Editor 'Add Text' / Whiteout Boxes)
+            for annot in page.annots():
+                a_rect = annot.rect
+                a_type = annot.type[1] if isinstance(annot.type, tuple) else str(annot.type)
+                a_info = annot.info or {}
+                a_content = (a_info.get("content") or "").strip()
+
+                if a_type in ("FreeText", "Square", "Stamp", "Ink", "Redact", "Text"):
+                    tamper_points += 30
+                    anomalies.append({
+                        "id": f"anom_annot_p{p_idx+1}_{len(anomalies)}",
+                        "page": p_idx + 1,
+                        "type": f"ANNOTATION_{a_type.upper()}",
+                        "title": f"Injected {a_type} Layer (p.{p_idx+1})",
+                        "description": f"External {a_type} object added post-generation: '{a_content[:40]}'. Frequently used in PDF editors to modify numbers or cover original text.",
+                        "bbox": [round(a_rect.x0, 1), round(a_rect.y0, 1), round(a_rect.x1, 1), round(a_rect.y1, 1)],
+                        "severity": "CRITICAL",
+                    })
+
+            # B. VECTOR WHITEOUT / PATCH BOXES
             drawings = page.get_drawings()
-            white_boxes = []
             for d in drawings:
                 fill = d.get("fill")
                 if fill is not None:
-                    # check if fill is pure white or near-white (> 0.95)
                     if isinstance(fill, (list, tuple)):
-                        is_white = all(c >= 0.94 for c in fill[:3])
+                        is_white = all(c >= 0.93 for c in fill[:3])
                     elif isinstance(fill, (int, float)):
-                        is_white = fill >= 0.94
+                        is_white = fill >= 0.93
                     else:
                         is_white = False
 
                     if is_white and d.get("rect"):
                         r = d["rect"]
-                        # Filter out whole page background canvas rectangles
-                        if r.width < pw * 0.95 or r.height < ph * 0.95:
-                            if r.width > 5 and r.height > 5:
-                                white_boxes.append(r)
+                        # Filter out whole page background canvas
+                        if (r.width < pw * 0.92 or r.height < ph * 0.92) and r.width > 8 and r.height > 6:
+                            tamper_points += 35
+                            anomalies.append({
+                                "id": f"anom_whiteout_p{p_idx+1}_{len(anomalies)}",
+                                "page": p_idx + 1,
+                                "type": "WHITEOUT_MASK_TAMPER",
+                                "title": f"Whiteout Patch Box (p.{p_idx+1})",
+                                "description": f"Opaque white vector rectangle ({round(r.width)}x{round(r.height)}pt) concealing background content. Typical indicator of erased figures/dates.",
+                                "bbox": [round(r.x0, 1), round(r.y0, 1), round(r.x1, 1), round(r.y1, 1)],
+                                "severity": "CRITICAL",
+                            })
 
-            # Extract raw words with bboxes: (x0, y0, x1, y1, "word", block_no, line_no, word_no)
-            words = page.get_text("words")
-            covered_words = []
-            for w in words:
-                wx0, wy0, wx1, wy1, word_str = w[0], w[1], w[2], w[3], w[4]
-                w_rect = fitz.Rect(wx0, wy0, wx1, wy1)
-                for wb in white_boxes:
-                    # Check significant intersection
-                    intersect = w_rect & wb
-                    if intersect.width > w_rect.width * 0.6 and intersect.height > w_rect.height * 0.6:
-                        covered_words.append((word_str, w_rect, wb))
+            # C. SPLICED SECONDARY IMAGE PATCHES (Signatures / Rubber Stamps / Photos)
+            if has_bg_scan and len(img_info_list) > 1:
+                for info in img_info_list:
+                    ibox = fitz.Rect(info["bbox"])
+                    if ibox.width < pw * 0.8 and ibox.height < ph * 0.8 and (ibox.width * ibox.height) > 150:
+                        tamper_points += 25
+                        anomalies.append({
+                            "id": f"anom_imgpatch_p{p_idx+1}_{len(anomalies)}",
+                            "page": p_idx + 1,
+                            "type": "SPLICED_IMAGE_LAYER",
+                            "title": f"Overlaid Image Patch (p.{p_idx+1})",
+                            "description": f"Secondary image ({round(ibox.width)}x{round(ibox.height)}pt) pasted on top of document scan. Common in forged signatures, stamps, and altered photos.",
+                            "bbox": [round(ibox.x0, 1), round(ibox.y0, 1), round(ibox.x1, 1), round(ibox.y1, 1)],
+                            "severity": "HIGH",
+                        })
 
-            if covered_words:
-                tamper_points += 35
-                covered_sample = " ".join([cw[0] for cw in covered_words[:6]])
-                # Bounding box of the whiteout area
-                first_wb = covered_words[0][2]
-                anomalies.append({
-                    "id": f"anom_covered_p{p_idx+1}",
-                    "page": p_idx + 1,
-                    "type": "COVERED_TEXT_WHITEOUT",
-                    "title": f"Hidden Text Detected Under White Box (p.{p_idx+1})",
-                    "description": f"Text ('{covered_sample}...') is concealed underneath an opaque white vector rectangle. This is the classic signature of forged numbers/dates where original values were masked rather than properly typeset.",
-                    "bbox": [round(first_wb.x0, 1), round(first_wb.y0, 1), round(first_wb.x1, 1), round(first_wb.y1, 1)],
-                    "severity": "CRITICAL",
-                })
-
-            # B. FONT FAMILY & GLYPH INCONSISTENCY IN NUMERIC DATA
+            # D. TEXT SPAN EXTRACTION & OVERWRITE / COLLISION ANALYSIS
             blocks = page.get_text("dict", flags=fitz.TEXT_PRESERVE_WHITESPACE).get("blocks", [])
             spans_list = []
-            font_counter = Counter()
-
             for b in blocks:
                 if b.get("type") == 0:
                     for line in b.get("lines", []):
@@ -5002,33 +5021,71 @@ async def analyze_forensics(request: Request, file: UploadFile = File(...)):
                             txt = span.get("text", "").strip()
                             if txt:
                                 spans_list.append(span)
-                                font_counter[span.get("font", "")] += len(txt)
 
-            if len(font_counter) > 1 and spans_list:
-                dominant_font, dom_count = font_counter.most_common(1)[0]
-                total_chars = sum(font_counter.values())
+            # Check if vector text is typed directly over a scanned raster document
+            if has_bg_scan and spans_list:
+                # Scanned PDFs have text in pixels; vector text typed on top is a spliced edit
+                for s in spans_list:
+                    s_text = s.get("text", "").strip()
+                    if len(s_text) > 1 and re.search(r"[\d\w]", s_text):
+                        tamper_points += 20
+                        s_bbox = s.get("bbox", [0, 0, 0, 0])
+                        anomalies.append({
+                            "id": f"anom_vectorscan_p{p_idx+1}_{len(anomalies)}",
+                            "page": p_idx + 1,
+                            "type": "SPLICED_VECTOR_ON_SCAN",
+                            "title": f"Spliced Text on Scan: '{s_text[:25]}'",
+                            "description": f"Vector computer font text '{s_text}' injected directly over scanned document raster image.",
+                            "bbox": [round(s_bbox[0], 1), round(s_bbox[1], 1), round(s_bbox[2], 1), round(s_bbox[3], 1)],
+                            "severity": "CRITICAL",
+                        })
 
-                if dom_count / max(1, total_chars) > 0.70:
-                    # Look for isolated single numeric spans using a rare alien font
-                    for s in spans_list:
-                        s_font = s.get("font", "")
-                        s_text = s.get("text", "").strip()
-                        # If span contains digits (amounts, dates, scores) and uses rare font (< 5% of document)
-                        if s_font != dominant_font and font_counter[s_font] < total_chars * 0.08:
-                            if re.search(r"\d", s_text):
-                                tamper_points += 15
-                                s_bbox = s.get("bbox", [0, 0, 0, 0])
-                                anomalies.append({
-                                    "id": f"anom_font_p{p_idx+1}_{len(anomalies)}",
-                                    "page": p_idx + 1,
-                                    "type": "FONT_MISMATCH_ANOMALY",
-                                    "title": f"Font Inconsistency on Numeric Field '{s_text[:20]}'",
-                                    "description": f"Field '{s_text}' is rendered using alien font '{s_font}', while 80%+ of the document uses '{dominant_font}'. Commonly seen when numbers in financial balances, salaries, or exam marks are spliced in.",
-                                    "bbox": [round(s_bbox[0], 1), round(s_bbox[1], 1), round(s_bbox[2], 1), round(s_bbox[3], 1)],
-                                    "severity": "HIGH",
-                                })
-                                break
+            # Check for overlapping text collisions (typing new text over old without deleting)
+            for i in range(len(spans_list)):
+                r1 = fitz.Rect(spans_list[i].get("bbox", [0, 0, 0, 0]))
+                t1 = spans_list[i].get("text", "").strip()
+                for j in range(i + 1, min(i + 15, len(spans_list))):
+                    r2 = fitz.Rect(spans_list[j].get("bbox", [0, 0, 0, 0]))
+                    t2 = spans_list[j].get("text", "").strip()
+                    inter = r1 & r2
+                    if inter.width > 4 and inter.height > 4 and t1 != t2:
+                        tamper_points += 25
+                        anomalies.append({
+                            "id": f"anom_collision_p{p_idx+1}_{len(anomalies)}",
+                            "page": p_idx + 1,
+                            "type": "OVERWRITTEN_TEXT_COLLISION",
+                            "title": f"Overwritten Text Collision (p.{p_idx+1})",
+                            "description": f"Text '{t2[:20]}' collides with underlying '{t1[:20]}'.",
+                            "bbox": [round(inter.x0, 1), round(inter.y0, 1), round(inter.x1, 1), round(inter.y1, 1)],
+                            "severity": "CRITICAL",
+                        })
 
+            # Check for in-line font family splicing in numeric / critical fields
+            for b in blocks:
+                if b.get("type") == 0:
+                    for line in b.get("lines", []):
+                        line_spans = [s for s in line.get("spans", []) if s.get("text", "").strip()]
+                        if len(line_spans) > 1:
+                            # Count fonts in this specific line
+                            line_fonts = Counter(s.get("font", "") for s in line_spans)
+                            dom_font, dom_cnt = line_fonts.most_common(1)[0]
+                            if dom_cnt >= 2:
+                                for s in line_spans:
+                                    s_font = s.get("font", "")
+                                    s_text = s.get("text", "").strip()
+                                    # If font differs within same line and contains digits
+                                    if s_font != dom_font and re.search(r"\d", s_text):
+                                        tamper_points += 15
+                                        s_bbox = s.get("bbox", [0, 0, 0, 0])
+                                        anomalies.append({
+                                            "id": f"anom_font_p{p_idx+1}_{len(anomalies)}",
+                                            "page": p_idx + 1,
+                                            "type": "FONT_MISMATCH_ANOMALY",
+                                            "title": f"In-Line Font Splicing on '{s_text[:20]}'",
+                                            "description": f"Numeric field '{s_text}' is rendered with font '{s_font}' while surrounding line uses '{dom_font}'.",
+                                            "bbox": [round(s_bbox[0], 1), round(s_bbox[1], 1), round(s_bbox[2], 1), round(s_bbox[3], 1)],
+                                            "severity": "HIGH",
+                                        })
         doc.close()
 
         # Score & Risk Calculation
