@@ -56,8 +56,8 @@ export default function AirgapCleanroom() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Compute SHA-256 in browser
-  const computeSha256 = async (buffer: ArrayBuffer): Promise<string> => {
-    const digest = await crypto.subtle.digest('SHA-256', buffer);
+  const computeSha256 = async (buffer: ArrayBuffer | Uint8Array): Promise<string> => {
+    const digest = await crypto.subtle.digest('SHA-256', buffer as ArrayBuffer);
     return Array.from(new Uint8Array(digest))
       .map((b) => b.toString(16).padStart(2, '0'))
       .join('');
@@ -236,7 +236,7 @@ export default function AirgapCleanroom() {
 
       // 6. Finalize and compute Post-Cleanse SHA-256
       const sanitizedBytes = await pdfDoc.save({ useObjectStreams: false });
-      const postHash = await computeSha256(sanitizedBytes.buffer);
+      const postHash = await computeSha256(sanitizedBytes);
 
       const outBlob = new Blob([sanitizedBytes as any], { type: 'application/pdf' });
       setSanitizedBlob(outBlob);
