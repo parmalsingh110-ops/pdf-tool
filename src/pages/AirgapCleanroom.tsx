@@ -16,7 +16,7 @@ import {
   Fingerprint,
   RefreshCw,
 } from 'lucide-react';
-import { PDFDocument, PDFName, PDFDict, PDFArray } from 'pdf-lib';
+import { PDFDocument, PDFName, PDFDict, PDFArray, PDFString, PDFHexString } from 'pdf-lib';
 import { useSEO } from '../hooks/useSEO';
 import { usePageSEO } from '../lib/usePageSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
@@ -87,107 +87,154 @@ export default function AirgapCleanroom() {
       let zeroWidthCount = 0;
       let jsActionsCount = 0;
 
-      // 1. Scan for Steganographic Zero-Width Leaker Tracking Characters in Raw Stream
-      let uint8 = new Uint8Array(rawBytes);
+      // 1. Load pristine raw binary bytes directly into pdf-lib
+      const pdfDoc = await PDFDocument.load(rawBytes, { ignoreEncryption: true });
+
+      // 2. Scan & Strip Steganographic Zero-Width Leaker Tracking Characters from String Objects
       if (stripZeroWidth) {
         // Zero-width characters: \u200B (8203), \u200C (8204), \u200D (8205), \uFEFF (65279), \u2060 (8288)
-        const decoder = new TextDecoder('utf-8', { fatal: false });
-        const text = decoder.decode(uint8);
         const zeroWidthRegex = /[\u200B\u200C\u200D\u200E\u200F\uFEFF\u2060\u2061\u2062\u2063]/g;
-        const matches = text.match(zeroWidthRegex);
-        if (matches) {
-          zeroWidthCount = matches.length;
-          // Cleaned text
-          const cleanedText = text.replace(zeroWidthRegex, '');
-          const encoder = new TextEncoder();
-          uint8 = encoder.encode(cleanedText);
-        }
-      }
-
-      // 2. Load into pdf-lib for Structure & Action Sanitization
-      const pdfDoc = await PDFDocument.load(uint8, { ignoreEncryption: true });
-
-      // Wipe Metadata & Producer Signatures
-      if (stripMetadata) {
-        pdfDoc.setTitle('');
-        pdfDoc.setAuthor('');
-        pdfDoc.setSubject('');
-        pdfDoc.setKeywords([]);
-        pdfDoc.setProducer('');
-        pdfDoc.setCreator('');
-        metaCount += 6;
-
-        const catalog = pdfDoc.catalog;
-        if (catalog.has(PDFName.of('Metadata'))) {
-          catalog.delete(PDFName.of('Metadata'));
-          metaCount++;
-        }
-        if (catalog.has(PDFName.of('PieceInfo'))) {
-          catalog.delete(PDFName.of('PieceInfo'));
-          metaCount++;
-        }
-      }
-
-      // Wipe Interactive & Automated JavaScript Actions
-      if (stripJsActions) {
-        const catalog = pdfDoc.catalog;
-        if (catalog.has(PDFName.of('OpenAction'))) {
-          catalog.delete(PDFName.of('OpenAction'));
-          jsActionsCount++;
-        }
-        if (catalog.has(PDFName.of('AA'))) {
-          catalog.delete(PDFName.of('AA'));
-          jsActionsCount++;
-        }
-        if (catalog.has(PDFName.of('Names'))) {
-          const names = catalog.lookup(PDFName.of('Names'));
-          if (names instanceof PDFDict && names.has(PDFName.of('JavaScript'))) {
-            names.delete(PDFName.of('JavaScript'));
-            jsActionsCount++;
-          }
-        }
-      }
-
-      // 3. Scan & Neutralize Spy Pixels / Remote Beacons across all pages
-      if (stripBeacons) {
-        const pages = pdfDoc.getPages();
-        for (const page of pages) {
-          const annots = page.node.lookup(PDFName.of('Annots'));
-          if (annots instanceof PDFArray) {
-            for (let i = annots.size() - 1; i >= 0; i--) {
-              const annot = annots.lookup(i);
-              if (annot instanceof PDFDict) {
-                const action = annot.lookup(PDFName.of('A'));
-                if (action instanceof PDFDict) {
-                  const s = action.lookup(PDFName.of('S'));
-                  const sName = s instanceof PDFName ? s.asString() : '';
-                  // Neutralize tracking launch / submit / remote beacons
-                  if (sName === '/Launch' || sName === '/SubmitForm' || sName === '/ImportData') {
-                    annots.asArray().splice(i, 1);
-                    beaconsCount++;
-                  } else if (sName === '/URI') {
-                    const uri = action.lookup(PDFName.of('URI'));
-                    const uriStr = uri?.toString() || '';
-                    // Flag suspicious webhook / tracking pixel / canary tokens
-                    if (
-                      uriStr.includes('canarytokens') ||
-                      uriStr.includes('pixel') ||
-                      uriStr.includes('webhook') ||
-                      uriStr.includes('collect') ||
-                      uriStr.includes('track')
-                    ) {
-                      annots.asArray().splice(i, 1);
-                      beaconsCount++;
-                    }
-                  }
-                }
+        try {
+          const indirectObjects = pdfDoc.context.enumerateIndirectObjects();
+          for (const [ref, obj] of indirectObjects) {
+            if (obj instanceof PDFString || obj instanceof PDFHexString) {
+              const strVal = obj.asString();
+              const matches = strVal.match(zeroWidthRegex);
+              if (matches) {
+                zeroWidthCount += matches.length;
+                const cleaned = strVal.replace(zeroWidthRegex, '');
+                pdfDoc.context.assign(ref, PDFString.of(cleaned));
               }
             }
           }
+        } catch (zwErr) {
+          console.warn('[AirgapCleanroom] Non-fatal zero-width scan warning:', zwErr);
         }
       }
 
-      // Finalize and compute Post-Cleanse SHA-256
+      // 3. Wipe Metadata & Producer Signatures
+      if (stripMetadata) {
+        try {
+          pdfDoc.setTitle('');
+          pdfDoc.setAuthor('');
+          pdfDoc.setSubject('');
+          pdfDoc.setKeywords([]);
+          pdfDoc.setProducer('');
+          pdfDoc.setCreator('');
+          metaCount += 6;
+
+          const catalog = pdfDoc.catalog;
+          if (catalog.has(PDFName.of('Metadata'))) {
+            catalog.delete(PDFName.of('Metadata'));
+            metaCount++;
+          }
+          if (catalog.has(PDFName.of('PieceInfo'))) {
+            catalog.delete(PDFName.of('PieceInfo'));
+            metaCount++;
+          }
+        } catch (metaErr) {
+          console.warn('[AirgapCleanroom] Non-fatal metadata purge warning:', metaErr);
+        }
+      }
+
+      // 4. Wipe Interactive & Automated JavaScript Actions
+      if (stripJsActions) {
+        try {
+          const catalog = pdfDoc.catalog;
+          if (catalog.has(PDFName.of('OpenAction'))) {
+            catalog.delete(PDFName.of('OpenAction'));
+            jsActionsCount++;
+          }
+          if (catalog.has(PDFName.of('AA'))) {
+            catalog.delete(PDFName.of('AA'));
+            jsActionsCount++;
+          }
+          if (catalog.has(PDFName.of('Names'))) {
+            const namesRef = catalog.get(PDFName.of('Names'));
+            const names = pdfDoc.context.lookup(namesRef);
+            if (names instanceof PDFDict && names.has(PDFName.of('JavaScript'))) {
+              names.delete(PDFName.of('JavaScript'));
+              jsActionsCount++;
+            }
+          }
+        } catch (jsErr) {
+          console.warn('[AirgapCleanroom] Non-fatal JS action purge warning:', jsErr);
+        }
+      }
+
+      // 5. Scan & Neutralize Spy Pixels / Remote Beacons across all pages safely
+      if (stripBeacons) {
+        try {
+          const pages = pdfDoc.getPages();
+          for (const page of pages) {
+            try {
+              const annotsRef = page.node.get(PDFName.of('Annots'));
+              if (!annotsRef) continue;
+              const annots = pdfDoc.context.lookup(annotsRef);
+              if (annots instanceof PDFArray) {
+                const preservedAnnots = pdfDoc.context.obj([]) as PDFArray;
+
+                for (let a = 0; a < annots.size(); a++) {
+                  try {
+                    const annotRef = annots.get(a);
+                    const annotDict = pdfDoc.context.lookup(annotRef);
+
+                    if (annotDict instanceof PDFDict) {
+                      let isSpyBeacon = false;
+                      const actionRef = annotDict.get(PDFName.of('A'));
+                      const action = pdfDoc.context.lookup(actionRef);
+
+                      if (action instanceof PDFDict) {
+                        const s = action.get(PDFName.of('S'));
+                        const sName = s instanceof PDFName ? s.asString() : '';
+                        if (sName === '/Launch' || sName === '/SubmitForm' || sName === '/ImportData') {
+                          isSpyBeacon = true;
+                        } else if (sName === '/URI') {
+                          const uriRef = action.get(PDFName.of('URI'));
+                          const uriObj = pdfDoc.context.lookup(uriRef);
+                          const uriStr = uriObj?.toString().toLowerCase() || '';
+                          if (
+                            uriStr.includes('canary') ||
+                            uriStr.includes('pixel') ||
+                            uriStr.includes('webhook') ||
+                            uriStr.includes('track') ||
+                            uriStr.includes('collect') ||
+                            uriStr.includes('beacon')
+                          ) {
+                            isSpyBeacon = true;
+                          }
+                        }
+                      }
+
+                      if (isSpyBeacon) {
+                        beaconsCount++;
+                      } else {
+                        preservedAnnots.push(annotRef);
+                      }
+                    } else {
+                      preservedAnnots.push(annotRef);
+                    }
+                  } catch {
+                    // Skip corrupt individual annotation safely
+                  }
+                }
+
+                if (preservedAnnots.size() > 0) {
+                  page.node.set(PDFName.of('Annots'), preservedAnnots);
+                } else {
+                  page.node.delete(PDFName.of('Annots'));
+                }
+              }
+            } catch (pageErr) {
+              console.warn('[AirgapCleanroom] Safe page annot skip:', pageErr);
+            }
+          }
+        } catch (beaconErr) {
+          console.warn('[AirgapCleanroom] Beacon scan warning:', beaconErr);
+        }
+      }
+
+      // 6. Finalize and compute Post-Cleanse SHA-256
       const sanitizedBytes = await pdfDoc.save({ useObjectStreams: false });
       const postHash = await computeSha256(sanitizedBytes.buffer);
 
