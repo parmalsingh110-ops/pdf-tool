@@ -49,6 +49,7 @@ export const API_BASE_URL = API_BASE;
 
 export interface ApiFetchOptions extends RequestInit {
   timeoutMs?: number;
+  suppressTelemetry?: boolean;
 }
 
 /**
@@ -82,8 +83,14 @@ export async function apiFetch(endpoint: string, options: ApiFetchOptions = {}):
       err?.message?.toLowerCase().includes('abort') ||
       err?.message?.toLowerCase().includes('aborted');
 
-    // Never log normal client timeouts or routine poll aborts to telemetry
-    if (!isAborted && !endpoint.includes('/api/telemetry')) {
+    const isNetworkDown =
+      err?.message?.includes('Failed to fetch') ||
+      err?.message?.includes('NetworkError') ||
+      err?.message?.includes('ERR_CONNECTION_REFUSED') ||
+      err?.message?.includes('Load failed');
+
+    // Never log normal client timeouts, network offline, routine poll aborts, or suppressed endpoints to telemetry
+    if (!isAborted && !isNetworkDown && !options.suppressTelemetry && !endpoint.includes('/api/telemetry')) {
       try {
         const { reportToolError } = await import('./telemetry');
         void reportToolError({

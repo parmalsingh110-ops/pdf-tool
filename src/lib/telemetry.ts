@@ -51,6 +51,7 @@ const REQUEST_TIMEOUT_MS = 25000; // 25s gives Render waking-up instance a fair 
 const recentErrors = new Set<string>();
 
 let isFlushing = false;
+let lastFlushFailure = 0;
 let retryTimer: ReturnType<typeof setTimeout> | null = null;
 let intervalStarted = false;
 
@@ -149,6 +150,11 @@ export async function flushTelemetryQueue(): Promise<{ sent: number; remaining: 
     return { sent: 0, remaining: getTelemetryQueue().length };
   }
 
+  // Prevent console flood if backend is unreachable
+  if (Date.now() - lastFlushFailure < 45000) {
+    return { sent: 0, remaining: getTelemetryQueue().length };
+  }
+
   const queue = getTelemetryQueue();
   if (queue.length === 0) return { sent: 0, remaining: 0 };
 
@@ -208,6 +214,7 @@ export async function flushTelemetryQueue(): Promise<{ sent: number; remaining: 
         sentCount++;
       } else {
         // Item failed to deliver
+        lastFlushFailure = Date.now();
         item.retryCount += 1;
         if (item.retryCount < MAX_RETRIES) {
           remainingItems.push(item);

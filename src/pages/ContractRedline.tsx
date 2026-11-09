@@ -24,6 +24,21 @@ import { usePageSEO } from '../lib/usePageSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
 import { downloadBlob } from '../lib/utils';
 
+function cleanWinAnsi(str: string): string {
+  if (!str) return '';
+  return str
+    .replace(/[✓✔]/g, '[OK]')
+    .replace(/[✗✘❌]/g, '[X]')
+    .replace(/[⚠️🚨]/g, '[!]')
+    .replace(/₹/g, 'Rs.')
+    .replace(/[—–]/g, '-')
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .replace(/[•·]/g, '-')
+    .replace(/…/g, '...')
+    .replace(/[^\x20-\x7E\n\r\t]/g, ' ');
+}
+
 interface ContractTrap {
   id: string;
   category: string;
@@ -204,7 +219,7 @@ export default function ContractRedline() {
             borderWidth: 0,
           });
 
-          page.drawText(`⚠️ RISK ALERT: ${trap.category.toUpperCase().slice(0, 24)}`, {
+          page.drawText(cleanWinAnsi(`RISK ALERT: ${trap.category.toUpperCase().slice(0, 24)}`), {
             x: width - 252,
             y: height - 26,
             size: 7.5,

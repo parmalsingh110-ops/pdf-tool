@@ -28,6 +28,21 @@ import ToolSEOSection from '../components/ToolSEOSection';
 import { apiFetch } from '../lib/api';
 import { downloadBlob } from '../lib/utils';
 
+function cleanWinAnsi(str: string): string {
+  if (!str) return '';
+  return str
+    .replace(/[✓✔]/g, '[OK]')
+    .replace(/[✗✘❌]/g, '[X]')
+    .replace(/[⚠️🚨]/g, '[!]')
+    .replace(/₹/g, 'Rs.')
+    .replace(/[—–]/g, '-')
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .replace(/[•·]/g, '-')
+    .replace(/…/g, '...')
+    .replace(/[^\x20-\x7E\n\r\t]/g, ' ');
+}
+
 interface Anomaly {
   id: string;
   page: number;
@@ -108,6 +123,8 @@ export default function DocForensics() {
         const res = await apiFetch('/analyze/forensics', {
           method: 'POST',
           body: fd,
+          timeoutMs: 8000,
+          suppressTelemetry: true,
         });
 
         if (res.ok) {
@@ -245,9 +262,9 @@ export default function DocForensics() {
 
       // Target File Details
       let currY = height - 120;
-      page.drawText(`File Analyzed: ${file.name}`, { x: 35, y: currY, size: 11, font: fontBold });
+      page.drawText(cleanWinAnsi(`File Analyzed: ${file.name}`), { x: 35, y: currY, size: 11, font: fontBold });
       currY -= 18;
-      page.drawText(`File Size: ${(file.size / 1024).toFixed(1)} KB | Total Pages: ${totalPages}`, {
+      page.drawText(cleanWinAnsi(`File Size: ${(file.size / 1024).toFixed(1)} KB | Total Pages: ${totalPages}`), {
         x: 35,
         y: currY,
         size: 9,
@@ -268,7 +285,7 @@ export default function DocForensics() {
         borderWidth: 2,
       });
 
-      page.drawText(`FORGERY RISK LEVEL: ${riskLevel} (Tamper Score: ${tamperScore}/100)`, {
+      page.drawText(cleanWinAnsi(`FORGERY RISK LEVEL: ${riskLevel} (Tamper Score: ${tamperScore}/100)`), {
         x: 50,
         y: currY - 22,
         size: 12,
@@ -276,7 +293,7 @@ export default function DocForensics() {
         color: scoreColor,
       });
 
-      page.drawText(verdict, {
+      page.drawText(cleanWinAnsi(verdict), {
         x: 50,
         y: currY - 38,
         size: 9,
@@ -288,9 +305,9 @@ export default function DocForensics() {
       currY -= 80;
       page.drawText('METADATA & REVISION FINGERPRINT', { x: 35, y: currY, size: 10, font: fontBold });
       currY -= 16;
-      page.drawText(`Software Producer: ${metadataAudit?.producer || 'N/A'}`, { x: 35, y: currY, size: 8.5, font: fontReg });
+      page.drawText(cleanWinAnsi(`Software Producer: ${metadataAudit?.producer || 'N/A'}`), { x: 35, y: currY, size: 8.5, font: fontReg });
       currY -= 14;
-      page.drawText(`Creation Date: ${metadataAudit?.creation_date || 'N/A'} | Modified Date: ${metadataAudit?.mod_date || 'N/A'}`, {
+      page.drawText(cleanWinAnsi(`Creation Date: ${metadataAudit?.creation_date || 'N/A'} | Modified Date: ${metadataAudit?.mod_date || 'N/A'}`), {
         x: 35,
         y: currY,
         size: 8.5,
@@ -303,7 +320,7 @@ export default function DocForensics() {
       currY -= 18;
 
       if (anomalies.length === 0) {
-        page.drawText('✓ No vector whiteouts, hidden stream covers, or font family inconsistencies detected.', {
+        page.drawText('[OK] No vector whiteouts, hidden stream covers, or font family inconsistencies detected.', {
           x: 35,
           y: currY,
           size: 9,
@@ -312,7 +329,7 @@ export default function DocForensics() {
         });
       } else {
         for (const anom of anomalies.slice(0, 6)) {
-          page.drawText(`• [Page ${anom.page}] [${anom.severity}] ${anom.title}`, {
+          page.drawText(cleanWinAnsi(`- [Page ${anom.page}] [${anom.severity}] ${anom.title}`), {
             x: 35,
             y: currY,
             size: 9,
@@ -320,7 +337,7 @@ export default function DocForensics() {
             color: anom.severity === 'CRITICAL' ? rgb(0.8, 0.1, 0.1) : rgb(0.2, 0.2, 0.2),
           });
           currY -= 14;
-          page.drawText(`   ${anom.description.slice(0, 95)}...`, {
+          page.drawText(cleanWinAnsi(`   ${anom.description.slice(0, 95)}...`), {
             x: 35,
             y: currY,
             size: 8,
@@ -332,7 +349,7 @@ export default function DocForensics() {
       }
 
       // Verification Watermark
-      page.drawText('CONFIDENTIAL FORENSIC AUDIT — FOR VERIFICATION PURPOSES ONLY', {
+      page.drawText('CONFIDENTIAL FORENSIC AUDIT - FOR VERIFICATION PURPOSES ONLY', {
         x: 130,
         y: 25,
         size: 7.5,
