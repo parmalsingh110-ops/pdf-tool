@@ -15,11 +15,13 @@ import {
   Shuffle, FlipHorizontal, Compass, Bookmark, FileCheck2, Printer, Grid,
   Briefcase, GraduationCap, Building2, Award, X,
   Calculator, Monitor, Scale, Megaphone,
+  ShieldAlert, Maximize2, FileWarning, WifiOff,
 } from 'lucide-react';
 import { toggleFavorite, isFavorite } from '../lib/favorites';
 import { useSEO } from '../hooks/useSEO';
 
 function categoryAnchor(title: string): string {
+  if (title.includes('Deep-Tech')) return 'cat-deep-tech';
   if (title.includes('Currently Available')) return 'cat-available';
   if (title.includes('Pro & Advanced')) return 'cat-pro-tools';
   if (title.includes('Advanced Text')) return 'cat-advanced-ocr';
@@ -31,6 +33,15 @@ function categoryAnchor(title: string): string {
 }
 
 const categories = [
+  {
+    title: "Deep-Tech & Forensic Innovations 🔬",
+    tools: [
+      { title: 'DocForensics™ (Forgery & Tamper Inspector)', path: '/doc-forensics', icon: ShieldAlert, color: 'text-rose-600', bg: 'bg-rose-50' },
+      { title: 'TrueVector 4K™ (Neural Vector Restorer)', path: '/true-vector-4k', icon: Maximize2, color: 'text-indigo-600', bg: 'bg-indigo-50' },
+      { title: 'Contract Trap Redliner™ (Fine-Print Shield)', path: '/contract-redline', icon: FileWarning, color: 'text-amber-600', bg: 'bg-amber-50' },
+      { title: 'Airgap Cleanroom™ (Anti-Surveillance Sanitizer)', path: '/airgap-cleanroom', icon: WifiOff, color: 'text-emerald-600', bg: 'bg-emerald-50' },
+    ]
+  },
   {
     title: "Currently Available Tools",
     tools: [

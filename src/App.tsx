@@ -166,6 +166,10 @@ const AdmitCardOptimizer = lazy(() => import('./pages/AdmitCardOptimizer'));
 const CourtEvidenceFormatter = lazy(() => import('./pages/CourtEvidenceFormatter'));
 const SmartKycSlip = lazy(() => import('./pages/SmartKycSlip'));
 const PamphletMaker = lazy(() => import('./pages/PamphletMaker'));
+const DocForensics = lazy(() => import('./pages/DocForensics'));
+const TrueVector4k = lazy(() => import('./pages/TrueVector4k'));
+const ContractRedline = lazy(() => import('./pages/ContractRedline'));
+const AirgapCleanroom = lazy(() => import('./pages/AirgapCleanroom'));
 const NotFound = lazy(() => import('./pages/NotFound'));
 
 export default function App() {
@@ -384,6 +388,12 @@ export default function App() {
         <Route path="court-evidence-formatter" element={<CourtEvidenceFormatter />} />
         <Route path="smart-kyc-slip" element={<SmartKycSlip />} />
         <Route path="pamphlet-maker" element={<PamphletMaker />} />
+
+        {/* Deep-Tech Breakthrough Proprietary Tools */}
+        <Route path="doc-forensics" element={<DocForensics />} />
+        <Route path="true-vector-4k" element={<TrueVector4k />} />
+        <Route path="contract-redline" element={<ContractRedline />} />
+        <Route path="airgap-cleanroom" element={<AirgapCleanroom />} />
 
         {/* 404 Catch-All Route: Eliminates Soft-404 Errors in Google Search Console */}
         <Route path="*" element={<NotFound />} />

@@ -39,6 +39,10 @@ import {
   Linkedin,
   Github,
   ExternalLink,
+  ShieldAlert,
+  Maximize2,
+  FileWarning,
+  WifiOff,
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 import { readRecentTools, recordToolVisit, type RecentEntry } from '../lib/recentFiles';
@@ -136,6 +140,10 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Pro Tools',
     items: [
+      { to: '/doc-forensics', label: 'DocForensics™ (AI)', icon: ShieldAlert },
+      { to: '/true-vector-4k', label: 'TrueVector 4K™', icon: Maximize2 },
+      { to: '/contract-redline', label: 'Contract Redliner™', icon: FileWarning },
+      { to: '/airgap-cleanroom', label: 'Airgap Cleanroom™', icon: WifiOff },
       { to: '/redact', label: 'PDF Redaction', icon: ShieldOff },
       { to: '/masked-aadhaar', label: 'Masked Aadhaar (XXXX)', icon: ShieldCheck },
       { to: '/stamp', label: 'PDF Stamp', icon: Stamp },
@@ -565,6 +573,10 @@ export default function Layout() {
               <li><Link to="/court-evidence-formatter" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Court Evidence Formatter</Link></li>
               <li><Link to="/smart-kyc-slip" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Smart KYC OCR Slip</Link></li>
               <li><Link to="/pamphlet-maker" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Pamphlet &amp; Flyer Maker</Link></li>
+              <li><Link to="/doc-forensics" className="hover:text-rose-600 dark:hover:text-rose-400 font-semibold transition-colors">🔬 DocForensics™</Link></li>
+              <li><Link to="/true-vector-4k" className="hover:text-rose-600 dark:hover:text-rose-400 font-semibold transition-colors">⚡ TrueVector 4K™</Link></li>
+              <li><Link to="/contract-redline" className="hover:text-rose-600 dark:hover:text-rose-400 font-semibold transition-colors">⚖️ Contract Redliner™</Link></li>
+              <li><Link to="/airgap-cleanroom" className="hover:text-rose-600 dark:hover:text-rose-400 font-semibold transition-colors">🛡️ Airgap Cleanroom™</Link></li>
               <li><Link to="/edit" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Edit PDF</Link></li>
               <li><Link to="/protect" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Protect PDF</Link></li>
               <li><Link to="/rotate-pages" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Rotate PDF</Link></li>

@@ -9,6 +9,7 @@ import { Search, ArrowRight, X, Combine, Scissors, Minimize2, FileText, Image as
   Shield, Wrench, FileCode2, Type, BookMarked, Accessibility, Tag, BarChart2,
   Shuffle, FlipHorizontal, Compass, Bookmark, FileCheck2, Printer, Grid,
   Calculator, Monitor, Scale, GraduationCap, Megaphone,
+  ShieldAlert, Maximize2, FileWarning, WifiOff,
 } from 'lucide-react';
 
 interface ToolEntry {
@@ -20,6 +21,12 @@ interface ToolEntry {
 }
 
 const ALL_TOOLS: ToolEntry[] = [
+  // Deep-Tech & Forensics
+  { title: 'DocForensics™ AI Forgery & Tamper Inspector', path: '/doc-forensics', icon: ShieldAlert, category: 'Deep-Tech', keywords: 'forensics tamper forgery fake salary slip whiteout bank statement audit fraud detection' },
+  { title: 'TrueVector 4K™ Blueprint & Scan Vectorizer', path: '/true-vector-4k', icon: Maximize2, category: 'Deep-Tech', keywords: 'vectorize svg bezier curve blueprint cad denoise upscale depixelate 4k clean line art' },
+  { title: 'Contract Trap Redliner™ Fine-Print Risk Shield', path: '/contract-redline', icon: FileWarning, category: 'Deep-Tech', keywords: 'contract redline legal audit fine print auto renewal indemnity non compete agreement trap' },
+  { title: 'Airgap Cleanroom™ Anti-Surveillance Sanitizer', path: '/airgap-cleanroom', icon: WifiOff, category: 'Deep-Tech', keywords: 'airgap cleanroom surveillance tracking pixel canary token zero width sovereign steganography sanitize' },
+
   // PDF Essentials
   { title: 'Merge PDF', path: '/merge', icon: Combine, category: 'PDF Tools', keywords: 'combine join' },
   { title: 'Alternate & Mix PDF', path: '/alternate-mix', icon: Shuffle, category: 'PDF Tools', keywords: 'duplex scanner interleave odd even mix alternate' },

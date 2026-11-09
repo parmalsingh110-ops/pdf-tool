@@ -13,7 +13,7 @@ This document serves as the "Graph" context for the `pdf-tool` project, giving A
   - `main.py`: The core backend file containing all API routes and logic.
   - `requirements.txt`: Python dependencies.
 - **`src/`**: Contains the React + TypeScript frontend.
-  - **`pages/`**: Contains 135 page components (e.g., AdvancedEditor.tsx, AllTools.tsx, ScanToPrint.tsx, PrintCostCalculator.tsx, ZeroTracePrint.tsx, CounterKiosk.tsx, TalkingNotes.tsx, AdmitCardOptimizer.tsx, CourtEvidenceFormatter.tsx, SmartKycSlip.tsx, PamphletMaker.tsx).
+  - **`pages/`**: Contains 139 page components (e.g., DocForensics.tsx, TrueVector4k.tsx, ContractRedline.tsx, AirgapCleanroom.tsx, AdvancedEditor.tsx, AllTools.tsx, ScanToPrint.tsx, PrintCostCalculator.tsx, ZeroTracePrint.tsx, CounterKiosk.tsx, TalkingNotes.tsx, AdmitCardOptimizer.tsx, CourtEvidenceFormatter.tsx, SmartKycSlip.tsx, PamphletMaker.tsx).
   - **`components/`**: Contains shared UI components (e.g., Layout.tsx, FileDropzone.tsx).
 - **`public/`**: Static assets.
 
@@ -24,7 +24,8 @@ The backend exposes the following API routes found in `backend/main.py`:
 ```markdown
 - [GET] /
 - [POST] /analyze/links
-- [POST] /analyze/text-layout   ← NEW: rich span-level text info (font, color, bold, italic) from PyMuPDF
+- [POST] /analyze/text-layout   ← rich span-level text info (font, color, bold, italic) from PyMuPDF
+- [POST] /analyze/forensics     ← NEW: AI PDF Tamper & Forgery Inspector (Whiteout vectors, spliced fonts, XRef revisions, graphics editor signatures)
 - [POST] /compress-pdf
 - [POST] /convert/auto-crop
 - [POST] /convert/cmyk

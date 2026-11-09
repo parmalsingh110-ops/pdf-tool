@@ -4850,5 +4850,220 @@ async def print_drop_download_file(session_id: str, job_id: str, keep: bool = Fa
     )
 
 
+# ─── 16. Deep-Tech DocForensics: Tamper & Forgery Inspector ────────────────
+
+SUSPICIOUS_PRODUCERS = [
+    "canva", "photoshop", "illustrator", "coreldraw", "gimp", "sejda",
+    "ilovepdf", "pdfescape", "smallpdf", "inkscape", "pdf24", "phantompdf",
+    "nitro", "wondershare", "foxit phantom"
+]
+
+@app.post("/analyze/forensics")
+@limiter.limit("20/minute")
+async def analyze_forensics(request: Request, file: UploadFile = File(...)):
+    """
+    Forensic deep-inspection of PDF for tampering, forgery, whiteout attacks,
+    font inconsistencies, incremental update revisions, and metadata anomalies.
+    """
+    inp = temp_path(".pdf")
+    try:
+        inp.write_bytes(await safe_read_upload(file))
+        check_pdf_page_count(inp, "analyze-forensics")
+
+        import fitz
+        from collections import Counter
+
+        doc = fitz.open(str(inp))
+        anomalies = []
+        tamper_points = 0
+
+        # 1. METADATA & REVISION AUDIT
+        meta = doc.metadata or {}
+        producer = (meta.get("producer") or "").strip().lower()
+        creator = (meta.get("creator") or "").strip().lower()
+        creation_date = (meta.get("creationDate") or "").strip()
+        mod_date = (meta.get("modDate") or "").strip()
+
+        suspicious_tool = None
+        for sp in SUSPICIOUS_PRODUCERS:
+            if sp in producer or sp in creator:
+                suspicious_tool = sp.title()
+                break
+
+        meta_audit = {
+            "producer": meta.get("producer") or "Not Specified",
+            "creator": meta.get("creator") or "Not Specified",
+            "creation_date": creation_date or "Unknown",
+            "mod_date": mod_date or "Unknown",
+            "is_encrypted": doc.is_encrypted,
+            "is_repaired": doc.is_repaired,
+            "page_count": len(doc),
+            "software_warning": None,
+            "revision_warning": None,
+        }
+
+        if suspicious_tool:
+            tamper_points += 30
+            warning_msg = f"Document modified using graphic design / online editor software ({suspicious_tool}). Official salary slips, bank statements, and degree certificates are typically generated via automated enterprise billing systems, not graphic design tools."
+            meta_audit["software_warning"] = warning_msg
+            anomalies.append({
+                "id": "anom_meta_tool",
+                "page": 1,
+                "type": "GRAPHIC_EDITOR_METADATA",
+                "title": f"Editing Software Detected: {suspicious_tool}",
+                "description": warning_msg,
+                "bbox": [20, 20, 250, 60],
+                "severity": "HIGH",
+            })
+
+        # Incremental XRef / Trailer check (indicates post-generation edits)
+        try:
+            raw_bytes = inp.read_bytes()
+            startxref_count = len(re.findall(rb"startxref", raw_bytes))
+            if startxref_count > 1:
+                tamper_points += 20
+                rev_msg = f"Document contains {startxref_count} incremental revisions. Content was modified and re-saved on top of the original stream."
+                meta_audit["revision_warning"] = rev_msg
+                anomalies.append({
+                    "id": "anom_incremental_update",
+                    "page": 1,
+                    "type": "INCREMENTAL_REVISION",
+                    "title": "Multiple Revisions & Post-Save Edits",
+                    "description": rev_msg,
+                    "bbox": [20, 70, 250, 110],
+                    "severity": "HIGH",
+                })
+        except Exception:
+            pass
+
+        # 2. PAGE LEVEL DEEP VECTOR & FONT AUDIT
+        for p_idx in range(len(doc)):
+            page = doc[p_idx]
+            page_rect = page.rect
+            pw, ph = page_rect.width, page_rect.height
+
+            # A. WHITEOUT / COVERED TEXT DETECTION
+            drawings = page.get_drawings()
+            white_boxes = []
+            for d in drawings:
+                fill = d.get("fill")
+                if fill is not None:
+                    # check if fill is pure white or near-white (> 0.95)
+                    if isinstance(fill, (list, tuple)):
+                        is_white = all(c >= 0.94 for c in fill[:3])
+                    elif isinstance(fill, (int, float)):
+                        is_white = fill >= 0.94
+                    else:
+                        is_white = False
+
+                    if is_white and d.get("rect"):
+                        r = d["rect"]
+                        # Filter out whole page background canvas rectangles
+                        if r.width < pw * 0.95 or r.height < ph * 0.95:
+                            if r.width > 5 and r.height > 5:
+                                white_boxes.append(r)
+
+            # Extract raw words with bboxes: (x0, y0, x1, y1, "word", block_no, line_no, word_no)
+            words = page.get_text("words")
+            covered_words = []
+            for w in words:
+                wx0, wy0, wx1, wy1, word_str = w[0], w[1], w[2], w[3], w[4]
+                w_rect = fitz.Rect(wx0, wy0, wx1, wy1)
+                for wb in white_boxes:
+                    # Check significant intersection
+                    intersect = w_rect & wb
+                    if intersect.width > w_rect.width * 0.6 and intersect.height > w_rect.height * 0.6:
+                        covered_words.append((word_str, w_rect, wb))
+
+            if covered_words:
+                tamper_points += 35
+                covered_sample = " ".join([cw[0] for cw in covered_words[:6]])
+                # Bounding box of the whiteout area
+                first_wb = covered_words[0][2]
+                anomalies.append({
+                    "id": f"anom_covered_p{p_idx+1}",
+                    "page": p_idx + 1,
+                    "type": "COVERED_TEXT_WHITEOUT",
+                    "title": f"Hidden Text Detected Under White Box (p.{p_idx+1})",
+                    "description": f"Text ('{covered_sample}...') is concealed underneath an opaque white vector rectangle. This is the classic signature of forged numbers/dates where original values were masked rather than properly typeset.",
+                    "bbox": [round(first_wb.x0, 1), round(first_wb.y0, 1), round(first_wb.x1, 1), round(first_wb.y1, 1)],
+                    "severity": "CRITICAL",
+                })
+
+            # B. FONT FAMILY & GLYPH INCONSISTENCY IN NUMERIC DATA
+            blocks = page.get_text("dict", flags=fitz.TEXT_PRESERVE_WHITESPACE).get("blocks", [])
+            spans_list = []
+            font_counter = Counter()
+
+            for b in blocks:
+                if b.get("type") == 0:
+                    for line in b.get("lines", []):
+                        for span in line.get("spans", []):
+                            txt = span.get("text", "").strip()
+                            if txt:
+                                spans_list.append(span)
+                                font_counter[span.get("font", "")] += len(txt)
+
+            if len(font_counter) > 1 and spans_list:
+                dominant_font, dom_count = font_counter.most_common(1)[0]
+                total_chars = sum(font_counter.values())
+
+                if dom_count / max(1, total_chars) > 0.70:
+                    # Look for isolated single numeric spans using a rare alien font
+                    for s in spans_list:
+                        s_font = s.get("font", "")
+                        s_text = s.get("text", "").strip()
+                        # If span contains digits (amounts, dates, scores) and uses rare font (< 5% of document)
+                        if s_font != dominant_font and font_counter[s_font] < total_chars * 0.08:
+                            if re.search(r"\d", s_text):
+                                tamper_points += 15
+                                s_bbox = s.get("bbox", [0, 0, 0, 0])
+                                anomalies.append({
+                                    "id": f"anom_font_p{p_idx+1}_{len(anomalies)}",
+                                    "page": p_idx + 1,
+                                    "type": "FONT_MISMATCH_ANOMALY",
+                                    "title": f"Font Inconsistency on Numeric Field '{s_text[:20]}'",
+                                    "description": f"Field '{s_text}' is rendered using alien font '{s_font}', while 80%+ of the document uses '{dominant_font}'. Commonly seen when numbers in financial balances, salaries, or exam marks are spliced in.",
+                                    "bbox": [round(s_bbox[0], 1), round(s_bbox[1], 1), round(s_bbox[2], 1), round(s_bbox[3], 1)],
+                                    "severity": "HIGH",
+                                })
+                                break
+
+        doc.close()
+
+        # Score & Risk Calculation
+        final_score = min(100, tamper_points)
+        if final_score >= 60:
+            risk_level = "CRITICAL"
+            verdict = "High probability of document modification or artificial tampering."
+        elif final_score >= 35:
+            risk_level = "HIGH"
+            verdict = "Significant anomalies detected. Manual verification strongly recommended."
+        elif final_score >= 15:
+            risk_level = "MEDIUM"
+            verdict = "Minor formatting or font variance found. Possible non-standard PDF generation."
+        else:
+            risk_level = "LOW"
+            verdict = "Document appears consistent with standard automated output. No obvious vector tampering detected."
+
+        return JSONResponse({
+            "success": True,
+            "filename": file.filename or "Document.pdf",
+            "tamper_score": final_score,
+            "risk_level": risk_level,
+            "verdict": verdict,
+            "metadata_audit": meta_audit,
+            "total_anomalies": len(anomalies),
+            "anomalies": anomalies,
+        })
+    except HTTPException:
+        cleanup(inp)
+        raise
+    except Exception as e:
+        cleanup(inp)
+        raise safe_error(e, "analyze-forensics")
+
+
+
 
 

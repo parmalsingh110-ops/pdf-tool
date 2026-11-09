@@ -11,6 +11,7 @@ import {
   Shuffle, FlipHorizontal, Compass, Trash2, Tag, Bookmark,
   ScanLine, FileCheck, Receipt, BookMarked, Printer, Grid,
   Calculator, Monitor, Scale, GraduationCap, Megaphone,
+  ShieldAlert, Maximize2, FileWarning, WifiOff,
 } from 'lucide-react';
 import { readRecentTools, type RecentEntry } from '../lib/recentFiles';
 import { usePageSEO } from '../lib/usePageSEO';
@@ -23,6 +24,17 @@ import { FOUNDER_INFO, TEAM_MEMBERS } from '../config/founderInfo';
    ============================================= */
 
 const TOOL_GROUPS = [
+  {
+    title: 'Deep-Tech & Forensics 🔬',
+    desc: 'AI PDF forgery inspector, infinite vector blueprint restorer, fine-print contract redliner, and zero-egress airgap cleaner.',
+    color: 'indigo',
+    tools: [
+      { title: 'DocForensics™', desc: 'AI PDF forgery, whiteout layer & tamper inspector.', path: '/doc-forensics', icon: ShieldAlert },
+      { title: 'TrueVector 4K™', desc: 'Reconstruct 72 DPI scans into infinite Bezier vector curves.', path: '/true-vector-4k', icon: Maximize2 },
+      { title: 'Contract Trap Redliner™', desc: 'Detect fine-print traps with safe counter-clauses.', path: '/contract-redline', icon: FileWarning },
+      { title: 'Airgap Cleanroom™', desc: 'Strip tracking beacons, canary tokens & zero-width leakers.', path: '/airgap-cleanroom', icon: WifiOff },
+    ],
+  },
   {
     title: 'Most Popular PDF Tools',
     desc: 'The essentials — merge, compress, edit, scan to print, and passport photo sheets.',
