@@ -805,6 +805,8 @@ export default function AdvancedEditor() {
         e.preventDefault();
         return;
       }
+      // Clicked on blank area: deselect any active annotation
+      setSelectedId(null);
       return;
     }
 
@@ -1314,8 +1316,11 @@ export default function AdvancedEditor() {
       };
 
       // 1. Separate native text replacements (from selection) vs other annotations
-      const nativeEditsAll = annotations.filter(a => a.type === 'text' && a.sourceWidth && a.sourceWidth > 0);
-      const otherAnnotations = annotations.filter(a => !(a.type === 'text' && a.sourceWidth && a.sourceWidth > 0));
+      // Pure Latin/ASCII text edits go to PyMuPDF backend for 100% native vector font matching.
+      // Any edits containing Devanagari/Hindi/Unicode are handled by browser's HarfBuzz canvas engine,
+      // which shapes complex ligatures (like 'कर्मचारी') with zero tofu boxes or missing glyphs!
+      const nativeEditsAll = annotations.filter(a => a.type === 'text' && a.sourceWidth && a.sourceWidth > 0 && !hasNonLatinChars(a.text || ''));
+      const otherAnnotations = annotations.filter(a => !(a.type === 'text' && a.sourceWidth && a.sourceWidth > 0 && !hasNonLatinChars(a.text || '')));
 
       let currentFileBuffer = await file.arrayBuffer();
 
@@ -2307,25 +2312,6 @@ export default function AdvancedEditor() {
                             onMouseDown={e => { e.stopPropagation(); resizeAnnRef.current = { id: ann.id, handle: 'bl', startX: e.clientX, startY: e.clientY, startAnnX: ann.x, startAnnY: ann.y, startW: ann.width || 80, startH: ann.height || 20 }; }} />
                           <div className="absolute -bottom-1 -right-1 w-2 h-2 bg-white border border-blue-600 rounded-none cursor-nwse-resize z-20 pointer-events-auto shadow-xs"
                             onMouseDown={e => { e.stopPropagation(); resizeAnnRef.current = { id: ann.id, handle: 'br', startX: e.clientX, startY: e.clientY, startAnnX: ann.x, startAnnY: ann.y, startW: ann.width || 80, startH: ann.height || 20 }; }} />
-                          {/* Sleek Move Pill */}
-                          {!ann.lockPosition && (
-                            <div
-                              className="absolute -top-4 left-1/2 -translate-x-1/2 flex items-center gap-1 bg-blue-600 text-white rounded px-1.5 py-0.2 text-[8.5px] font-medium shadow-xs cursor-move z-20 opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap"
-                              onMouseDown={(e) => {
-                                e.stopPropagation();
-                                setIsDragging(true);
-                                setDragTarget(ann.id);
-                                const rect = overlayRef.current?.getBoundingClientRect();
-                                if (rect) {
-                                  setDragOffset({ x: e.clientX - rect.left - ann.x, y: e.clientY - rect.top - ann.y });
-                                }
-                              }}
-                              title="Drag to reposition (magnetic snap)"
-                            >
-                              <Move className="w-2.5 h-2.5" />
-                              <span>Move</span>
-                            </div>
-                          )}
                         </>
                       )}
                       {/* Resize handles for image & signature */}
@@ -2361,17 +2347,15 @@ export default function AdvancedEditor() {
                         </div>
                       )}
 
-                      {/* Delete & Move indicators */}
-                      <button
-                        onClick={(e) => { e.stopPropagation(); pushUndo(); deleteAnnotation(ann.id); }}
-                        className="absolute -top-3 -right-3 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity z-20 shadow-sm"
-                      >
-                        <X className="w-3 h-3" />
-                      </button>
-                      {!activeTool && ann.type !== 'freehand' && (
-                        <div className="absolute -top-3 -left-3 bg-indigo-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity z-20 shadow-sm">
-                          <Move className="w-3 h-3" />
-                        </div>
+                      {/* Delete indicator for non-text items (images, stamps, etc.) */}
+                      {ann.type !== 'text' && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); pushUndo(); deleteAnnotation(ann.id); }}
+                          className="absolute -top-2.5 -right-2.5 bg-red-500 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity z-20 shadow-sm"
+                          title="Delete"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
                       )}
                     </div>
                   ))}
@@ -2526,85 +2510,48 @@ export default function AdvancedEditor() {
                     />
                   )}
 
-                  {/* ── SMART MAGNETIC ALIGNMENT GUIDES (Blue Snap Lines - LightPDF / Figma style) ── */}
-                  {(() => {
-                    let gX = activeGuides.vertical;
-                    let gY = activeGuides.horizontal;
-
-                    if (gX === null || gY === null) {
-                      const selAnn = annotations.find(a => a.id === selectedId && a.pageIndex === currentPage - 1);
-                      if (selAnn) {
-                        const annW = selAnn.width || 80;
-                        const annH = selAnn.height || 20;
-
-                        if (gX === null) {
-                          // Find if any other block in detectedText aligns vertically (same column left edge or right edge)
-                          const matchCol = detectedText.some(b =>
-                            (Math.abs(b.x - selAnn.x) < 4 || Math.abs((b.x + b.w) - (selAnn.x + annW)) < 4) &&
-                            Math.abs(b.y - selAnn.y) > 10
-                          );
-                          if (matchCol) {
-                            gX = selAnn.x;
-                          }
-                        }
-
-                        if (gY === null) {
-                          // Find if any other block in detectedText aligns horizontally (same row top edge or baseline)
-                          const matchRow = detectedText.some(b =>
-                            (Math.abs(b.y - selAnn.y) < 4 || Math.abs((b.y + b.h) - (selAnn.y + annH)) < 4) &&
-                            Math.abs(b.x - selAnn.x) > 15
-                          );
-                          if (matchRow) {
-                            gY = selAnn.y + annH; // baseline snap line across the row
-                          }
-                        }
-                      }
-                    }
-
-                    if (gX === null && gY === null) return null;
-
-                    return (
-                      <svg
-                        className="absolute inset-0 pointer-events-none overflow-visible"
-                        style={{
-                          width: pageViewport?.width || '100%',
-                          height: pageViewport?.height || '100%',
-                          zIndex: 25,
-                        }}
-                      >
-                        {gX !== null && (
-                          <g>
-                            <line
-                              x1={gX}
-                              y1={0}
-                              x2={gX}
-                              y2={pageViewport?.height || 2000}
-                              stroke="#2563eb"
-                              strokeWidth="1.2"
-                              strokeDasharray="4 3"
-                            />
-                            <circle cx={gX} cy={4} r={2.5} fill="#2563eb" />
-                            <circle cx={gX} cy={(pageViewport?.height || 1000) - 4} r={2.5} fill="#2563eb" />
-                          </g>
-                        )}
-                        {gY !== null && (
-                          <g>
-                            <line
-                              x1={0}
-                              y1={gY}
-                              x2={pageViewport?.width || 2000}
-                              y2={gY}
-                              stroke="#2563eb"
-                              strokeWidth="1.2"
-                              strokeDasharray="4 3"
-                            />
-                            <circle cx={4} cy={gY} r={2.5} fill="#2563eb" />
-                            <circle cx={(pageViewport?.width || 1000) - 4} cy={gY} r={2.5} fill="#2563eb" />
-                          </g>
-                        )}
-                      </svg>
-                    );
-                  })()}
+                  {/* ── SMART MAGNETIC ALIGNMENT GUIDES (Blue Snap Lines - Shown ONLY while dragging/moving) ── */}
+                  {isDragging && (activeGuides.vertical !== null || activeGuides.horizontal !== null) && (
+                    <svg
+                      className="absolute inset-0 pointer-events-none overflow-visible"
+                      style={{
+                        width: pageViewport?.width || '100%',
+                        height: pageViewport?.height || '100%',
+                        zIndex: 25,
+                      }}
+                    >
+                      {activeGuides.vertical !== null && (
+                        <g>
+                          <line
+                            x1={activeGuides.vertical}
+                            y1={0}
+                            x2={activeGuides.vertical}
+                            y2={pageViewport?.height || 2000}
+                            stroke="#2563eb"
+                            strokeWidth="1.2"
+                            strokeDasharray="4 3"
+                          />
+                          <circle cx={activeGuides.vertical} cy={4} r={2.5} fill="#2563eb" />
+                          <circle cx={activeGuides.vertical} cy={(pageViewport?.height || 1000) - 4} r={2.5} fill="#2563eb" />
+                        </g>
+                      )}
+                      {activeGuides.horizontal !== null && (
+                        <g>
+                          <line
+                            x1={0}
+                            y1={activeGuides.horizontal}
+                            x2={pageViewport?.width || 2000}
+                            y2={activeGuides.horizontal}
+                            stroke="#2563eb"
+                            strokeWidth="1.2"
+                            strokeDasharray="4 3"
+                          />
+                          <circle cx={4} cy={activeGuides.horizontal} r={2.5} fill="#2563eb" />
+                          <circle cx={(pageViewport?.width || 1000) - 4} cy={activeGuides.horizontal} r={2.5} fill="#2563eb" />
+                        </g>
+                      )}
+                    </svg>
+                  )}
                 </div>
 
                   {/* ── INLINE EDIT OVERLAY (double-click) ── */}

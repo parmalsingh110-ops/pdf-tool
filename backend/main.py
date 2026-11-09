@@ -3154,25 +3154,6 @@ async def edit_pdf_endpoint(request: Request, file: UploadFile = File(...), edit
                 else:
                     fontname = "helv"
 
-            # ── Hindi/Devanagari font handling ────────────────────────────────
-            if has_non_latin(new_text):
-                deva_path = _resolve_font_path(is_bold)
-                if deva_path is not None:
-                    fontname = "NotoDevaB" if is_bold else "NotoDeva"
-                    page_fonts = _registered_fonts.setdefault(page_idx, set())
-                    if fontname not in page_fonts:
-                        try:
-                            font_bytes = deva_path.read_bytes()
-                            page.insert_font(fontname=fontname, fontbuffer=font_bytes)
-                            page_fonts.add(fontname)
-                            logger.info(f"[EditPDF] Registered Devanagari font '{fontname}' on page {page_idx}")
-                        except Exception as fe:
-                            logger.warning(f"[EditPDF] Devanagari font register failed: {fe}. Using helv.")
-                            fontname = "hebo" if is_bold else "helv"
-                else:
-                    logger.warning(f"[EditPDF] Devanagari font not found at {_fonts_dir}.")
-            # ─────────────────────────────────────────────────────────────────
-
             # Alignment support
             align_req = str(action.get("align", "left")).lower()
             if align_req == "center":
@@ -3184,14 +3165,68 @@ async def edit_pdf_endpoint(request: Request, file: UploadFile = File(...), edit
             else:
                 align = fitz.TEXT_ALIGN_LEFT
 
-            # If native text baseline is detected and single line text, insert at exact baseline
-            inserted = False
             baseline_y = action.get("baseline") or detected_baseline
             if baseline_y is None and h > 0:
-                # Accurate baseline fallback based on text box geometry
                 baseline_y = y + h * 0.78
 
-            if baseline_y is not None and "\n" not in new_text:
+            # ── Hindi/Devanagari font handling with HarfBuzz/RAQM shaping ─────────
+            inserted = False
+            if has_non_latin(new_text):
+                deva_path = _resolve_font_path(is_bold)
+                if deva_path is not None:
+                    try:
+                        # Render complex Devanagari ligatures (like 'कर्मचारी') using HarfBuzz/RAQM
+                        # to eliminate broken virama tofu boxes in Adobe Acrobat
+                        from PIL import Image, ImageDraw, ImageFont
+                        import io
+                        text_size = orig_size
+                        if detected_size is not None and (orig_size == 12.0 or orig_size == 16.0 or abs(orig_size - detected_size) < 2.0):
+                            text_size = detected_size
+
+                        RENDER_SCALE = 4
+                        pil_font = ImageFont.truetype(str(deva_path), int(text_size * RENDER_SCALE), layout_engine=ImageFont.Layout.RAQM)
+                        bbox = pil_font.getbbox(new_text)
+                        txt_w = max(4, bbox[2] - bbox[0] + 16)
+                        txt_h = max(4, bbox[3] - bbox[1] + 16)
+
+                        pil_img = Image.new("RGBA", (txt_w, txt_h), (255, 255, 255, 0))
+                        pil_draw = ImageDraw.Draw(pil_img)
+                        r_i, g_i, b_i = int(fg_color[0] * 255), int(fg_color[1] * 255), int(fg_color[2] * 255)
+                        pil_draw.text((0, 0), new_text, font=pil_font, fill=(r_i, g_i, b_i, 255))
+
+                        buf = io.BytesIO()
+                        pil_img.save(buf, format="PNG")
+                        deva_png = buf.getvalue()
+
+                        img_w_pt = txt_w / RENDER_SCALE
+                        img_h_pt = txt_h / RENDER_SCALE
+                        ins_x = x
+                        if align == fitz.TEXT_ALIGN_CENTER:
+                            ins_x = x + (w - img_w_pt) / 2
+                        elif align == fitz.TEXT_ALIGN_RIGHT:
+                            ins_x = x + w - img_w_pt
+
+                        ins_y = (baseline_y - img_h_pt * 0.78) if (baseline_y is not None) else y
+                        img_rect = fitz.Rect(ins_x, ins_y, ins_x + img_w_pt, ins_y + img_h_pt)
+                        page.insert_image(img_rect, stream=deva_png)
+                        inserted = True
+                    except Exception as deva_err:
+                        logger.warning(f"[EditPDF] Pillow HarfBuzz rendering failed: {deva_err}. Falling back to insert_font.")
+                        fontname = "NotoDevaB" if is_bold else "NotoDeva"
+                        page_fonts = _registered_fonts.setdefault(page_idx, set())
+                        if fontname not in page_fonts:
+                            try:
+                                font_bytes = deva_path.read_bytes()
+                                page.insert_font(fontname=fontname, fontbuffer=font_bytes)
+                                page_fonts.add(fontname)
+                            except Exception:
+                                pass
+                else:
+                    logger.warning(f"[EditPDF] Devanagari font not found at {_fonts_dir}.")
+            # ─────────────────────────────────────────────────────────────────
+
+            # If native text baseline is detected and single line text, insert at exact baseline
+            if not inserted and baseline_y is not None and "\n" not in new_text:
                 try:
                     text_size = orig_size
                     # If detected_size exists and orig_size was default or close, match detected_size
