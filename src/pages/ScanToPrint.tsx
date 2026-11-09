@@ -1253,18 +1253,15 @@ export default function ScanToPrint() {
         // 1. Poll configured API_BASE (or same-origin Vite dev/preview server if localhost:8000 is not running)
         const gotPrimary = await fetchRelayJobsFromBase(API_BASE);
         let gotSecondary = false;
-        let gotCloud = false;
 
         if (typeof window !== 'undefined') {
           const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
           if (isLocal) {
             // Check same-origin Vite relay
             gotSecondary = await fetchRelayJobsFromBase('');
-            // ALSO check production cloud relay so phone scanning QR on live web works seamlessly on localhost!
-            gotCloud = await fetchRelayJobsFromBase('https://www.pdfmediasuite.in');
           }
         }
-        if (gotPrimary || gotSecondary || gotCloud) {
+        if (gotPrimary || gotSecondary) {
           pollBackoffRef.current = 2500;
         } else {
           pollBackoffRef.current = Math.min(pollBackoffRef.current + 500, 8000);
@@ -1466,10 +1463,6 @@ export default function ScanToPrint() {
       if (API_BASE.includes('localhost:8000')) {
         const okSecondary = await attemptUploadToBase('');
         if (okSecondary) return true;
-      }
-      // If on localhost/private network and local relays didn't resolve, fall back to production cloud relay
-      if (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
-        return await attemptUploadToBase('https://www.pdfmediasuite.in');
       }
       return false;
     })();
