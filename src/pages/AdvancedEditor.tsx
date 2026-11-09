@@ -205,6 +205,12 @@ export default function AdvancedEditor() {
   const [dragTarget, setDragTarget] = useState<string | null>(null);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
 
+  // === Smart Magnetic Alignment Guides (Vertical & Horizontal Snap Lines) ===
+  const [activeGuides, setActiveGuides] = useState<{ vertical: number | null; horizontal: number | null }>({
+    vertical: null,
+    horizontal: null,
+  });
+
   // === Freehand ===
   const [freehandPoints, setFreehandPoints] = useState<{ x: number, y: number }[]>([]);
   const [freehandColor, setFreehandColor] = useState('#000000');
@@ -862,17 +868,87 @@ export default function AdvancedEditor() {
       return;
     }
 
-    // Handle drag move
+    // Handle drag move with smart magnetic alignment guides
     if (isDragging && dragTarget) {
       setAnnotations(prev => {
         const dragAnn = prev.find(a => a.id === dragTarget);
         if (!dragAnn) return prev;
-        const nextX = currentX - dragOffset.x;
-        const nextY = currentY - dragOffset.y;
-        const deltaX = nextX - dragAnn.x;
-        const deltaY = nextY - dragAnn.y;
+
+        const rawNextX = currentX - dragOffset.x;
+        const rawNextY = currentY - dragOffset.y;
+        const annW = dragAnn.width || 80;
+        const annH = dragAnn.height || 20;
+
+        // Collect snap candidate targets from other annotations and detected text blocks
+        const snapDist = 6;
+        let snappedX = rawNextX;
+        let snappedY = rawNextY;
+        let guideX: number | null = null;
+        let guideY: number | null = null;
+
+        const candidateTargets = [
+          ...prev
+            .filter(a => a.id !== dragTarget && a.pageIndex === currentPage - 1)
+            .map(a => ({
+              left: a.x,
+              right: a.x + (a.width || 80),
+              center: a.x + (a.width || 80) / 2,
+              top: a.y,
+              bottom: a.y + (a.height || 20),
+            })),
+          ...detectedText.map(b => ({
+            left: b.x,
+            right: b.x + b.w,
+            center: b.x + b.w / 2,
+            top: b.y,
+            bottom: b.y + b.h,
+          })),
+        ];
+
+        // Magnetic X-axis Snapping (Left, Right, Center)
+        for (const t of candidateTargets) {
+          if (Math.abs(rawNextX - t.left) < snapDist) {
+            snappedX = t.left;
+            guideX = t.left;
+            break;
+          }
+          if (Math.abs(rawNextX + annW - t.right) < snapDist) {
+            snappedX = t.right - annW;
+            guideX = t.right;
+            break;
+          }
+          if (Math.abs(rawNextX - t.right) < snapDist) {
+            snappedX = t.right;
+            guideX = t.right;
+            break;
+          }
+          if (Math.abs(rawNextX + annW / 2 - t.center) < snapDist) {
+            snappedX = t.center - annW / 2;
+            guideX = t.center;
+            break;
+          }
+        }
+
+        // Magnetic Y-axis Snapping (Top, Bottom / Row Baseline)
+        for (const t of candidateTargets) {
+          if (Math.abs(rawNextY - t.top) < snapDist) {
+            snappedY = t.top;
+            guideY = t.top;
+            break;
+          }
+          if (Math.abs(rawNextY + annH - t.bottom) < snapDist) {
+            snappedY = t.bottom - annH;
+            guideY = t.bottom;
+            break;
+          }
+        }
+
+        setActiveGuides({ vertical: guideX, horizontal: guideY });
+
+        const deltaX = snappedX - dragAnn.x;
+        const deltaY = snappedY - dragAnn.y;
         return prev.map(a => {
-          if (a.id === dragTarget) return { ...a, x: nextX, y: nextY };
+          if (a.id === dragTarget) return { ...a, x: snappedX, y: snappedY };
           if (dragAnn.linkedId && a.id === dragAnn.linkedId) {
             return { ...a, x: a.x + deltaX, y: a.y + deltaY };
           }
@@ -910,6 +986,7 @@ export default function AdvancedEditor() {
     if (isDragging && dragTarget) {
       setIsDragging(false);
       setDragTarget(null);
+      setActiveGuides({ vertical: null, horizontal: null });
       return;
     }
 
@@ -1770,7 +1847,7 @@ export default function AdvancedEditor() {
       const scale = pageViewport?.scale || 1;
       const realFontSize = match ? match.fontSize : (block.fontSize || Math.max(6, Math.round((block.h / scale) * 0.72)));
       const fs = Math.max(6, Math.min(realFontSize, 120));
-      const bw = Math.min(Math.max(block.w, 20), 800);
+      const bw = Math.min(Math.max(block.w + 4, 16), 800);
       const bh = Math.max(block.h, Math.round(fs * scale * 1.25) + 2);
       const baselinePt = match?.baseline || block.pdfBaselineY || ((block.y + block.h * 0.78) / scale);
       const id = Date.now().toString() + '_ie';
@@ -2133,17 +2210,31 @@ export default function AdvancedEditor() {
                           e.stopPropagation();
                           if (!isErasingRef.current) { isErasingRef.current = true; pushUndo(); }
                           deleteAnnotation(ann.id);
+                          return;
+                        }
+                        if (!activeTool || activeTool === 'select') {
+                          if (!ann.lockPosition) {
+                            e.stopPropagation();
+                            setSelectedId(ann.id);
+                            setIsDragging(true);
+                            setDragTarget(ann.id);
+                            const rect = overlayRef.current?.getBoundingClientRect();
+                            if (rect) {
+                              setDragOffset({ x: e.clientX - rect.left - ann.x, y: e.clientY - rect.top - ann.y });
+                            }
+                          }
                         }
                       }}
                       className={`absolute group ${activeTool === 'eraser' ? 'cursor-none' : ''
-                        } ${selectedId === ann.id && activeTool !== 'eraser' ? 'ring-2 ring-indigo-500' : ''} ${!activeTool && ann.type !== 'freehand' ? 'cursor-move' : activeTool !== 'eraser' ? 'cursor-pointer' : ''}`}
+                        } ${selectedId === ann.id && activeTool !== 'eraser' ? 'border border-blue-600 shadow-xs' : ''} ${!activeTool && ann.type !== 'freehand' ? 'cursor-move' : activeTool !== 'eraser' ? 'cursor-pointer' : ''}`}
                       style={{
                         left: ann.x,
                         top: ann.y,
-                        width: ann.width || (ann.type === 'text' ? Math.max(120, (ann.text?.length || 10) * (ann.fontSize || 12) * (pageViewport?.scale || 1) * 0.6) : undefined),
-                        height: Math.max(ann.height || 24, ann.type === 'text' ? (ann.fontSize || 12) * (pageViewport?.scale || 1) * 1.3 : 0),
+                        width: ann.width || (ann.type === 'text' ? Math.max(16, Math.round((ann.text?.length || 4) * (ann.fontSize || 12) * (pageViewport?.scale || 1) * 0.62)) : undefined),
+                        height: Math.max(ann.height || 18, ann.type === 'text' ? Math.round((ann.fontSize || 12) * (pageViewport?.scale || 1) * 1.25) : 0),
                         backgroundColor: ann.type === 'text' ? ((ann.backgroundColor === '#fbfcfc' || !ann.backgroundColor) ? '#ffffff' : ann.backgroundColor) : ann.type === 'whiteout' ? (ann.color || '#ffffff') : ann.type === 'highlight' ? 'rgba(255, 255, 0, 0.4)' : ann.type === 'link' ? 'rgba(0, 0, 255, 0.2)' : 'transparent',
-                        border: ann.type === 'link' ? '1px dashed blue' : ann.type === 'table' ? '1px solid #ccc' : 'none'
+                        border: selectedId === ann.id ? '1px solid #2563eb' : (ann.type === 'link' ? '1px dashed blue' : ann.type === 'table' ? '1px solid #ccc' : 'none'),
+                        boxSizing: 'border-box',
                       }}
                     >
                       {ann.type === 'text' && (
@@ -2205,31 +2296,58 @@ export default function AdvancedEditor() {
                       {ann.type === 'image' && ann.imageDataUrl && (
                         <img src={ann.imageDataUrl} alt="Inserted" className="w-full h-full object-fill pointer-events-none" />
                       )}
-                      {/* 8-handle resize for image & signature */}
-                      {(ann.type === 'image' || ann.type === 'signature' || ann.type === 'text') && selectedId === ann.id && (
+                      {/* Sleek Corner Handles for Text (LightPDF style) */}
+                      {ann.type === 'text' && selectedId === ann.id && (
                         <>
-                          {/* Corner handles */}
-                          <div className="absolute -top-1.5 -left-1.5 w-3 h-3 bg-indigo-500 border border-white rounded-sm cursor-nwse-resize z-20"
+                          <div className="absolute -top-1 -left-1 w-2 h-2 bg-white border border-blue-600 rounded-none cursor-nwse-resize z-20 pointer-events-auto shadow-xs"
+                            onMouseDown={e => { e.stopPropagation(); resizeAnnRef.current = { id: ann.id, handle: 'tl', startX: e.clientX, startY: e.clientY, startAnnX: ann.x, startAnnY: ann.y, startW: ann.width || 80, startH: ann.height || 20 }; }} />
+                          <div className="absolute -top-1 -right-1 w-2 h-2 bg-white border border-blue-600 rounded-none cursor-nesw-resize z-20 pointer-events-auto shadow-xs"
+                            onMouseDown={e => { e.stopPropagation(); resizeAnnRef.current = { id: ann.id, handle: 'tr', startX: e.clientX, startY: e.clientY, startAnnX: ann.x, startAnnY: ann.y, startW: ann.width || 80, startH: ann.height || 20 }; }} />
+                          <div className="absolute -bottom-1 -left-1 w-2 h-2 bg-white border border-blue-600 rounded-none cursor-nesw-resize z-20 pointer-events-auto shadow-xs"
+                            onMouseDown={e => { e.stopPropagation(); resizeAnnRef.current = { id: ann.id, handle: 'bl', startX: e.clientX, startY: e.clientY, startAnnX: ann.x, startAnnY: ann.y, startW: ann.width || 80, startH: ann.height || 20 }; }} />
+                          <div className="absolute -bottom-1 -right-1 w-2 h-2 bg-white border border-blue-600 rounded-none cursor-nwse-resize z-20 pointer-events-auto shadow-xs"
+                            onMouseDown={e => { e.stopPropagation(); resizeAnnRef.current = { id: ann.id, handle: 'br', startX: e.clientX, startY: e.clientY, startAnnX: ann.x, startAnnY: ann.y, startW: ann.width || 80, startH: ann.height || 20 }; }} />
+                          {/* Sleek Move Pill */}
+                          {!ann.lockPosition && (
+                            <div
+                              className="absolute -top-4 left-1/2 -translate-x-1/2 flex items-center gap-1 bg-blue-600 text-white rounded px-1.5 py-0.2 text-[8.5px] font-medium shadow-xs cursor-move z-20 opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap"
+                              onMouseDown={(e) => {
+                                e.stopPropagation();
+                                setIsDragging(true);
+                                setDragTarget(ann.id);
+                                const rect = overlayRef.current?.getBoundingClientRect();
+                                if (rect) {
+                                  setDragOffset({ x: e.clientX - rect.left - ann.x, y: e.clientY - rect.top - ann.y });
+                                }
+                              }}
+                              title="Drag to reposition (magnetic snap)"
+                            >
+                              <Move className="w-2.5 h-2.5" />
+                              <span>Move</span>
+                            </div>
+                          )}
+                        </>
+                      )}
+                      {/* Resize handles for image & signature */}
+                      {(ann.type === 'image' || ann.type === 'signature') && selectedId === ann.id && (
+                        <>
+                          <div className="absolute -top-1.5 -left-1.5 w-3 h-3 bg-blue-600 border border-white rounded-sm cursor-nwse-resize z-20"
                             onMouseDown={e => { e.stopPropagation(); resizeAnnRef.current = { id: ann.id, handle: 'tl', startX: e.clientX, startY: e.clientY, startAnnX: ann.x, startAnnY: ann.y, startW: ann.width || 150, startH: ann.height || 50 }; }} />
-                          <div className="absolute -top-1.5 -right-1.5 w-3 h-3 bg-indigo-500 border border-white rounded-sm cursor-nesw-resize z-20"
+                          <div className="absolute -top-1.5 -right-1.5 w-3 h-3 bg-blue-600 border border-white rounded-sm cursor-nesw-resize z-20"
                             onMouseDown={e => { e.stopPropagation(); resizeAnnRef.current = { id: ann.id, handle: 'tr', startX: e.clientX, startY: e.clientY, startAnnX: ann.x, startAnnY: ann.y, startW: ann.width || 150, startH: ann.height || 50 }; }} />
-                          <div className="absolute -bottom-1.5 -left-1.5 w-3 h-3 bg-indigo-500 border border-white rounded-sm cursor-nesw-resize z-20"
+                          <div className="absolute -bottom-1.5 -left-1.5 w-3 h-3 bg-blue-600 border border-white rounded-sm cursor-nesw-resize z-20"
                             onMouseDown={e => { e.stopPropagation(); resizeAnnRef.current = { id: ann.id, handle: 'bl', startX: e.clientX, startY: e.clientY, startAnnX: ann.x, startAnnY: ann.y, startW: ann.width || 150, startH: ann.height || 50 }; }} />
-                          <div className="absolute -bottom-1.5 -right-1.5 w-3 h-3 bg-indigo-500 border border-white rounded-sm cursor-nwse-resize z-20"
+                          <div className="absolute -bottom-1.5 -right-1.5 w-3 h-3 bg-blue-600 border border-white rounded-sm cursor-nwse-resize z-20"
                             onMouseDown={e => { e.stopPropagation(); resizeAnnRef.current = { id: ann.id, handle: 'br', startX: e.clientX, startY: e.clientY, startAnnX: ann.x, startAnnY: ann.y, startW: ann.width || 150, startH: ann.height || 50 }; }} />
                           {/* Edge handles */}
-                          <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-6 h-2 bg-indigo-400 border border-white rounded-sm cursor-ns-resize z-20"
+                          <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-6 h-2 bg-blue-500 border border-white rounded-sm cursor-ns-resize z-20"
                             onMouseDown={e => { e.stopPropagation(); resizeAnnRef.current = { id: ann.id, handle: 't', startX: e.clientX, startY: e.clientY, startAnnX: ann.x, startAnnY: ann.y, startW: ann.width || 150, startH: ann.height || 50 }; }} />
-                          <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-6 h-2 bg-indigo-400 border border-white rounded-sm cursor-ns-resize z-20"
+                          <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-6 h-2 bg-blue-500 border border-white rounded-sm cursor-ns-resize z-20"
                             onMouseDown={e => { e.stopPropagation(); resizeAnnRef.current = { id: ann.id, handle: 'b', startX: e.clientX, startY: e.clientY, startAnnX: ann.x, startAnnY: ann.y, startW: ann.width || 150, startH: ann.height || 50 }; }} />
-                          <div className="absolute top-1/2 -left-1 -translate-y-1/2 w-2 h-6 bg-indigo-400 border border-white rounded-sm cursor-ew-resize z-20"
+                          <div className="absolute top-1/2 -left-1 -translate-y-1/2 w-2 h-6 bg-blue-500 border border-white rounded-sm cursor-ew-resize z-20"
                             onMouseDown={e => { e.stopPropagation(); resizeAnnRef.current = { id: ann.id, handle: 'l', startX: e.clientX, startY: e.clientY, startAnnX: ann.x, startAnnY: ann.y, startW: ann.width || 150, startH: ann.height || 50 }; }} />
-                          <div className="absolute top-1/2 -right-1 -translate-y-1/2 w-2 h-6 bg-indigo-400 border border-white rounded-sm cursor-ew-resize z-20"
+                          <div className="absolute top-1/2 -right-1 -translate-y-1/2 w-2 h-6 bg-blue-500 border border-white rounded-sm cursor-ew-resize z-20"
                             onMouseDown={e => { e.stopPropagation(); resizeAnnRef.current = { id: ann.id, handle: 'r', startX: e.clientX, startY: e.clientY, startAnnX: ann.x, startAnnY: ann.y, startW: ann.width || 150, startH: ann.height || 50 }; }} />
-                          {/* Size label */}
-                          <div className="absolute -top-5 left-0 text-[9px] font-bold text-indigo-600 bg-white/90 px-1 rounded whitespace-nowrap z-20">
-                            {Math.round(ann.width || 0)}×{Math.round(ann.height || 0)}
-                          </div>
                         </>
                       )}
                       {ann.type === 'freehand' && ann.pathData && (
@@ -2287,41 +2405,26 @@ export default function AdvancedEditor() {
                             position: 'absolute',
                             left: block.x,
                             top: block.y,
-                            width: Math.max(block.w, 10),
+                            width: Math.max(block.w, 8),
                             height: Math.max(block.h, 8),
-                            border: selectionGranularity === 'paragraph'
-                              ? '1.5px dashed rgba(16,185,129,0.65)'
-                              : selectionGranularity === 'line'
-                              ? '1.5px dashed rgba(245,158,11,0.65)'
-                              : '1.5px dashed rgba(99,102,241,0.55)',
-                            backgroundColor: selectionGranularity === 'paragraph'
-                              ? 'rgba(16,185,129,0.04)'
-                              : selectionGranularity === 'line'
-                              ? 'rgba(245,158,11,0.04)'
-                              : 'rgba(99,102,241,0.04)',
+                            border: '1px solid transparent',
+                            backgroundColor: 'transparent',
                             cursor: 'text',
                             zIndex: 15,
                             boxSizing: 'border-box',
-                            borderRadius: 2,
+                            borderRadius: 1,
                             pointerEvents: 'all',
+                            transition: 'border-color 0.1s ease, background-color 0.1s ease',
                           }}
                           onMouseEnter={e => {
                             const el = e.currentTarget as HTMLElement;
-                            el.style.backgroundColor = selectionGranularity === 'paragraph'
-                              ? 'rgba(16,185,129,0.18)'
-                              : selectionGranularity === 'line'
-                              ? 'rgba(245,158,11,0.18)'
-                              : 'rgba(99,102,241,0.18)';
-                            el.style.borderStyle = 'solid';
+                            el.style.border = '1px solid #2563eb';
+                            el.style.backgroundColor = 'rgba(37, 99, 235, 0.08)';
                           }}
                           onMouseLeave={e => {
                             const el = e.currentTarget as HTMLElement;
-                            el.style.backgroundColor = selectionGranularity === 'paragraph'
-                              ? 'rgba(16,185,129,0.04)'
-                              : selectionGranularity === 'line'
-                              ? 'rgba(245,158,11,0.04)'
-                              : 'rgba(99,102,241,0.04)';
-                            el.style.borderStyle = 'dashed';
+                            el.style.border = '1px solid transparent';
+                            el.style.backgroundColor = 'transparent';
                           }}
                           onMouseDown={e => {
                             // Single click: create text annotation with exact matched font & scale
@@ -2333,7 +2436,7 @@ export default function AdvancedEditor() {
                               const scale = pageViewport?.scale || 1;
                               const realFontSize = match ? match.fontSize : (block.fontSize || Math.max(6, Math.round((block.h / scale) * 0.72)));
                               const fs = Math.max(6, Math.min(realFontSize, 120));
-                              const bw = Math.min(Math.max(block.w, 20), 800);
+                              const bw = Math.max(block.w + 4, 16);
                               const bh = Math.max(block.h, Math.round(fs * scale * 1.25) + 2);
                               const baselinePt = match?.baseline || block.pdfBaselineY || ((block.y + block.h * 0.78) / scale);
                               const bg = (block.bgColor === '#fbfcfc' || !block.bgColor) ? '#ffffff' : block.bgColor;
@@ -2422,6 +2525,86 @@ export default function AdvancedEditor() {
                       }}
                     />
                   )}
+
+                  {/* ── SMART MAGNETIC ALIGNMENT GUIDES (Blue Snap Lines - LightPDF / Figma style) ── */}
+                  {(() => {
+                    let gX = activeGuides.vertical;
+                    let gY = activeGuides.horizontal;
+
+                    if (gX === null || gY === null) {
+                      const selAnn = annotations.find(a => a.id === selectedId && a.pageIndex === currentPage - 1);
+                      if (selAnn) {
+                        const annW = selAnn.width || 80;
+                        const annH = selAnn.height || 20;
+
+                        if (gX === null) {
+                          // Find if any other block in detectedText aligns vertically (same column left edge or right edge)
+                          const matchCol = detectedText.some(b =>
+                            (Math.abs(b.x - selAnn.x) < 4 || Math.abs((b.x + b.w) - (selAnn.x + annW)) < 4) &&
+                            Math.abs(b.y - selAnn.y) > 10
+                          );
+                          if (matchCol) {
+                            gX = selAnn.x;
+                          }
+                        }
+
+                        if (gY === null) {
+                          // Find if any other block in detectedText aligns horizontally (same row top edge or baseline)
+                          const matchRow = detectedText.some(b =>
+                            (Math.abs(b.y - selAnn.y) < 4 || Math.abs((b.y + b.h) - (selAnn.y + annH)) < 4) &&
+                            Math.abs(b.x - selAnn.x) > 15
+                          );
+                          if (matchRow) {
+                            gY = selAnn.y + annH; // baseline snap line across the row
+                          }
+                        }
+                      }
+                    }
+
+                    if (gX === null && gY === null) return null;
+
+                    return (
+                      <svg
+                        className="absolute inset-0 pointer-events-none overflow-visible"
+                        style={{
+                          width: pageViewport?.width || '100%',
+                          height: pageViewport?.height || '100%',
+                          zIndex: 25,
+                        }}
+                      >
+                        {gX !== null && (
+                          <g>
+                            <line
+                              x1={gX}
+                              y1={0}
+                              x2={gX}
+                              y2={pageViewport?.height || 2000}
+                              stroke="#2563eb"
+                              strokeWidth="1.2"
+                              strokeDasharray="4 3"
+                            />
+                            <circle cx={gX} cy={4} r={2.5} fill="#2563eb" />
+                            <circle cx={gX} cy={(pageViewport?.height || 1000) - 4} r={2.5} fill="#2563eb" />
+                          </g>
+                        )}
+                        {gY !== null && (
+                          <g>
+                            <line
+                              x1={0}
+                              y1={gY}
+                              x2={pageViewport?.width || 2000}
+                              y2={gY}
+                              stroke="#2563eb"
+                              strokeWidth="1.2"
+                              strokeDasharray="4 3"
+                            />
+                            <circle cx={4} cy={gY} r={2.5} fill="#2563eb" />
+                            <circle cx={(pageViewport?.width || 1000) - 4} cy={gY} r={2.5} fill="#2563eb" />
+                          </g>
+                        )}
+                      </svg>
+                    );
+                  })()}
                 </div>
 
                   {/* ── INLINE EDIT OVERLAY (double-click) ── */}
@@ -2442,12 +2625,13 @@ export default function AdvancedEditor() {
                           position: 'absolute',
                           left: block.x - 2,
                           top: block.y - 2,
-                          width: Math.max(block.w + 6, 120),
+                          width: Math.max(block.w + 8, 28),
                           minHeight: block.h + 4,
                           zIndex: 100,
                           backgroundColor: bg,
-                          boxShadow: '0 0 0 2px #6366f1, 0 4px 20px rgba(99,102,241,0.3)',
-                          borderRadius: 3,
+                          border: '1px solid #2563eb',
+                          boxShadow: '0 2px 10px rgba(37,99,235,0.18)',
+                          borderRadius: 2,
                         }}
                       >
                         <textarea
