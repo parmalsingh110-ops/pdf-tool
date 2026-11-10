@@ -3029,6 +3029,93 @@ async def edit_pdf_endpoint(request: Request, file: UploadFile = File(...), edit
             return None
 
         _registered_fonts: dict[int, set] = {}
+        _hb_font_cache: dict = {}
+
+        def _get_hb_components(font_path: Path):
+            path_str = str(font_path)
+            if path_str not in _hb_font_cache:
+                import uharfbuzz as hb
+                from fontTools.ttLib import TTFont
+                blob = hb.Blob.from_file_path(path_str)
+                face = hb.Face(blob)
+                hb_font = hb.Font(face)
+                tt_font = TTFont(path_str)
+                glyph_set = tt_font.getGlyphSet()
+                glyph_order = tt_font.getGlyphOrder()
+                _hb_font_cache[path_str] = (hb, hb_font, face.upem, tt_font, glyph_set, glyph_order)
+            return _hb_font_cache[path_str]
+
+        def _q_to_cubic(p0, p1, p2):
+            cp1 = fitz.Point(p0.x + 2/3 * (p1.x - p0.x), p0.y + 2/3 * (p1.y - p0.y))
+            cp2 = fitz.Point(p2.x + 2/3 * (p1.x - p2.x), p2.y + 2/3 * (p1.y - p2.y))
+            return cp1, cp2
+
+        def _draw_vector_harfbuzz(target_page, text_str: str, font_file: Path, font_sz: float, orig_x: float, base_y: float, fill_rgb=(0, 0, 0), text_align=fitz.TEXT_ALIGN_LEFT, box_width: float = 0.0):
+            from fontTools.pens.recordingPen import RecordingPen
+            hb, hb_font, upem, tt_font, glyph_set, glyph_order = _get_hb_components(font_file)
+            scale_factor = font_sz / upem
+
+            buf = hb.Buffer()
+            buf.add_str(text_str)
+            buf.guess_segment_properties()
+            hb.shape(hb_font, buf)
+
+            total_adv = sum(pos.x_advance for pos in buf.glyph_positions) * scale_factor
+            ins_x = orig_x
+            if text_align == fitz.TEXT_ALIGN_CENTER and box_width > total_adv:
+                ins_x = orig_x + (box_width - total_adv) / 2
+            elif text_align == fitz.TEXT_ALIGN_RIGHT and box_width > total_adv:
+                ins_x = orig_x + (box_width - total_adv)
+
+            shape = target_page.new_shape()
+            cur_x = ins_x
+            cur_y = base_y
+
+            for info, pos in zip(buf.glyph_infos, buf.glyph_positions):
+                gid = info.codepoint
+                gname = glyph_order[gid]
+                pen = RecordingPen()
+                glyph_set[gname].draw(pen)
+
+                gx = cur_x + pos.x_offset * scale_factor
+                gy = cur_y - pos.y_offset * scale_factor
+
+                curr_pt = fitz.Point(gx, gy)
+                start_pt = fitz.Point(gx, gy)
+
+                for op, args in pen.value:
+                    if op == 'moveTo':
+                        p = args[0]
+                        curr_pt = fitz.Point(gx + p[0] * scale_factor, gy - p[1] * scale_factor)
+                        start_pt = curr_pt
+                    elif op == 'lineTo':
+                        p = args[0]
+                        target = fitz.Point(gx + p[0] * scale_factor, gy - p[1] * scale_factor)
+                        shape.draw_line(curr_pt, target)
+                        curr_pt = target
+                    elif op == 'qCurveTo':
+                        pts = [fitz.Point(gx + p[0] * scale_factor, gy - p[1] * scale_factor) for p in args]
+                        for i in range(len(pts) - 1):
+                            p1 = pts[i]
+                            p2 = pts[i+1] if i == len(pts)-2 else fitz.Point((pts[i].x + pts[i+1].x)/2, (pts[i].y + pts[i+1].y)/2)
+                            cp1, cp2 = _q_to_cubic(curr_pt, p1, p2)
+                            shape.draw_bezier(curr_pt, cp1, cp2, p2)
+                            curr_pt = p2
+                    elif op == 'curveTo':
+                        p1, p2, p3 = [fitz.Point(gx + p[0] * scale_factor, gy - p[1] * scale_factor) for p in args]
+                        shape.draw_bezier(curr_pt, p1, p2, p3)
+                        curr_pt = p3
+                    elif op == 'closePath':
+                        if curr_pt != start_pt:
+                            shape.draw_line(curr_pt, start_pt)
+                        curr_pt = start_pt
+
+                cur_x += pos.x_advance * scale_factor
+                cur_y -= pos.y_advance * scale_factor
+
+            shape.finish(color=None, fill=fill_rgb, even_odd=True)
+            shape.commit()
+            return total_adv
 
         for action in edit_actions:
             page_idx = action.get("page", 0)
@@ -3178,59 +3265,72 @@ async def edit_pdf_endpoint(request: Request, file: UploadFile = File(...), edit
             else:
                 baseline_y = None
 
-            # ── Hindi/Devanagari font handling with HarfBuzz/RAQM shaping ─────────
+            # ── Hindi/Devanagari font handling with True Native Vector HarfBuzz ──
             inserted = False
             if has_non_latin(new_text):
                 deva_path = _resolve_font_path(is_bold)
                 if deva_path is not None:
+                    text_size = orig_size
+                    if detected_size is not None and (orig_size == 12.0 or orig_size == 16.0 or abs(orig_size - detected_size) < 2.0):
+                        text_size = detected_size
+
+                    base_calc = baseline_y if baseline_y is not None else (y + text_size * 0.85)
+
                     try:
-                        # Render complex Devanagari ligatures (like 'कर्मचारी') using HarfBuzz/RAQM
-                        # to eliminate broken virama tofu boxes in Adobe Acrobat
-                        from PIL import Image, ImageDraw, ImageFont
-                        import io
-                        text_size = orig_size
-                        if detected_size is not None and (orig_size == 12.0 or orig_size == 16.0 or abs(orig_size - detected_size) < 2.0):
-                            text_size = detected_size
-
-                        RENDER_SCALE = 4
-                        pil_font = ImageFont.truetype(str(deva_path), int(text_size * RENDER_SCALE), layout_engine=ImageFont.Layout.RAQM)
-                        bbox = pil_font.getbbox(new_text)
-                        txt_w = max(4, bbox[2] - bbox[0])
-                        txt_h = max(4, bbox[3] - bbox[1])
-
-                        pil_img = Image.new("RGBA", (txt_w, txt_h), (0, 0, 0, 0))
-                        pil_draw = ImageDraw.Draw(pil_img)
-                        r_i, g_i, b_i = int(fg_color[0] * 255), int(fg_color[1] * 255), int(fg_color[2] * 255)
-                        pil_draw.text((-bbox[0], -bbox[1]), new_text, font=pil_font, fill=(r_i, g_i, b_i, 255))
-
-                        buf = io.BytesIO()
-                        pil_img.save(buf, format="PNG")
-                        deva_png = buf.getvalue()
-
-                        img_w_pt = txt_w / RENDER_SCALE
-                        img_h_pt = txt_h / RENDER_SCALE
-                        ins_x = x
-                        if align == fitz.TEXT_ALIGN_CENTER:
-                            ins_x = x + (w - img_w_pt) / 2
-                        elif align == fitz.TEXT_ALIGN_RIGHT:
-                            ins_x = x + w - img_w_pt
-
-                        ascent, _ = pil_font.getmetrics()
-                        ins_y = (baseline_y - (ascent - bbox[1]) / RENDER_SCALE) if (baseline_y is not None) else y
-                        img_rect = fitz.Rect(ins_x, ins_y, ins_x + img_w_pt, ins_y + img_h_pt)
-                        page.insert_image(img_rect, stream=deva_png)
+                        # 1. Pure Native PDF Vector Bézier path insertion shaped via HarfBuzz
+                        # Eliminates broken virama tofu boxes (□) in Adobe Acrobat and keeps 100% crisp vector outlines
+                        _draw_vector_harfbuzz(
+                            target_page=page,
+                            text_str=new_text,
+                            font_file=deva_path,
+                            font_sz=text_size,
+                            orig_x=x,
+                            base_y=base_calc,
+                            fill_rgb=fg_color,
+                            text_align=align,
+                            box_width=w
+                        )
                         inserted = True
-                    except Exception as deva_err:
-                        logger.warning(f"[EditPDF] Pillow HarfBuzz rendering failed: {deva_err}. Falling back to insert_font.")
-                        fontname = "NotoDevaB" if is_bold else "NotoDeva"
-                        page_fonts = _registered_fonts.setdefault(page_idx, set())
-                        if fontname not in page_fonts:
-                            try:
-                                font_bytes = deva_path.read_bytes()
-                                page.insert_font(fontname=fontname, fontbuffer=font_bytes)
-                                page_fonts.add(fontname)
-                            except Exception:
-                                pass
+                    except Exception as vector_err:
+                        logger.warning(f"[EditPDF] Vector HarfBuzz drawing failed: {vector_err}. Falling back to Pillow PNG.")
+                        try:
+                            from PIL import Image, ImageDraw, ImageFont
+                            import io
+                            RENDER_SCALE = 4
+                            pil_font = ImageFont.truetype(str(deva_path), int(text_size * RENDER_SCALE), layout_engine=ImageFont.Layout.RAQM)
+                            bbox = pil_font.getbbox(new_text)
+                            txt_w = max(4, bbox[2] - bbox[0])
+                            txt_h = max(4, bbox[3] - bbox[1])
+                            pil_img = Image.new("RGBA", (txt_w, txt_h), (0, 0, 0, 0))
+                            pil_draw = ImageDraw.Draw(pil_img)
+                            r_i, g_i, b_i = int(fg_color[0] * 255), int(fg_color[1] * 255), int(fg_color[2] * 255)
+                            pil_draw.text((-bbox[0], -bbox[1]), new_text, font=pil_font, fill=(r_i, g_i, b_i, 255))
+                            buf = io.BytesIO()
+                            pil_img.save(buf, format="PNG")
+                            deva_png = buf.getvalue()
+                            img_w_pt = txt_w / RENDER_SCALE
+                            img_h_pt = txt_h / RENDER_SCALE
+                            ins_x = x
+                            if align == fitz.TEXT_ALIGN_CENTER:
+                                ins_x = x + (w - img_w_pt) / 2
+                            elif align == fitz.TEXT_ALIGN_RIGHT:
+                                ins_x = x + w - img_w_pt
+                            ascent, _ = pil_font.getmetrics()
+                            ins_y = (base_calc - (ascent - bbox[1]) / RENDER_SCALE)
+                            img_rect = fitz.Rect(ins_x, ins_y, ins_x + img_w_pt, ins_y + img_h_pt)
+                            page.insert_image(img_rect, stream=deva_png)
+                            inserted = True
+                        except Exception as deva_err:
+                            logger.warning(f"[EditPDF] Pillow HarfBuzz rendering failed: {deva_err}. Falling back to insert_font.")
+                            fontname = "NotoDevaB" if is_bold else "NotoDeva"
+                            page_fonts = _registered_fonts.setdefault(page_idx, set())
+                            if fontname not in page_fonts:
+                                try:
+                                    font_bytes = deva_path.read_bytes()
+                                    page.insert_font(fontname=fontname, fontbuffer=font_bytes)
+                                    page_fonts.add(fontname)
+                                except Exception:
+                                    pass
                 else:
                     logger.warning(f"[EditPDF] Devanagari font not found at {_fonts_dir}.")
             # ─────────────────────────────────────────────────────────────────

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { PDFDocument } from 'pdf-lib';
-import { Download, Trash2, GripVertical, FileText, ListRestart, ChevronUp, ChevronDown, Plus, Layers } from 'lucide-react';
+import { PDFDocument, StandardFonts, rgb, PDFName } from 'pdf-lib';
+import { Download, Trash2, GripVertical, FileText, ListRestart, ChevronUp, ChevronDown, Plus, Layers, BookOpen, Maximize2, Sparkles } from 'lucide-react';
 import FileDropzone from '../components/FileDropzone';
 import * as pdfjsLib from 'pdfjs-dist';
 import '../lib/pdfWorker';
@@ -59,6 +59,45 @@ async function generateThumb(file: File): Promise<{ thumb: string; pageCount: nu
   }
 }
 
+async function isPageBlank(pdfJsDoc: any, pageNum: number): Promise<boolean> {
+  try {
+    const page = await pdfJsDoc.getPage(pageNum);
+    const textContent = await page.getTextContent();
+    const hasText = textContent.items.some((item: any) => item.str && item.str.trim().length > 0);
+    if (hasText) {
+      page.cleanup();
+      return false;
+    }
+    const vp = page.getViewport({ scale: 0.25 });
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(10, Math.round(vp.width));
+    canvas.height = Math.max(10, Math.round(vp.height));
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      page.cleanup();
+      return false;
+    }
+    await page.render({ canvasContext: ctx, viewport: vp, canvas }).promise;
+    const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+    let darkPixelCount = 0;
+    const totalPixels = canvas.width * canvas.height;
+    for (let i = 0; i < imgData.length; i += 4) {
+      const r = imgData[i];
+      const g = imgData[i + 1];
+      const b = imgData[i + 2];
+      const a = imgData[i + 3];
+      if (a > 50 && (r < 235 || g < 235 || b < 235)) {
+        darkPixelCount++;
+      }
+    }
+    canvas.width = 0; canvas.height = 0;
+    page.cleanup();
+    return darkPixelCount / totalPixels < 0.0025;
+  } catch {
+    return false;
+  }
+}
+
 export default function MergePDF() {
   useSEO(
     'Merge PDF Online Free — Combine Multiple PDF Files in Seconds',
@@ -67,11 +106,17 @@ export default function MergePDF() {
 
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [mergeProgress, setMergeProgress] = useState('');
   const [mergedPdfUrl, setMergedPdfUrl] = useState<string | null>(null);
   const [totalPages, setTotalPages] = useState(0);
   const [orderHint, setOrderHint] = useState<string | null>(null);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [dragOver, setDragOver] = useState<number | null>(null);
+
+  // ── Smart Enterprise Merge Settings ──
+  const [generateToc, setGenerateToc] = useState(false);
+  const [pageSizeMode, setPageSizeMode] = useState<'original' | 'a4' | 'letter'>('original');
+  const [removeBlankPages, setRemoveBlankPages] = useState(false);
 
   const toast = useToast();
 
@@ -155,11 +200,17 @@ export default function MergePDF() {
   const mergePdfs = async () => {
     if (entries.length < 2) return;
     setIsProcessing(true);
+    setMergeProgress('Preparing documents...');
     if (mergedPdfUrl) URL.revokeObjectURL(mergedPdfUrl);
     setMergedPdfUrl(null);
     try {
       const mergedPdf = await PDFDocument.create();
-      for (const entry of entries) {
+      let skippedBlankCount = 0;
+      const filePageMaps: { name: string; startPage: number; pageCount: number }[] = [];
+
+      for (let fi = 0; fi < entries.length; fi++) {
+        const entry = entries[fi];
+        setMergeProgress(`Processing file ${fi + 1} of ${entries.length}: ${entry.file.name}...`);
         const ab = await entry.file.arrayBuffer();
         let pdf: PDFDocument;
         try {
@@ -171,19 +222,187 @@ export default function MergePDF() {
           }
           throw new Error(`Could not read "${entry.file.name}". The file may be damaged.`);
         }
-        const copied = await mergedPdf.copyPages(pdf, pdf.getPageIndices());
-        copied.forEach(p => mergedPdf.addPage(p));
+
+        let pdfJsDoc: any = null;
+        if (removeBlankPages) {
+          try {
+            pdfJsDoc = await pdfjsLib.getDocument({ data: ab.slice(0) }).promise;
+          } catch {}
+        }
+
+        const totalSourcePages = pdf.getPageCount();
+        const pagesToInclude: number[] = [];
+        for (let pIdx = 0; pIdx < totalSourcePages; pIdx++) {
+          if (removeBlankPages && pdfJsDoc) {
+            const isBlank = await isPageBlank(pdfJsDoc, pIdx + 1);
+            if (isBlank) {
+              skippedBlankCount++;
+              continue;
+            }
+          }
+          pagesToInclude.push(pIdx);
+        }
+
+        if (pdfJsDoc) {
+          try { pdfJsDoc.destroy(); } catch {}
+        }
+
+        if (pagesToInclude.length === 0) continue;
+
+        const currentMergedCount = mergedPdf.getPageCount();
+        const startPageNumber = currentMergedCount + 1 + (generateToc ? 1 : 0);
+
+        if (pageSizeMode === 'original') {
+          const copied = await mergedPdf.copyPages(pdf, pagesToInclude);
+          copied.forEach(p => mergedPdf.addPage(p));
+        } else {
+          // Normalize to A4 (595.28 x 841.89) or US Letter (612 x 792)
+          const targetW = pageSizeMode === 'a4' ? 595.28 : 612;
+          const targetH = pageSizeMode === 'a4' ? 841.89 : 792;
+          const embedded = await mergedPdf.embedPdf(pdf, pagesToInclude);
+          for (const embPage of embedded) {
+            const newPage = mergedPdf.addPage([targetW, targetH]);
+            const pad = 36;
+            const scale = Math.min((targetW - pad * 2) / embPage.width, (targetH - pad * 2) / embPage.height);
+            const sw = embPage.width * scale;
+            const sh = embPage.height * scale;
+            newPage.drawPage(embPage, {
+              x: (targetW - sw) / 2,
+              y: (targetH - sh) / 2,
+              width: sw,
+              height: sh,
+            });
+          }
+        }
+
+        filePageMaps.push({
+          name: entry.file.name,
+          startPage: startPageNumber,
+          pageCount: pagesToInclude.length,
+        });
       }
+
+      // Generate Clickable Table of Contents if requested
+      if (generateToc && filePageMaps.length > 0) {
+        setMergeProgress('Generating Smart Table of Contents with Clickable Links...');
+        const tocPage = mergedPdf.insertPage(0, [595.28, 841.89]);
+        const helvBold = await mergedPdf.embedFont(StandardFonts.HelveticaBold);
+        const helv = await mergedPdf.embedFont(StandardFonts.Helvetica);
+
+        // Header Title
+        tocPage.drawText('TABLE OF CONTENTS', {
+          x: 48,
+          y: 770,
+          size: 22,
+          font: helvBold,
+          color: rgb(0.1, 0.12, 0.18),
+        });
+
+        tocPage.drawText('Click on any document below to jump directly to its first page.', {
+          x: 48,
+          y: 748,
+          size: 10,
+          font: helv,
+          color: rgb(0.45, 0.5, 0.58),
+        });
+
+        // Decorative horizontal accent bar
+        tocPage.drawRectangle({
+          x: 48,
+          y: 735,
+          width: 500,
+          height: 2,
+          color: rgb(0.85, 0.2, 0.2),
+        });
+
+        let curY = 700;
+        const linkAnnots: any[] = [];
+
+        for (let i = 0; i < filePageMaps.length && curY > 60; i++) {
+          const doc = filePageMaps[i];
+          const rawName = doc.name.replace(/\.pdf$/i, '');
+          const maxNameLen = 48;
+          const displayName = rawName.length > maxNameLen ? rawName.slice(0, maxNameLen - 3) + '...' : rawName;
+          const pageStr = `Page ${doc.startPage}`;
+
+          // Draw document title
+          tocPage.drawText(`${i + 1}.  ${displayName}`, {
+            x: 48,
+            y: curY,
+            size: 11,
+            font: helvBold,
+            color: rgb(0.12, 0.15, 0.22),
+          });
+
+          // Draw dotted leader
+          const titleWidth = helvBold.widthOfTextAtSize(`${i + 1}.  ${displayName}`, 11);
+          const pageNumWidth = helv.widthOfTextAtSize(pageStr, 11);
+          const dotsStart = 56 + titleWidth;
+          const dotsEnd = 540 - pageNumWidth;
+          if (dotsEnd > dotsStart + 20) {
+            const dotStep = 6;
+            for (let dotX = dotsStart; dotX < dotsEnd; dotX += dotStep) {
+              tocPage.drawText('.', {
+                x: dotX,
+                y: curY,
+                size: 9,
+                font: helv,
+                color: rgb(0.7, 0.72, 0.78),
+              });
+            }
+          }
+
+          // Draw Page Number
+          tocPage.drawText(pageStr, {
+            x: 548 - pageNumWidth,
+            y: curY,
+            size: 11,
+            font: helv,
+            color: rgb(0.85, 0.2, 0.2),
+          });
+
+          // Create Real Clickable Internal PDF Link Annotation
+          const targetPageIndex = doc.startPage - 1;
+          if (targetPageIndex >= 0 && targetPageIndex < mergedPdf.getPageCount()) {
+            const targetPageRef = mergedPdf.getPage(targetPageIndex).ref;
+            const dest = mergedPdf.context.obj([targetPageRef, PDFName.of('Fit')]);
+            const linkAnnot = mergedPdf.context.obj({
+              Type: PDFName.of('Annot'),
+              Subtype: PDFName.of('Link'),
+              Rect: [44, curY - 4, 552, curY + 14],
+              Border: [0, 0, 0],
+              Dest: dest,
+            });
+            const linkRef = mergedPdf.context.register(linkAnnot);
+            linkAnnots.push(linkRef);
+          }
+
+          curY -= 26;
+        }
+
+        if (linkAnnots.length > 0) {
+          tocPage.node.set(PDFName.of('Annots'), mergedPdf.context.obj(linkAnnots));
+        }
+      }
+
+      setMergeProgress('Finalizing document...');
       const bytes = await mergedPdf.save();
       const blob = new Blob([bytes as any], { type: 'application/pdf' });
       if (mergedPdfUrl) URL.revokeObjectURL(mergedPdfUrl);
       setMergedPdfUrl(URL.createObjectURL(blob));
-      toast.success(`Merged ${entries.length} files (${totalPages} pages) successfully!`);
+
+      const totalResultPages = mergedPdf.getPageCount();
+      let successMsg = `Merged ${entries.length} files (${totalResultPages} pages) successfully!`;
+      if (skippedBlankCount > 0) {
+        successMsg += ` (Purged ${skippedBlankCount} blank page${skippedBlankCount !== 1 ? 's' : ''})`;
+      }
+      toast.success(successMsg);
     } catch (e: any) {
       console.error('Merge error:', e);
       toast.error(e?.message || 'An error occurred while merging. Please try again.');
     } finally {
       setIsProcessing(false);
+      setMergeProgress('');
     }
   };
 
@@ -308,6 +527,75 @@ export default function MergePDF() {
             ))}
           </div>
 
+          {/* ── Smart Merge Enterprise Options ── */}
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 space-y-4">
+            <div className="flex items-center gap-2 mb-2">
+              <Sparkles className="w-5 h-5 text-red-600" />
+              <h3 className="text-base font-bold text-gray-900">Smart Merge Enhancements</h3>
+              <span className="text-[10px] font-bold uppercase tracking-wider bg-red-100 text-red-700 px-2 py-0.5 rounded-full">Pro Features</span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {/* Option 1: Table of Contents */}
+              <label className={`flex flex-col justify-between p-4 rounded-xl border-2 cursor-pointer transition-all ${generateToc ? 'border-red-500 bg-red-50/40 shadow-xs' : 'border-gray-100 bg-gray-50/50 hover:border-gray-200'}`}>
+                <div className="flex items-start justify-between gap-2 mb-2">
+                  <div className="flex items-center gap-2">
+                    <BookOpen className={`w-4 h-4 ${generateToc ? 'text-red-600' : 'text-gray-500'}`} />
+                    <span className="text-sm font-bold text-gray-900">Clickable Index (TOC)</span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={generateToc}
+                    onChange={e => setGenerateToc(e.target.checked)}
+                    className="w-4 h-4 accent-red-600 rounded cursor-pointer mt-0.5"
+                  />
+                </div>
+                <p className="text-xs text-gray-500 leading-relaxed">
+                  Adds a Page 1 Index with <strong>clickable links</strong> jumping to each document.
+                </p>
+              </label>
+
+              {/* Option 2: Page Size Normalizer */}
+              <div className="flex flex-col justify-between p-4 rounded-xl border-2 border-gray-100 bg-gray-50/50">
+                <div className="flex items-center gap-2 mb-2">
+                  <Maximize2 className="w-4 h-4 text-gray-700" />
+                  <span className="text-sm font-bold text-gray-900">Page Dimensions</span>
+                </div>
+                <select
+                  value={pageSizeMode}
+                  onChange={e => setPageSizeMode(e.target.value as any)}
+                  className="w-full text-xs font-semibold bg-white border border-gray-200 rounded-lg p-2 text-gray-800 focus:outline-none focus:border-red-500 cursor-pointer"
+                >
+                  <option value="original">Original Page Sizes (Keep as-is)</option>
+                  <option value="a4">Standardize to A4 (Proportional Center)</option>
+                  <option value="letter">Standardize to US Letter (Proportional)</option>
+                </select>
+                <p className="text-[11px] text-gray-400 mt-2">
+                  Fixes mismatched receipts & landscape scans.
+                </p>
+              </div>
+
+              {/* Option 3: Auto-Purge Blank Pages */}
+              <label className={`flex flex-col justify-between p-4 rounded-xl border-2 cursor-pointer transition-all ${removeBlankPages ? 'border-red-500 bg-red-50/40 shadow-xs' : 'border-gray-100 bg-gray-50/50 hover:border-gray-200'}`}>
+                <div className="flex items-start justify-between gap-2 mb-2">
+                  <div className="flex items-center gap-2">
+                    <Trash2 className={`w-4 h-4 ${removeBlankPages ? 'text-red-600' : 'text-gray-500'}`} />
+                    <span className="text-sm font-bold text-gray-900">Purge Blank Pages</span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={removeBlankPages}
+                    onChange={e => setRemoveBlankPages(e.target.checked)}
+                    className="w-4 h-4 accent-red-600 rounded cursor-pointer mt-0.5"
+                  />
+                </div>
+                <p className="text-xs text-gray-500 leading-relaxed">
+                  Scans & skips empty white scanner pages before merging.
+                </p>
+              </label>
+            </div>
+          </div>
+
           {/* Merge button */}
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
             {entries.length < 2 && (
@@ -316,7 +604,7 @@ export default function MergePDF() {
             <button onClick={mergePdfs} disabled={entries.length < 2 || isProcessing}
               className="w-full py-4 bg-red-600 text-white text-base font-bold rounded-xl hover:bg-red-700 transition-colors disabled:opacity-50 shadow-md flex items-center justify-center gap-2">
               {isProcessing ? (
-                <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />Merging {entries.length} files...</>
+                <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />{mergeProgress || `Merging ${entries.length} files...`}</>
               ) : (
                 <><Layers className="w-5 h-5" />Merge {entries.length} PDF{entries.length !== 1 ? 's' : ''} into One</>
               )}

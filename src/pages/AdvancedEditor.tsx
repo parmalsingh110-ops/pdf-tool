@@ -614,10 +614,37 @@ export default function AdvancedEditor() {
           i.h < 400
         );
 
+      // Consolidate adjacent zero-gap fragments on the same baseline into complete words/tokens
+      // (PDF streams often break numbers like "10006099872" into "10", "00060998", "72")
+      const sortedRaw = [...rawItems].sort((a, b) => {
+        const yDiff = a.y - b.y;
+        if (Math.abs(yDiff) > Math.max(a.h, b.h) * 0.4) return yDiff;
+        return a.x - b.x;
+      });
+      const consolidated: DetectedTextBlock[] = [];
+      for (const cur of sortedRaw) {
+        if (!consolidated.length) {
+          consolidated.push({ ...cur });
+          continue;
+        }
+        const last = consolidated[consolidated.length - 1];
+        const sameBaseline = Math.abs(last.baselineY - cur.baselineY) <= 3 || Math.abs(last.y - cur.y) <= 3;
+        const gap = cur.x - (last.x + last.w);
+        const noSpace = !last.text.endsWith(' ') && !cur.text.startsWith(' ');
+        // If items touch or are within 2.5px without whitespace, they belong to the same word/number token
+        if (sameBaseline && gap >= -2 && gap <= 2.5 && noSpace) {
+          last.text += cur.text;
+          last.w = Math.round((cur.x + cur.w) - last.x);
+          last.h = Math.max(last.h, cur.h);
+        } else {
+          consolidated.push({ ...cur });
+        }
+      }
+
       // Sample canvas pixels to detect text (fg) and background colors
       // This runs after rendering so canvas has the page pixels
       const ctx = context; // already obtained above
-      const items: DetectedTextBlock[] = rawItems.map(block => {
+      const items: DetectedTextBlock[] = consolidated.map(block => {
         if (!ctx) return block;
         try {
           // ── Robust background color: sample paper from left/right margins
@@ -1228,9 +1255,13 @@ export default function AdvancedEditor() {
       // "text gets big/small as I type" problem.
       const preservedFont = target.fontSize || 14;
 
-      // Width: use the existing width, don't automatically expand horizontally for paragraphs
-      // so that text wraps naturally.
-      const contentW = target.width || target.sourceWidth || 120;
+      // Width: for single-line text, auto-expand if new text exceeds previous box width
+      const scale = pageViewport?.scale || 1;
+      const isSingleLine = !text.includes('\n') && !(target.text || '').includes('\n');
+      const estimatedW = Math.round(text.length * (preservedFont * scale * 0.62));
+      const contentW = isSingleLine
+        ? Math.max(target.width || 0, target.sourceWidth || 0, estimatedW)
+        : (target.width || target.sourceWidth || 120);
       
       // Calculate how many lines we roughly have by splitting by newline
       const lines = text.split('\n').length;

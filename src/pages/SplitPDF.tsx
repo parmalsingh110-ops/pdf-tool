@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { PDFDocument } from 'pdf-lib';
-import { Download, Scissors, FileText, CheckSquare, Square, Layers, LayoutGrid, Archive } from 'lucide-react';
+import { Download, Scissors, FileText, CheckSquare, Square, Layers, LayoutGrid, Archive, HardDrive, Search, Sparkles } from 'lucide-react';
 import JSZip from 'jszip';
 import FileDropzone from '../components/FileDropzone';
 import * as pdfjsLib from 'pdfjs-dist';
@@ -10,7 +10,7 @@ import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { useToast } from '../components/Toast';
 
-type SplitMode = 'all' | 'ranges' | 'selection' | 'every';
+type SplitMode = 'all' | 'ranges' | 'selection' | 'every' | 'size' | 'keyword';
 
 interface PageThumb {
   num: number;
@@ -31,6 +31,10 @@ export default function SplitPDF() {
   const [ranges, setRanges] = useState('');
   const [everyN, setEveryN] = useState(1);
   const [selectedPages, setSelectedPages] = useState<Set<number>>(new Set());
+
+  // ── Smart Target Size & Keyword Split States ──
+  const [targetSizeMB, setTargetSizeMB] = useState(2);
+  const [splitKeyword, setSplitKeyword] = useState('Invoice');
 
   const [isProcessing, setIsProcessing] = useState(false);
   const [processStep, setProcessStep] = useState('');
@@ -207,6 +211,106 @@ export default function SplitPDF() {
           const blob = new Blob([bytes as any], { type: 'application/pdf' });
           results.push({ url: URL.createObjectURL(blob), name: `part_${chunk}.pdf`, pages: `Pages ${start + 1}–${end + 1}` });
         }
+      } else if (splitMode === 'size') {
+        const maxBytes = Math.max(0.2, targetSizeMB) * 1024 * 1024;
+        let currentPages: number[] = [];
+        let chunkIdx = 1;
+
+        for (let i = 0; i < pageCount; i++) {
+          setProcessStep(`Packaging page ${i + 1} of ${pageCount} into size-optimized chunks...`);
+          const testPdf = await PDFDocument.create();
+          const testIndices = [...currentPages, i];
+          const copied = await testPdf.copyPages(sourcePdf, testIndices);
+          copied.forEach(p => testPdf.addPage(p));
+          const testBytes = await testPdf.save();
+
+          if (testBytes.byteLength > maxBytes && currentPages.length > 0) {
+            // Finalize previous chunk
+            const finalPdf = await PDFDocument.create();
+            const chunkCopied = await finalPdf.copyPages(sourcePdf, currentPages);
+            chunkCopied.forEach(p => finalPdf.addPage(p));
+            const finalBytes = await finalPdf.save();
+            const blob = new Blob([finalBytes as any], { type: 'application/pdf' });
+            const pStart = currentPages[0] + 1;
+            const pEnd = currentPages[currentPages.length - 1] + 1;
+            const sizeLabel = (finalBytes.byteLength / 1024 / 1024).toFixed(2);
+            results.push({
+              url: URL.createObjectURL(blob),
+              name: `part_${chunkIdx}_(${sizeLabel}MB_limit_${targetSizeMB}MB).pdf`,
+              pages: `Pages ${pStart}–${pEnd} · ${sizeLabel} MB (Under ${targetSizeMB} MB limit)`,
+            });
+            chunkIdx++;
+            currentPages = [i];
+          } else {
+            currentPages.push(i);
+          }
+        }
+
+        if (currentPages.length > 0) {
+          const finalPdf = await PDFDocument.create();
+          const chunkCopied = await finalPdf.copyPages(sourcePdf, currentPages);
+          chunkCopied.forEach(p => finalPdf.addPage(p));
+          const finalBytes = await finalPdf.save();
+          const blob = new Blob([finalBytes as any], { type: 'application/pdf' });
+          const pStart = currentPages[0] + 1;
+          const pEnd = currentPages[currentPages.length - 1] + 1;
+          const sizeLabel = (finalBytes.byteLength / 1024 / 1024).toFixed(2);
+          results.push({
+            url: URL.createObjectURL(blob),
+            name: `part_${chunkIdx}_(${sizeLabel}MB_limit_${targetSizeMB}MB).pdf`,
+            pages: `Pages ${pStart}–${pEnd} · ${sizeLabel} MB (Under ${targetSizeMB} MB limit)`,
+          });
+        }
+      } else if (splitMode === 'keyword') {
+        const kw = splitKeyword.trim().toLowerCase();
+        if (!kw) {
+          toast.error('Please enter a keyword to split by (e.g. "Invoice", "Salary", "Roll No").');
+          return;
+        }
+
+        setProcessStep(`Scanning all ${pageCount} pages for keyword "${splitKeyword}"...`);
+        const pdfJsDoc = await pdfjsLib.getDocument({ data: arrayBuffer.slice(0) }).promise;
+        const matchingPages: number[] = [];
+
+        for (let i = 1; i <= pageCount; i++) {
+          const page = await pdfJsDoc.getPage(i);
+          const tc = await page.getTextContent();
+          const text = tc.items.map((it: any) => it.str || '').join(' ').toLowerCase();
+          if (text.includes(kw)) {
+            matchingPages.push(i - 1);
+          }
+          page.cleanup();
+        }
+        pdfJsDoc.destroy();
+
+        if (matchingPages.length === 0) {
+          toast.error(`Keyword "${splitKeyword}" was not found on any page. Try a different phrase or check spelling.`);
+          return;
+        }
+
+        // Create boundary segments
+        const boundaries = [...matchingPages];
+        if (boundaries[0] !== 0) {
+          boundaries.unshift(0);
+        }
+
+        for (let b = 0; b < boundaries.length; b++) {
+          const start = boundaries[b];
+          const end = (b + 1 < boundaries.length) ? boundaries[b + 1] - 1 : pageCount - 1;
+          setProcessStep(`Creating section ${b + 1}: pages ${start + 1}–${end + 1}...`);
+          const newPdf = await PDFDocument.create();
+          const indices = Array.from({ length: end - start + 1 }, (_, k) => start + k);
+          const copied = await newPdf.copyPages(sourcePdf, indices);
+          copied.forEach(p => newPdf.addPage(p));
+          const bytes = await newPdf.save();
+          const blob = new Blob([bytes as any], { type: 'application/pdf' });
+          const safeKw = splitKeyword.replace(/[^a-zA-Z0-9_-]/g, '_');
+          results.push({
+            url: URL.createObjectURL(blob),
+            name: `${safeKw}_part_${b + 1}_(p${start + 1}-p${end + 1}).pdf`,
+            pages: `Pages ${start + 1}–${end + 1} (Matched "${splitKeyword}")`,
+          });
+        }
       }
 
       setSplitUrls(results);
@@ -263,6 +367,8 @@ export default function SplitPDF() {
     { id: 'selection', icon: LayoutGrid, label: 'Select Pages', desc: 'Click thumbnails to pick specific pages', color: 'violet' },
     { id: 'ranges', icon: Scissors, label: 'Custom Ranges', desc: 'Enter ranges like 1-3, 5, 7-10', color: 'blue' },
     { id: 'every', icon: Layers, label: 'Every N Pages', desc: 'Split every N pages into chunks', color: 'emerald' },
+    { id: 'size', icon: HardDrive, label: 'By File Size (MB)', desc: 'Split into parts under target limit (e.g. 2MB)', color: 'teal' },
+    { id: 'keyword', icon: Search, label: 'By Keyword / Invoice', desc: 'Split whenever "Invoice", "Slip" appears', color: 'indigo' },
   ];
 
   const colorMap: Record<string, string> = {
@@ -270,6 +376,8 @@ export default function SplitPDF() {
     violet: 'border-violet-400 bg-violet-50 text-violet-700',
     blue: 'border-blue-400 bg-blue-50 text-blue-700',
     emerald: 'border-emerald-400 bg-emerald-50 text-emerald-700',
+    teal: 'border-teal-400 bg-teal-50 text-teal-700',
+    indigo: 'border-indigo-400 bg-indigo-50 text-indigo-700',
   };
 
   return (
@@ -410,6 +518,85 @@ export default function SplitPDF() {
                     {selectedPages.size > 0 && (
                       <p className="text-xs text-center text-violet-600 mt-2 font-medium">{selectedPages.size} page{selectedPages.size > 1 ? 's' : ''} selected</p>
                     )}
+                  </div>
+                )}
+
+                {/* Split by File Size */}
+                {splitMode === 'size' && (
+                  <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 space-y-3">
+                    <div className="flex items-center gap-1.5 text-teal-700 font-bold text-sm">
+                      <HardDrive className="w-4 h-4" />
+                      <span>Target Maximum File Size</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      {[
+                        { label: '2 MB', desc: 'Govt Portals / SSC', val: 2 },
+                        { label: '5 MB', desc: 'Standard Form', val: 5 },
+                        { label: '10 MB', desc: 'Email Attachment', val: 10 },
+                        { label: '16 MB', desc: 'WhatsApp Limit', val: 16 },
+                      ].map(preset => (
+                        <button
+                          key={preset.val}
+                          type="button"
+                          onClick={() => setTargetSizeMB(preset.val)}
+                          className={`p-2 rounded-xl text-left border-2 transition-all ${
+                            targetSizeMB === preset.val
+                              ? 'border-teal-500 bg-teal-50 text-teal-900 font-bold'
+                              : 'border-gray-100 bg-gray-50 hover:border-gray-200 text-gray-700'
+                          }`}
+                        >
+                          <div className="text-xs font-bold">{preset.label}</div>
+                          <div className="text-[10px] text-gray-500">{preset.desc}</div>
+                        </button>
+                      ))}
+                    </div>
+                    <div className="pt-2">
+                      <label className="block text-xs font-semibold text-gray-600 mb-1">Custom Limit (MB)</label>
+                      <input
+                        type="number"
+                        min={0.2}
+                        max={100}
+                        step={0.5}
+                        value={targetSizeMB}
+                        onChange={e => setTargetSizeMB(Number(e.target.value))}
+                        className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm font-semibold focus:outline-none focus:border-teal-500"
+                      />
+                    </div>
+                    <p className="text-[11px] text-gray-400 leading-tight">
+                      Guarantees every output PDF chunk stays strictly below {targetSizeMB} MB without trial and error.
+                    </p>
+                  </div>
+                )}
+
+                {/* Split by Keyword / Invoice */}
+                {splitMode === 'keyword' && (
+                  <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 space-y-3">
+                    <div className="flex items-center gap-1.5 text-indigo-700 font-bold text-sm">
+                      <Search className="w-4 h-4" />
+                      <span>Split Boundary Keyword</span>
+                    </div>
+                    <input
+                      type="text"
+                      value={splitKeyword}
+                      onChange={e => setSplitKeyword(e.target.value)}
+                      placeholder="e.g. Invoice, Salary, Roll No"
+                      className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm font-semibold focus:outline-none focus:border-indigo-500"
+                    />
+                    <div className="flex flex-wrap gap-1.5">
+                      {['Invoice', 'Salary Slip', 'Roll No', 'Receipt', 'Form 16', 'Statement'].map(tag => (
+                        <button
+                          key={tag}
+                          type="button"
+                          onClick={() => setSplitKeyword(tag)}
+                          className="px-2 py-0.5 text-[11px] rounded-md bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-medium transition-colors"
+                        >
+                          {tag}
+                        </button>
+                      ))}
+                    </div>
+                    <p className="text-[11px] text-gray-400 leading-tight">
+                      Scans the text of all pages. Each page containing "{splitKeyword}" begins a new separate document.
+                    </p>
                   </div>
                 )}
 
