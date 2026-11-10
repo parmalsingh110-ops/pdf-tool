@@ -1866,8 +1866,8 @@ export default function AdvancedEditor() {
       const scale = pageViewport?.scale || 1;
       const realFontSize = match ? match.fontSize : (block.fontSize || Math.max(6, Math.round((block.h / scale) * 0.72)));
       const fs = Math.max(6, Math.min(realFontSize, 120));
-      const bw = Math.min(Math.max(block.w + 4, 16), 800);
-      const bh = Math.max(block.h, Math.round(fs * scale * 1.25) + 2);
+      const bw = Math.min(Math.max(block.w, 12), 800);
+      const bh = Math.max(block.h, 10);
       const baselinePt = match?.baseline || block.pdfBaselineY || ((block.y + block.h * 0.78) / scale);
       const id = Date.now().toString() + '_ie';
       const bg = isPaperWhiteHex(block.bgColor) ? '#ffffff' : block.bgColor;
@@ -2218,8 +2218,8 @@ export default function AdvancedEditor() {
                       else if (h === 'l') { newW = r.startW - dx; newX = r.startAnnX + dx; }
                       else if (h === 'b') { newH = r.startH + dy; }
                       else if (h === 't') { newH = r.startH - dy; newY = r.startAnnY + dy; }
-                      newW = Math.max(20, newW);
-                      newH = Math.max(20, newH);
+                      newW = Math.max(10, newW);
+                      newH = Math.max(8, newH);
                       updateAnnotation(r.id, { width: newW, height: newH, x: newX, y: newY });
                     }
                   }}
@@ -2269,8 +2269,8 @@ export default function AdvancedEditor() {
                       style={{
                         left: ann.x,
                         top: ann.y,
-                        width: ann.width || (ann.type === 'text' ? Math.max(16, Math.round((ann.text?.length || 4) * (ann.fontSize || 12) * (pageViewport?.scale || 1) * 0.62)) : undefined),
-                        height: Math.max(ann.height || 18, ann.type === 'text' ? Math.round((ann.fontSize || 12) * (pageViewport?.scale || 1) * 1.25) : 0),
+                        width: ann.width !== undefined ? ann.width : (ann.type === 'text' ? Math.max(16, Math.round((ann.text?.length || 4) * (ann.fontSize || 12) * (pageViewport?.scale || 1) * 0.62)) : undefined),
+                        height: ann.height !== undefined ? ann.height : Math.max(12, ann.type === 'text' ? Math.round((ann.fontSize || 12) * (pageViewport?.scale || 1) * 1.2) : 0),
                         backgroundColor: ann.type === 'text' ? (isPaperWhiteHex(ann.backgroundColor) ? '#ffffff' : ann.backgroundColor) : ann.type === 'whiteout' ? (ann.color || '#ffffff') : ann.type === 'highlight' ? 'rgba(255, 255, 0, 0.4)' : ann.type === 'link' ? 'rgba(0, 0, 255, 0.2)' : 'transparent',
                         border: selectedId === ann.id ? '1px solid #2563eb' : (ann.type === 'link' ? '1px dashed blue' : ann.type === 'table' ? '1px solid #ccc' : 'none'),
                         boxSizing: 'border-box',
@@ -2335,17 +2335,36 @@ export default function AdvancedEditor() {
                       {ann.type === 'image' && ann.imageDataUrl && (
                         <img src={ann.imageDataUrl} alt="Inserted" className="w-full h-full object-fill pointer-events-none" />
                       )}
-                      {/* Sleek Corner Handles for Text (LightPDF style) */}
+                      {/* Sleek 8-Point Bounding Box Handles for Text (LightPDF exact style) */}
                       {ann.type === 'text' && selectedId === ann.id && (
                         <>
+                          {/* 4 Corners */}
                           <div className="absolute -top-1 -left-1 w-2 h-2 bg-white border border-blue-600 rounded-none cursor-nwse-resize z-20 pointer-events-auto shadow-xs"
+                            title="Resize diagonally"
                             onMouseDown={e => { e.stopPropagation(); resizeAnnRef.current = { id: ann.id, handle: 'tl', startX: e.clientX, startY: e.clientY, startAnnX: ann.x, startAnnY: ann.y, startW: ann.width || 80, startH: ann.height || 20 }; }} />
                           <div className="absolute -top-1 -right-1 w-2 h-2 bg-white border border-blue-600 rounded-none cursor-nesw-resize z-20 pointer-events-auto shadow-xs"
+                            title="Resize diagonally"
                             onMouseDown={e => { e.stopPropagation(); resizeAnnRef.current = { id: ann.id, handle: 'tr', startX: e.clientX, startY: e.clientY, startAnnX: ann.x, startAnnY: ann.y, startW: ann.width || 80, startH: ann.height || 20 }; }} />
                           <div className="absolute -bottom-1 -left-1 w-2 h-2 bg-white border border-blue-600 rounded-none cursor-nesw-resize z-20 pointer-events-auto shadow-xs"
+                            title="Resize diagonally"
                             onMouseDown={e => { e.stopPropagation(); resizeAnnRef.current = { id: ann.id, handle: 'bl', startX: e.clientX, startY: e.clientY, startAnnX: ann.x, startAnnY: ann.y, startW: ann.width || 80, startH: ann.height || 20 }; }} />
                           <div className="absolute -bottom-1 -right-1 w-2 h-2 bg-white border border-blue-600 rounded-none cursor-nwse-resize z-20 pointer-events-auto shadow-xs"
+                            title="Resize diagonally"
                             onMouseDown={e => { e.stopPropagation(); resizeAnnRef.current = { id: ann.id, handle: 'br', startX: e.clientX, startY: e.clientY, startAnnX: ann.x, startAnnY: ann.y, startW: ann.width || 80, startH: ann.height || 20 }; }} />
+
+                          {/* 4 Edge Centers: Top, Bottom, Left, Right */}
+                          <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-white border border-blue-600 rounded-none cursor-ns-resize z-20 pointer-events-auto shadow-xs"
+                            title="Resize height vertically"
+                            onMouseDown={e => { e.stopPropagation(); resizeAnnRef.current = { id: ann.id, handle: 't', startX: e.clientX, startY: e.clientY, startAnnX: ann.x, startAnnY: ann.y, startW: ann.width || 80, startH: ann.height || 20 }; }} />
+                          <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-white border border-blue-600 rounded-none cursor-ns-resize z-20 pointer-events-auto shadow-xs"
+                            title="Resize height vertically"
+                            onMouseDown={e => { e.stopPropagation(); resizeAnnRef.current = { id: ann.id, handle: 'b', startX: e.clientX, startY: e.clientY, startAnnX: ann.x, startAnnY: ann.y, startW: ann.width || 80, startH: ann.height || 20 }; }} />
+                          <div className="absolute top-1/2 -left-1 -translate-y-1/2 w-2 h-2 bg-white border border-blue-600 rounded-none cursor-ew-resize z-20 pointer-events-auto shadow-xs"
+                            title="Resize width horizontally"
+                            onMouseDown={e => { e.stopPropagation(); resizeAnnRef.current = { id: ann.id, handle: 'l', startX: e.clientX, startY: e.clientY, startAnnX: ann.x, startAnnY: ann.y, startW: ann.width || 80, startH: ann.height || 20 }; }} />
+                          <div className="absolute top-1/2 -right-1 -translate-y-1/2 w-2 h-2 bg-white border border-blue-600 rounded-none cursor-ew-resize z-20 pointer-events-auto shadow-xs"
+                            title="Resize width horizontally"
+                            onMouseDown={e => { e.stopPropagation(); resizeAnnRef.current = { id: ann.id, handle: 'r', startX: e.clientX, startY: e.clientY, startAnnX: ann.x, startAnnY: ann.y, startW: ann.width || 80, startH: ann.height || 20 }; }} />
                         </>
                       )}
                       {/* Resize handles for image & signature */}
@@ -2454,8 +2473,8 @@ export default function AdvancedEditor() {
                               const scale = pageViewport?.scale || 1;
                               const realFontSize = match ? match.fontSize : (block.fontSize || Math.max(6, Math.round((block.h / scale) * 0.72)));
                               const fs = Math.max(6, Math.min(realFontSize, 120));
-                              const bw = Math.max(block.w + 4, 16);
-                              const bh = Math.max(block.h, Math.round(fs * scale * 1.25) + 2);
+                              const bw = Math.max(block.w, 12);
+                              const bh = Math.max(block.h, 10);
                               const baselinePt = match?.baseline || block.pdfBaselineY || ((block.y + block.h * 0.78) / scale);
                               const bg = isPaperWhiteHex(block.bgColor) ? '#ffffff' : block.bgColor;
                               const textAnn: Annotation = {
@@ -2606,15 +2625,15 @@ export default function AdvancedEditor() {
                       <div
                         style={{
                           position: 'absolute',
-                          left: block.x - 2,
-                          top: block.y - 2,
-                          width: Math.max(block.w + 8, 28),
-                          minHeight: block.h + 4,
+                          left: block.x,
+                          top: block.y,
+                          width: Math.max(block.w, 16),
+                          minHeight: Math.max(block.h, 12),
                           zIndex: 100,
                           backgroundColor: bg,
                           border: '1px solid #2563eb',
-                          boxShadow: '0 2px 10px rgba(37,99,235,0.18)',
-                          borderRadius: 2,
+                          boxShadow: '0 1px 4px rgba(37,99,235,0.18)',
+                          borderRadius: 1,
                         }}
                       >
                         <textarea
@@ -2633,20 +2652,18 @@ export default function AdvancedEditor() {
                           onBlur={() => commitInlineEdit()}
                           style={{
                             width: '100%',
-                            // Use exact span height from backend (converted to canvas px via scale)
                             minHeight: block.h,
                             fontSize: `${fs * scale}px`,
                             color: fgColor,
                             fontWeight: isBold ? 700 : 400,
                             fontStyle: isItalic ? 'italic' : 'normal',
-                            // Use CSS font-family mapped from original PDF font name
                             fontFamily: fontFam,
-                            lineHeight: 1.25,
+                            lineHeight: 1.15,
                             background: 'transparent',
                             border: 'none',
                             outline: 'none',
                             resize: 'none',
-                            padding: '2px 4px',
+                            padding: 0,
                             margin: 0,
                             boxSizing: 'border-box',
                           }}
