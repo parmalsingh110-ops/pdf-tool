@@ -3043,13 +3043,17 @@ async def edit_pdf_endpoint(request: Request, file: UploadFile = File(...), edit
             y   = float(action["y"])   # top of text bounding box, from top of page
             w   = float(action["w"])
             h   = float(action["h"])
+            orig_x = float(action.get("origX", x))
+            orig_y = float(action.get("origY", y))
+            orig_w = float(action.get("origW", w))
+            orig_h = float(action.get("origH", h))
             new_text = action.get("newText", "")
 
-            # Redact: use exact bounding box (no padding) to prevent deleting adjacent words
-            rect = fitz.Rect(x, y, x + w, y + h)
+            # Redact: use exact bounding box of the ORIGINAL text (no padding) to delete it from source
+            rect = fitz.Rect(orig_x, orig_y, orig_x + orig_w, orig_y + orig_h)
             
             # Extract original baseline and font metrics from the native text being replaced
-            annot_rect = fitz.Rect(x - 0.5, y - 0.5, x + w + 0.5, y + h + 0.5)
+            annot_rect = fitz.Rect(orig_x - 0.5, orig_y - 0.5, orig_x + orig_w + 0.5, orig_y + orig_h + 0.5)
             orig_dict = page.get_text("dict", clip=annot_rect)
             detected_baseline = None
             detected_font = None
@@ -3165,9 +3169,14 @@ async def edit_pdf_endpoint(request: Request, file: UploadFile = File(...), edit
             else:
                 align = fitz.TEXT_ALIGN_LEFT
 
-            baseline_y = action.get("baseline") or detected_baseline
-            if baseline_y is None and h > 0:
+            dy = y - orig_y
+            raw_baseline = action.get("baseline") or detected_baseline
+            if raw_baseline is not None:
+                baseline_y = raw_baseline + dy
+            elif h > 0:
                 baseline_y = y + h * 0.78
+            else:
+                baseline_y = None
 
             # ── Hindi/Devanagari font handling with HarfBuzz/RAQM shaping ─────────
             inserted = False

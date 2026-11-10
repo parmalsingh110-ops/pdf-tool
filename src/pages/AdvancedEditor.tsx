@@ -79,6 +79,9 @@ interface Annotation {
   lockPosition?: boolean;
   /** Link text <-> whiteout pair for seamless replace */
   linkedId?: string;
+  /** Original position of the text block before moving */
+  sourceX?: number;
+  sourceY?: number;
   /** Keep original OCR line metrics for smart resizing */
   sourceWidth?: number;
   sourceHeight?: number;
@@ -269,6 +272,7 @@ export default function AdvancedEditor() {
   // Underline/Strikethrough tool active state is tracked via activeTool, no separate defaults needed
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const pristineCanvasRef = useRef<ImageData | null>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
   const sigCanvasRef = useRef<SignatureCanvas>(null);
 
@@ -497,6 +501,47 @@ export default function AdvancedEditor() {
     };
   };
 
+  // Clear a specific text block footprint on the rendered canvas so no ghost text stays behind
+  const clearTextFootprintOnCanvas = useCallback((sx: number, sy: number, sw: number, sh: number, bg?: string) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const fill = isPaperWhiteHex(bg) ? '#ffffff' : (bg || '#ffffff');
+    ctx.fillStyle = fill;
+    ctx.fillRect(Math.floor(sx) - 1, Math.floor(sy) - 1, Math.ceil(sw) + 2, Math.ceil(sh) + 2);
+  }, []);
+
+  // Restore pristine canvas and erase all active text annotations' source footprints
+  const syncCanvasWithAnnotations = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || !pristineCanvasRef.current) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    // 1. Restore pristine background from PDF.js
+    ctx.putImageData(pristineCanvasRef.current, 0, 0);
+
+    // 2. Erase the original text at source positions for all active text annotations on current page
+    const pageAnnotations = annotations.filter(
+      a => a.pageIndex === currentPage - 1 && a.type === 'text' && a.sourceWidth && a.sourceWidth > 0
+    );
+    for (const ann of pageAnnotations) {
+      const sx = ann.sourceX !== undefined ? ann.sourceX : ann.x;
+      const sy = ann.sourceY !== undefined ? ann.sourceY : ann.y;
+      const sw = ann.sourceWidth || ann.width || 80;
+      const sh = ann.sourceHeight || ann.height || 20;
+      const bg = isPaperWhiteHex(ann.backgroundColor) ? '#ffffff' : (ann.backgroundColor || '#ffffff');
+
+      ctx.fillStyle = bg;
+      ctx.fillRect(Math.floor(sx) - 1, Math.floor(sy) - 1, Math.ceil(sw) + 2, Math.ceil(sh) + 2);
+    }
+  }, [annotations, currentPage]);
+
+  useEffect(() => {
+    syncCanvasWithAnnotations();
+  }, [syncCanvasWithAnnotations]);
+
   const renderPage = async (pageNum: number) => {
     if (!pdfDoc || !canvasRef.current) return;
 
@@ -516,6 +561,9 @@ export default function AdvancedEditor() {
           viewport: viewport,
           canvas: canvas
         }).promise;
+
+        pristineCanvasRef.current = context.getImageData(0, 0, canvas.width, canvas.height);
+        syncCanvasWithAnnotations();
       }
 
       // Text detection for editing
@@ -1341,6 +1389,10 @@ export default function AdvancedEditor() {
       if (nativeEditsAll.length > 0) {
         const editPayload = nativeEditsAll.map(ann => ({
           page: ann.pageIndex,
+          origX: (ann.sourceX !== undefined ? ann.sourceX : ann.x) / pageViewport.scale,
+          origY: (ann.sourceY !== undefined ? ann.sourceY : ann.y) / pageViewport.scale,
+          origW: (ann.sourceWidth || ann.width || 100) / pageViewport.scale,
+          origH: (ann.sourceHeight || ann.height || 20) / pageViewport.scale,
           x: ann.x / pageViewport.scale,
           // Convert from top-left (frontend) to standard coords expected by backend
           y: ann.y / pageViewport.scale,
@@ -1507,10 +1559,12 @@ export default function AdvancedEditor() {
         if (ann.type === 'text' && ann.text) {
           const textFontSizePt = ann.fontSize || 12;
           const boxPxH = ann.height || Math.max(20, textFontSizePt * scale * 1.25);
-          const clearPxW = Math.max(ann.width || 0, ann.sourceWidth || 0);
-          const clearPxH = Math.max(boxPxH, ann.sourceHeight || 0);
-          const clearPdfW = clearPxW / scale;
-          const clearPdfH = clearPxH / scale;
+          const sourcePxX = ann.sourceX !== undefined ? ann.sourceX : ann.x;
+          const sourcePxY = ann.sourceY !== undefined ? ann.sourceY : ann.y;
+          const clearPdfX = sourcePxX / scale;
+          const clearPdfY = pageHeight - (sourcePxY / scale);
+          const clearPdfW = (ann.sourceWidth || ann.width || 0) / scale;
+          const clearPdfH = (ann.sourceHeight || ann.height || boxPxH) / scale;
 
           if (ann.backgroundColor) {
             const { r: bgR, g: bgG, b: bgB } = hexToRgb(ann.backgroundColor);
@@ -1518,8 +1572,8 @@ export default function AdvancedEditor() {
             const isPaperWhite = (lum >= 0.65) || (bgR >= 0.65 && bgG >= 0.65 && bgB >= 0.65);
             const fillColor = isPaperWhite ? rgb(1, 1, 1) : rgb(bgR, bgG, bgB);
             page.drawRectangle({
-              x: pdfX,
-              y: pdfY - clearPdfH - 1,
+              x: clearPdfX,
+              y: clearPdfY - clearPdfH - 1,
               width: clearPdfW,
               height: clearPdfH + 2,
               color: fillColor,
@@ -1871,6 +1925,7 @@ export default function AdvancedEditor() {
       const baselinePt = match?.baseline || block.pdfBaselineY || ((block.y + block.h * 0.78) / scale);
       const id = Date.now().toString() + '_ie';
       const bg = isPaperWhiteHex(block.bgColor) ? '#ffffff' : block.bgColor;
+      clearTextFootprintOnCanvas(block.x, block.y, bw, bh, block.bgColor);
       const textAnn: Annotation = {
         id,
         type: 'text',
@@ -1879,6 +1934,10 @@ export default function AdvancedEditor() {
         y: block.y,
         width: bw,
         height: bh,
+        sourceX: block.x,
+        sourceY: block.y,
+        sourceWidth: bw,
+        sourceHeight: bh,
         text: newText,
         fontSize: fs,
         color: match?.color || block.fgColor || '#000000',
@@ -1886,8 +1945,6 @@ export default function AdvancedEditor() {
         bold: match?.bold ?? block.bold ?? false,
         italic: match?.italic ?? block.italic ?? false,
         lockPosition: false,
-        sourceWidth: bw,
-        sourceHeight: bh,
         baseline: Math.round(baselinePt * 100) / 100,
         originalFontName: match?.fontName || block.fontName,
         fontCssFamily: pdfFontToCss(match?.fontName || block.fontName),
@@ -2271,7 +2328,7 @@ export default function AdvancedEditor() {
                         top: ann.y,
                         width: ann.width !== undefined ? ann.width : (ann.type === 'text' ? Math.max(16, Math.round((ann.text?.length || 4) * (ann.fontSize || 12) * (pageViewport?.scale || 1) * 0.62)) : undefined),
                         height: ann.height !== undefined ? ann.height : Math.max(12, ann.type === 'text' ? Math.round((ann.fontSize || 12) * (pageViewport?.scale || 1) * 1.2) : 0),
-                        backgroundColor: ann.type === 'text' ? (isPaperWhiteHex(ann.backgroundColor) ? '#ffffff' : ann.backgroundColor) : ann.type === 'whiteout' ? (ann.color || '#ffffff') : ann.type === 'highlight' ? 'rgba(255, 255, 0, 0.4)' : ann.type === 'link' ? 'rgba(0, 0, 255, 0.2)' : 'transparent',
+                        backgroundColor: ann.type === 'text' ? 'transparent' : ann.type === 'whiteout' ? (ann.color || '#ffffff') : ann.type === 'highlight' ? 'rgba(255, 255, 0, 0.4)' : ann.type === 'link' ? 'rgba(0, 0, 255, 0.2)' : 'transparent',
                         border: selectedId === ann.id ? '1px solid #2563eb' : (ann.type === 'link' ? '1px dashed blue' : ann.type === 'table' ? '1px solid #ccc' : 'none'),
                         boxSizing: 'border-box',
                       }}
@@ -2477,6 +2534,7 @@ export default function AdvancedEditor() {
                               const bh = Math.max(block.h, 10);
                               const baselinePt = match?.baseline || block.pdfBaselineY || ((block.y + block.h * 0.78) / scale);
                               const bg = isPaperWhiteHex(block.bgColor) ? '#ffffff' : block.bgColor;
+                              clearTextFootprintOnCanvas(block.x, block.y, bw, bh, block.bgColor);
                               const textAnn: Annotation = {
                                 id,
                                 type: 'text',
@@ -2485,6 +2543,10 @@ export default function AdvancedEditor() {
                                 y: block.y,
                                 width: bw,
                                 height: bh,
+                                sourceX: block.x,
+                                sourceY: block.y,
+                                sourceWidth: bw,
+                                sourceHeight: bh,
                                 text: block.text,
                                 fontSize: fs,
                                 color: match?.color || block.fgColor || '#000000',
@@ -2492,8 +2554,6 @@ export default function AdvancedEditor() {
                                 bold: match?.bold ?? block.bold ?? false,
                                 italic: match?.italic ?? block.italic ?? false,
                                 lockPosition: false,
-                                sourceWidth: bw,
-                                sourceHeight: bh,
                                 baseline: Math.round(baselinePt * 100) / 100,
                                 originalFontName: match?.fontName || block.fontName,
                                 fontCssFamily: pdfFontToCss(match?.fontName || block.fontName),
