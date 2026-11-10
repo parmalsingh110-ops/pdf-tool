@@ -3186,13 +3186,13 @@ async def edit_pdf_endpoint(request: Request, file: UploadFile = File(...), edit
                         RENDER_SCALE = 4
                         pil_font = ImageFont.truetype(str(deva_path), int(text_size * RENDER_SCALE), layout_engine=ImageFont.Layout.RAQM)
                         bbox = pil_font.getbbox(new_text)
-                        txt_w = max(4, bbox[2] - bbox[0] + 16)
-                        txt_h = max(4, bbox[3] - bbox[1] + 16)
+                        txt_w = max(4, bbox[2] - bbox[0])
+                        txt_h = max(4, bbox[3] - bbox[1])
 
-                        pil_img = Image.new("RGBA", (txt_w, txt_h), (255, 255, 255, 0))
+                        pil_img = Image.new("RGBA", (txt_w, txt_h), (0, 0, 0, 0))
                         pil_draw = ImageDraw.Draw(pil_img)
                         r_i, g_i, b_i = int(fg_color[0] * 255), int(fg_color[1] * 255), int(fg_color[2] * 255)
-                        pil_draw.text((0, 0), new_text, font=pil_font, fill=(r_i, g_i, b_i, 255))
+                        pil_draw.text((-bbox[0], -bbox[1]), new_text, font=pil_font, fill=(r_i, g_i, b_i, 255))
 
                         buf = io.BytesIO()
                         pil_img.save(buf, format="PNG")
@@ -3206,7 +3206,8 @@ async def edit_pdf_endpoint(request: Request, file: UploadFile = File(...), edit
                         elif align == fitz.TEXT_ALIGN_RIGHT:
                             ins_x = x + w - img_w_pt
 
-                        ins_y = (baseline_y - img_h_pt * 0.78) if (baseline_y is not None) else y
+                        ascent, _ = pil_font.getmetrics()
+                        ins_y = (baseline_y - (ascent - bbox[1]) / RENDER_SCALE) if (baseline_y is not None) else y
                         img_rect = fitz.Rect(ins_x, ins_y, ins_x + img_w_pt, ins_y + img_h_pt)
                         page.insert_image(img_rect, stream=deva_png)
                         inserted = True

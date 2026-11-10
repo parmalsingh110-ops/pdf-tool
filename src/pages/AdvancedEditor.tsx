@@ -200,6 +200,21 @@ export default function AdvancedEditor() {
   // === Select granularity (word / line / paragraph) ===
   const [selectionGranularity, setSelectionGranularity] = useState<'word' | 'line' | 'paragraph'>('word');
 
+  // === Continuous / Persistent Auto-Select mode (Default: ON) ===
+  const [continuousSelect, setContinuousSelect] = useState(true);
+
+  // Helper to determine if a color is paper-white or light scanner tone (should snap to #ffffff)
+  const isPaperWhiteHex = (hex?: string) => {
+    if (!hex || hex === 'transparent' || hex === '#ffffff' || hex === '#fbfcfc' || hex === '#fcfcfc') return true;
+    const clean = hex.replace('#', '');
+    if (clean.length !== 6) return true;
+    const r = parseInt(clean.slice(0, 2), 16);
+    const g = parseInt(clean.slice(2, 4), 16);
+    const b = parseInt(clean.slice(4, 6), 16);
+    const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+    return lum >= 170 || (r >= 170 && g >= 170 && b >= 170);
+  };
+
   // === Drag move ===
   const [isDragging, setIsDragging] = useState(false);
   const [dragTarget, setDragTarget] = useState<string | null>(null);
@@ -557,37 +572,36 @@ export default function AdvancedEditor() {
       const items: DetectedTextBlock[] = rawItems.map(block => {
         if (!ctx) return block;
         try {
-          // ── Robust background color: sample from OUTSIDE the text box (ring around it)
-          let bgSumR = 0, bgSumG = 0, bgSumB = 0, bgCount = 0;
-          const ringPad = Math.max(3, Math.round(block.h * 0.25));
-          const corners = [
-            [block.x - ringPad, block.y - ringPad],
-            [block.x + block.w + ringPad, block.y - ringPad],
-            [block.x - ringPad, block.y + block.h + ringPad],
-            [block.x + block.w + ringPad, block.y + block.h + ringPad],
-            [block.x + Math.round(block.w * 0.5), block.y - ringPad],
-            [block.x + Math.round(block.w * 0.5), block.y + block.h + ringPad],
+          // ── Robust background color: sample paper from left/right margins
+          // (NEVER sample top/bottom which hits dark text lines above/below!)
+          let bgR = 255, bgG = 255, bgB = 255;
+          const candidatePoints = [
+            [block.x - 3, block.y + Math.round(block.h * 0.5)],
+            [block.x - 6, block.y + Math.round(block.h * 0.5)],
+            [block.x + block.w + 3, block.y + Math.round(block.h * 0.5)],
+            [block.x + block.w + 6, block.y + Math.round(block.h * 0.5)],
+            [block.x - 3, block.y + 2],
+            [block.x + block.w + 3, block.y + 2],
           ];
-          for (const [cx2, cy2] of corners) {
+          let maxLum = -1;
+          for (const [cx2, cy2] of candidatePoints) {
             const sx = Math.max(0, Math.min(Math.round(cx2), canvas.width - 1));
             const sy = Math.max(0, Math.min(Math.round(cy2), canvas.height - 1));
             const px = ctx.getImageData(sx, sy, 1, 1).data;
             if (px[3] > 128) {
-              bgSumR += px[0]; bgSumG += px[1]; bgSumB += px[2]; bgCount++;
+              const lum = 0.299 * px[0] + 0.587 * px[1] + 0.114 * px[2];
+              if (lum > maxLum) {
+                maxLum = lum;
+                bgR = px[0]; bgG = px[1]; bgB = px[2];
+              }
             }
           }
           let bgColor = '#ffffff';
-          if (bgCount > 0) {
-            const bgR = Math.round(bgSumR / bgCount);
-            const bgG = Math.round(bgSumG / bgCount);
-            const bgB = Math.round(bgSumB / bgCount);
-            const lum = 0.299 * bgR + 0.587 * bgG + 0.114 * bgB;
-            // Snap near-white paper/scanner texture to pure white
-            if (lum >= 235 || (bgR >= 235 && bgG >= 235 && bgB >= 235)) {
-              bgColor = '#ffffff';
-            } else {
-              bgColor = `#${bgR.toString(16).padStart(2,'0')}${bgG.toString(16).padStart(2,'0')}${bgB.toString(16).padStart(2,'0')}`;
-            }
+          // Snap document paper background (even with scanner artifacts) to pure white
+          if (maxLum >= 190 || (bgR >= 190 && bgG >= 190 && bgB >= 190)) {
+            bgColor = '#ffffff';
+          } else if (maxLum > 0) {
+            bgColor = `#${bgR.toString(16).padStart(2,'0')}${bgG.toString(16).padStart(2,'0')}${bgB.toString(16).padStart(2,'0')}`;
           }
 
           // ── Foreground color: prefer exactColor from pdf.js (100% accurate)
@@ -707,7 +721,7 @@ export default function AdvancedEditor() {
                 }
                 const lum = 0.299 * bR + 0.587 * bG + 0.114 * bB;
                 // Snap near-white paper/scanner texture to pure white
-                if (lum >= 235 || (bR >= 235 && bG >= 235 && bB >= 235)) {
+                if (lum >= 170 || (bR >= 170 && bG >= 170 && bB >= 170)) {
                   bgColor = '#ffffff';
                 } else {
                   bgColor = `#${((1 << 24) + (bR << 16) + (bG << 8) + bB).toString(16).slice(1)}`;
@@ -1316,11 +1330,10 @@ export default function AdvancedEditor() {
       };
 
       // 1. Separate native text replacements (from selection) vs other annotations
-      // Pure Latin/ASCII text edits go to PyMuPDF backend for 100% native vector font matching.
-      // Any edits containing Devanagari/Hindi/Unicode are handled by browser's HarfBuzz canvas engine,
-      // which shapes complex ligatures (like 'कर्मचारी') with zero tofu boxes or missing glyphs!
-      const nativeEditsAll = annotations.filter(a => a.type === 'text' && a.sourceWidth && a.sourceWidth > 0 && !hasNonLatinChars(a.text || ''));
-      const otherAnnotations = annotations.filter(a => !(a.type === 'text' && a.sourceWidth && a.sourceWidth > 0 && !hasNonLatinChars(a.text || '')));
+      // Both Latin and Hindi/Devanagari text edits go to PyMuPDF backend with fill=None
+      // so original text is removed cleanly at the PDF vector layer with ZERO whiteout and ZERO gray box!
+      const nativeEditsAll = annotations.filter(a => a.type === 'text' && a.sourceWidth && a.sourceWidth > 0);
+      const otherAnnotations = annotations.filter(a => !(a.type === 'text' && a.sourceWidth && a.sourceWidth > 0));
 
       let currentFileBuffer = await file.arrayBuffer();
 
@@ -1336,7 +1349,7 @@ export default function AdvancedEditor() {
           newText: ann.text || '',
           fontSize: ann.fontSize || 12,
           color: ann.color || '#000000',
-          bgColor: (ann.backgroundColor === '#fbfcfc' || !ann.backgroundColor) ? '#ffffff' : ann.backgroundColor,
+          bgColor: isPaperWhiteHex(ann.backgroundColor) ? '#ffffff' : ann.backgroundColor,
           bold: ann.bold || false,
           italic: ann.italic || false,
           fontFamily: ann.fontCssFamily || ann.originalFontName || '',
@@ -1501,8 +1514,9 @@ export default function AdvancedEditor() {
 
           if (ann.backgroundColor) {
             const { r: bgR, g: bgG, b: bgB } = hexToRgb(ann.backgroundColor);
-            const isNearWhite = (bgR >= 0.92 && bgG >= 0.92 && bgB >= 0.92);
-            const fillColor = isNearWhite ? rgb(1, 1, 1) : rgb(bgR, bgG, bgB);
+            const lum = 0.299 * bgR + 0.587 * bgG + 0.114 * bgB;
+            const isPaperWhite = (lum >= 0.65) || (bgR >= 0.65 && bgG >= 0.65 && bgB >= 0.65);
+            const fillColor = isPaperWhite ? rgb(1, 1, 1) : rgb(bgR, bgG, bgB);
             page.drawRectangle({
               x: pdfX,
               y: pdfY - clearPdfH - 1,
@@ -1856,7 +1870,7 @@ export default function AdvancedEditor() {
       const bh = Math.max(block.h, Math.round(fs * scale * 1.25) + 2);
       const baselinePt = match?.baseline || block.pdfBaselineY || ((block.y + block.h * 0.78) / scale);
       const id = Date.now().toString() + '_ie';
-      const bg = (block.bgColor === '#fbfcfc' || !block.bgColor) ? '#ffffff' : block.bgColor;
+      const bg = isPaperWhiteHex(block.bgColor) ? '#ffffff' : block.bgColor;
       const textAnn: Annotation = {
         id,
         type: 'text',
@@ -1926,6 +1940,26 @@ export default function AdvancedEditor() {
                   <span className="text-[10px] text-indigo-500 px-1 capitalize">{selectionGranularity}</span>
                 </div>
               )}
+              {/* Persistent Auto-Select ON/OFF Switch */}
+              <button
+                type="button"
+                onClick={() => {
+                  setContinuousSelect(prev => {
+                    const next = !prev;
+                    if (next) setActiveTool('select');
+                    return next;
+                  });
+                }}
+                title={continuousSelect ? "⚡ Auto-Select is ON: Hover & click any text to edit continuously without re-clicking Select. Click to turn OFF." : "Auto-Select is OFF: Click to turn ON."}
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold transition-all shadow-xs ml-1 ${
+                  continuousSelect
+                    ? 'bg-emerald-600 text-white hover:bg-emerald-700'
+                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200 border border-gray-300'
+                }`}
+              >
+                <span className={`w-2 h-2 rounded-full ${continuousSelect ? 'bg-white animate-pulse' : 'bg-gray-400'}`} />
+                <span>Auto-Select: {continuousSelect ? 'ON' : 'OFF'}</span>
+              </button>
               <div className="w-px h-6 bg-gray-200 mx-1"></div>
               {toolButton('text', <Type className="w-5 h-5" />, 'Text', 'Add New Text')}
               <button
@@ -2237,7 +2271,7 @@ export default function AdvancedEditor() {
                         top: ann.y,
                         width: ann.width || (ann.type === 'text' ? Math.max(16, Math.round((ann.text?.length || 4) * (ann.fontSize || 12) * (pageViewport?.scale || 1) * 0.62)) : undefined),
                         height: Math.max(ann.height || 18, ann.type === 'text' ? Math.round((ann.fontSize || 12) * (pageViewport?.scale || 1) * 1.25) : 0),
-                        backgroundColor: ann.type === 'text' ? ((ann.backgroundColor === '#fbfcfc' || !ann.backgroundColor) ? '#ffffff' : ann.backgroundColor) : ann.type === 'whiteout' ? (ann.color || '#ffffff') : ann.type === 'highlight' ? 'rgba(255, 255, 0, 0.4)' : ann.type === 'link' ? 'rgba(0, 0, 255, 0.2)' : 'transparent',
+                        backgroundColor: ann.type === 'text' ? (isPaperWhiteHex(ann.backgroundColor) ? '#ffffff' : ann.backgroundColor) : ann.type === 'whiteout' ? (ann.color || '#ffffff') : ann.type === 'highlight' ? 'rgba(255, 255, 0, 0.4)' : ann.type === 'link' ? 'rgba(0, 0, 255, 0.2)' : 'transparent',
                         border: selectedId === ann.id ? '1px solid #2563eb' : (ann.type === 'link' ? '1px dashed blue' : ann.type === 'table' ? '1px solid #ccc' : 'none'),
                         boxSizing: 'border-box',
                       }}
@@ -2423,7 +2457,7 @@ export default function AdvancedEditor() {
                               const bw = Math.max(block.w + 4, 16);
                               const bh = Math.max(block.h, Math.round(fs * scale * 1.25) + 2);
                               const baselinePt = match?.baseline || block.pdfBaselineY || ((block.y + block.h * 0.78) / scale);
-                              const bg = (block.bgColor === '#fbfcfc' || !block.bgColor) ? '#ffffff' : block.bgColor;
+                              const bg = isPaperWhiteHex(block.bgColor) ? '#ffffff' : block.bgColor;
                               const textAnn: Annotation = {
                                 id,
                                 type: 'text',
@@ -2447,7 +2481,9 @@ export default function AdvancedEditor() {
                               };
                               setAnnotations(prev => [...prev, textAnn]);
                               setSelectedId(textAnn.id);
-                              setActiveTool(null);
+                              if (!continuousSelect) {
+                                setActiveTool(null);
+                              }
                             }
                           }}
                           onDoubleClick={e => {
@@ -2565,7 +2601,7 @@ export default function AdvancedEditor() {
                     const isBold = match?.bold ?? block.bold ?? false;
                     const isItalic = match?.italic ?? block.italic ?? false;
                     const fontFam = pdfFontToCss(match?.fontName || block.fontName);
-                    const bg = (block.bgColor === '#fbfcfc' || !block.bgColor) ? '#ffffff' : block.bgColor;
+                    const bg = isPaperWhiteHex(block.bgColor) ? '#ffffff' : block.bgColor;
                     return (
                       <div
                         style={{
@@ -3204,7 +3240,7 @@ export default function AdvancedEditor() {
                   y: block.y,
                   width: block.w,
                   height: block.h,
-                  color: block.bgColor || '#ffffff',
+                  color: isPaperWhiteHex(block.bgColor) ? '#ffffff' : (block.bgColor || '#ffffff'),
                 }]);
                 setContextMenu({ visible: false, x: 0, y: 0, block: null });
               }}
