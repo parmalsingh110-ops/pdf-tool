@@ -382,24 +382,93 @@ export default function SplitPDF() {
 
   return (
     <div className="flex-1 flex flex-col items-center justify-start p-6 md:p-8 min-h-screen bg-gradient-to-br from-orange-50/40 via-white to-slate-50">
-      <div className="text-center mb-10 max-w-2xl">
+      <div className="text-center mb-8 max-w-3xl">
         <div className="inline-flex items-center justify-center w-14 h-14 bg-orange-100 rounded-2xl mb-4">
           <Scissors className="w-7 h-7 text-orange-600" />
         </div>
         <h1 className="text-4xl font-extrabold text-gray-900 mb-3">Split PDF File</h1>
-        <p className="text-lg text-gray-500 mb-3">Extract pages visually. Select individually, by range, or split into chunks.</p>
-        <div className="flex flex-wrap items-center justify-center gap-2">
+        <p className="text-lg text-gray-500 mb-3">Extract pages visually. Split by exact target file size, invoice keyword, or custom ranges.</p>
+        <div className="flex flex-wrap items-center justify-center gap-2 mt-2">
+          <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold bg-teal-100 text-teal-800 shadow-xs">
+            💾 Split by Target Size (&lt;2MB Govt / WhatsApp)
+          </span>
+          <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold bg-indigo-100 text-indigo-800 shadow-xs">
+            🔍 Split by Keyword / Invoice Title
+          </span>
+          <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold bg-orange-100 text-orange-800 shadow-xs">
+            ✂️ Visual Page Selector
+          </span>
           <Link
             to="/split-in-half"
-            className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-orange-100 text-orange-800 hover:bg-orange-200 transition-colors shadow-xs"
+            className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 hover:bg-amber-200 transition-colors shadow-xs"
           >
-            ✂ Need to split 2-page book spreads in half? Try Split In Half →
+            ✂ Need to split 2-page book spreads? Split In Half →
           </Link>
         </div>
       </div>
 
       {!file ? (
-        <FileDropzone onDrop={handleDrop} multiple={false} title="Drop PDF here or click to select" />
+        <div className="w-full max-w-5xl space-y-6">
+          <FileDropzone onDrop={handleDrop} multiple={false} title="Drop PDF here or click to select" />
+
+          {/* Supported Split Modes Showcase */}
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-5 h-5 text-orange-600" />
+                <h3 className="text-base font-bold text-gray-900">Supported Split Modes</h3>
+                <span className="text-[10px] font-bold uppercase tracking-wider bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full">Choose & Drop</span>
+              </div>
+              <span className="text-xs text-gray-400">Click any mode to pre-select it</span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+              {modes.map(m => (
+                <button
+                  key={m.id}
+                  type="button"
+                  onClick={() => setSplitMode(m.id)}
+                  className={`flex items-start gap-3 p-4 rounded-xl border-2 text-left transition-all ${
+                    splitMode === m.id
+                      ? colorMap[m.color] + ' ring-2 ring-offset-1 ring-current shadow-xs'
+                      : 'border-gray-100 bg-gray-50/60 hover:border-gray-200'
+                  }`}
+                >
+                  <m.icon className="w-5 h-5 mt-0.5 shrink-0" />
+                  <div>
+                    <div className="font-bold text-sm text-gray-900">{m.label}</div>
+                    <div className="text-xs text-gray-500 mt-1 leading-relaxed">{m.desc}</div>
+                  </div>
+                </button>
+              ))}
+            </div>
+
+            {/* Mode Specific Preview / Quick Info */}
+            <div className="mt-4 p-4 rounded-xl bg-slate-50 border border-slate-100 flex items-center justify-between">
+              <div className="text-xs text-slate-600">
+                {splitMode === 'size' && (
+                  <span>⚡ <strong>Target Size Mode:</strong> Guarantees output files stay strictly under 2MB for Govt portals (SSC, UPSC) or 16MB for WhatsApp without trial and error.</span>
+                )}
+                {splitMode === 'keyword' && (
+                  <span>🔍 <strong>Keyword / Invoice Mode:</strong> Uses OCR and PDF text extraction to cut new documents whenever terms like "Invoice", "Salary Slip", or "Roll No" appear.</span>
+                )}
+                {splitMode === 'all' && (
+                  <span>📑 <strong>All Pages:</strong> Every single page of your document will be exported into an individual single-page PDF.</span>
+                )}
+                {splitMode === 'selection' && (
+                  <span>🎯 <strong>Visual Selection:</strong> Interactive thumbnail grid lets you click specific pages to extract.</span>
+                )}
+                {splitMode === 'ranges' && (
+                  <span>✂️ <strong>Custom Ranges:</strong> Specify custom page ranges like 1-5, 8, 12-15 to split into exact segments.</span>
+                )}
+                {splitMode === 'every' && (
+                  <span>📚 <strong>Every N Pages:</strong> Automatically bundle every 2, 5, or 10 pages into equal chunks.</span>
+                )}
+              </div>
+              <span className="text-xs font-bold text-orange-600 shrink-0 ml-4">Active: {modes.find(m => m.id === splitMode)?.label}</span>
+            </div>
+          </div>
+        </div>
       ) : (
         <div className="w-full max-w-6xl space-y-6">
 

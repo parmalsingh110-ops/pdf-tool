@@ -406,26 +406,111 @@ export default function MergePDF() {
     }
   };
 
+  const renderSmartOptions = () => (
+    <div className="w-full bg-white rounded-2xl shadow-sm border border-gray-100 p-6 space-y-4">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Sparkles className="w-5 h-5 text-red-600" />
+          <h3 className="text-base font-bold text-gray-900">Smart Merge Enhancements</h3>
+          <span className="text-[10px] font-bold uppercase tracking-wider bg-red-100 text-red-700 px-2 py-0.5 rounded-full">Pro Features</span>
+        </div>
+        <span className="text-xs text-gray-400">Configure before or after uploading</span>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {/* Option 1: Table of Contents */}
+        <label className={`flex flex-col justify-between p-4 rounded-xl border-2 cursor-pointer transition-all ${generateToc ? 'border-red-500 bg-red-50/40 shadow-xs' : 'border-gray-100 bg-gray-50/50 hover:border-gray-200'}`}>
+          <div className="flex items-start justify-between gap-2 mb-2">
+            <div className="flex items-center gap-2">
+              <BookOpen className={`w-4 h-4 ${generateToc ? 'text-red-600' : 'text-gray-500'}`} />
+              <span className="text-sm font-bold text-gray-900">Clickable Index (TOC)</span>
+            </div>
+            <input
+              type="checkbox"
+              checked={generateToc}
+              onChange={e => setGenerateToc(e.target.checked)}
+              className="w-4 h-4 accent-red-600 rounded cursor-pointer mt-0.5"
+            />
+          </div>
+          <p className="text-xs text-gray-500 leading-relaxed">
+            Adds a Page 1 Index with <strong>clickable links</strong> jumping directly to each document.
+          </p>
+        </label>
+
+        {/* Option 2: Page Size Normalizer */}
+        <div className="flex flex-col justify-between p-4 rounded-xl border-2 border-gray-100 bg-gray-50/50">
+          <div className="flex items-center gap-2 mb-2">
+            <Maximize2 className="w-4 h-4 text-gray-700" />
+            <span className="text-sm font-bold text-gray-900">Page Dimensions</span>
+          </div>
+          <select
+            value={pageSizeMode}
+            onChange={e => setPageSizeMode(e.target.value as any)}
+            className="w-full text-xs font-semibold bg-white border border-gray-200 rounded-lg p-2 text-gray-800 focus:outline-none focus:border-red-500 cursor-pointer"
+          >
+            <option value="original">Original Page Sizes (Keep as-is)</option>
+            <option value="a4">Standardize to A4 (Proportional Center)</option>
+            <option value="letter">Standardize to US Letter (Proportional)</option>
+          </select>
+          <p className="text-[11px] text-gray-400 mt-2">
+            Fixes mismatched receipts & landscape scans.
+          </p>
+        </div>
+
+        {/* Option 3: Auto-Purge Blank Pages */}
+        <label className={`flex flex-col justify-between p-4 rounded-xl border-2 cursor-pointer transition-all ${removeBlankPages ? 'border-red-500 bg-red-50/40 shadow-xs' : 'border-gray-100 bg-gray-50/50 hover:border-gray-200'}`}>
+          <div className="flex items-start justify-between gap-2 mb-2">
+            <div className="flex items-center gap-2">
+              <Trash2 className={`w-4 h-4 ${removeBlankPages ? 'text-red-600' : 'text-gray-500'}`} />
+              <span className="text-sm font-bold text-gray-900">Purge Blank Pages</span>
+            </div>
+            <input
+              type="checkbox"
+              checked={removeBlankPages}
+              onChange={e => setRemoveBlankPages(e.target.checked)}
+              className="w-4 h-4 accent-red-600 rounded cursor-pointer mt-0.5"
+            />
+          </div>
+          <p className="text-xs text-gray-500 leading-relaxed">
+            Scans & skips empty white scanner pages before merging.
+          </p>
+        </label>
+      </div>
+    </div>
+  );
+
   return (
     <div className="flex-1 flex flex-col items-center justify-start p-6 md:p-8 min-h-screen bg-gradient-to-br from-red-50/40 via-white to-slate-50">
-      <div className="text-center mb-10 max-w-2xl">
+      <div className="text-center mb-8 max-w-3xl">
         <div className="inline-flex items-center justify-center w-14 h-14 bg-red-100 rounded-2xl mb-4">
           <Layers className="w-7 h-7 text-red-600" />
         </div>
         <h1 className="text-4xl font-extrabold text-gray-900 mb-3">Merge PDF Files</h1>
         <p className="text-lg text-gray-500 mb-3">Combine multiple PDFs into one. See thumbnail previews, drag to reorder.</p>
-        <div className="flex flex-wrap items-center justify-center gap-2">
+        <div className="flex flex-wrap items-center justify-center gap-2 mt-2">
+          <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold bg-red-100 text-red-800 shadow-xs">
+            📑 Smart Clickable TOC Index
+          </span>
+          <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-800 shadow-xs">
+            📐 A4 / Letter Normalizer
+          </span>
+          <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 shadow-xs">
+            🧹 Auto-Purge Blank Pages
+          </span>
           <Link
             to="/alternate-mix"
             className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-teal-100 text-teal-800 hover:bg-teal-200 transition-colors shadow-xs"
           >
-            🔀 Need to interleave duplex odd/even pages? Try Alternate & Mix →
+            🔀 Alternate & Mix →
           </Link>
         </div>
       </div>
 
       {entries.length === 0 ? (
-        <FileDropzone onDrop={handleDrop} multiple title="Drop PDFs here or click to select multiple" />
+        <div className="w-full max-w-5xl space-y-6">
+          <FileDropzone onDrop={handleDrop} multiple title="Drop PDFs here or click to select multiple" />
+          {renderSmartOptions()}
+        </div>
       ) : mergedPdfUrl ? (
         <div className="w-full max-w-md bg-white rounded-2xl shadow-sm border border-gray-100 p-8 text-center">
           <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -528,73 +613,7 @@ export default function MergePDF() {
           </div>
 
           {/* ── Smart Merge Enterprise Options ── */}
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 space-y-4">
-            <div className="flex items-center gap-2 mb-2">
-              <Sparkles className="w-5 h-5 text-red-600" />
-              <h3 className="text-base font-bold text-gray-900">Smart Merge Enhancements</h3>
-              <span className="text-[10px] font-bold uppercase tracking-wider bg-red-100 text-red-700 px-2 py-0.5 rounded-full">Pro Features</span>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {/* Option 1: Table of Contents */}
-              <label className={`flex flex-col justify-between p-4 rounded-xl border-2 cursor-pointer transition-all ${generateToc ? 'border-red-500 bg-red-50/40 shadow-xs' : 'border-gray-100 bg-gray-50/50 hover:border-gray-200'}`}>
-                <div className="flex items-start justify-between gap-2 mb-2">
-                  <div className="flex items-center gap-2">
-                    <BookOpen className={`w-4 h-4 ${generateToc ? 'text-red-600' : 'text-gray-500'}`} />
-                    <span className="text-sm font-bold text-gray-900">Clickable Index (TOC)</span>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={generateToc}
-                    onChange={e => setGenerateToc(e.target.checked)}
-                    className="w-4 h-4 accent-red-600 rounded cursor-pointer mt-0.5"
-                  />
-                </div>
-                <p className="text-xs text-gray-500 leading-relaxed">
-                  Adds a Page 1 Index with <strong>clickable links</strong> jumping to each document.
-                </p>
-              </label>
-
-              {/* Option 2: Page Size Normalizer */}
-              <div className="flex flex-col justify-between p-4 rounded-xl border-2 border-gray-100 bg-gray-50/50">
-                <div className="flex items-center gap-2 mb-2">
-                  <Maximize2 className="w-4 h-4 text-gray-700" />
-                  <span className="text-sm font-bold text-gray-900">Page Dimensions</span>
-                </div>
-                <select
-                  value={pageSizeMode}
-                  onChange={e => setPageSizeMode(e.target.value as any)}
-                  className="w-full text-xs font-semibold bg-white border border-gray-200 rounded-lg p-2 text-gray-800 focus:outline-none focus:border-red-500 cursor-pointer"
-                >
-                  <option value="original">Original Page Sizes (Keep as-is)</option>
-                  <option value="a4">Standardize to A4 (Proportional Center)</option>
-                  <option value="letter">Standardize to US Letter (Proportional)</option>
-                </select>
-                <p className="text-[11px] text-gray-400 mt-2">
-                  Fixes mismatched receipts & landscape scans.
-                </p>
-              </div>
-
-              {/* Option 3: Auto-Purge Blank Pages */}
-              <label className={`flex flex-col justify-between p-4 rounded-xl border-2 cursor-pointer transition-all ${removeBlankPages ? 'border-red-500 bg-red-50/40 shadow-xs' : 'border-gray-100 bg-gray-50/50 hover:border-gray-200'}`}>
-                <div className="flex items-start justify-between gap-2 mb-2">
-                  <div className="flex items-center gap-2">
-                    <Trash2 className={`w-4 h-4 ${removeBlankPages ? 'text-red-600' : 'text-gray-500'}`} />
-                    <span className="text-sm font-bold text-gray-900">Purge Blank Pages</span>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={removeBlankPages}
-                    onChange={e => setRemoveBlankPages(e.target.checked)}
-                    className="w-4 h-4 accent-red-600 rounded cursor-pointer mt-0.5"
-                  />
-                </div>
-                <p className="text-xs text-gray-500 leading-relaxed">
-                  Scans & skips empty white scanner pages before merging.
-                </p>
-              </label>
-            </div>
-          </div>
+          {renderSmartOptions()}
 
           {/* Merge button */}
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">

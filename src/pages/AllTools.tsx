@@ -45,9 +45,9 @@ const categories = [
   {
     title: "Currently Available Tools",
     tools: [
-      { title: 'Merge PDF', path: '/merge', icon: Combine, color: 'text-red-500', bg: 'bg-red-50' },
+      { title: 'Merge PDF (TOC Index & Normalizer)', path: '/merge', icon: Combine, color: 'text-red-500', bg: 'bg-red-50' },
       { title: 'Alternate & Mix (Duplex)', path: '/alternate-mix', icon: Shuffle, color: 'text-teal-600', bg: 'bg-teal-50' },
-      { title: 'Split PDF', path: '/split', icon: Scissors, color: 'text-orange-500', bg: 'bg-orange-50' },
+      { title: 'Split PDF (by Size <2MB or Keyword)', path: '/split', icon: Scissors, color: 'text-orange-500', bg: 'bg-orange-50' },
       { title: 'Split PDF in Half', path: '/split-in-half', icon: Scissors, color: 'text-orange-600', bg: 'bg-orange-50' },
       { title: 'Flip PDF (Mirror)', path: '/flip', icon: FlipHorizontal, color: 'text-violet-600', bg: 'bg-violet-50' },
       { title: 'Remove Annotations', path: '/remove-annotations', icon: Trash2, color: 'text-rose-600', bg: 'bg-rose-50' },
@@ -331,7 +331,8 @@ const ROLE_PROFILES: RoleProfile[] = [
       { title: 'Clean Paper Signature', path: '/clean-signature', desc: 'Digitalize student signature on scholarship & exam forms.', icon: Pen, color: 'text-indigo-600', bg: 'bg-indigo-50', badge: 'Forms' },
       { title: 'Target Compress PDF', path: '/target-compress', desc: 'Shrink PDF to meet university portal size limits.', icon: Target, color: 'text-emerald-600', bg: 'bg-emerald-50', badge: 'Portal Fit' },
       { title: 'All Documents to Single PDF (<1 MB)', path: '/exam-document-merger', desc: 'Combine marksheets into single dossier under 1MB.', icon: Combine, color: 'text-blue-600', bg: 'bg-blue-50', badge: 'Dossier' },
-      { title: 'Merge PDF', path: '/merge', desc: 'Combine multiple assignment & practical pages.', icon: Combine, color: 'text-red-500', bg: 'bg-red-50', badge: 'Essentials' },
+      { title: 'Merge PDF (with Clickable Index)', path: '/merge', desc: 'Combine multiple PDFs with auto Table of Contents & A4 normalization.', icon: Combine, color: 'text-red-500', bg: 'bg-red-50', badge: 'Smart TOC' },
+      { title: 'Split PDF (by Size <2MB or Keyword)', path: '/split', desc: 'Split into files under 2MB for Govt portals or by Invoice keyword.', icon: Scissors, color: 'text-orange-500', bg: 'bg-orange-50', badge: 'Smart Split' },
       { title: 'Searchable PDF (OCR)', path: '/searchable-pdf', desc: 'Make scanned notes text-searchable with OCR.', icon: ScanSearch, color: 'text-blue-600', bg: 'bg-blue-50', badge: 'Study Notes' },
       { title: 'Word to PDF (Exact)', path: '/word-to-pdf-exact', desc: 'Convert reports to PDF with 100% formatting.', icon: FileType, color: 'text-indigo-600', bg: 'bg-indigo-50', badge: 'Project Reports' },
     ],

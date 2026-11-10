@@ -42,11 +42,11 @@ const TOOL_GROUPS = [
     tools: [
       { title: 'Scan to Print QR', desc: 'Beam mobile files to PC queue without WhatsApp.', path: '/scan-to-print', icon: Printer },
       { title: 'Passport Photo Sheet', desc: 'Print-ready photo grid on A4 & 4x6.', path: '/passport-photo-sheet', icon: ContactRound },
-      { title: 'Merge PDF', desc: 'Combine multiple PDFs into one.', path: '/merge', icon: Combine },
+      { title: 'Merge PDF', desc: 'Combine PDFs with Clickable TOC Index & A4 Normalizer.', path: '/merge', icon: Combine, badge: 'Smart TOC' },
       { title: 'Compress PDF', desc: 'Reduce file size instantly.', path: '/compress', icon: Minimize2 },
       { title: 'Edit PDF', desc: 'Annotate, edit text & layout.', path: '/edit', icon: Edit3 },
       { title: 'Alternate & Mix', desc: 'Mix odd & even duplex scanned pages.', path: '/alternate-mix', icon: Shuffle },
-      { title: 'Split PDF', desc: 'Separate PDF into pages.', path: '/split', icon: Scissors },
+      { title: 'Split PDF', desc: 'Split by size (<2MB Govt), invoice keyword, or ranges.', path: '/split', icon: Scissors, badge: 'By Size & Word' },
       { title: 'Split in Half', desc: 'Cut 2-page book scans down the center.', path: '/split-in-half', icon: Scissors },
       { title: 'Flip PDF', desc: 'Mirror pages for T-shirt transfers & scans.', path: '/flip', icon: FlipHorizontal },
       { title: 'Remove Annotations', desc: 'Batch strip highlights, comments & stamps.', path: '/remove-annotations', icon: Trash2 },
