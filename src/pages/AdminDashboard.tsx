@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { useSEO } from '../hooks/useSEO';
 import { getBackendUrl, getPendingTelemetryCount, flushTelemetryQueue } from '../lib/telemetry';
+import { isAllowedBackendOverride } from '../lib/privacy';
 
 interface TelemetryData {
   summary: {
@@ -127,6 +128,13 @@ export default function AdminDashboard() {
 
       if (res.status === 401) {
         setAuthError('Invalid admin passcode. Access denied.');
+        setIsAuthenticated(false);
+        setLoading(false);
+        return;
+      }
+
+      if (res.status === 503) {
+        setAuthError('Server ADMIN_SECRET_KEY is not configured. Set ADMIN_SECRET_KEY in your backend environment.');
         setIsAuthenticated(false);
         setLoading(false);
         return;
@@ -323,7 +331,15 @@ export default function AdminDashboard() {
                   type="button"
                   onClick={() => {
                     const clean = customBackendInput.trim().replace(/\/$/, '');
-                    localStorage.setItem('pdf_admin_backend_url', clean);
+                    if (clean && !isAllowedBackendOverride(clean)) {
+                      setAuthError('Untrusted backend URL blocked. Use an https://*.pdfmediasuite.in or https://*.onrender.com URL.');
+                      return;
+                    }
+                    if (clean) {
+                      localStorage.setItem('pdf_admin_backend_url', clean);
+                    } else {
+                      localStorage.removeItem('pdf_admin_backend_url');
+                    }
                     setBackendUrl(clean);
                     fetchTelemetry(passcode || inputPass, clean);
                   }}
@@ -640,9 +656,9 @@ export default function AdminDashboard() {
 
                       <div className="flex flex-wrap items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 pt-1">
                         <div className="flex items-center gap-3">
-                          {fileObj.name && (
+                          {(fileObj.extension || fileObj.type || fileObj.name) && (
                             <span>
-                              File: <strong>{fileObj.name}</strong> ({fileObj.sizeFormatted || 'N/A'})
+                              File: <strong>{fileObj.extension || fileObj.type || 'document'}</strong> ({fileObj.sizeFormatted || 'N/A'})
                             </span>
                           )}
                           <span className="flex items-center gap-1">

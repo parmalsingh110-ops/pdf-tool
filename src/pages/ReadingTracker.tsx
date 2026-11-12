@@ -8,6 +8,7 @@ import '../lib/pdfWorker';
 import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
+import { hashStorageId } from '../lib/privacy';
 
 type ReadingTheme = 'light' | 'dark' | 'sepia' | 'oled';
 
@@ -17,7 +18,7 @@ interface BookmarkItem {
   addedAt: string;
 }
 
-const STORAGE_KEY = (name: string) => `pdf_study_tracker_${name}`;
+const LEGACY_STORAGE_KEY = (name: string) => `pdf_study_tracker_${name}`;
 
 export default function ReadingTracker() {
   useSEO(
@@ -40,6 +41,7 @@ export default function ReadingTracker() {
   const [wpm, setWpm] = useState<number>(200);
 
   const [busy, setBusy] = useState(false);
+  const [storageKey, setStorageKey] = useState<string | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const pdfRef = useRef<pdfjsLib.PDFDocumentProxy | null>(null);
 
@@ -92,10 +94,31 @@ export default function ReadingTracker() {
     if (totalPages > 0) renderPage(current);
   }, [current, totalPages, renderPage]);
 
-  // Load saved progress from localStorage
+  // Load saved progress from localStorage (hashed key to avoid storing plaintext filenames)
   useEffect(() => {
-    if (file) {
-      const saved = localStorage.getItem(STORAGE_KEY(file.name));
+    if (!file) {
+      setStorageKey(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const digest = await hashStorageId(`${file.name}:${file.size}`);
+      const nextKey = `pdf_study_tracker_${digest}`;
+      const legacyKey = LEGACY_STORAGE_KEY(file.name);
+      if (cancelled) return;
+
+      let saved = localStorage.getItem(nextKey);
+      if (!saved) {
+        const legacySaved = localStorage.getItem(legacyKey);
+        if (legacySaved) {
+          saved = legacySaved;
+          try {
+            localStorage.setItem(nextKey, legacySaved);
+            localStorage.removeItem(legacyKey);
+          } catch {}
+        }
+      }
+      setStorageKey(nextKey);
       if (saved) {
         try {
           const d = JSON.parse(saved);
@@ -103,14 +126,17 @@ export default function ReadingTracker() {
           setBookmarks(d.bookmarks || []);
         } catch {}
       }
-    }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [file]);
 
   // Save progress automatically
   const saveProgress = useCallback(() => {
-    if (!file) return;
-    localStorage.setItem(STORAGE_KEY(file.name), JSON.stringify({ page: current, bookmarks }));
-  }, [file, current, bookmarks]);
+    if (!file || !storageKey) return;
+    localStorage.setItem(storageKey, JSON.stringify({ page: current, bookmarks }));
+  }, [file, storageKey, current, bookmarks]);
 
   useEffect(() => {
     if (totalPages > 0) saveProgress();
@@ -163,7 +189,9 @@ export default function ReadingTracker() {
 
   const reset = () => {
     setFile(null);
+    setStorageKey(null);
     setTotalPages(0);
+    setCurrent(0);
     setBookmarks([]);
   };
 

@@ -104,7 +104,7 @@ export interface PhotoSlotItem {
 }
 
 const bgRemoverConfig = {
-  publicPath: 'https://staticimgly.com/@imgly/background-removal-data/1.7.0/dist/',
+  publicPath: 'https://cdn.jsdelivr.net/npm/@imgly/background-removal-data@1.7.0/dist/',
   model: 'isnet_quint8' as const,
   device: 'cpu' as const,
   proxyToWorker: false,

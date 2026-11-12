@@ -18,13 +18,21 @@ import {
   Settings,
   Sparkles,
   Ticket,
+  Copy,
+  Check,
+  ShieldCheck,
 } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
 import '../lib/pdfWorker';
 import { useSEO } from '../hooks/useSEO';
 import { usePageSEO } from '../lib/usePageSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
-import { apiFetch, API_BASE } from '../lib/api';
+import { apiFetch } from '../lib/api';
+import {
+  generateSecretToken,
+  encryptBytesWithKey,
+  decryptBytesWithKey,
+} from '../lib/privacy';
 
 interface KioskJob {
   id: string;
@@ -43,6 +51,33 @@ interface KioskJob {
   status: 'pending' | 'printed' | 'cancelled';
 }
 
+const KIOSK_STATION_ID_KEY = 'pms_kiosk_station_id';
+const KIOSK_STATION_SECRET_KEY = 'pms_kiosk_station_secret';
+const KIOSK_E2EE_KEY = 'pms_kiosk_e2ee_key';
+const KIOSK_SHOP_PIN_KEY = 'pms_kiosk_shop_pin';
+
+const makeKioskStationId = (): string => {
+  const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+  let suffix = '';
+  if (typeof window !== 'undefined' && window.crypto?.getRandomValues) {
+    const arr = new Uint8Array(6);
+    window.crypto.getRandomValues(arr);
+    for (let i = 0; i < 6; i++) suffix += chars[arr[i] % chars.length];
+  } else {
+    for (let i = 0; i < 6; i++) suffix += chars[Math.floor(Math.random() * chars.length)];
+  }
+  return `KS${suffix}`;
+};
+
+const parseKioskHashKey = (hashStr: string): string => {
+  try {
+    const clean = hashStr.startsWith('#') ? hashStr.slice(1) : hashStr;
+    return (new URLSearchParams(clean).get('k') || '').trim();
+  } catch {
+    return '';
+  }
+};
+
 export default function CounterKiosk() {
   useSEO(
     'Fullscreen Counter Self-Service Kiosk — Client Self-Print Terminal | PDF Media Suite',
@@ -56,13 +91,73 @@ export default function CounterKiosk() {
     '/counter-kiosk'
   );
 
+  const [stationId] = useState<string>(() => {
+    if (typeof window === 'undefined') return 'KSDEFAULT';
+    const urlStation = (new URLSearchParams(window.location.search).get('station') || '')
+      .trim()
+      .toUpperCase()
+      .replace(/[^A-Z0-9]/g, '');
+    if (urlStation.length >= 4 && urlStation !== 'KIOSKSTATION') return urlStation;
+    try {
+      const saved = localStorage.getItem(KIOSK_STATION_ID_KEY);
+      if (saved && saved !== 'KIOSKSTATION') return saved;
+      const fresh = makeKioskStationId();
+      localStorage.setItem(KIOSK_STATION_ID_KEY, fresh);
+      return fresh;
+    } catch {
+      return makeKioskStationId();
+    }
+  });
+
+  const [isPairedTablet] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    const params = new URLSearchParams(window.location.search);
+    return params.get('mode') === 'kiosk' && Boolean(params.get('station'));
+  });
+
+  const [stationReadToken] = useState<string>(() => {
+    if (typeof window === 'undefined') return '';
+    // Paired customer tablets do NOT receive read permission for other customers' jobs
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('mode') === 'kiosk' && params.get('station')) return '';
+    try {
+      let tok = localStorage.getItem(KIOSK_STATION_SECRET_KEY) || '';
+      if (!tok || tok.length < 16) {
+        tok = generateSecretToken(24);
+        localStorage.setItem(KIOSK_STATION_SECRET_KEY, tok);
+      }
+      return tok;
+    } catch {
+      return generateSecretToken(24);
+    }
+  });
+
+  const [stationE2eeKey] = useState<string>(() => {
+    if (typeof window === 'undefined') return '';
+    const hashKey = parseKioskHashKey(window.location.hash || '');
+    if (hashKey) return hashKey;
+    try {
+      let k = localStorage.getItem(KIOSK_E2EE_KEY) || '';
+      if (!k || k.length < 32) {
+        k = generateSecretToken(32);
+        localStorage.setItem(KIOSK_E2EE_KEY, k);
+      }
+      return k;
+    } catch {
+      return generateSecretToken(32);
+    }
+  });
+
+  const [copiedTabletLink, setCopiedTabletLink] = useState(false);
   const [viewMode, setViewMode] = useState<'customer' | 'shopkeeper'>('customer');
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [pinInput, setPinInput] = useState('');
   const [showPinModal, setShowPinModal] = useState(false);
   const [queue, setQueue] = useState<KioskJob[]>(() => {
     try {
-      const saved = localStorage.getItem('pms_kiosk_queue');
+      // Wipe legacy unencrypted localStorage key if present
+      localStorage.removeItem('pms_kiosk_queue');
+      const saved = sessionStorage.getItem('pms_kiosk_session_queue');
       return saved ? JSON.parse(saved) : [];
     } catch {
       return [];
@@ -83,37 +178,76 @@ export default function CounterKiosk() {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // BroadcastChannel + Cloud Relay Polling for cross-device sync (Counter tablet -> Main PC)
+  // BroadcastChannel + Authenticated Cloud Relay Polling (Isolated per-shop room)
   useEffect(() => {
-    const channel = new BroadcastChannel('pms_kiosk_sync');
+    const channel = new BroadcastChannel(`pms_kiosk_sync_${stationId}`);
     channel.onmessage = (event) => {
       if (event.data?.type === 'QUEUE_UPDATE') {
         setQueue(event.data.queue);
       }
     };
 
+    if (!stationReadToken || isPairedTablet) {
+      return () => channel.close();
+    }
+
+    let isRegistered = false;
+    const registerStation = async () => {
+      try {
+        const fd = new FormData();
+        fd.append('session_id', stationId);
+        fd.append('read_token', stationReadToken);
+        const res = await apiFetch('/api/print-drop/register', { method: 'POST', body: fd });
+        if (res.ok) isRegistered = true;
+      } catch {}
+    };
+
     const pollInterval = setInterval(async () => {
       try {
-        const res = await apiFetch('/api/print-drop/jobs/KIOSKSTATION');
+        if (!isRegistered) await registerStation();
+        let res = await apiFetch(`/api/print-drop/jobs/${stationId}`, {
+          headers: { 'X-Room-Token': stationReadToken },
+        });
+        if (res.status === 412) {
+          await registerStation();
+          res = await apiFetch(`/api/print-drop/jobs/${stationId}`, {
+            headers: { 'X-Room-Token': stationReadToken },
+          });
+        }
         if (!res.ok) return;
         const data = await res.json();
         if (Array.isArray(data?.jobs) && data.jobs.length > 0) {
-          const incomingJobs: KioskJob[] = data.jobs.map((j: any) => ({
-            id: j.id || `kiosk_${Date.now()}`,
-            tokenNumber: j.token_num || 1,
-            customerName: j.device_label || `Customer #${j.token_num || 1}`,
-            phone: j.sender_device_id !== 'kiosk_tablet' ? j.sender_device_id : '',
-            fileName: j.name || 'Document.pdf',
-            fileSize: j.size || 0,
-            fileDataUrl: `${API_BASE}/api/print-drop/file/KIOSKSTATION/${encodeURIComponent(j.id)}?keep=1`,
-            totalPages: 1,
-            printType: j.color_mode === 'color' ? 'color' : 'bw',
-            sides: 'single',
-            copies: j.copies || 1,
-            estimatedCost: Math.max(2, (j.copies || 1) * (j.color_mode === 'color' ? 10 : 2)),
-            timestamp: j.timestamp || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            status: 'pending',
-          }));
+          const incomingJobs: KioskJob[] = [];
+          for (const j of data.jobs) {
+            let blobUrl = '';
+            try {
+              const fileRes = await apiFetch(
+                `/api/print-drop/file/${stationId}/${encodeURIComponent(j.id)}`,
+                { headers: { 'X-Room-Token': stationReadToken } }
+              );
+              if (fileRes.ok) {
+                const rawBuf = await fileRes.arrayBuffer();
+                const { buffer: plainBuf } = await decryptBytesWithKey(rawBuf, stationE2eeKey);
+                blobUrl = URL.createObjectURL(new Blob([plainBuf], { type: j.type || 'application/pdf' }));
+              }
+            } catch {}
+            incomingJobs.push({
+              id: j.id || `kiosk_${Date.now()}`,
+              tokenNumber: j.tokenNum || j.token_num || 1,
+              customerName: j.deviceLabel || j.device_label || `Customer #${j.tokenNum || j.token_num || 1}`,
+              phone: j.senderDeviceId && j.senderDeviceId !== 'kiosk_tablet' ? j.senderDeviceId : '',
+              fileName: j.name || 'Document.pdf',
+              fileSize: j.size || 0,
+              fileDataUrl: blobUrl,
+              totalPages: 1,
+              printType: (j.colorMode || j.color_mode) === 'color' ? 'color' : 'bw',
+              sides: 'single',
+              copies: j.copies || 1,
+              estimatedCost: Math.max(2, (j.copies || 1) * ((j.colorMode || j.color_mode) === 'color' ? 10 : 2)),
+              timestamp: j.timestamp || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              status: 'pending',
+            });
+          }
           setQueue((prev) => {
             const existingIds = new Set(prev.map((item) => item.id));
             const uniqueNew = incomingJobs.filter((item) => !existingIds.has(item.id));
@@ -127,22 +261,20 @@ export default function CounterKiosk() {
       channel.close();
       clearInterval(pollInterval);
     };
-  }, []);
+  }, [stationId, stationReadToken, stationE2eeKey, isPairedTablet]);
 
   const saveQueue = (newQueue: KioskJob[]) => {
     setQueue(newQueue);
     try {
-      // Store lightweight metadata in localStorage (exclude heavy fileDataUrl to avoid 5MB quota crash)
+      // Ephemeral sessionStorage only (never lingers permanently on shared PCs after tab closes)
       const safeQueue = newQueue.slice(0, 50).map(({ fileDataUrl, ...meta }) => ({
         ...meta,
-        fileDataUrl: fileDataUrl.length < 2000 ? fileDataUrl : '',
+        fileDataUrl: fileDataUrl.startsWith('blob:') ? fileDataUrl : '',
       }));
-      localStorage.setItem('pms_kiosk_queue', JSON.stringify(safeQueue));
-    } catch (e) {
-      console.warn('LocalStorage quota guard protected kiosk queue', e);
-    }
+      sessionStorage.setItem('pms_kiosk_session_queue', JSON.stringify(safeQueue));
+    } catch {}
     try {
-      const channel = new BroadcastChannel('pms_kiosk_sync');
+      const channel = new BroadcastChannel(`pms_kiosk_sync_${stationId}`);
       channel.postMessage({ type: 'QUEUE_UPDATE', queue: newQueue });
       channel.close();
     } catch {}
@@ -215,21 +347,31 @@ export default function CounterKiosk() {
     const updated = [...queue, newJob];
     saveQueue(updated);
 
-    // Also push to cloud relay so a separate Operator PC receives the Kiosk Tablet job automatically
+    // Encrypt & push to isolated shop station relay when a separate Operator PC is paired
     if (uploadedFile) {
-      const fd = new FormData();
-      fd.append('session_id', 'KIOSKSTATION');
-      fd.append('job_id', newJob.id);
-      fd.append('sender_device_id', customerPhone.trim() || 'kiosk_tablet');
-      fd.append('device_label', newJob.customerName);
-      fd.append('copies', String(copies));
-      fd.append('color_mode', printType);
-      fd.append('orientation', 'auto');
-      fd.append('file', uploadedFile, uploadedFile.name);
-      void apiFetch('/api/print-drop/upload', {
-        method: 'POST',
-        body: fd,
-      }).catch(() => {});
+      void (async () => {
+        try {
+          let payloadBlob: Blob = uploadedFile;
+          if (stationE2eeKey) {
+            const plainBuf = await uploadedFile.arrayBuffer();
+            const encBuf = await encryptBytesWithKey(plainBuf, stationE2eeKey);
+            payloadBlob = new Blob([encBuf], { type: 'application/octet-stream' });
+          }
+          const fd = new FormData();
+          fd.append('session_id', stationId);
+          fd.append('job_id', newJob.id);
+          fd.append('sender_device_id', customerPhone.trim() || 'kiosk_tablet');
+          fd.append('device_label', newJob.customerName);
+          fd.append('copies', String(copies));
+          fd.append('color_mode', printType);
+          fd.append('orientation', 'auto');
+          fd.append('file', payloadBlob, uploadedFile.name);
+          await apiFetch('/api/print-drop/upload', {
+            method: 'POST',
+            body: fd,
+          });
+        } catch {}
+      })();
     }
     setCompletedJob(newJob);
     setIsSubmitting(false);
@@ -514,22 +656,40 @@ export default function CounterKiosk() {
         {/* SHOPKEEPER VIEW */}
         {viewMode === 'shopkeeper' && (
           <div className="space-y-6">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="text-2xl font-black text-slate-900 dark:text-white">Live Print Jobs Queue</h2>
-                <p className="text-xs text-slate-500">
-                  {queue.filter((j) => j.status === 'pending').length} pending jobs waiting to print
+                <p className="text-xs text-slate-500 flex items-center gap-2">
+                  <span>{queue.filter((j) => j.status === 'pending').length} pending jobs waiting to print</span>
+                  <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-bold">
+                    <ShieldCheck className="w-3.5 h-3.5" /> Station: {stationId} (E2EE Isolated)
+                  </span>
                 </p>
               </div>
 
-              {queue.length > 0 && (
+              <div className="flex items-center gap-2">
                 <button
-                  onClick={handleClearAll}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40"
+                  type="button"
+                  onClick={() => {
+                    const pairUrl = `${window.location.origin}/counter-kiosk?station=${stationId}&mode=kiosk${stationE2eeKey ? `#k=${stationE2eeKey}` : ''}`;
+                    navigator.clipboard.writeText(pairUrl).catch(() => {});
+                    setCopiedTabletLink(true);
+                    setTimeout(() => setCopiedTabletLink(false), 2000);
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-slate-200/80 dark:bg-slate-800 text-slate-800 dark:text-slate-200 hover:bg-emerald-50 dark:hover:bg-emerald-950/50 transition-colors"
                 >
-                  <Trash2 className="w-3.5 h-3.5" /> Clear Queue
+                  {copiedTabletLink ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                  {copiedTabletLink ? 'Tablet Link Copied!' : 'Copy Paired Tablet Link'}
                 </button>
-              )}
+                {queue.length > 0 && (
+                  <button
+                    onClick={handleClearAll}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" /> Clear Queue
+                  </button>
+                )}
+              </div>
             </div>
 
             {queue.length === 0 ? (
@@ -633,12 +793,19 @@ export default function CounterKiosk() {
                 </button>
                 <button
                   onClick={() => {
-                    if (pinInput === '1234' || pinInput === '') {
+                    const expectedPin = (() => {
+                      try {
+                        return localStorage.getItem(KIOSK_SHOP_PIN_KEY) || '1234';
+                      } catch {
+                        return '1234';
+                      }
+                    })();
+                    if (pinInput.trim() === expectedPin) {
                       setViewMode('shopkeeper');
                       setShowPinModal(false);
                       setPinInput('');
                     } else {
-                      alert('Incorrect PIN (Default is 1234)');
+                      alert('Incorrect PIN. Please enter your shopkeeper PIN.');
                     }
                   }}
                   className="py-2.5 text-xs font-bold bg-emerald-600 rounded-xl text-white"

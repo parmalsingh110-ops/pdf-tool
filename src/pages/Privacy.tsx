@@ -4,8 +4,8 @@ import { useSEO } from '../hooks/useSEO';
 
 export default function Privacy() {
   useSEO(
-    'Privacy Policy — 100% Client-Side Private Document Processing | PDF Media Suite',
-    'PDF Media Suite operates directly inside your web browser. Your confidential PDF and document files never leave your device and are never stored on external servers.'
+    'Privacy Policy — Browser-First & Ephemeral Private Document Processing | PDF Media Suite',
+    'PDF Media Suite runs most tools directly in your browser. Server-assisted Office/OCR conversions and E2EE print relays process files ephemerally with immediate deletion and zero permanent storage.'
   );
 
   return (
@@ -27,6 +27,12 @@ export default function Privacy() {
         <p>
           Most tools in PDF Media Suite run <strong>in your browser</strong> (client-side). Files you select are
           processed locally where possible and are not uploaded to our servers by default.
+        </p>
+        <p>
+          <strong>Server-assisted conversions &amp; ephemeral E2EE relays</strong> (such as PDF/Office conversions,
+          lossless unlock, URL-to-PDF, or QR Print Drop / Counter Kiosk) process data ephemerally with immediate
+          post-response deletion or short TTL auto-purge (≤ 20 minutes). Print Drop &amp; TalkingNotes QR transfers
+          use browser-side AES-256-GCM encryption with per-room access tokens.
         </p>
         <p>
           <strong>OCR &amp; image tools</strong> may download language or model data from third-party CDNs

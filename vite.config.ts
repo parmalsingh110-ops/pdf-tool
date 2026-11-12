@@ -1,5 +1,6 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
+import crypto from 'crypto';
 import path from 'path';
 import { defineConfig, type Plugin } from 'vite';
 import { nodePolyfills } from 'vite-plugin-node-polyfills';
@@ -14,19 +15,125 @@ import { nodePolyfills } from 'vite-plugin-node-polyfills';
 function pmsShareTargetServerPlugin(): Plugin {
   // Built-in local print-drop relay so localhost:3000 works even when Python port 8000 is not running
   const localPrintRooms = new Map<string, any[]>();
-  const localPrintFiles = new Map<string, { buffer: Buffer; mime: string }>();
+  const localPrintFiles = new Map<string, { buffer: Buffer; mime: string; createdAt: number }>();
   const localRoomTokens = new Map<string, number>();
   const localDeviceTokens = new Map<string, Map<string, number>>();
+  const localRoomSecrets = new Map<string, string>();
+  const localRoomTimestamps = new Map<string, number>();
+
+  const hashToken = (tok: string) =>
+    crypto.createHash('sha256').update(tok.trim()).digest('hex');
+
+  const safeEqualHex = (a: string, b: string) => {
+    if (!a || !b || a.length !== b.length) return false;
+    return crypto.timingSafeEqual(Buffer.from(a, 'utf8'), Buffer.from(b, 'utf8'));
+  };
+
+  const extractRoomToken = (req: any): string => {
+    const hdr = req.headers?.['x-room-token'];
+    if (typeof hdr === 'string' && hdr.trim()) return hdr.trim();
+    const auth = req.headers?.['authorization'];
+    if (typeof auth === 'string' && auth.startsWith('Bearer ')) return auth.slice(7).trim();
+    return '';
+  };
+
+  const pruneLocalRelay = () => {
+    const now = Date.now();
+    for (const [key, item] of localPrintFiles.entries()) {
+      if (now - item.createdAt > 15 * 60 * 1000) {
+        localPrintFiles.delete(key);
+      }
+    }
+    for (const [room, ts] of localRoomTimestamps.entries()) {
+      if (now - ts > 20 * 60 * 1000) {
+        localRoomTimestamps.delete(room);
+        localPrintRooms.delete(room);
+        localRoomTokens.delete(room);
+        localDeviceTokens.delete(room);
+        localRoomSecrets.delete(room);
+      }
+    }
+  };
+
+  const sweepTimer = setInterval(pruneLocalRelay, 60 * 1000);
+  if (typeof sweepTimer.unref === 'function') sweepTimer.unref();
 
   const handleShareTargetMiddleware = (req: any, res: any, next: () => void) => {
     const reqUrl = String(req.url || '');
 
+    if (reqUrl.startsWith('/api/print-drop/register') && req.method === 'POST') {
+      pruneLocalRelay();
+      const chunks: Buffer[] = [];
+      req.on('data', (c: Buffer) => chunks.push(c));
+      req.on('end', async () => {
+        try {
+          const rawBody = Buffer.concat(chunks);
+          const headers: Record<string, string> = {};
+          for (const [k, v] of Object.entries(req.headers || {})) {
+            if (typeof v === 'string') headers[k] = v;
+            else if (Array.isArray(v)) headers[k] = v.join(', ');
+          }
+          const webReq = new Request(`http://localhost${reqUrl}`, { method: 'POST', headers, body: rawBody });
+          const formData = await webReq.formData();
+          const cleanSession = String(formData.get('session_id') || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+          const token = String(formData.get('read_token') || extractRoomToken(req) || '').trim();
+          if (cleanSession.length < 3 || cleanSession.length > 12 || cleanSession === 'KIOSKSTATION' || cleanSession === 'AUDIONOTES' || token.length < 16) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ detail: 'Invalid room PIN or secret token' }));
+            return;
+          }
+          const h = hashToken(token);
+          const existing = localRoomSecrets.get(cleanSession);
+          if (existing) {
+            if (!safeEqualHex(h, existing)) {
+              res.statusCode = 409;
+              res.end(JSON.stringify({ detail: 'Room PIN already claimed' }));
+              return;
+            }
+            localRoomTimestamps.set(cleanSession, Date.now());
+            res.statusCode = 200;
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({ success: true, session_id: cleanSession }));
+            return;
+          }
+          if ((localPrintRooms.get(cleanSession) || []).length > 0) {
+            res.statusCode = 409;
+            res.end(JSON.stringify({ detail: 'Room already active' }));
+            return;
+          }
+          localRoomSecrets.set(cleanSession, h);
+          localRoomTimestamps.set(cleanSession, Date.now());
+          res.statusCode = 200;
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify({ success: true, session_id: cleanSession }));
+        } catch {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: 'Relay register error' }));
+        }
+      });
+      return;
+    }
+
     // ── Built-in Print-Drop Relay Endpoints (/api/print-drop/*) ──────────
     if (reqUrl.startsWith('/api/print-drop/jobs/') && req.method === 'GET') {
+      pruneLocalRelay();
       const sessionRaw = reqUrl.split('/api/print-drop/jobs/')[1]?.split('?')[0] || '';
       const cleanSession = sessionRaw.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+      const expected = localRoomSecrets.get(cleanSession);
+      if (!expected) {
+        res.statusCode = 412;
+        res.end(JSON.stringify({ detail: 'Room not registered' }));
+        return;
+      }
+      const provided = extractRoomToken(req);
+      if (!provided || !safeEqualHex(hashToken(provided), expected)) {
+        res.statusCode = 403;
+        res.end(JSON.stringify({ detail: 'Unauthorized' }));
+        return;
+      }
       const jobs = localPrintRooms.get(cleanSession) || [];
       localPrintRooms.delete(cleanSession);
+      localRoomTimestamps.set(cleanSession, Date.now());
       res.statusCode = 200;
       res.setHeader('Content-Type', 'application/json');
       res.end(JSON.stringify({ success: true, jobs }));
@@ -34,10 +141,23 @@ function pmsShareTargetServerPlugin(): Plugin {
     }
 
     if (reqUrl.startsWith('/api/print-drop/file/') && req.method === 'GET') {
-      const parts = reqUrl.split('/api/print-drop/file/')[1]?.split('?')[0]?.split('/') || [];
-      const key = `${(parts[0] || '').toUpperCase()}_${parts[1] || ''}`;
+      pruneLocalRelay();
+      const [pathPart, queryPart = ''] = reqUrl.split('/api/print-drop/file/')[1]?.split('?') || ['', ''];
+      const parts = pathPart.split('/');
+      const cleanSession = (parts[0] || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+      const expected = localRoomSecrets.get(cleanSession);
+      const provided = extractRoomToken(req);
+      if (!expected || !provided || !safeEqualHex(hashToken(provided), expected)) {
+        res.statusCode = 403;
+        res.end('Unauthorized');
+        return;
+      }
+      const key = `${cleanSession}_${parts[1] || ''}`;
       const stored = localPrintFiles.get(key);
-      localPrintFiles.delete(key);
+      const keepAudio = cleanSession.startsWith('TN') && queryPart.includes('keep=1');
+      if (!keepAudio) {
+        localPrintFiles.delete(key);
+      }
       if (!stored) {
         res.statusCode = 404;
         res.end('Not found');
@@ -45,14 +165,31 @@ function pmsShareTargetServerPlugin(): Plugin {
       }
       res.statusCode = 200;
       res.setHeader('Content-Type', stored.mime || 'application/octet-stream');
+      res.setHeader('Cache-Control', 'private, no-cache, no-store, must-revalidate');
       res.end(stored.buffer);
       return;
     }
 
     if (reqUrl.startsWith('/api/print-drop/upload') && req.method === 'POST') {
+      pruneLocalRelay();
       const chunks: Buffer[] = [];
-      req.on('data', (c: Buffer) => chunks.push(c));
+      let totalReceived = 0;
+      let tooLarge = false;
+      req.on('data', (c: Buffer) => {
+        totalReceived += c.byteLength;
+        if (totalReceived > 105 * 1024 * 1024) {
+          tooLarge = true;
+          chunks.length = 0;
+          return;
+        }
+        chunks.push(c);
+      });
       req.on('end', async () => {
+        if (tooLarge) {
+          res.statusCode = 413;
+          res.end(JSON.stringify({ error: 'File too large (max 100MB)' }));
+          return;
+        }
         try {
           const rawBody = Buffer.concat(chunks);
           const headers: Record<string, string> = {};
@@ -69,7 +206,7 @@ function pmsShareTargetServerPlugin(): Plugin {
           const sessionRaw = String(formData.get('session_id') || '');
           const cleanSession = sessionRaw.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
           const fileEntry = formData.get('file') as File | null;
-          if (!cleanSession || !fileEntry || typeof fileEntry.arrayBuffer !== 'function') {
+          if (!cleanSession || cleanSession === 'KIOSKSTATION' || cleanSession === 'AUDIONOTES' || !fileEntry || typeof fileEntry.arrayBuffer !== 'function') {
             res.statusCode = 400;
             res.end(JSON.stringify({ error: 'Invalid upload' }));
             return;
@@ -98,7 +235,9 @@ function pmsShareTargetServerPlugin(): Plugin {
           localPrintFiles.set(`${cleanSession}_${jobId}`, {
             buffer: buf,
             mime: fileEntry.type || 'application/pdf',
+            createdAt: Date.now(),
           });
+          localRoomTimestamps.set(cleanSession, Date.now());
 
           const job = {
             id: jobId,
@@ -329,6 +468,15 @@ export default defineConfig(() => {
         include: ['crypto', 'buffer', 'stream', 'vm', 'http', 'https', 'url', 'assert'],
       }),
     ],
+    build: {
+      target: 'es2022',
+    },
+    optimizeDeps: {
+      exclude: ['harfbuzzjs'],
+      esbuildOptions: {
+        target: 'es2022',
+      },
+    },
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),
@@ -358,7 +506,7 @@ export default defineConfig(() => {
           "font-src    'self' https://fonts.gstatic.com data:",
           "img-src     'self' data: blob: https:",
           "media-src   'self' blob:",
-          "connect-src 'self' wss: https://*.peerjs.com wss://*.peerjs.com https://api.qrserver.com https://*.onrender.com https://pdfmediasuite.in https://www.pdfmediasuite.in https://generativelanguage.googleapis.com https://cdn.jsdelivr.net https://tessdata.projectnaptha.com https://staticimgly.com https://tfhub.dev https://storage.googleapis.com http://localhost:8000 http://127.0.0.1:8000",
+          "connect-src 'self' wss: https://*.peerjs.com wss://*.peerjs.com https://*.onrender.com https://pdfmediasuite.in https://www.pdfmediasuite.in https://generativelanguage.googleapis.com https://cdn.jsdelivr.net https://tessdata.projectnaptha.com https://staticimgly.com https://tfhub.dev https://storage.googleapis.com http://localhost:8000 http://127.0.0.1:8000",
           "worker-src  'self' blob: https://cdn.jsdelivr.net https://pdfmediasuite.in https://www.pdfmediasuite.in",
           "object-src  'none'",
           "frame-src   'none'",

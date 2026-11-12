@@ -437,7 +437,7 @@ function handleFileDrop(file) {
   }
 
   chrome.tabs.create({
-    url: `${BASE_URL}${path}?utm_source=extension_dropzone&filename=${encodeURIComponent(file.name)}`,
+    url: `${BASE_URL}${path}?utm_source=extension_dropzone`,
   });
 }
 

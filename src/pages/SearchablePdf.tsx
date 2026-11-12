@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
-import { Search, Zap, CheckCircle2, Download, RotateCcw, AlertTriangle, Cpu, Cloud, ShieldCheck } from 'lucide-react';
-import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
+import { Search, Zap, CheckCircle2, Download, RotateCcw, AlertTriangle, Cpu, Cloud, ShieldCheck, Sparkles } from 'lucide-react';
+import { PDFDocument, StandardFonts } from 'pdf-lib';
 import 'regenerator-runtime/runtime';
 import fontkit from '@pdf-lib/fontkit';
 import * as pdfjsLib from 'pdfjs-dist';
@@ -11,6 +11,12 @@ import BackendLoader from '../components/BackendLoader';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { apiFetch } from '../lib/api';
+import {
+  preprocessCanvasForOcr,
+  extractTesseractWords,
+  mergeRecoveredBrowserOcrWords,
+  embedOcrWordsPixelLocked,
+} from '../lib/ocrLayerRenderer';
 
 type Stage = 'idle' | 'processing' | 'done' | 'error';
 type Lang = 'eng' | 'hin' | 'hin+eng';
@@ -19,12 +25,12 @@ type OcrEngine = 'browser' | 'cloud';
 export default function SearchablePdf() {
   useSEO(
     'Make PDF Searchable Online Free — OCR Hidden Text Layer | PDF Media Suite',
-    'Convert scanned PDFs into searchable and selectable PDFs online free. Dual-engine OCR runs in-browser or cloud without altering original document appearance.'
+    'Convert scanned PDFs into searchable and selectable PDFs online free. Dual-engine OCR runs in-browser or server Pro AI without altering original document appearance.'
   );
 
   usePageSEO(
-    'Make PDF Searchable (OCR) — Browser & Cloud Engine',
-    'Convert scanned PDFs into text-searchable PDFs without changing their appearance. Instant browser OCR with zero server upload, or cloud engine with auto-deskew.',
+    'Make PDF Searchable (OCR) — Pixel-Locked Multi-Layer Engine',
+    'Convert scanned PDFs into text-searchable PDFs without changing their appearance. Sub-point 3-Tr text matrix alignment, watermark cleaner, and local RapidOCR AI.',
   );
 
   const [file, setFile] = useState<File | null>(null);
@@ -37,6 +43,9 @@ export default function SearchablePdf() {
   const [engine, setEngine] = useState<OcrEngine>('browser');
   const [deskew, setDeskew] = useState(true);
   const [forceOcr, setForceOcr] = useState(true);
+  const [cleanWatermarks, setCleanWatermarks] = useState(true);
+  const [strictLocal, setStrictLocal] = useState(true);
+  const [indexedWordCount, setIndexedWordCount] = useState<number | null>(null);
 
   // In-browser OCR progress
   const [browserProgress, setBrowserProgress] = useState<{
@@ -116,81 +125,94 @@ export default function SearchablePdf() {
         },
       });
 
-      for (let i = 0; i < total; i++) {
-        const pageNum = i + 1;
-        setBrowserProgress({
-          currentPage: pageNum,
-          totalPages: total,
-          percent: 0,
-          status: `Rendering page ${pageNum} of ${total}...`,
-        });
+      let totalWordsDrawn = 0;
+      try {
+        for (let i = 0; i < total; i++) {
+          const pageNum = i + 1;
+          setBrowserProgress({
+            currentPage: pageNum,
+            totalPages: total,
+            percent: 0,
+            status: `Rendering page ${pageNum} of ${total}...`,
+          });
 
-        const page = await pdfjsDoc.getPage(pageNum);
-        const pdfLibPage = pdfDoc.getPage(i);
-        const { width: pdfW, height: pdfH } = pdfLibPage.getSize();
+          const page = await pdfjsDoc.getPage(pageNum);
+          const pdfLibPage = pdfDoc.getPage(i);
 
-        // Render at 2x resolution for high accuracy OCR
-        const vp = page.getViewport({ scale: 2.0 });
-        const canvas = document.createElement('canvas');
-        canvas.width = vp.width;
-        canvas.height = vp.height;
-        const ctx = canvas.getContext('2d')!;
+          // Adaptive ~300-DPI target OCR scale (2500px target width, capped cleanly for RAM)
+          const baseVp = page.getViewport({ scale: 1.0 });
+          const maxBaseDim = Math.max(baseVp.width, baseVp.height, 1);
+          const ocrScale = Math.min(
+            3.6,
+            Math.max(2.2, 2500 / Math.max(400, baseVp.width)),
+            3800 / maxBaseDim
+          );
+          const vp = page.getViewport({ scale: ocrScale });
 
-        // Fill background white
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, vp.width, vp.height);
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.round(vp.width);
+          canvas.height = Math.round(vp.height);
+          const ctx = canvas.getContext('2d')!;
 
-        await page.render({ canvasContext: ctx, viewport: vp, canvas }).promise;
+          // Flatten all PDF layers onto clean white composite canvas
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          await page.render({ canvasContext: ctx, viewport: vp, canvas }).promise;
 
-        setBrowserProgress({
-          currentPage: pageNum,
-          totalPages: total,
-          percent: 15,
-          status: `Running OCR on page ${pageNum} of ${total}...`,
-        });
+          setBrowserProgress({
+            currentPage: pageNum,
+            totalPages: total,
+            percent: 15,
+            status: cleanWatermarks
+              ? `Cleaning watermarks & running Pass 1 OCR on page ${pageNum} of ${total}...`
+              : `Running OCR on page ${pageNum} of ${total}...`,
+          });
 
-        const ret = await worker.recognize(canvas);
-        const dataAny = ret.data as any;
-        const words: any[] = dataAny.words || dataAny.lines?.flatMap((l: any) => l.words || []) || [];
-
-        const scaleX = pdfW / vp.width;
-        const scaleY = pdfH / vp.height;
-
-        for (const w of words) {
-          const text = (w.text || '').trim();
-          if (!text) continue;
-
-          const x0 = w.bbox.x0 * scaleX;
-          const y0 = w.bbox.y0 * scaleY;
-          const y1 = w.bbox.y1 * scaleY;
-
-          const wordH = y1 - y0;
-          // PDF coordinate system (0,0 is bottom-left)
-          const pdfY = pdfH - y1;
-
-          try {
-            const hasDevanagari = /[\u0900-\u097F]/.test(text);
-            const fontToUse = (hasDevanagari && devanagariFont) ? devanagariFont : helvetica;
-            // Draw invisible searchable text exactly over the scanned word image
-            pdfLibPage.drawText(text, {
-              x: x0,
-              y: pdfY,
-              size: Math.max(6, Math.min(36, wordH * 0.85)),
-              font: fontToUse,
-              color: rgb(0, 0, 0),
-              opacity: 0, // 100% invisible so scan looks pristine, but text is selectable & searchable!
-            });
-          } catch {
-            // Ignore glyph encoding errors on non-standard symbols
+          let ocrSourceCanvas: HTMLCanvasElement = canvas;
+          let cleanedCanvas: HTMLCanvasElement | null = null;
+          if (cleanWatermarks) {
+            cleanedCanvas = preprocessCanvasForOcr(canvas);
+            ocrSourceCanvas = cleanedCanvas;
           }
-        }
 
-        canvas.width = 0;
-        canvas.height = 0;
-        page.cleanup();
+          // CRITICAL: In Tesseract.js v7+, blocks: true is required to populate words & bounding boxes!
+          const ret = await worker.recognize(ocrSourceCanvas, {}, { blocks: true });
+          let words = extractTesseractWords(ret.data);
+
+          // Pass 2 Dual-Recovery: recover any faint ink-saver / thin words missed by watermark pass
+          if (cleanWatermarks) {
+            setBrowserProgress({
+              currentPage: pageNum,
+              totalPages: total,
+              percent: 65,
+              status: `Running Pass 2 ink-recovery check on page ${pageNum} of ${total}...`,
+            });
+            const rawRet = await worker.recognize(canvas, {}, { blocks: true });
+            const rawWords = extractTesseractWords(rawRet.data);
+            words = mergeRecoveredBrowserOcrWords(words, rawWords, canvas);
+          }
+
+          totalWordsDrawn += embedOcrWordsPixelLocked(
+            pdfLibPage,
+            vp,
+            words,
+            helvetica,
+            devanagariFont
+          );
+
+          if (cleanedCanvas) {
+            cleanedCanvas.width = 0;
+            cleanedCanvas.height = 0;
+          }
+          canvas.width = 0;
+          canvas.height = 0;
+          page.cleanup();
+        }
+      } finally {
+        await worker.terminate();
       }
 
-      await worker.terminate();
+      setIndexedWordCount(totalWordsDrawn);
 
       setBrowserProgress({
         currentPage: total,
@@ -210,10 +232,11 @@ export default function SearchablePdf() {
     }
   };
 
-  // ── CLOUD OCR (Server-side with OCRmyPDF & Ghostscript) ─────────────────────
+  // ── SERVER PRO OCR (RapidOCR ONNX + OpenCV Watermark Cleaner + 3-Tr Pixel-Lock) ──
   const processCloudOcr = async (inputFile: File) => {
     setStage('processing');
     setErrorMsg('');
+    setIndexedWordCount(null);
 
     try {
       const formData = new FormData();
@@ -222,6 +245,9 @@ export default function SearchablePdf() {
       formData.append('deskew', deskew ? 'true' : 'false');
       formData.append('rotate', 'true');
       formData.append('force_ocr', forceOcr ? 'true' : 'false');
+      formData.append('strict_local', strictLocal ? 'true' : 'false');
+      formData.append('engine_mode', strictLocal ? 'pro_local' : 'hybrid');
+      formData.append('clean_watermarks', cleanWatermarks ? 'true' : 'false');
 
       const res = await apiFetch('/convert/make-searchable', {
         method: 'POST',
@@ -310,14 +336,14 @@ export default function SearchablePdf() {
                     }`}
                   >
                     <div className="flex items-center gap-2 font-bold text-sm mb-1 text-blue-600 dark:text-blue-400">
-                      <Cpu className="w-4 h-4" /> ⚡ Instant Browser OCR
+                      <Cpu className="w-4 h-4" /> ⚡ Instant Browser OCR (Pixel-Lock 3-Tr)
                     </div>
                     <p className="text-xs text-slate-500 dark:text-slate-400">
-                      Recommended: 100% private, zero server bandwidth, runs directly on your device with no limits.
+                      100% private in-device OCR with watermark cleaner, CropBox/Rotate sync &amp; exact 3-Tr text matrix alignment.
                     </p>
                   </button>
 
-                  {/* Cloud Engine */}
+                  {/* Server Pro AI Engine */}
                   <button
                     type="button"
                     onClick={() => setEngine('cloud')}
@@ -328,10 +354,10 @@ export default function SearchablePdf() {
                     }`}
                   >
                     <div className="flex items-center gap-2 font-bold text-sm mb-1 text-indigo-600 dark:text-indigo-400">
-                      <Cloud className="w-4 h-4" /> ☁ Cloud Server OCR
+                      <Cloud className="w-4 h-4" /> 🚀 Server Pro AI (RapidOCR + Denoise)
                     </div>
                     <p className="text-xs text-slate-500 dark:text-slate-400">
-                      OCRmyPDF + Ghostscript backend. Includes automatic deskew and page rotation.
+                      Uses RapidOCR PP-OCRv4 ONNX + OpenCV watermark filter + PyMuPDF 3-Tr sub-point alignment (zero external leaks).
                     </p>
                   </button>
                 </div>
@@ -360,34 +386,65 @@ export default function SearchablePdf() {
                 </div>
               </div>
 
-              {engine === 'cloud' && (
-                <div className="space-y-3 pt-4 border-t border-slate-100 dark:border-slate-800">
-                  <div className="flex items-center gap-3">
-                    <input
-                      type="checkbox"
-                      id="deskew"
-                      checked={deskew}
-                      onChange={(e) => setDeskew(e.target.checked)}
-                      className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500"
-                    />
-                    <label htmlFor="deskew" className="text-xs font-medium text-slate-700 dark:text-slate-300">
-                      Auto-deskew (Straighten crooked pages)
-                    </label>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <input
-                      type="checkbox"
-                      id="forceOcr"
-                      checked={forceOcr}
-                      onChange={(e) => setForceOcr(e.target.checked)}
-                      className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500"
-                    />
-                    <label htmlFor="forceOcr" className="text-xs font-medium text-slate-700 dark:text-slate-300">
-                      Force OCR (Re-process pages that already have broken text)
-                    </label>
-                  </div>
+              {/* Shared Multi-Layer & Watermark Filter Option */}
+              <div className="space-y-3 pt-4 border-t border-slate-100 dark:border-slate-800">
+                <div className="flex items-start gap-3">
+                  <input
+                    type="checkbox"
+                    id="cleanWatermarks"
+                    checked={cleanWatermarks}
+                    onChange={(e) => setCleanWatermarks(e.target.checked)}
+                    className="w-4 h-4 mt-0.5 rounded text-blue-600 focus:ring-blue-500"
+                  />
+                  <label htmlFor="cleanWatermarks" className="text-xs font-medium text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                    <span>
+                      <strong>Multi-Layer &amp; Watermark Cleaner:</strong> Strips yellow/colored stamps &amp; shadows for sharper OCR (original PDF visuals stay 100% untouched)
+                    </span>
+                  </label>
                 </div>
-              )}
+
+                {engine === 'cloud' && (
+                  <>
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="checkbox"
+                        id="deskew"
+                        checked={deskew}
+                        onChange={(e) => setDeskew(e.target.checked)}
+                        className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500"
+                      />
+                      <label htmlFor="deskew" className="text-xs font-medium text-slate-700 dark:text-slate-300">
+                        Auto-deskew (Straighten crooked fallback scans)
+                      </label>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="checkbox"
+                        id="forceOcr"
+                        checked={forceOcr}
+                        onChange={(e) => setForceOcr(e.target.checked)}
+                        className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500"
+                      />
+                      <label htmlFor="forceOcr" className="text-xs font-medium text-slate-700 dark:text-slate-300">
+                        Force OCR (Re-process multi-layer pages that already have partial/broken text)
+                      </label>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="checkbox"
+                        id="strictLocalOcr"
+                        checked={strictLocal}
+                        onChange={(e) => setStrictLocal(e.target.checked)}
+                        className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500"
+                      />
+                      <label htmlFor="strictLocalOcr" className="text-xs font-medium text-emerald-700 dark:text-emerald-400">
+                        Privacy Lock: Strictly use local Pro AI OCR (RapidOCR + Tesseract) — never upload to iLovePDF API
+                      </label>
+                    </div>
+                  </>
+                )}
+              </div>
             </div>
 
             <FileDropzone
@@ -397,8 +454,8 @@ export default function SearchablePdf() {
               title="Drop your Scanned PDF here"
               subtitle={
                 engine === 'browser'
-                  ? '⚡ Fast in-browser OCR (0 MB server data • 100% Private)'
-                  : '☁ Cloud OCRmyPDF Archival Engine'
+                  ? '⚡ Pixel-Locked Browser OCR (0 MB server data • CropBox + Watermark Filter)'
+                  : '🚀 Server Pro AI (RapidOCR ONNX + OpenCV Denoise + 3-Tr Sub-Point Overlay)'
               }
             />
           </div>
@@ -476,8 +533,8 @@ export default function SearchablePdf() {
                 <h3 className="text-xl font-bold text-emerald-900 dark:text-emerald-200">Searchable PDF Ready!</h3>
                 <p className="text-sm text-emerald-700 dark:text-emerald-400">
                   {engine === 'browser'
-                    ? 'Generated 100% in your browser without consuming server bandwidth.'
-                    : 'Generated via cloud OCR engine.'}
+                    ? `Generated 100% in your browser — ${indexedWordCount ?? 0} searchable words indexed.`
+                    : 'Generated via server OCR engine.'}
                 </p>
               </div>
             </div>

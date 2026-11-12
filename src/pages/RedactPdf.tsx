@@ -293,8 +293,11 @@ export default function RedactPdf() {
 
       for (let p = 0; p < pageImages.length; p++) {
         setOcrStatus(`OCR scanning page ${p + 1} of ${pageImages.length}...`);
-        const res = await worker.recognize(pageImages[p]);
-        const lines = (res.data as any).lines || [];
+        const res = await worker.recognize(pageImages[p], {}, { blocks: true });
+        const dAny = res.data as any;
+        const lines = Array.isArray(dAny.blocks)
+          ? dAny.blocks.flatMap((b: any) => (b.paragraphs || []).flatMap((pr: any) => pr.lines || []))
+          : (dAny.lines || []);
         const imgSize = pageSizes[p] || { w: 1000, h: 1400 };
 
         for (const line of lines) {

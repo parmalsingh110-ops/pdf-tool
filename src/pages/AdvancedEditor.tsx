@@ -41,6 +41,17 @@ import SignatureCanvas from 'react-signature-canvas';
 import FileDropzone from '../components/FileDropzone';
 import { useSEO } from '../hooks/useSEO';
 import { apiFetch } from '../lib/api';
+import {
+  drawMatchedLatinText,
+  drawVectorHarfbuzzText,
+  hasNonLatinChars as checkNonLatinChars,
+} from '../lib/vectorHarfbuzzPdf';
+import {
+  preprocessCanvasForOcr,
+  extractTesseractWords,
+  mergeRecoveredBrowserOcrWords,
+  BrowserOcrWord,
+} from '../lib/ocrLayerRenderer';
 
 // Initialize pdf.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
@@ -110,6 +121,7 @@ interface BackendSpan {
   mono: boolean;
   color: string;
   baseline?: number;
+  isInvisibleOcr?: boolean;
 }
 
 /** Word info returned by /analyze/text-layout (PyMuPDF backend) */
@@ -127,6 +139,7 @@ interface BackendWord {
   mono?: boolean;
   color: string;
   baseline: number;
+  isInvisibleOcr?: boolean;
 }
 
 /** Context menu state */
@@ -191,6 +204,9 @@ export default function AdvancedEditor() {
   const [linkUrl, setLinkUrl] = useState('');
 
   const [isProcessing, setIsProcessing] = useState(false);
+  const [saveStatusLabel, setSaveStatusLabel] = useState<string>('Saving...');
+  const [savedEngineNote, setSavedEngineNote] = useState<string | null>(null);
+  const [backendStatus, setBackendStatus] = useState<'waking' | 'ready' | 'offline'>('waking');
   const [editedUrl, setEditedUrl] = useState<string | null>(null);
 
   // === Zoom ===
@@ -206,7 +222,14 @@ export default function AdvancedEditor() {
   // === Continuous / Persistent Auto-Select mode (Default: ON) ===
   const [continuousSelect, setContinuousSelect] = useState(true);
 
-  // Helper to determine if a color is paper-white or light scanner tone (should snap to #ffffff)
+  // Helper to determine if an RGB background is neutral paper-white (preserving tinted cards like Aadhaar beige/green/blue)
+  const isNeutralPaperRgb = (r: number, g: number, b: number) => {
+    const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+    const chroma = Math.max(r, g, b) - Math.min(r, g, b);
+    return lum >= 242 || (chroma <= 22 && lum >= 195);
+  };
+
+  // Helper to determine if a hex color is paper-white or neutral light scanner tone (should snap to #ffffff)
   const isPaperWhiteHex = (hex?: string) => {
     if (!hex || hex === 'transparent' || hex === '#ffffff' || hex === '#fbfcfc' || hex === '#fcfcfc') return true;
     const clean = hex.replace('#', '');
@@ -214,8 +237,7 @@ export default function AdvancedEditor() {
     const r = parseInt(clean.slice(0, 2), 16);
     const g = parseInt(clean.slice(2, 4), 16);
     const b = parseInt(clean.slice(4, 6), 16);
-    const lum = 0.299 * r + 0.587 * g + 0.114 * b;
-    return lum >= 170 || (r >= 170 && g >= 170 && b >= 170);
+    return isNeutralPaperRgb(r, g, b);
   };
 
   // === Drag move ===
@@ -243,6 +265,7 @@ export default function AdvancedEditor() {
 
   // === Resize for image/signature annotations ===
   const resizeAnnRef = useRef<{ id: string; handle: string; startX: number; startY: number; startAnnX: number; startAnnY: number; startW: number; startH: number } | null>(null);
+  const hasAutoScaledFontRef = useRef<boolean>(false);
 
   // === Eraser drag state ===
   const isErasingRef = useRef(false);
@@ -252,7 +275,23 @@ export default function AdvancedEditor() {
   const [ocrBusy, setOcrBusy] = useState(false);
   const [ocrDone, setOcrDone] = useState(false);
   const [isScannedPdf, setIsScannedPdf] = useState(false);
-  const [ocrLanguage, setOcrLanguage] = useState<'eng' | 'hin' | 'eng+hin'>('eng');
+  const [ocrLanguage, setOcrLanguage] = useState<'eng' | 'hin' | 'eng+hin'>('eng+hin');
+  const [ocrStatusLabel, setOcrStatusLabel] = useState<string>('');
+  const [ocrNotice, setOcrNotice] = useState<string | null>(null);
+  // Store unscaled PDF-point OCR blocks per page (1-based) so zooming or changing pages never wipes them
+  const ocrBlocksByPageRef = useRef<Map<number, DetectedTextBlock[]>>(new Map());
+  const currentPageRef = useRef<number>(1);
+  currentPageRef.current = currentPage;
+
+  const scaleOcrBlocks = (blocksPt: DetectedTextBlock[], scale: number): DetectedTextBlock[] =>
+    blocksPt.map(b => ({
+      ...b,
+      x: Math.round(b.x * scale),
+      y: Math.round(b.y * scale),
+      w: Math.max(2, Math.round(b.w * scale)),
+      h: Math.max(4, Math.round(b.h * scale)),
+      baselineY: b.pdfBaselineY !== undefined ? Math.round(b.pdfBaselineY * scale) : undefined,
+    }));
 
   // === Signature pen width ===
   const [signaturePenWidth, setSignaturePenWidth] = useState(2);
@@ -329,12 +368,18 @@ export default function AdvancedEditor() {
       const selectedFile = acceptedFiles[0];
       setFile(selectedFile);
       setEditedUrl(null);
+      setSavedEngineNote(null);
       setAnnotations([]);
       setDetectedText([]);
       setUndoStack([]);
       setRedoStack([]);
+      ocrBlocksByPageRef.current.clear();
       setOcrDone(false);
       setIsScannedPdf(false);
+      setOcrNotice(null);
+      setOcrStatusLabel('');
+      hasAutoScaledFontRef.current = false;
+      setFontSize(14);
 
       try {
         const arrayBuffer = await selectedFile.arrayBuffer();
@@ -385,6 +430,30 @@ export default function AdvancedEditor() {
     return () => window.removeEventListener('keydown', handler);
   }, [doUndo, doRedo, selectedId, pushUndo]);
 
+  // === Render Cold-Start Pre-Warm: Wake backend immediately when user opens /edit ===
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await apiFetch('/', {
+          method: 'GET',
+          timeoutMs: 65000,
+          suppressTelemetry: true,
+        });
+        if (!cancelled) {
+          setBackendStatus(res.ok ? 'ready' : 'offline');
+        }
+      } catch {
+        if (!cancelled) {
+          setBackendStatus('offline');
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   useEffect(() => {
     if (pdfDoc) {
       renderPage(currentPage);
@@ -396,6 +465,14 @@ export default function AdvancedEditor() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pdfDoc, currentPage, zoomLevel]);
 
+  // If backend finishes waking up after PDF was already rendered on page, fetch layout once
+  useEffect(() => {
+    if (backendStatus === 'ready' && file && pdfDoc && backendSpans.length === 0 && !layoutFetching) {
+      fetchTextLayout(file, currentPage - 1);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [backendStatus]);
+
   // === Fetch accurate text layout from backend (PyMuPDF) ===
   const fetchTextLayout = async (pdfFile: File, pageIndex: number) => {
     setLayoutFetching(true);
@@ -406,14 +483,17 @@ export default function AdvancedEditor() {
       const res = await apiFetch('/analyze/text-layout', {
         method: 'POST',
         body: formData,
+        timeoutMs: 65000,
+        suppressTelemetry: true,
       });
       if (res.ok) {
         const data = await res.json();
         setBackendSpans(data.spans || []);
         setBackendWords(data.words || []);
+        setBackendStatus('ready');
       }
     } catch (e) {
-      // Silently ignore — pdfjs text detection is the fallback
+      // Silently ignore — pdfjs text detection + frontend vector HarfBuzz is the fallback
       console.warn('[AdvancedEditor] Backend text layout fetch failed:', e);
     } finally {
       setLayoutFetching(false);
@@ -428,12 +508,14 @@ export default function AdvancedEditor() {
     italic: boolean;
     color: string;
     baseline: number;
+    isInvisibleOcr?: boolean;
   } | null => {
     if (!pageViewport) return null;
     const scale = pageViewport.scale;
     const bx = block.x / scale;
     const by = block.y / scale;
     const bw = block.w / scale;
+    const bh = block.h / scale;
     const blockText = block.text.trim().toLowerCase();
 
     // 1. Search word-level PyMuPDF layout
@@ -441,17 +523,18 @@ export default function AdvancedEditor() {
       const wordMatch = backendWords.find(w => {
         const wText = w.text.trim().toLowerCase();
         const textEqual = wText === blockText || wText.includes(blockText) || blockText.includes(wText);
-        const posNear = Math.abs(w.x - bx) < Math.max(16, bw * 0.8) && Math.abs(w.y - by) < 18;
+        const posNear = Math.abs(w.x - bx) < Math.max(16, bw * 0.8) && Math.abs(w.y - by) < Math.max(18, bh * 0.7);
         return textEqual && posNear;
       });
       if (wordMatch) {
         return {
-          fontSize: wordMatch.fontSize,
+          fontSize: wordMatch.isInvisibleOcr && block.fontSize ? block.fontSize : wordMatch.fontSize,
           fontName: wordMatch.fontName,
           bold: wordMatch.bold,
           italic: wordMatch.italic,
-          color: wordMatch.color,
+          color: wordMatch.isInvisibleOcr ? (block.fgColor || wordMatch.color) : wordMatch.color,
           baseline: wordMatch.baseline,
+          isInvisibleOcr: wordMatch.isInvisibleOcr,
         };
       }
     }
@@ -467,12 +550,13 @@ export default function AdvancedEditor() {
       });
       if (spanMatch) {
         return {
-          fontSize: spanMatch.fontSize,
+          fontSize: spanMatch.isInvisibleOcr && block.fontSize ? block.fontSize : spanMatch.fontSize,
           fontName: spanMatch.fontName,
           bold: spanMatch.bold,
           italic: spanMatch.italic,
-          color: spanMatch.color,
+          color: spanMatch.isInvisibleOcr ? (block.fgColor || spanMatch.color) : spanMatch.color,
           baseline: spanMatch.baseline || (spanMatch.y + spanMatch.h * 0.82),
+          isInvisibleOcr: spanMatch.isInvisibleOcr,
         };
       }
     }
@@ -568,23 +652,31 @@ export default function AdvancedEditor() {
 
       // Text detection for editing
       const textContent = await page.getTextContent();
+      const textStyles = ((textContent as any).styles || {}) as Record<string, { fontFamily?: string }>;
       const rawItems: DetectedTextBlock[] = textContent.items
         .map((item: any) => {
           const tx = pdfjsLib.Util.transform(viewport.transform, item.transform);
-          // UNTRANSFORMED PDF font size in points:
+          // True visual PDF font size in points (respects /UserUnit & nested CTM scaling)
           const fontScaleX = Math.hypot(item.transform[0], item.transform[1]);
           const fontScaleY = Math.hypot(item.transform[2], item.transform[3]);
-          const rawPdfPt = fontScaleY || fontScaleX || item.height || 11;
-          const extractedFontSize = Math.round(Math.min(Math.max(rawPdfPt, 6), 120) * 10) / 10;
+          const txScaleY = Math.hypot(tx[2], tx[3]) / viewport.scale;
+          const txScaleX = Math.hypot(tx[0], tx[1]) / viewport.scale;
+          const rawPdfPt = txScaleY || fontScaleY || fontScaleX || txScaleX || item.height || 11;
+          const extractedFontSize = Math.round(Math.min(Math.max(rawPdfPt, 4), 200) * 10) / 10;
 
           const baselineCanvasY = Math.round(tx[5]);
           const blockH = Math.round(extractedFontSize * viewport.scale * 1.25);
           const topY = Math.round(baselineCanvasY - (extractedFontSize * viewport.scale * 0.85));
-          const blockW = Math.round(item.width * viewport.scale);
+          const blockW = Math.round(Math.max(item.width * viewport.scale, 1));
 
-          // Detect bold / italic from font name
-          const fontName: string = item.fontName || '';
-          const isBold = /bold/i.test(fontName);
+          // Detect bold / italic and real CSS family from font name + pdf.js font styles table
+          const rawFontName: string = item.fontName || '';
+          const styleFamily = textStyles[rawFontName]?.fontFamily || '';
+          const fontName: string =
+            styleFamily && !rawFontName.toLowerCase().includes(styleFamily.toLowerCase())
+              ? `${rawFontName} ${styleFamily}`.trim()
+              : rawFontName;
+          const isBold = /bold|black|heavy|semibold/i.test(fontName);
           const isItalic = /italic|oblique/i.test(fontName);
 
           let exactColor: string | undefined;
@@ -672,10 +764,10 @@ export default function AdvancedEditor() {
             }
           }
           let bgColor = '#ffffff';
-          // Snap document paper background (even with scanner artifacts) to pure white
-          if (maxLum >= 190 || (bgR >= 190 && bgG >= 190 && bgB >= 190)) {
+          // Snap neutral white paper background (preserving tinted ID/card colors) to pure white
+          if (maxLum >= 0 && isNeutralPaperRgb(bgR, bgG, bgB)) {
             bgColor = '#ffffff';
-          } else if (maxLum > 0) {
+          } else if (maxLum >= 0) {
             bgColor = `#${bgR.toString(16).padStart(2,'0')}${bgG.toString(16).padStart(2,'0')}${bgB.toString(16).padStart(2,'0')}`;
           }
 
@@ -702,137 +794,273 @@ export default function AdvancedEditor() {
         }
       });
 
-      setDetectedText(items);
+      // Check if native PDF text exists on this page (ignoring invisible empty rects)
+      const validNativeItems = items.filter(i => i.w > 2 && i.h > 2);
+      const hasText = validNativeItems.length > 3;
 
-      // If very few text items found, it's likely a scanned PDF
-      const hasText = items.filter(i => i.w > 2 && i.h > 2).length > 3;
-      setIsScannedPdf(!hasText);
+      if (!hasText) {
+        setIsScannedPdf(true);
+        const cachedOcrPt = ocrBlocksByPageRef.current.get(pageNum);
+        if (cachedOcrPt && cachedOcrPt.length > 0) {
+          // Restore OCR boxes rescaled cleanly to current zoom (e.g. 75% <-> 150%)
+          setDetectedText(scaleOcrBlocks(cachedOcrPt, viewport.scale));
+          setOcrDone(true);
+        } else {
+          setDetectedText([]);
+          setOcrDone(false);
+        }
+      } else {
+        setDetectedText(items);
+        setIsScannedPdf(false);
+        setOcrDone(false);
+      }
+
+      // Auto-calibrate New Text default fontSize on first load so high-DPI pixel-sized scans
+      // (e.g. 1654x2339pt or 2480x3508pt) don't start with microscopic 14pt text
+      if (!hasAutoScaledFontRef.current) {
+        hasAutoScaledFontRef.current = true;
+        const pageWidthPt = viewport.width / viewport.scale;
+        if (items.length >= 3) {
+          const sizes = items.map(it => it.fontSize).filter(s => s >= 5 && s <= 160).sort((a, b) => a - b);
+          if (sizes.length > 0) {
+            const medianPt = sizes[Math.floor(sizes.length / 2)];
+            setFontSize(Math.round(Math.max(10, Math.min(72, medianPt))));
+          }
+        } else if (pageWidthPt > 750) {
+          const scaledDefault = Math.round(Math.max(12, Math.min(72, 12 * (pageWidthPt / 595))));
+          setFontSize(scaledDefault);
+        }
+      }
     } catch (error) {
       console.error("Error rendering page:", error);
     }
   };
 
-  // === NEW: OCR fallback for scanned PDFs ===
+  // === Upgraded Multi-Engine OCR for Scanned PDFs (Backend Pro Hybrid + High-Res Browser Fallback) ===
   const runOcrOnPage = async () => {
-    if (!canvasRef.current) return;
+    if (!pdfDoc) return;
+    const targetPage = currentPage;
+    const activeScale = pageViewport?.scale || zoomLevel || 1;
     setOcrBusy(true);
+    setOcrNotice(null);
+    setOcrStatusLabel('Scanning page...');
+
     try {
-      const canvas = canvasRef.current;
-      const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(b => resolve(b), 'image/png'));
-      if (!blob) throw new Error('Canvas export failed');
+      const apiLang = ocrLanguage === 'eng+hin' ? 'hin+eng' : ocrLanguage;
+      let unscaledBlocks: DetectedTextBlock[] = [];
 
-      const worker = await createWorker(ocrLanguage);
-      const { data } = await worker.recognize(blob, {}, { blocks: true });
-      await worker.terminate();
-
-      const ctx = canvas.getContext('2d', { willReadFrequently: true });
-      const imgData = ctx ? ctx.getImageData(0, 0, canvas.width, canvas.height).data : null;
-
-      const ocrItems: DetectedTextBlock[] = [];
-      if (data.blocks) {
-        for (const block of data.blocks) {
-          for (const para of block.paragraphs || []) {
-            for (const line of para.lines || []) {
-              const t = (line.text || '').trim();
-              if (!t) continue;
-              const b = line.bbox;
-              if (!b || b.x1 <= b.x0 || b.y1 <= b.y0) continue;
-              const x = Math.floor(b.x0);
-              const y = Math.floor(b.y0);
-              const w = Math.floor(b.x1 - b.x0);
-              const h = Math.floor(b.y1 - b.y0);
-
-              let fgColor = '#000000';
-              let bgColor = '#ffffff';
-
-              if (imgData && w > 0 && h > 0) {
-                let minL = 255, maxL = 0;
-                let fgR = 0, fgG = 0, fgB = 0;
-                let bgR = 255, bgG = 255, bgB = 255;
-                let bgSumR = 0, bgSumG = 0, bgSumB = 0, bgCount = 0;
-                let ringSumR = 0, ringSumG = 0, ringSumB = 0, ringCount = 0;
-                const ringPad = Math.max(2, Math.round(h * 0.2));
-
-                for (let py = y; py < y + h; py++) {
-                  for (let px = x; px < x + w; px++) {
-                    const i = (py * canvas.width + px) * 4;
-                    if (i >= 0 && i < imgData.length) {
-                      const r = imgData[i], g = imgData[i + 1], b = imgData[i + 2];
-                      const l = 0.299 * r + 0.587 * g + 0.114 * b;
-                      if (l < minL) { minL = l; fgR = r; fgG = g; fgB = b; }
-                      if (l > maxL) { maxL = l; bgR = r; bgG = g; bgB = b; }
-                      if (l > 150) { bgSumR += r; bgSumG += g; bgSumB += b; bgCount++; }
-                    }
-                  }
-                }
-                // Sample around text edges to match page background and avoid visible patch edges.
-                for (let py = y - ringPad; py < y + h + ringPad; py++) {
-                  for (let px = x - ringPad; px < x + w + ringPad; px++) {
-                    const inside = px >= x && px < x + w && py >= y && py < y + h;
-                    if (inside) continue;
-                    if (px < 0 || py < 0 || px >= canvas.width || py >= canvas.height) continue;
-                    const i = (py * canvas.width + px) * 4;
-                    if (i >= 0 && i < imgData.length) {
-                      ringSumR += imgData[i];
-                      ringSumG += imgData[i + 1];
-                      ringSumB += imgData[i + 2];
-                      ringCount++;
-                    }
-                  }
-                }
-                fgColor = `#${((1 << 24) + (fgR << 16) + (fgG << 8) + fgB).toString(16).slice(1)}`;
-                let rawBg = '#ffffff';
-                let bR = 255, bG = 255, bB = 255;
-                if (ringCount > 0) {
-                  bR = Math.round(ringSumR / ringCount);
-                  bG = Math.round(ringSumG / ringCount);
-                  bB = Math.round(ringSumB / ringCount);
-                } else if (bgCount > 0) {
-                  bR = Math.round(bgSumR / bgCount);
-                  bG = Math.round(bgSumG / bgCount);
-                  bB = Math.round(bgSumB / bgCount);
-                } else {
-                  bR = bgR; bG = bgG; bB = bgB;
-                }
-                const lum = 0.299 * bR + 0.587 * bG + 0.114 * bB;
-                // Snap near-white paper/scanner texture to pure white
-                if (lum >= 170 || (bR >= 170 && bG >= 170 && bB >= 170)) {
-                  bgColor = '#ffffff';
-                } else {
-                  bgColor = `#${((1 << 24) + (bR << 16) + (bG << 8) + bB).toString(16).slice(1)}`;
-                }
-              }
-
-              const scale = pageViewport?.scale || 1;
-              const boxHeightPt = h / scale;
-              const ocrFontSizePt = Math.max(6, Math.min(120, Math.round(boxHeightPt * 0.72 * 10) / 10));
-              const ocrBaselineCanvasY = Math.round(y + h * 0.78);
-              const ocrBaselinePdfY = Math.round((ocrBaselineCanvasY / scale) * 100) / 100;
-
-              ocrItems.push({
-                text: t,
-                x: b.x0,
-                y: b.y0,
-                w,
-                h,
-                fontSize: ocrFontSizePt,
-                baselineY: ocrBaselineCanvasY,
-                pdfBaselineY: ocrBaselinePdfY,
-                fgColor,
-                bgColor: bgColor === '#fbfcfc' ? '#ffffff' : bgColor,
-              });
+      // 1. Prefer Pro Hybrid Backend OCR (/ocr/page-words: RapidOCR + OpenCV cleaner + Tesseract TSV)
+      if (file && backendStatus !== 'offline') {
+        try {
+          setOcrStatusLabel('Running Pro AI OCR...');
+          const fd = new FormData();
+          fd.append('file', file);
+          fd.append('page', String(targetPage - 1));
+          fd.append('lang', apiLang);
+          const res = await apiFetch('/ocr/page-words', {
+            method: 'POST',
+            body: fd,
+            timeoutMs: backendStatus === 'ready' ? 28000 : 12000,
+          });
+          if (res.ok) {
+            setBackendStatus('ready');
+            const payload = await res.json();
+            if (Array.isArray(payload?.words) && payload.words.length > 0) {
+              unscaledBlocks = payload.words
+                .map((w: any): DetectedTextBlock => {
+                  const x = Number(w.x) || 0;
+                  const y = Number(w.y) || 0;
+                  const bw = Math.max(2, Number(w.w) || 2);
+                  const bh = Math.max(4, Number(w.h) || 4);
+                  const fsz = Number(w.fontSize) || Math.max(6, Math.min(160, Math.round(bh * 0.76 * 10) / 10));
+                  const basePt = Number(w.baseline) || Math.round((y + bh * 0.80) * 100) / 100;
+                  return {
+                    text: String(w.text || '').trim(),
+                    x,
+                    y,
+                    w: bw,
+                    h: bh,
+                    fontSize: fsz,
+                    pdfBaselineY: basePt,
+                    fgColor: String(w.fgColor || '#000000'),
+                    bgColor: isPaperWhiteHex(w.bgColor) ? '#ffffff' : String(w.bgColor || '#ffffff'),
+                  };
+                })
+                .filter((b: DetectedTextBlock) => b.text.length > 0);
             }
           }
+        } catch (backendErr) {
+          console.warn('Backend /ocr/page-words unavailable, falling back to high-res browser OCR:', backendErr);
         }
       }
-      setDetectedText(ocrItems);
-      setOcrDone(true);
-      setIsScannedPdf(ocrItems.length > 0);
+
+      // 2. High-Resolution Preprocessed Dual-Pass Browser OCR Fallback (independent of UI zoom!)
+      if (unscaledBlocks.length === 0) {
+        setOcrStatusLabel('Rendering high-DPI scan...');
+        const page = await pdfDoc.getPage(targetPage);
+        const baseVp = page.getViewport({ scale: 1.0 });
+        const maxBaseDim = Math.max(baseVp.width, baseVp.height, 1);
+        const ocrScale = Math.min(
+          3.5,
+          Math.max(2.2, 2400 / Math.max(350, baseVp.width)),
+          3600 / maxBaseDim
+        );
+        const ocrVp = page.getViewport({ scale: ocrScale });
+
+        const rawCanvas = document.createElement('canvas');
+        rawCanvas.width = Math.max(16, Math.round(ocrVp.width));
+        rawCanvas.height = Math.max(16, Math.round(ocrVp.height));
+        const rawCtx = rawCanvas.getContext('2d', { willReadFrequently: true });
+        if (!rawCtx) throw new Error('OCR canvas context unavailable');
+
+        rawCtx.fillStyle = '#ffffff';
+        rawCtx.fillRect(0, 0, rawCanvas.width, rawCanvas.height);
+        await page.render({ canvasContext: rawCtx, viewport: ocrVp, canvas: rawCanvas }).promise;
+
+        setOcrStatusLabel('Cleaning background...');
+        const cleanCanvas = preprocessCanvasForOcr(rawCanvas);
+        const rawImgData = rawCtx.getImageData(0, 0, rawCanvas.width, rawCanvas.height).data;
+
+        setOcrStatusLabel('Recognizing words...');
+        const tessLang = ocrLanguage === 'eng+hin' ? 'hin+eng' : ocrLanguage;
+        const worker = await createWorker(tessLang, 1, {
+          logger: (m: any) => {
+            if (m?.status === 'recognizing text') {
+              const pct = Math.round((m.progress || 0) * 100);
+              setOcrStatusLabel(`OCR ${pct}%...`);
+            }
+          },
+        });
+
+        let finalWords: BrowserOcrWord[] = [];
+        try {
+          const cleanRes = await worker.recognize(cleanCanvas, {}, { blocks: true });
+          const cleanWords = extractTesseractWords(cleanRes?.data);
+
+          // Pass 2 recovery on untouched composite canvas catches text on deep colored headers (e.g. Aadhaar)
+          const rawRes = await worker.recognize(rawCanvas, {}, { blocks: true });
+          const rawWords = extractTesseractWords(rawRes?.data);
+          finalWords = mergeRecoveredBrowserOcrWords(cleanWords, rawWords, rawCanvas);
+        } finally {
+          await worker.terminate();
+        }
+
+        const cw = rawCanvas.width;
+        const ch = rawCanvas.height;
+
+        for (const word of finalWords) {
+          const t = (word.text || '').trim();
+          const b = word.bbox;
+          if (!t || !b || b.x1 <= b.x0 || b.y1 <= b.y0) continue;
+
+          const x = Math.max(0, Math.floor(b.x0));
+          const y = Math.max(0, Math.floor(b.y0));
+          const w = Math.max(2, Math.min(cw - x, Math.ceil(b.x1 - x)));
+          const h = Math.max(3, Math.min(ch - y, Math.ceil(b.y1 - y)));
+
+          let fgColor = '#000000';
+          let bgColor = '#ffffff';
+
+          if (w > 0 && h > 0) {
+            let minL = 255;
+            let fgR = 0, fgG = 0, fgB = 0;
+            const stride = (w * h > 3000) ? 2 : 1;
+
+            for (let py = y; py < y + h; py += stride) {
+              for (let px = x; px < x + w; px += stride) {
+                const i = (py * cw + px) * 4;
+                const r = rawImgData[i], g = rawImgData[i + 1], bl = rawImgData[i + 2];
+                const l = 0.299 * r + 0.587 * g + 0.114 * bl;
+                if (l < minL) { minL = l; fgR = r; fgG = g; fgB = bl; }
+              }
+            }
+            fgColor = `#${((1 << 24) + (fgR << 16) + (fgG << 8) + fgB).toString(16).slice(1)}`;
+
+            // Sample background from left/right outer margins so nearby lines above/below don't bleed in
+            const pad = Math.max(3, Math.round(h * 0.25));
+            let ringR = 0, ringG = 0, ringB = 0, ringCnt = 0;
+            for (let py = y; py < y + h; py += stride) {
+              for (let px = Math.max(0, x - pad); px < x; px += stride) {
+                const i = (py * cw + px) * 4;
+                ringR += rawImgData[i]; ringG += rawImgData[i + 1]; ringB += rawImgData[i + 2];
+                ringCnt++;
+              }
+              for (let px = x + w; px < Math.min(cw, x + w + pad); px += stride) {
+                const i = (py * cw + px) * 4;
+                ringR += rawImgData[i]; ringG += rawImgData[i + 1]; ringB += rawImgData[i + 2];
+                ringCnt++;
+              }
+            }
+            if (ringCnt > 0) {
+              const bR = Math.round(ringR / ringCnt);
+              const bG = Math.round(ringG / ringCnt);
+              const bB = Math.round(ringB / ringCnt);
+              bgColor = isNeutralPaperRgb(bR, bG, bB)
+                ? '#ffffff'
+                : `#${((1 << 24) + (bR << 16) + (bG << 8) + bB).toString(16).slice(1)}`;
+            }
+          }
+
+          const xPt = Math.round((x / ocrScale) * 100) / 100;
+          const yPt = Math.round((y / ocrScale) * 100) / 100;
+          const wPt = Math.round(Math.max(2, w / ocrScale) * 100) / 100;
+          const hPt = Math.round(Math.max(4, h / ocrScale) * 100) / 100;
+          const hasDescender = /[gjpqy\u0941\u0942\u0943]/.test(t);
+          const hasDevUpper = /\u0930\u094D|[\u093F\u0940\u0947\u0948\u094B\u094C\u0902\u0901\u0945\u0949]/.test(t);
+          const emDivisor = hasDescender && hasDevUpper ? 1.20 : hasDescender ? 0.96 : hasDevUpper ? 0.98 : 0.76;
+          const baseFrac = hasDescender ? 0.78 : 0.95;
+          const ocrFontSizePt = Math.max(6, Math.min(140, Math.round((hPt / emDivisor) * 10) / 10));
+          const ocrBaselinePdfY = Math.round((yPt + hPt * baseFrac) * 100) / 100;
+
+          unscaledBlocks.push({
+            text: t,
+            x: xPt,
+            y: yPt,
+            w: wPt,
+            h: hPt,
+            fontSize: ocrFontSizePt,
+            pdfBaselineY: ocrBaselinePdfY,
+            fgColor,
+            bgColor,
+          });
+        }
+
+        // Release offscreen canvas memory cleanly
+        rawCanvas.width = 0; rawCanvas.height = 0;
+        cleanCanvas.width = 0; cleanCanvas.height = 0;
+      }
+
+      if (unscaledBlocks.length > 0) {
+        ocrBlocksByPageRef.current.set(targetPage, unscaledBlocks);
+
+        // Calibrate New Text font size from OCR medians if it wasn't set by native items
+        const sizes = unscaledBlocks.map(b => b.fontSize).filter(s => s >= 5 && s <= 160).sort((a, b) => a - b);
+        if (sizes.length > 0) {
+          const medianPt = sizes[Math.floor(sizes.length / 2)];
+          setFontSize(Math.round(Math.max(10, Math.min(72, medianPt))));
+        }
+
+        if (currentPageRef.current === targetPage) {
+          setDetectedText(scaleOcrBlocks(unscaledBlocks, activeScale));
+          setOcrDone(true);
+          setIsScannedPdf(true);
+          setActiveTool('select');
+          setOcrNotice(null);
+        }
+      } else if (currentPageRef.current === targetPage) {
+        setDetectedText([]);
+        setOcrDone(false);
+        setIsScannedPdf(true);
+        setOcrNotice('No readable text detected on this page. Try switching OCR Language (Hindi + English / Hindi / English) and click Re-Scan.');
+      }
     } catch (e) {
       console.error('OCR failed:', e);
-      alert('OCR failed. Please try again.');
+      setOcrDone(false);
+      setIsScannedPdf(true);
+      setOcrNotice('OCR encountered an issue on this page. Please try again or switch OCR Language.');
     } finally {
       setOcrBusy(false);
+      setOcrStatusLabel('');
     }
   };
 
@@ -906,14 +1134,17 @@ export default function AdvancedEditor() {
       return;
     } else if (activeTool === 'text') {
       pushUndo();
+      const curScale = pageViewport?.scale || 1;
+      const boxW = Math.round(Math.max(160, fontSize * curScale * 8));
+      const boxH = Math.round(Math.max(24, fontSize * curScale * 1.35));
       const newAnnotation: Annotation = {
         id: Date.now().toString(),
         type: 'text',
         pageIndex: currentPage - 1,
         x,
         y,
-        width: 200,
-        height: Math.max(24, fontSize + 8),
+        width: boxW,
+        height: boxH,
         text: 'New Text',
         fontSize,
         color: textColor,
@@ -1266,9 +1497,7 @@ export default function AdvancedEditor() {
       // Calculate how many lines we roughly have by splitting by newline
       const lines = text.split('\n').length;
       
-      // If we want it to auto-expand height we could, but let's stick to the user's manual resize
-      // unless the text implies more height.
-      const lineHeight = Math.round(preservedFont * 1.3);
+      const lineHeight = Math.round(preservedFont * scale * 1.28);
       const minH = lineHeight * lines;
       const contentH = Math.max(target.height || target.sourceHeight || lineHeight, minH);
       
@@ -1329,11 +1558,14 @@ export default function AdvancedEditor() {
     if (!fontName) return 'Helvetica, Arial, sans-serif';
     const f = fontName.toLowerCase();
 
-    // Serif / Times family
-    if (f.includes('times') || f.includes('timesnew') || f.includes('palatino') ||
-        f.includes('garamond') || f.includes('georgia') || f.includes('bookman') ||
-        f.includes('minion') || f.includes('caslon') || f.includes('didot') ||
-        f.includes('bodoni') || f.includes('cambria') || f.includes('constantia')) {
+    // Serif / Times family (avoid matching generic CSS 'sans-serif')
+    const hasExplicitSerif =
+      f.includes('times') || f.includes('timesnew') || f.includes('palatino') ||
+      f.includes('garamond') || f.includes('georgia') || f.includes('bookman') ||
+      f.includes('minion') || f.includes('caslon') || f.includes('didot') ||
+      f.includes('bodoni') || f.includes('cambria') || f.includes('constantia') ||
+      (f.includes('serif') && !f.includes('sans-serif'));
+    if (hasExplicitSerif) {
       return '"Times New Roman", Times, Georgia, serif';
     }
 
@@ -1389,10 +1621,12 @@ export default function AdvancedEditor() {
     if (!file || !pageViewport) return;
 
     setIsProcessing(true);
+    setSaveStatusLabel('Saving...');
+    setSavedEngineNote(null);
+    let usedLocalVectorFallback = false;
+
     try {
       // ── FAST PATH: No edits at all — download original file unchanged ──────
-      // pdf-lib load+save can slightly restructure PDF text streams, causing
-      // subtle layout shifts. If there's nothing to apply, skip entirely.
       if (annotations.length === 0) {
         const originalBuffer = await file.arrayBuffer();
         const blob = new Blob([originalBuffer], { type: 'application/pdf' });
@@ -1400,23 +1634,13 @@ export default function AdvancedEditor() {
         return;
       }
 
-      // Helper: check if text contains non-ASCII / non-WinAnsi characters (Hindi, Devanagari, etc.)
-      const hasNonLatinChars = (text: string) => {
-        for (let i = 0; i < text.length; i++) {
-          if (text.charCodeAt(i) > 0x00FF) return true;
-        }
-        return false;
-      };
-
       // 1. Separate native text replacements (from selection) vs other annotations
-      // Both Latin and Hindi/Devanagari text edits go to PyMuPDF backend with fill=None
-      // so original text is removed cleanly at the PDF vector layer with ZERO whiteout and ZERO gray box!
       const nativeEditsAll = annotations.filter(a => a.type === 'text' && a.sourceWidth && a.sourceWidth > 0);
       const otherAnnotations = annotations.filter(a => !(a.type === 'text' && a.sourceWidth && a.sourceWidth > 0));
 
       let currentFileBuffer = await file.arrayBuffer();
 
-      // 2. If there are native text edits, send to Python backend first
+      // 2. If there are native text edits, send to Python backend first (with Render cold-start wakeup retry)
       if (nativeEditsAll.length > 0) {
         const editPayload = nativeEditsAll.map(ann => ({
           page: ann.pageIndex,
@@ -1425,7 +1649,6 @@ export default function AdvancedEditor() {
           origW: (ann.sourceWidth || ann.width || 100) / pageViewport.scale,
           origH: (ann.sourceHeight || ann.height || 20) / pageViewport.scale,
           x: ann.x / pageViewport.scale,
-          // Convert from top-left (frontend) to standard coords expected by backend
           y: ann.y / pageViewport.scale,
           w: (ann.width || ann.sourceWidth || 100) / pageViewport.scale,
           h: (ann.height || ann.sourceHeight || 20) / pageViewport.scale,
@@ -1435,42 +1658,100 @@ export default function AdvancedEditor() {
           bgColor: isPaperWhiteHex(ann.backgroundColor) ? '#ffffff' : ann.backgroundColor,
           bold: ann.bold || false,
           italic: ann.italic || false,
+          underline: ann.underline || false,
+          strikethrough: ann.strikethrough || false,
           fontFamily: ann.fontCssFamily || ann.originalFontName || '',
           fontName: ann.originalFontName || '',
           align: ann.align || 'left',
           baseline: ann.baseline,
         }));
 
-        console.log("Sending Native Edits to Python Backend:", editPayload);
-
-        try {
-          const formData = new FormData();
-          formData.append('file', new File([currentFileBuffer], file.name, { type: file.type }));
-          formData.append('edits', JSON.stringify(editPayload));
-
-          const res = await apiFetch('/edit-pdf', {
+        const editsJson = JSON.stringify(editPayload);
+        const postEditToBackend = async () => {
+          const fd = new FormData();
+          fd.append('file', new File([currentFileBuffer], file.name, { type: file.type }));
+          fd.append('edits', editsJson);
+          return apiFetch('/edit-pdf', {
             method: 'POST',
-            body: formData,
+            body: fd,
+            timeoutMs: 65000,
           });
+        };
+
+        let backendSucceeded = false;
+        try {
+          setSaveStatusLabel('Applying edits...');
+          let res = await postEditToBackend();
+
+          // Render free-tier cold start can return 502/503/504 while Python server boots
+          if (!res.ok && (res.status === 502 || res.status === 503 || res.status === 504)) {
+            setSaveStatusLabel('Waking server...');
+            try {
+              const wakeRes = await apiFetch('/', { method: 'GET', timeoutMs: 45000, suppressTelemetry: true });
+              if (wakeRes.ok) {
+                setBackendStatus('ready');
+                setSaveStatusLabel('Retrying server...');
+                res = await postEditToBackend();
+              }
+            } catch {
+              // Fall through to pure-vector frontend engine
+            }
+          }
 
           if (res.ok) {
             currentFileBuffer = await res.arrayBuffer();
+            setBackendStatus('ready');
+            backendSucceeded = true;
           } else {
-            console.warn('Native Python backend edit failed, falling back to in-browser pdf-lib:', await res.text());
-            otherAnnotations.push(...nativeEditsAll);
+            console.warn('Native Python backend edit failed, using local vector HarfBuzz engine:', await res.text().catch(() => res.status));
           }
-        } catch (fetchErr) {
-          console.warn('Native Python backend offline, falling back to in-browser pdf-lib:', fetchErr);
+        } catch (fetchErr: any) {
+          const msg = String(fetchErr?.message || '').toLowerCase();
+          // If Render timed out mid-boot, try one fast wakeup + retry before falling back locally
+          if (msg.includes('timed out') || msg.includes('waking')) {
+            setSaveStatusLabel('Waking server...');
+            try {
+              const wakeRes = await apiFetch('/', { method: 'GET', timeoutMs: 35000, suppressTelemetry: true });
+              if (wakeRes.ok) {
+                setBackendStatus('ready');
+                setSaveStatusLabel('Retrying server...');
+                const retryRes = await postEditToBackend();
+                if (retryRes.ok) {
+                  currentFileBuffer = await retryRes.arrayBuffer();
+                  backendSucceeded = true;
+                }
+              }
+            } catch {
+              // Proceed to local vector fallback below
+            }
+          }
+          if (!backendSucceeded) {
+            console.warn('Native Python backend offline/asleep, using in-browser vector HarfBuzz fallback:', fetchErr);
+          }
+        }
+
+        if (!backendSucceeded) {
+          usedLocalVectorFallback = true;
           otherAnnotations.push(...nativeEditsAll);
         }
       }
 
-      // 3. Apply the rest of the annotations (drawings, signatures, highlights, NEW text) using pdf-lib
+      // Skip pdf-lib rewrite if backend already applied everything and there are no client-only annotations
+      if (otherAnnotations.length === 0) {
+        const blob = new Blob([currentFileBuffer], { type: 'application/pdf' });
+        setEditedUrl(URL.createObjectURL(blob));
+        return;
+      }
+
+      setSaveStatusLabel(usedLocalVectorFallback ? 'Vectorizing Hindi & fonts...' : 'Finalizing PDF...');
+
+      // 3. Apply remaining annotations (or full local vector fallback) using pdf-lib + HarfBuzz WASM
       const pdf = await PDFDocument.load(currentFileBuffer);
 
-      // ── Load Noto Sans Devanagari in BROWSER for Canvas-based text rendering ──
-      const loadBrowserFonts = async () => {
-        // Always try to load — document.fonts.check is unreliable across browsers
+      let browserFontsLoaded = false;
+      const loadBrowserFontsOnce = async () => {
+        if (browserFontsLoaded) return;
+        browserFontsLoaded = true;
         const fontsToLoad: Array<[string, string, object]> = [
           ['NotoSansDevanagari', '/fonts/NotoSansDevanagari-Regular.ttf', { weight: '400' }],
           ['NotoSansDevanagari', '/fonts/NotoSansDevanagari-Bold.ttf',    { weight: '700' }],
@@ -1484,7 +1765,6 @@ export default function AdvancedEditor() {
             console.warn(`[PDF Editor] Failed to load ${name} from ${url}:`, e);
           }
         }
-        // Wait for all fonts to be ready
         try { await document.fonts.ready; } catch { /* ignore */ }
       };
 
@@ -1504,6 +1784,7 @@ export default function AdvancedEditor() {
         bold?: boolean,
         italic?: boolean,
       ) => {
+        await loadBrowserFontsOnce();
         const RENDER_SCALE = 4;
         const canvasFontPx = Math.max(8, pdfFontSize * RENDER_SCALE);
 
@@ -1512,7 +1793,6 @@ export default function AdvancedEditor() {
 
         const weight = bold ? 'bold' : '400';
         const fontStyle = italic ? 'italic' : 'normal';
-        // Use NotoSansDevanagari first (loaded above), fallback to system fonts
         const fontStr = `${fontStyle} ${weight} ${canvasFontPx}px NotoSansDevanagari, 'Noto Sans Devanagari', 'Mangal', Arial Unicode MS, sans-serif`;
 
         ctx.font = fontStr;
@@ -1526,7 +1806,6 @@ export default function AdvancedEditor() {
         const textW = Math.ceil(actualLeft + actualRight);
         const textH = Math.ceil(actualAscent + actualDescent);
 
-        // Safety: ensure canvas is at least 1×1
         canvas.width  = Math.max(4, textW + pad * 2);
         canvas.height = Math.max(4, textH + pad * 2);
 
@@ -1537,7 +1816,6 @@ export default function AdvancedEditor() {
         ctx.fillText(text, pad + actualLeft, pad + actualAscent);
 
         const dataUrl = canvas.toDataURL('image/png');
-        // Use direct base64 decode to avoid CSP blocking fetch() on data: URLs
         const imgBytes = dataUrlToArrayBuffer(dataUrl);
 
         const imgPdfW = canvas.width / RENDER_SCALE;
@@ -1548,42 +1826,30 @@ export default function AdvancedEditor() {
         return { imgBytes, imgPdfW, imgPdfH, baselineFromTop };
       };
 
-
-      const allTexts = otherAnnotations
-        .filter(a => a.type === 'text' && a.text)
-        .map(a => a.text || '');
-      const allTableTexts = otherAnnotations
-        .filter(a => a.type === 'table' && a.tableData)
-        .flatMap(a => (a.tableData || []).flat());
-      const allContent = [...allTexts, ...allTableTexts].join('');
-      const needsUnicodeSupport = hasNonLatinChars(allContent);
-
-      if (needsUnicodeSupport) {
-        await loadBrowserFonts();
-      }
-
-      const helveticaFont = await pdf.embedFont(StandardFonts.Helvetica);
-      const helveticaOblique = await pdf.embedFont(StandardFonts.HelveticaOblique);
-      const helveticaBold = await pdf.embedFont(StandardFonts.HelveticaBold);
-      const helveticaBoldOblique = await pdf.embedFont(StandardFonts.HelveticaBoldOblique);
-
-      const resolveLatinFont = (bold?: boolean, italic?: boolean) => {
-        if (bold && italic) return helveticaBoldOblique;
-        if (bold) return helveticaBold;
-        if (italic) return helveticaOblique;
-        return helveticaFont;
-      };
-
       const pages = pdf.getPages();
+      const normalizedPages = new Set<number>();
 
       for (const ann of otherAnnotations) {
         const page = pages[ann.pageIndex];
         if (!page) continue;
+
+        if (!normalizedPages.has(ann.pageIndex)) {
+          normalizedPages.add(ann.pageIndex);
+          try {
+            page.node.normalize();
+          } catch {
+            /* ignore if leaf lacks normalize */
+          }
+        }
+
         const { height: pageHeight } = page.getSize();
+        const cb = page.getCropBox();
+        const originX = cb.x || 0;
+        const originYTop = (cb.y || 0) + (cb.height || pageHeight);
 
         const scale = pageViewport.scale;
-        const pdfX = ann.x / scale;
-        const pdfY = pageHeight - (ann.y / scale);
+        const pdfX = originX + ann.x / scale;
+        const pdfY = originYTop - ann.y / scale;
         const pdfW = (ann.width || 0) / scale;
         const pdfH = (ann.height || 0) / scale;
 
@@ -1592,58 +1858,104 @@ export default function AdvancedEditor() {
           const boxPxH = ann.height || Math.max(20, textFontSizePt * scale * 1.25);
           const sourcePxX = ann.sourceX !== undefined ? ann.sourceX : ann.x;
           const sourcePxY = ann.sourceY !== undefined ? ann.sourceY : ann.y;
-          const clearPdfX = sourcePxX / scale;
-          const clearPdfY = pageHeight - (sourcePxY / scale);
+          const clearPdfX = originX + sourcePxX / scale;
+          const clearPdfY = originYTop - sourcePxY / scale;
           const clearPdfW = (ann.sourceWidth || ann.width || 0) / scale;
           const clearPdfH = (ann.sourceHeight || ann.height || boxPxH) / scale;
 
-          if (ann.backgroundColor) {
+          // Clean background blend patch for source text erasure (preserves tinted card/page color)
+          if (ann.backgroundColor && (ann.sourceWidth || 0) > 0) {
             const { r: bgR, g: bgG, b: bgB } = hexToRgb(ann.backgroundColor);
             const lum = 0.299 * bgR + 0.587 * bgG + 0.114 * bgB;
-            const isPaperWhite = (lum >= 0.65) || (bgR >= 0.65 && bgG >= 0.65 && bgB >= 0.65);
+            const chroma = Math.max(bgR, bgG, bgB) - Math.min(bgR, bgG, bgB);
+            const isPaperWhite = (lum >= 0.94) || (chroma <= 0.085 && lum >= 0.78);
             const fillColor = isPaperWhite ? rgb(1, 1, 1) : rgb(bgR, bgG, bgB);
             page.drawRectangle({
-              x: clearPdfX,
-              y: clearPdfY - clearPdfH - 1,
-              width: clearPdfW,
-              height: clearPdfH + 2,
+              x: clearPdfX - 0.5,
+              y: clearPdfY - clearPdfH - 0.8,
+              width: clearPdfW + 1.0,
+              height: clearPdfH + 1.4,
               color: fillColor,
             });
           }
 
+          const dyPt = (ann.y - sourcePxY) / scale;
           const actualBaselinePdfY = ann.baseline
-            ? (pageHeight - ann.baseline)
-            : (pdfY - (clearPdfH * 0.78));
+            ? originYTop - (ann.baseline + dyPt)
+            : pdfY - textFontSizePt * 0.94;
 
-          if (hasNonLatinChars(ann.text)) {
-            const pdfFontSize = textFontSizePt;
-            const colorHex = ann.color || '#000000';
-            const { imgBytes, imgPdfW, imgPdfH, baselineFromTop } =
-              await renderTextViaCanvas(ann.text, pdfFontSize, colorHex, ann.bold, ann.italic);
+          const colorRgb = hexToRgb(ann.color || '#000000');
+          const boxWidthPt = pdfW > 0 ? pdfW : clearPdfW;
 
-            const pdfImage = await pdf.embedPng(imgBytes);
-            const imgTopY = actualBaselinePdfY + baselineFromTop;
-
-            page.drawImage(pdfImage, {
-              x: pdfX,
-              y: imgTopY - imgPdfH,
-              width: imgPdfW,
-              height: imgPdfH,
+          if (checkNonLatinChars(ann.text)) {
+            // Pure Native PDF Vector HarfBuzz Path (Hindi / Devanagari / mixed Unicode)
+            // Keeps razor-sharp print vectors at any zoom & preserves Bold / Italic / Alignment!
+            const vecRes = await drawVectorHarfbuzzText({
+              page,
+              text: ann.text,
+              xPdf: pdfX,
+              baselinePdfY: actualBaselinePdfY,
+              boxWidthPt,
+              fontSizePt: textFontSizePt,
+              colorRgb,
+              bold: ann.bold,
+              italic: ann.italic,
+              align: ann.align || 'left',
+              lineHeightFactor: 1.25,
+              underline: ann.underline,
+              strikethrough: ann.strikethrough,
             });
+
+            if (!vecRes.drawn) {
+              // Last-resort raster fallback only if WASM/font is unavailable or emoji .notdef
+              const lines = ann.text.split(/\r?\n/);
+              const lineHeightPt = textFontSizePt * 1.25;
+              for (let li = 0; li < lines.length; li++) {
+                const lineTxt = lines[li];
+                if (!lineTxt) continue;
+                const { imgBytes, imgPdfW, imgPdfH, baselineFromTop } =
+                  await renderTextViaCanvas(lineTxt, textFontSizePt, ann.color || '#000000', ann.bold, ann.italic);
+                const pdfImage = await pdf.embedPng(imgBytes);
+                const lineBaseY = actualBaselinePdfY - li * lineHeightPt;
+                const imgTopY = lineBaseY + baselineFromTop;
+                let lineX = pdfX;
+                if (ann.align === 'center' && boxWidthPt > imgPdfW) {
+                  lineX = pdfX + (boxWidthPt - imgPdfW) / 2;
+                } else if (ann.align === 'right' && boxWidthPt > imgPdfW) {
+                  lineX = pdfX + (boxWidthPt - imgPdfW);
+                }
+                page.drawImage(pdfImage, {
+                  x: lineX,
+                  y: imgTopY - imgPdfH,
+                  width: imgPdfW,
+                  height: imgPdfH,
+                });
+              }
+            }
           } else {
-            const { r, g, b } = hexToRgb(ann.color || '#000000');
-            const font = resolveLatinFont(ann.bold, ann.italic);
-            page.drawText(ann.text, {
-              x: pdfX,
-              y: actualBaselinePdfY,
-              size: textFontSizePt,
-              font,
-              color: rgb(r, g, b),
+            // Matched Standard PDF font family (TimesRoman / Courier / Helvetica) + Bold/Italic + Alignment
+            await drawMatchedLatinText({
+              pdfDoc: pdf,
+              page,
+              text: ann.text,
+              xPdf: pdfX,
+              baselinePdfY: actualBaselinePdfY,
+              boxWidthPt,
+              fontSizePt: textFontSizePt,
+              colorRgb,
+              fontHint: ann.originalFontName || ann.fontCssFamily,
+              bold: ann.bold,
+              italic: ann.italic,
+              align: ann.align || 'left',
+              lineHeightFactor: 1.25,
+              underline: ann.underline,
+              strikethrough: ann.strikethrough,
             });
           }
         } else if (ann.type === 'table' && ann.tableData && ann.rows && ann.cols) {
           const cellW = pdfW / ann.cols;
           const cellH = pdfH / ann.rows;
+          const cellFontPt = Math.max(6, Math.round((10 / scale) * 10) / 10);
 
           for (let ri = 0; ri < ann.rows; ri++) {
             for (let ci = 0; ci < ann.cols; ci++) {
@@ -1662,24 +1974,38 @@ export default function AdvancedEditor() {
               });
 
               if (cell) {
-                if (hasNonLatinChars(cell)) {
-                  const cellFontSize = 8 / scale;
-                  const { imgBytes, imgPdfW, imgPdfH } =
-                    await renderTextViaCanvas(cell, cellFontSize, '#000000');
-                  const cellImg = await pdf.embedPng(imgBytes);
-                  page.drawImage(cellImg, {
-                    x: cx + (2 / scale),
-                    y: cy + (cellH - imgPdfH) / 2,
-                    width: imgPdfW,
-                    height: imgPdfH,
+                if (checkNonLatinChars(cell)) {
+                  const vecCell = await drawVectorHarfbuzzText({
+                    page,
+                    text: cell,
+                    xPdf: cx + 2 / scale,
+                    baselinePdfY: cy + cellH * 0.32,
+                    boxWidthPt: Math.max(0, cellW - 4 / scale),
+                    fontSizePt: cellFontPt,
+                    colorRgb: { r: 0, g: 0, b: 0 },
                   });
+                  if (!vecCell.drawn) {
+                    const { imgBytes, imgPdfW, imgPdfH } =
+                      await renderTextViaCanvas(cell, cellFontPt, '#000000');
+                    const cellImg = await pdf.embedPng(imgBytes);
+                    page.drawImage(cellImg, {
+                      x: cx + (2 / scale),
+                      y: cy + (cellH - imgPdfH) / 2,
+                      width: imgPdfW,
+                      height: imgPdfH,
+                    });
+                  }
                 } else {
-                  page.drawText(cell, {
-                    x: cx + (2 / scale),
-                    y: cy + (cellH / 4),
-                    size: 8 / scale,
-                    font: helveticaFont,
-                    color: rgb(0, 0, 0),
+                  await drawMatchedLatinText({
+                    pdfDoc: pdf,
+                    page,
+                    text: cell,
+                    xPdf: cx + (2 / scale),
+                    baselinePdfY: cy + (cellH / 4),
+                    boxWidthPt: Math.max(0, cellW - 4 / scale),
+                    fontSizePt: cellFontPt,
+                    colorRgb: { r: 0, g: 0, b: 0 },
+                    fontHint: 'helvetica',
                   });
                 }
               }
@@ -1723,7 +2049,6 @@ export default function AdvancedEditor() {
             color: rgb(r, g, b),
           });
         } else if (ann.type === 'signature' && ann.signatureDataUrl) {
-          // Use direct base64 decode to avoid CSP blocking fetch() on data: URLs
           const imgBytes = dataUrlToArrayBuffer(ann.signatureDataUrl);
           const pdfImage = await pdf.embedPng(imgBytes);
           page.drawImage(pdfImage, {
@@ -1753,8 +2078,8 @@ export default function AdvancedEditor() {
           for (const part of parts) {
             const cmd = part[0];
             const coords = part.slice(1).split(',').map(Number);
-            const px = coords[0] / scale;
-            const py = pageHeight - (coords[1] / scale);
+            const px = originX + coords[0] / scale;
+            const py = originYTop - (coords[1] / scale);
             if (cmd === 'L' && prevX !== 0) {
               page.drawLine({
                 start: { x: prevX, y: prevY },
@@ -1789,6 +2114,10 @@ export default function AdvancedEditor() {
         }
       }
 
+      if (usedLocalVectorFallback) {
+        setSavedEngineNote('Processed cleanly in browser with Vector HarfBuzz Hindi & Font Matching (backend was asleep/offline).');
+      }
+
       const pdfBytes = await pdf.save();
       const blob = new Blob([pdfBytes as unknown as BlobPart], { type: 'application/pdf' });
       const url = URL.createObjectURL(blob);
@@ -1798,6 +2127,7 @@ export default function AdvancedEditor() {
       alert("An error occurred while saving the PDF.");
     } finally {
       setIsProcessing(false);
+      setSaveStatusLabel('Saving...');
     }
   };
 
@@ -1848,9 +2178,9 @@ export default function AdvancedEditor() {
   };
 
   /**
-   * LINE MODE: Merge adjacent pdfjs items that are on the SAME visual row
-   * AND horizontally very close (gap < fontSize * 0.25 OR < 6px).
-   * Strict threshold prevents table-column items from being merged.
+   * LINE MODE: Merge adjacent pdfjs/OCR items that are on the SAME visual row
+   * AND horizontally close in canvas pixels (`h * 0.85`).
+   * Keeps table columns separate while grouping words into full lines at any zoom.
    */
   const mergeBlocksToLines = (blocks: DetectedTextBlock[]): DetectedTextBlock[] => {
     if (!blocks.length) return [];
@@ -1865,17 +2195,21 @@ export default function AdvancedEditor() {
       const next = sorted[i];
       const sameRow = Math.abs(next.y - group.y) < Math.max(group.h, next.h) * 0.45;
       const hGap = next.x - (group.x + group.w);
-      // STRICT gap: only merge if gap is very small (same logical phrase)
-      // fontSize * 0.25 ≈ one-quarter em — avoids merging across table columns
-      const closeEnough = hGap >= -2 && hGap < Math.max(6, group.fontSize * 0.25);
+      // Use canvas-pixel word spacing relative to box height so 75%/150%/OCR scales work consistently
+      const closeEnough = hGap >= -Math.max(2, group.h * 0.12) && hGap < Math.max(8, group.h * 0.85);
       if (sameRow && closeEnough) {
-        const rightEdge = next.x + next.w;
+        const rightEdge = Math.max(group.x + group.w, next.x + next.w);
+        const topEdge = Math.min(group.y, next.y);
+        const bottomEdge = Math.max(group.y + group.h, next.y + next.h);
         group = {
           ...group,
           text: group.text + (hGap > 1 ? ' ' : '') + next.text,
+          y: topEdge,
           w: rightEdge - group.x,
-          h: Math.max(group.h, next.h),
+          h: bottomEdge - topEdge,
           fontSize: Math.max(group.fontSize, next.fontSize),
+          baselineY: group.baselineY ?? next.baselineY,
+          pdfBaselineY: group.pdfBaselineY ?? next.pdfBaselineY,
           bold: group.bold || next.bold,
           italic: group.italic || next.italic,
           fgColor: group.fgColor || next.fgColor,
@@ -1950,8 +2284,8 @@ export default function AdvancedEditor() {
       const match = findBackendMatch(block);
       const scale = pageViewport?.scale || 1;
       const realFontSize = match ? match.fontSize : (block.fontSize || Math.max(6, Math.round((block.h / scale) * 0.72)));
-      const fs = Math.max(6, Math.min(realFontSize, 120));
-      const bw = Math.min(Math.max(block.w, 12), 800);
+      const fs = Math.max(4, Math.min(realFontSize, 200));
+      const bw = Math.min(Math.max(block.w, 12), Math.max(800, Math.round(pageViewport?.width || 800)));
       const bh = Math.max(block.h, 10);
       const baselinePt = match?.baseline || block.pdfBaselineY || ((block.y + block.h * 0.78) / scale);
       const id = Date.now().toString() + '_ie';
@@ -1988,6 +2322,36 @@ export default function AdvancedEditor() {
 
   // Helper: pages that have annotations (for multi-page indicators)
   const pagesWithEdits = new Set(annotations.map(a => a.pageIndex + 1));
+
+  // Keep annotation pixel coordinates synced if user zooms in/out mid-edit
+  const handleZoomChange = (nextZoomRaw: number) => {
+    const nextZoom = Math.max(0.5, Math.min(3, Math.round(nextZoomRaw * 100) / 100));
+    if (nextZoom === zoomLevel) return;
+    const ratio = nextZoom / zoomLevel;
+    setAnnotations(prev =>
+      prev.map(ann => {
+        const scaled: Annotation = {
+          ...ann,
+          x: ann.x * ratio,
+          y: ann.y * ratio,
+          width: ann.width !== undefined ? ann.width * ratio : undefined,
+          height: ann.height !== undefined ? ann.height * ratio : undefined,
+          sourceX: ann.sourceX !== undefined ? ann.sourceX * ratio : undefined,
+          sourceY: ann.sourceY !== undefined ? ann.sourceY * ratio : undefined,
+          sourceWidth: ann.sourceWidth !== undefined ? ann.sourceWidth * ratio : undefined,
+          sourceHeight: ann.sourceHeight !== undefined ? ann.sourceHeight * ratio : undefined,
+          strokeWidth: ann.strokeWidth !== undefined ? ann.strokeWidth * ratio : undefined,
+        };
+        if (ann.pathData) {
+          scaled.pathData = ann.pathData.replace(/([ML])([\d.-]+),([\d.-]+)/g, (_m, cmd, px, py) => {
+            return `${cmd}${(parseFloat(px) * ratio).toFixed(1)},${(parseFloat(py) * ratio).toFixed(1)}`;
+          });
+        }
+        return scaled;
+      })
+    );
+    setZoomLevel(nextZoom);
+  };
 
   return (
     <div className="flex-1 flex flex-col bg-gray-100">
@@ -2183,11 +2547,11 @@ export default function AdvancedEditor() {
             <div className="flex items-center gap-3 flex-wrap">
               {/* Zoom */}
               <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
-                <button onClick={() => setZoomLevel(z => Math.max(0.5, z - 0.25))} className="p-1 rounded hover:bg-white" title="Zoom out">
+                <button onClick={() => handleZoomChange(zoomLevel - 0.25)} className="p-1 rounded hover:bg-white" title="Zoom out">
                   <ZoomOut className="w-4 h-4" />
                 </button>
                 <span className="text-xs font-medium px-2 min-w-[3rem] text-center">{Math.round(zoomLevel * 100)}%</span>
-                <button onClick={() => setZoomLevel(z => Math.min(3, z + 0.25))} className="p-1 rounded hover:bg-white" title="Zoom in">
+                <button onClick={() => handleZoomChange(zoomLevel + 0.25)} className="p-1 rounded hover:bg-white" title="Zoom in">
                   <ZoomIn className="w-4 h-4" />
                 </button>
               </div>
@@ -2222,27 +2586,32 @@ export default function AdvancedEditor() {
                   <ChevronRight className="w-5 h-5" />
                 </button>
               </div>
-              {/* OCR button + language selector for scanned PDFs */}
-              {isScannedPdf && !ocrDone && (
+              {/* OCR button + language selector for scanned PDFs (always accessible before & after scanning) */}
+              {(isScannedPdf || ocrDone) && (
                 <div className="flex items-center gap-1">
                   <select
                     value={ocrLanguage}
                     onChange={e => setOcrLanguage(e.target.value as 'eng' | 'hin' | 'eng+hin')}
-                    className="px-2 py-2 bg-amber-50 border border-amber-300 text-amber-900 rounded-lg text-xs font-semibold"
+                    disabled={ocrBusy}
+                    className="px-2 py-2 bg-amber-50 border border-amber-300 text-amber-900 rounded-lg text-xs font-semibold disabled:opacity-50"
                     title="OCR Language"
                   >
-                    <option value="eng">English OCR</option>
-                    <option value="hin">Hindi OCR</option>
                     <option value="eng+hin">Hindi + English</option>
+                    <option value="hin">Hindi OCR</option>
+                    <option value="eng">English OCR</option>
                   </select>
                   <button
                     onClick={runOcrOnPage}
                     disabled={ocrBusy}
-                    className="px-3 py-2 bg-amber-100 text-amber-800 rounded-lg text-sm font-bold hover:bg-amber-200 disabled:opacity-50 flex items-center gap-2"
-                    title="Scanned PDF detected. Run OCR to detect text."
+                    className={`px-3 py-2 rounded-lg text-sm font-bold disabled:opacity-50 flex items-center gap-2 ${
+                      ocrDone
+                        ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200 border border-emerald-300'
+                        : 'bg-amber-100 text-amber-800 hover:bg-amber-200 border border-amber-300'
+                    }`}
+                    title={ocrDone ? 'Re-run OCR scan on this page' : 'Scanned PDF detected. Run OCR to detect editable words & lines.'}
                   >
                     {ocrBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <ScanText className="w-4 h-4" />}
-                    {ocrBusy ? 'OCR running…' : 'Scan Text'}
+                    {ocrBusy ? (ocrStatusLabel || 'OCR running…') : ocrDone ? 'Re-Scan Text' : 'Scan Text'}
                   </button>
                 </div>
               )}
@@ -2252,19 +2621,35 @@ export default function AdvancedEditor() {
                 className="px-6 py-2 bg-indigo-600 text-white font-bold rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50 flex items-center gap-2"
               >
                 {isProcessing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-                {isProcessing ? 'Saving...' : 'Apply Changes'}
+                {isProcessing ? saveStatusLabel : 'Apply Changes'}
               </button>
             </div>
           </div>
 
-          {/* Scanned PDF notice */}
-          {isScannedPdf && !ocrDone && (
-            <div className="bg-amber-50 border-b border-amber-200 px-4 py-2 text-sm text-amber-800 flex items-center gap-2">
-              <ScanText className="w-4 h-4 shrink-0" />
-              <span>
-                Scanned/image-based PDF detected.
-                <strong> For Hindi PDF → select "Hindi OCR" or "Hindi + English"</strong> from the language dropdown, then click "Scan Text".
-              </span>
+          {/* Scanned PDF notice / OCR status */}
+          {(isScannedPdf || ocrNotice) && (
+            <div className={`border-b px-4 py-2 text-sm flex items-center justify-between gap-2 ${
+              ocrNotice
+                ? 'bg-red-50 border-red-200 text-red-800'
+                : ocrDone
+                ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                : 'bg-amber-50 border-amber-200 text-amber-800'
+            }`}>
+              <div className="flex items-center gap-2">
+                <ScanText className="w-4 h-4 shrink-0" />
+                {ocrNotice ? (
+                  <span>{ocrNotice}</span>
+                ) : ocrDone ? (
+                  <span>
+                    OCR active on Page {currentPage}: <strong>{detectedText.length} clickable word boxes</strong> ready. Hover &amp; click any word, or switch <strong>W / L / P</strong> mode in toolbar.
+                  </span>
+                ) : (
+                  <span>
+                    Scanned/image-based PDF detected on Page {currentPage}.
+                    <strong> Choose language</strong> (Hindi + English default) and click <strong>"Scan Text"</strong> to make words clickable for editing.
+                  </span>
+                )}
+              </div>
             </div>
           )}
 
@@ -2382,7 +2767,7 @@ export default function AdvancedEditor() {
                             fontFamily: ann.fontCssFamily || pdfFontToCss(ann.originalFontName),
                             padding: 0,
                             margin: 0,
-                            overflow: 'hidden'
+                            overflow: 'visible'
                           }}
                           autoFocus
                           onClick={(e) => e.stopPropagation()}
@@ -2560,7 +2945,7 @@ export default function AdvancedEditor() {
                               const id = Date.now().toString() + '_tb';
                               const scale = pageViewport?.scale || 1;
                               const realFontSize = match ? match.fontSize : (block.fontSize || Math.max(6, Math.round((block.h / scale) * 0.72)));
-                              const fs = Math.max(6, Math.min(realFontSize, 120));
+                              const fs = Math.max(4, Math.min(realFontSize, 200));
                               const bw = Math.max(block.w, 12);
                               const bh = Math.max(block.h, 10);
                               const baselinePt = match?.baseline || block.pdfBaselineY || ((block.y + block.h * 0.78) / scale);
@@ -2706,7 +3091,7 @@ export default function AdvancedEditor() {
                     const match = findBackendMatch(block);
                     const scale = pageViewport?.scale || 1;
                     const realFontSize = match ? match.fontSize : (block.fontSize || Math.max(6, Math.round((block.h / scale) * 0.72)));
-                    const fs = Math.max(6, Math.min(realFontSize, 120));
+                    const fs = Math.max(4, Math.min(realFontSize, 200));
                     const fgColor = match?.color || block.fgColor || '#000000';
                     const isBold = match?.bold ?? block.bold ?? false;
                     const isItalic = match?.italic ?? block.italic ?? false;
@@ -2876,10 +3261,20 @@ export default function AdvancedEditor() {
                           <label className="block text-xs font-bold text-gray-700 mb-1.5">Font Size (pt)</label>
                           <input
                             type="number"
-                            min="6"
-                            max="120"
+                            min="4"
+                            max="200"
+                            step="0.5"
                             value={selAnn.fontSize || 12}
-                            onChange={(e) => updateAnnotation(selectedId, { fontSize: parseInt(e.target.value) || 12 })}
+                            onChange={(e) => {
+                              const nextSize = Math.max(4, Math.min(200, parseFloat(e.target.value) || 12));
+                              const curScale = pageViewport?.scale || 1;
+                              const linesCount = Math.max(1, (selAnn.text || '').split('\n').length);
+                              const minBoxH = Math.round(nextSize * curScale * 1.3 * linesCount);
+                              updateAnnotation(selectedId, {
+                                fontSize: nextSize,
+                                height: Math.max(selAnn.height || 0, minBoxH),
+                              });
+                            }}
                             className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
                           />
                         </div>
@@ -3120,6 +3515,11 @@ export default function AdvancedEditor() {
           <div className="w-full max-w-2xl bg-white rounded-2xl shadow-sm border border-gray-200 p-8 text-center">
             <div className="p-8 bg-green-50 rounded-xl border border-green-200 mb-6">
               <h3 className="text-2xl font-bold text-green-800 mb-4">PDF edited successfully!</h3>
+              {savedEngineNote && (
+                <p className="text-xs text-emerald-700 bg-emerald-100/70 border border-emerald-200 rounded-lg px-3 py-2 mb-4 max-w-md mx-auto">
+                  {savedEngineNote}
+                </p>
+              )}
               <a
                 href={editedUrl}
                 download={`edited_${file.name}`}
@@ -3130,7 +3530,7 @@ export default function AdvancedEditor() {
               </a>
             </div>
             <button
-              onClick={() => { setFile(null); setEditedUrl(null); setAnnotations([]); setUndoStack([]); setRedoStack([]); }}
+              onClick={() => { setFile(null); setEditedUrl(null); setSavedEngineNote(null); setAnnotations([]); setUndoStack([]); setRedoStack([]); }}
               className="text-gray-600 hover:text-gray-900 font-medium"
             >
               Edit another PDF

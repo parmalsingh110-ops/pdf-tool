@@ -103,7 +103,7 @@ export default function ImageResizer() {
     () => ({
       // publicPath points to the SEPARATE data package that hosts WASM/ONNX models on CDN.
       // Note: it's background-removal-DATA (different npm package), not background-removal!
-      publicPath: 'https://staticimgly.com/@imgly/background-removal-data/1.7.0/dist/',
+      publicPath: 'https://cdn.jsdelivr.net/npm/@imgly/background-removal-data@1.7.0/dist/',
       model: 'isnet_quint8' as const,
       device: 'cpu' as const,
       proxyToWorker: false,   // proxyToWorker only works with WebGPU; CPU mode must be false

@@ -16,9 +16,13 @@ python-multipart==0.0.20
 # ── PDF Processing ───────────────────────────────────────────────
 pdf2docx==0.5.8
 pdfplumber>=0.11.10
-camelot-py[cv]>=2.0.0
+camelot-py>=2.0.0
+pandas>=2.2.2
+lxml>=5.2.0
 # PyMuPDF downgraded to 1.23.26 to maintain compatibility with pdf2docx
 PyMuPDF==1.23.26
+uharfbuzz>=0.53.2
+fonttools>=4.53.0
 
 # ── Office & Presentation ────────────────────────────────────────
 openpyxl==3.1.2
@@ -34,7 +38,10 @@ numpy
 
 # ── OCR ──────────────────────────────────────────────────────────
 ocrmypdf>=17.8.1
-# iLovePDF OCR API — intentional existing feature, PRESERVED
+rapidocr-onnxruntime>=1.4.0
+onnxruntime>=1.20.0
+opencv-python-headless>=4.9.0
+# iLovePDF OCR API — optional server-side fallback (local Pro OCR is primary)
 ilovepdf>=1.0.0
 
 # ── Environment & Rate Limiting ──────────────────────────────────

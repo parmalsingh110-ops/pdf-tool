@@ -1,3 +1,5 @@
+import { isAllowedBackendOverride } from './privacy';
+
 /**
  * Centralized API configuration and resilient fetch helper.
  * Prevents Mixed Content errors in production, avoids hardcoded localhost leaks,
@@ -7,7 +9,9 @@
 export function getApiBaseUrl(): string {
   if (typeof window !== 'undefined') {
     const custom = localStorage.getItem('pdf_admin_backend_url');
-    if (custom && custom.trim()) return custom.trim().replace(/\/+$/, '');
+    if (custom && custom.trim() && isAllowedBackendOverride(custom)) {
+      return custom.trim().replace(/\/+$/, '');
+    }
   }
 
   const isLiveHost =

@@ -371,6 +371,7 @@ export default function UnlockPDF() {
   const [file, setFile] = useState<File | null>(null);
   const [unlockMode, setUnlockMode] = useState<'direct' | 'smart'>('smart');
   const [directPassword, setDirectPassword] = useState('');
+  const [offlineOnly, setOfflineOnly] = useState(false);
 
   // Smart Helper State
   const [selectedPresetId, setSelectedPresetId] = useState<string>('eaadhaar');
@@ -467,31 +468,37 @@ export default function UnlockPDF() {
       }
 
       const numPages = pdfjsDoc.numPages;
-      setProgress(`Verified password "${successfulPassword}"! Trying lossless backend unlock...`);
 
-      // ── Step 1: Try backend lossless unlock (preserves text/links/vectors) ──
-      try {
-        const formData = new FormData();
-        formData.append('file', file);
-        formData.append('password', successfulPassword);
-        const backendResp = await apiFetch('/unlock-pdf', {
-          method: 'POST',
-          body: formData,
-        });
-        if (backendResp.ok) {
-          const blob = await backendResp.blob();
-          const url = URL.createObjectURL(blob);
-          setUnlockedUrl(url);
-          setProgress('');
-          return;
+      if (!offlineOnly) {
+        setProgress(`Verified password "${successfulPassword}"! Trying lossless backend unlock...`);
+        // ── Step 1: Try backend lossless unlock (preserves text/links/vectors) ──
+        try {
+          const formData = new FormData();
+          formData.append('file', file);
+          formData.append('password', successfulPassword);
+          const backendResp = await apiFetch('/unlock-pdf', {
+            method: 'POST',
+            body: formData,
+          });
+          if (backendResp.ok) {
+            const blob = await backendResp.blob();
+            const url = URL.createObjectURL(blob);
+            setUnlockedUrl(url);
+            setProgress('');
+            return;
+          }
+        } catch (_backendErr) {
+          // Backend offline or failed — fall through to client-side raster path
+          console.warn('Backend unlock unavailable, using client raster fallback.');
         }
-      } catch (_backendErr) {
-        // Backend offline or failed — fall through to client-side raster path
-        console.warn('Backend unlock unavailable, using client raster fallback.');
       }
 
       // ── Step 2: Client-side raster fallback (canvas high-quality embed) ──
-      setProgress(`Backend offline — rebuilding ${numPages} page(s) locally...`);
+      setProgress(
+        offlineOnly
+          ? `Strict Offline Mode — rebuilding ${numPages} page(s) locally in your browser...`
+          : `Backend offline — rebuilding ${numPages} page(s) locally...`
+      );
 
       // Render each page into a brand new clean unencrypted PDF
       const newPdfDoc = await PDFDocument.create();
@@ -784,6 +791,22 @@ export default function UnlockPDF() {
                 </div>
               )}
 
+              {/* Strict 100% Offline Privacy Toggle */}
+              <label className="flex items-start gap-3 p-3.5 rounded-xl bg-emerald-50/70 border border-emerald-200 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={offlineOnly}
+                  onChange={(e) => setOfflineOnly(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-emerald-400 text-emerald-600 focus:ring-emerald-500"
+                />
+                <div className="text-xs text-emerald-900 leading-relaxed">
+                  <span className="font-bold block">Strict 100% Offline Browser Mode (Sensitive Docs / Aadhaar / Bank)</span>
+                  <span className="text-emerald-700">
+                    Never sends the file to our ephemeral lossless unlock API — rebuilds clean PDF pages 100% locally in your browser (high-res raster output).
+                  </span>
+                </div>
+              </label>
+
               {/* Action Buttons */}
               <div className="flex flex-col sm:flex-row gap-3 pt-2">
                 <button
@@ -820,9 +843,11 @@ export default function UnlockPDF() {
               </div>
 
               {/* Trust Badge */}
-              <div className="flex items-center justify-center gap-2 text-xs text-gray-500 pt-2 border-t border-gray-100">
-                <Shield className="w-4 h-4 text-emerald-600" />
-                <span><strong>100% Client-Side Privacy:</strong> No document, password, or name ever uploads to our servers. Processing occurs entirely in your browser.</span>
+              <div className="flex items-center justify-center gap-2 text-xs text-gray-500 pt-2 border-t border-gray-100 text-center">
+                <Shield className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>
+                  <strong>Browser-First Privacy:</strong> Password verification runs 100% in your browser. By default, verified PDFs use our ephemeral lossless unlock API (deleted immediately after response) to keep text selectable — enable Strict Offline Mode above to keep files strictly on your device.
+                </span>
               </div>
             </div>
           ) : (

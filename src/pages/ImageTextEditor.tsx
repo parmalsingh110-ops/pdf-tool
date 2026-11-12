@@ -15,7 +15,7 @@ import {
   Zap,
 } from 'lucide-react';
 import FileDropzone from '../components/FileDropzone';
-import { extractTextRegions } from '../lib/advancedVisionEngine';
+import { extractTextRegions, isVisionAiEnabled } from '../lib/advancedVisionEngine';
 import { useSEO } from '../hooks/useSEO';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
@@ -429,9 +429,9 @@ export default function ImageTextEditor() {
       await workerRef.current?.terminate();
       workerRef.current = null;
 
-      // Invisible AI Enhancement attempt
+      // Optional opt-in BYOK AI enhancement (disabled by default — zero external upload)
       try {
-        if (import.meta.env.VITE_GEMINI_API_KEY) {
+        if (isVisionAiEnabled()) {
           const aiBlocks = await extractTextRegions(ocrSource);
           const aiWords: EditableWord[] = [];
           let idx = 0;

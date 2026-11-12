@@ -12,6 +12,7 @@
 
 import { isChunkLoadError, handleChunkLoadFailure } from './chunkReloader';
 import { isDomMutationError } from './domResilience';
+import { isAllowedBackendOverride } from './privacy';
 
 export interface ToolFeedbackPayload {
   toolPath: string;
@@ -61,7 +62,9 @@ let intervalStarted = false;
 export function getBackendUrl(): string {
   if (typeof window !== 'undefined') {
     const custom = localStorage.getItem('pdf_admin_backend_url');
-    if (custom && custom.trim()) return custom.trim().replace(/\/$/, '');
+    if (custom && custom.trim() && isAllowedBackendOverride(custom)) {
+      return custom.trim().replace(/\/$/, '');
+    }
   }
   const envUrl = import.meta.env.VITE_API_URL || import.meta.env.VITE_BACKEND_URL;
   if (envUrl && envUrl.trim()) return envUrl.trim().replace(/\/$/, '');
@@ -295,7 +298,19 @@ export async function reportToolError(payload: ToolErrorPayload): Promise<void> 
     recentErrors.add(signature);
     setTimeout(() => recentErrors.delete(signature), 30000);
 
-    enqueueItem('error', payload);
+    // Strip client document filename before persisting/sending telemetry
+    let safeFileInfo: ToolErrorPayload['fileInfo'] | undefined;
+    if (payload.fileInfo) {
+      const rawName = String(payload.fileInfo.name || '');
+      const ext = rawName.includes('.') ? '.' + rawName.split('.').pop()?.toLowerCase().slice(0, 12) : undefined;
+      safeFileInfo = {
+        size: payload.fileInfo.size,
+        sizeFormatted: payload.fileInfo.sizeFormatted,
+        type: payload.fileInfo.type || ext,
+      };
+    }
+
+    enqueueItem('error', { ...payload, fileInfo: safeFileInfo });
   } catch (err) {
     console.debug('[Telemetry] reportToolError error', err);
   }

@@ -14,6 +14,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libreoffice \
     ghostscript \
     mupdf-tools \
+    fonts-liberation \
+    fonts-dejavu-core \
+    libraqm0 \
+    libfribidi0 \
+    libharfbuzz0b \
     libgl1 \
     libglib2.0-0 \
     libgomp1 \
@@ -51,9 +56,5 @@ USER appuser
 EXPOSE 8000
 
 # ── Run with gunicorn (proper request timeout for heavy OCR tasks) ────────────
-# 2 workers: enough for free Render tier (512 MB RAM), avoids OOM with concurrent OCR
-CMD ["gunicorn", "main:app", \
-     "-k", "uvicorn.workers.UvicornWorker", \
-     "-w", "2", \
-     "--timeout", "300", \
-     "--bind", "0.0.0.0:8000"]
+# 2 workers default: enough for free Render tier (512 MB RAM), avoids OOM with concurrent OCR
+CMD ["sh", "-c", "gunicorn main:app -k uvicorn.workers.UvicornWorker -w ${WEB_CONCURRENCY:-2} --timeout 300 --bind 0.0.0.0:${PORT:-8000}"]

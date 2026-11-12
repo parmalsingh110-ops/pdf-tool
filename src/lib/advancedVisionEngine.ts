@@ -1,4 +1,39 @@
-export const getVisionApiKey = () => import.meta.env.VITE_GEMINI_API_KEY || '';
+const USER_VISION_KEY_STORAGE = 'pms_user_gemini_key';
+
+/**
+ * Security & Zero-Leak Rule:
+ * NEVER read VITE_GEMINI_API_KEY from build env (that leaks keys into public JS bundles
+ * and silently uploads client documents to Google servers without consent).
+ * Vision AI only runs if the user explicitly provides a session-only BYOK key in their browser.
+ */
+export const getVisionApiKey = (): string => {
+  try {
+    if (typeof window !== 'undefined' && window.sessionStorage) {
+      return (window.sessionStorage.getItem(USER_VISION_KEY_STORAGE) || '').trim();
+    }
+  } catch {}
+  return '';
+};
+
+export const isVisionAiEnabled = (): boolean => getVisionApiKey().length > 10;
+
+export const setUserVisionApiKey = (key: string): void => {
+  try {
+    if (typeof window !== 'undefined' && window.sessionStorage) {
+      const clean = key.trim();
+      if (clean) window.sessionStorage.setItem(USER_VISION_KEY_STORAGE, clean);
+      else window.sessionStorage.removeItem(USER_VISION_KEY_STORAGE);
+    }
+  } catch {}
+};
+
+export const clearUserVisionApiKey = (): void => {
+  try {
+    if (typeof window !== 'undefined' && window.sessionStorage) {
+      window.sessionStorage.removeItem(USER_VISION_KEY_STORAGE);
+    }
+  } catch {}
+};
 
 const GEMINI_MODELS = [
   'gemini-2.5-flash',
@@ -9,14 +44,18 @@ const GEMINI_MODELS = [
 ];
 
 export async function fetchGeminiWithFallback(apiKey: string, requestBody: any): Promise<Response> {
+  if (!apiKey) throw new Error('Vision API key is not configured.');
   let lastStatus = 0;
   for (const model of GEMINI_MODELS) {
     try {
       const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
         {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            'x-goog-api-key': apiKey,
+          },
           body: JSON.stringify(requestBody)
         }
       );

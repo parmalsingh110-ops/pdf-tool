@@ -201,11 +201,10 @@ export default function PrintCostCalculator() {
     };
   }, [calculatedCounts, printMode, rateBwSingle, rateBwDuplex, rateColorSingle, rateColorDuplex, paperType, addSpiral, addLamination, copies]);
 
-  // Dynamic UPI Payment Link & QR
+  // Dynamic UPI Payment Link & QR (100% local in-browser — UPI ID & amount never touch external QR servers)
   const upiPayString = `upi://pay?pa=${encodeURIComponent(upiId)}&pn=${encodeURIComponent(shopName)}&am=${pricingSummary.grandTotal}&cu=INR&tn=${encodeURIComponent(`Print ${totalPages}p (${copies} copy)`)}`;
-  const upiQrUrlFallback = `https://api.qrserver.com/v1/create-qr-code/?size=280x280&margin=8&data=${encodeURIComponent(upiPayString)}`;
 
-  // Instant 100% Local In-Browser QR Code Generation (0ms Network Latency)
+  // Instant 100% Local In-Browser QR Code Generation (0ms Network Latency, Zero External Leaks)
   const [upiQrDataUrl, setUpiQrDataUrl] = useState<string>('');
   useEffect(() => {
     if (!upiPayString) return;
@@ -219,8 +218,8 @@ export default function PrintCostCalculator() {
       errorCorrectionLevel: 'M',
     })
       .then((url) => setUpiQrDataUrl(url))
-      .catch(() => setUpiQrDataUrl(upiQrUrlFallback));
-  }, [upiPayString, upiQrUrlFallback]);
+      .catch(() => setUpiQrDataUrl(''));
+  }, [upiPayString]);
 
   // Clean 80mm POS Thermal / Laser Bill Receipt Printer
   const handlePrintBillSlip = () => {
@@ -758,11 +757,17 @@ export default function PrintCostCalculator() {
 
                 {/* Scannable Dynamic UPI QR Code */}
                 <div className="bg-white p-4 rounded-2xl flex flex-col items-center text-center shadow-inner">
-                  <img
-                    src={upiQrDataUrl || upiQrUrlFallback}
-                    alt="Scan UPI QR"
-                    className="w-48 h-48 object-contain rounded-xl"
-                  />
+                  {upiQrDataUrl ? (
+                    <img
+                      src={upiQrDataUrl}
+                      alt="Scan UPI QR"
+                      className="w-48 h-48 object-contain rounded-xl"
+                    />
+                  ) : (
+                    <div className="w-48 h-48 rounded-xl bg-slate-100 flex items-center justify-center text-xs text-slate-500">
+                      Generating local UPI QR...
+                    </div>
+                  )}
                   <div className="mt-3">
                     <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-100 text-emerald-800 text-xs font-black">
                       <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> Scan to Pay ₹{pricingSummary.grandTotal}
@@ -810,11 +815,17 @@ export default function PrintCostCalculator() {
               </div>
 
               <div className="bg-slate-50 dark:bg-slate-800 p-4 rounded-2xl border border-slate-200 dark:border-slate-700 flex justify-center">
-                <img
-                  src={upiQrDataUrl || upiQrUrlFallback}
-                  alt="Dynamic UPI QR"
-                  className="w-60 h-60 object-contain rounded-xl"
-                />
+                {upiQrDataUrl ? (
+                  <img
+                    src={upiQrDataUrl}
+                    alt="Dynamic UPI QR"
+                    className="w-60 h-60 object-contain rounded-xl"
+                  />
+                ) : (
+                  <div className="w-60 h-60 rounded-xl bg-slate-100 dark:bg-slate-900 flex items-center justify-center text-xs text-slate-500">
+                    Generating local UPI QR...
+                  </div>
+                )}
               </div>
 
               <div className="space-y-2">

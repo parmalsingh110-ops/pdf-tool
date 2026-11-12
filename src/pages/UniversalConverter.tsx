@@ -12,7 +12,7 @@ import {
 import * as XLSX from 'xlsx';
 import PptxGenJS from 'pptxgenjs';
 import FileDropzone from '../components/FileDropzone';
-import { extractTextRegions, extractTableData } from '../lib/advancedVisionEngine';
+import { extractTextRegions, extractTableData, isVisionAiEnabled } from '../lib/advancedVisionEngine';
 import { extractDocxContent, DocxElement, DocxParagraph, DocxTable as DTable, DocxTableRow as DRow, safeStr } from '../lib/docxExtractor';
 import { useSEO } from '../hooks/useSEO';
 import { dataUrlToBytes } from '../lib/utils';
@@ -1625,9 +1625,9 @@ async function convertPdfFile(f: File, outType: Target, quality: number): Promis
       const content = await page.getTextContent();
       let pageText = content.items.map((x: any) => x.str).join(' ');
 
-      // AI Polishing
+      // Optional BYOK AI Polishing (never runs without explicit user key)
       try {
-        if (import.meta.env.VITE_GEMINI_API_KEY && pageText.trim().length > 10) {
+        if (isVisionAiEnabled() && pageText.trim().length > 10) {
           const { enhanceTextWithAI } = await import('../lib/advancedVisionEngine');
           const paras = await enhanceTextWithAI(pageText);
           pageText = paras.join('\n\n');
@@ -1640,9 +1640,9 @@ async function convertPdfFile(f: File, outType: Target, quality: number): Promis
   }
 
   if (outType === 'docx' || outType === 'xlsx' || outType === 'pptx') {
-    // Attempt Universal Layout Engine for DOCX
+    // Attempt Universal Layout Engine for DOCX (only if user enabled BYOK Vision AI)
     try {
-      if (outType === 'docx' && import.meta.env.VITE_GEMINI_API_KEY) {
+      if (outType === 'docx' && isVisionAiEnabled()) {
         const pagesData: { layout: any, canvas: HTMLCanvasElement }[] = [];
         for (let i = 1; i <= pdf.numPages; i++) {
           const page = await pdf.getPage(i);
@@ -1671,9 +1671,9 @@ async function convertPdfFile(f: File, outType: Target, quality: number): Promis
       const content = await page.getTextContent();
       let pageText = content.items.map((x: any) => x.str).join(' ');
 
-      // AI Polishing
+      // Optional BYOK AI Polishing
       try {
-        if (import.meta.env.VITE_GEMINI_API_KEY && pageText.trim().length > 10) {
+        if (isVisionAiEnabled() && pageText.trim().length > 10) {
           const { enhanceTextWithAI } = await import('../lib/advancedVisionEngine');
           const paras = await enhanceTextWithAI(pageText);
           pageText = paras.join('\n\n');
@@ -1696,10 +1696,10 @@ async function convertPdfFile(f: File, outType: Target, quality: number): Promis
       return Packer.toBlob(d);
     }
     if (outType === 'xlsx') {
-      // Silent AI table attempt on page 1
+      // Optional BYOK AI table attempt on page 1
       let tableRows: string[][] | null = null;
       try {
-        if (import.meta.env.VITE_GEMINI_API_KEY) {
+        if (isVisionAiEnabled()) {
           const base64 = await pageToBase64(1);
           const rows = await extractTableData(base64);
           if (rows && rows.length > 1) tableRows = rows;
@@ -1766,7 +1766,7 @@ async function convertTextFile(f: File): Promise<Blob> {
 // ─── AI text extractor for non-PDF files ─────────────────────────────────────
 // Converts the file to an image blob (using pdf.js or a canvas/img), then calls AI
 async function aiExtractFromImage(imageBlob: Blob): Promise<string[]> {
-  if (!import.meta.env.VITE_GEMINI_API_KEY) return [];
+  if (!isVisionAiEnabled()) return [];
   const { extractTextRegions } = await import('../lib/advancedVisionEngine');
   const base64 = await new Promise<string>((res, rej) => {
     const reader = new FileReader();
@@ -1822,6 +1822,7 @@ export default function UniversalConverter() {
   const [resultExt, setResultExt] = useState('');
   const [error, setError]         = useState<string | null>(null);
   const [progress, setProgress]   = useState('');
+  const [offlineOnly, setOfflineOnly] = useState(false);
 
   // Track current job so stale results from a cancelled job can't race ahead.
   const jobIdRef    = useRef(0);
@@ -1882,8 +1883,9 @@ export default function UniversalConverter() {
     setError(null);
     setProgress('Preparing…');
 
-    // ── Backend helper — tries server API, returns null on failure ──
+    // ── Backend helper — tries server API unless strict offline browser mode is checked ──
     const tryBackend = async (endpoint: string, extraFields?: Record<string, string>): Promise<Blob | null> => {
+      if (offlineOnly) return null;
       try {
         const form = new FormData();
         form.append('file', file);
@@ -2144,7 +2146,7 @@ export default function UniversalConverter() {
           Convert Any Document
         </h1>
         <p className="text-slate-600 dark:text-slate-400">
-          PDF, Word, Excel, PowerPoint, Images, Text — convert to any format. Everything runs in your browser, files never leave your device.
+          PDF, Word, Excel, PowerPoint, Images, Text — convert to any format. Browser-first processing wherever supported; Office/layout conversions run ephemerally on our server with immediate auto-deletion.
         </p>
       </div>
 
@@ -2238,6 +2240,22 @@ export default function UniversalConverter() {
                   </div>
                 )}
               </div>
+
+              {/* Strict 100% Offline Browser Toggle */}
+              <label className="flex items-start gap-3 p-3.5 rounded-xl bg-emerald-50/70 dark:bg-emerald-950/25 border border-emerald-200 dark:border-emerald-800/60 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={offlineOnly}
+                  onChange={(e) => setOfflineOnly(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-emerald-400 text-emerald-600 focus:ring-emerald-500"
+                />
+                <div className="text-xs text-emerald-900 dark:text-emerald-200 leading-relaxed">
+                  <span className="font-bold block">Strict 100% Offline Browser Mode (Confidential Documents)</span>
+                  <span className="text-emerald-700 dark:text-emerald-400">
+                    Never upload this file to the backend conversion API — runs purely in your browser (basic layout for Office/PDF conversions).
+                  </span>
+                </div>
+              </label>
 
               {error && (
                 <div className="p-4 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-xl text-red-700 dark:text-red-400 text-sm">{error}</div>

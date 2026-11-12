@@ -6,6 +6,7 @@ import {
   Moon,
   Sun,
   ChevronDown,
+  ChevronUp,
   Image as ImageIcon,
   Keyboard,
   Combine,
@@ -36,9 +37,6 @@ import {
   Unlock,
   ContactRound,
   Pen,
-  Linkedin,
-  Github,
-  ExternalLink,
   ShieldAlert,
   Maximize2,
   FileWarning,
@@ -47,7 +45,7 @@ import {
 import { useTheme } from '../context/ThemeContext';
 import { readRecentTools, recordToolVisit, type RecentEntry } from '../lib/recentFiles';
 import { getFavorites, toggleFavorite, type FavoriteItem } from '../lib/favorites';
-import { FOUNDER_INFO, TEAM_MEMBERS } from '../config/founderInfo';
+import { wipeAllBrowserTraces } from '../lib/privacy';
 import KeyboardShortcutsModal from './KeyboardShortcutsModal';
 import ErrorBoundary from './ErrorBoundary';
 import GlobalSearch from './GlobalSearch';
@@ -205,22 +203,149 @@ function NavDropdown({
 
       {isOpen && (
         <div className="absolute left-0 top-full pt-1 z-[60]">
-          <div className="w-64 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-2xl py-2 overflow-hidden">
-            {group.items.map((item) => (
-              <Link
-                key={item.to}
-                to={item.to}
-                onClick={() => { onClose(); onNavigate(); }}
-                className="flex items-center gap-3 px-4 py-2.5 text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-rose-50 dark:hover:bg-slate-800 hover:text-rose-600 dark:hover:text-rose-400 transition-colors"
-              >
-                <span className="flex items-center justify-center w-7 h-7 rounded-lg bg-slate-100 dark:bg-slate-800 shrink-0">
-                  <item.icon className="w-3.5 h-3.5 text-rose-500 dark:text-rose-400" />
-                </span>
-                {item.label}
-              </Link>
-            ))}
+          <div className="w-64 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-2xl overflow-hidden flex flex-col">
+            <div className="max-h-[62vh] overflow-y-auto py-2">
+              {group.items.map((item) => (
+                <Link
+                  key={item.to}
+                  to={item.to}
+                  onClick={() => { onClose(); onNavigate(); }}
+                  className="flex items-center gap-3 px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-rose-50 dark:hover:bg-slate-800 hover:text-rose-600 dark:hover:text-rose-400 transition-colors"
+                >
+                  <span className="flex items-center justify-center w-7 h-7 rounded-lg bg-slate-100 dark:bg-slate-800 shrink-0">
+                    <item.icon className="w-3.5 h-3.5 text-rose-500 dark:text-rose-400" />
+                  </span>
+                  {item.label}
+                </Link>
+              ))}
+            </div>
+            <Link
+              to="/all-tools"
+              onClick={() => { onClose(); onNavigate(); }}
+              className="block px-4 py-2.5 text-xs font-bold text-rose-600 dark:text-rose-400 bg-slate-50 dark:bg-slate-800/60 border-t border-slate-100 dark:border-slate-800 hover:bg-rose-50 dark:hover:bg-slate-800 transition-colors"
+            >
+              View All 100+ Tools &rarr;
+            </Link>
           </div>
         </div>
+      )}
+    </div>
+  );
+}
+
+const FOOTER_PDF_TOOLS = [
+  { to: '/merge', label: 'Merge PDF' },
+  { to: '/split', label: 'Split PDF' },
+  { to: '/compress', label: 'Compress PDF' },
+  { to: '/edit', label: 'Edit PDF' },
+  { to: '/protect', label: 'Protect PDF' },
+  { to: '/increase-size', label: 'Increase PDF Size' },
+  { to: '/rotate-pages', label: 'Rotate PDF' },
+  { to: '/id-card-joiner', label: 'ID Card Joiner' },
+  { to: '/pvc-card-maker', label: 'PVC Card Maker' },
+  { to: '/stamp-paper-aligner', label: 'E-Stamp Aligner' },
+  { to: '/assignment-cover-page', label: 'Assignment Cover Page' },
+  { to: '/rubber-stamp', label: 'Digital Rubber Stamp' },
+  { to: '/scan-to-print', label: 'Scan to Print QR' },
+  { to: '/gang-print-sheet', label: 'Gang-Print Sheet' },
+  { to: '/land-record-darkener', label: 'Land Record Darkener' },
+  { to: '/micro-pocket-notes', label: 'Micro-Pocket Notes' },
+  { to: '/lab-journal-formatter', label: 'Lab Journal Formatter' },
+  { to: '/board-notes-cleaner', label: 'Board Notes Cleaner' },
+  { to: '/resume-compactor', label: 'Resume 1-Page Compactor' },
+  { to: '/report-header-swapper', label: 'Report Header Swapper' },
+  { to: '/print-cost-calculator', label: 'Print Cost & UPI QR' },
+  { to: '/zero-trace-print', label: 'Zero-Trace Print' },
+  { to: '/counter-kiosk', label: 'Counter Print Kiosk' },
+  { to: '/talking-notes', label: 'Talking Notes Audio QR' },
+  { to: '/admit-card-optimizer', label: 'Admit Card 1-Page + GPS' },
+  { to: '/court-evidence-formatter', label: 'Court Evidence Formatter' },
+  { to: '/smart-kyc-slip', label: 'Smart KYC OCR Slip' },
+  { to: '/pamphlet-maker', label: 'Pamphlet & Flyer Maker' },
+  { to: '/doc-forensics', label: '🔬 DocForensics™', bold: true },
+  { to: '/true-vector-4k', label: '⚡ TrueVector 4K™', bold: true },
+  { to: '/contract-redline', label: '⚖️ Contract Redliner™', bold: true },
+  { to: '/airgap-cleanroom', label: '🛡️ Airgap Cleanroom™', bold: true },
+];
+
+const FOOTER_CONVERT_TOOLS = [
+  { to: '/pdf-to-word', label: 'PDF to Word' },
+  { to: '/pdf-to-excel', label: 'PDF to Excel' },
+  { to: '/pdf-to-jpg', label: 'PDF to JPG' },
+  { to: '/jpg-to-pdf', label: 'JPG to PDF' },
+  { to: '/pdf-to-images', label: 'PDF to Images' },
+  { to: '/pdf-to-ppt', label: 'PDF to PowerPoint' },
+  { to: '/searchable-pdf', label: 'Searchable PDF (OCR)' },
+  { to: '/universal-converter', label: 'Universal Converter' },
+];
+
+const FOOTER_IMAGE_TOOLS = [
+  { to: '/image-resizer', label: 'Image Resizer' },
+  { to: '/image-crop', label: 'Image Cropper' },
+  { to: '/image-converter', label: 'Format Converter' },
+  { to: '/remove-background', label: 'Remove Background' },
+  { to: '/color-extractor', label: 'Color Extractor' },
+  { to: '/passport-photo-sheet', label: 'Passport Photo Sheet' },
+  { to: '/clean-signature', label: 'Clean Signature' },
+  { to: '/exact-image-size', label: 'Exact Image Size' },
+];
+
+const FOOTER_COMPANY_LINKS = [
+  { to: '/all-tools', label: 'All Tools' },
+  { to: '/pricing', label: 'Pricing' },
+  { to: '/about', label: 'About & Team' },
+  { to: '/contact', label: 'Contact' },
+  { to: '/privacy', label: 'Privacy Policy' },
+  { to: '/terms', label: 'Terms of Service' },
+];
+
+function FooterLinkColumn({
+  title,
+  items,
+  initialLimit = 5,
+}: {
+  title: string;
+  items: { to: string; label: string; bold?: boolean }[];
+  initialLimit?: number;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const hasMore = items.length > initialLimit;
+  const visibleItems = expanded || !hasMore ? items : items.slice(0, initialLimit);
+  const hiddenCount = items.length - initialLimit;
+
+  return (
+    <div>
+      <h4 className="font-bold mb-4 text-slate-900 dark:text-white text-sm">{title}</h4>
+      <ul className="space-y-2.5 text-sm text-slate-500 dark:text-slate-400">
+        {visibleItems.map((item) => (
+          <li key={item.to}>
+            <Link
+              to={item.to}
+              className={`hover:text-rose-600 dark:hover:text-rose-400 transition-colors ${
+                item.bold ? 'font-semibold' : ''
+              }`}
+            >
+              {item.label}
+            </Link>
+          </li>
+        ))}
+      </ul>
+      {hasMore && (
+        <button
+          type="button"
+          onClick={() => setExpanded((prev) => !prev)}
+          className="mt-3 inline-flex items-center gap-1 text-xs font-bold text-rose-600 dark:text-rose-400 hover:text-rose-700 dark:hover:text-rose-300 transition-colors cursor-pointer"
+        >
+          {expanded ? (
+            <>
+              Show less <ChevronUp className="w-3.5 h-3.5" />
+            </>
+          ) : (
+            <>
+              More (+{hiddenCount}) <ChevronDown className="w-3.5 h-3.5" />
+            </>
+          )}
+        </button>
       )}
     </div>
   );
@@ -238,8 +363,17 @@ export default function Layout() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [favOpen, setFavOpen] = useState(false);
   const [favorites, setFavorites] = useState<FavoriteItem[]>([]);
+  const [tracesWiped, setTracesWiped] = useState(false);
   const recentRef = useRef<HTMLDivElement>(null);
   const favRef = useRef<HTMLDivElement>(null);
+
+  const handleWipeTraces = useCallback(async () => {
+    await wipeAllBrowserTraces();
+    setRecent([]);
+    setFavorites([]);
+    setTracesWiped(true);
+    setTimeout(() => setTracesWiped(false), 3000);
+  }, []);
 
   // Close mobile menu & dropdowns and ensure scroll resets on route change
   useEffect(() => {
@@ -534,178 +668,36 @@ export default function Layout() {
       </main>
 
       {/* ── FOOTER ── */}
-      <footer className="bg-slate-50 dark:bg-slate-900 py-14 border-t border-slate-200/70 dark:border-slate-800">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 grid grid-cols-2 md:grid-cols-5 gap-10">
+      <footer className="bg-slate-50 dark:bg-slate-900 py-12 border-t border-slate-200/70 dark:border-slate-800">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 grid grid-cols-2 md:grid-cols-5 gap-8 sm:gap-10">
           <div className="col-span-2 md:col-span-1">
             <div className="flex items-center gap-2.5 mb-3">
               <BrandLogo className="w-7 h-7 rounded-lg shadow-sm" />
               <h3 className="text-base font-bold text-slate-900 dark:text-white">PDF Media Suite</h3>
             </div>
-            <p className="text-sm text-slate-500 dark:text-slate-400">
-              Free online PDF & document tools. Fast, private, browser-based.
+            <p className="text-sm text-slate-500 dark:text-slate-400 leading-relaxed">
+              Fast, private PDF, OCR &amp; image tools right in your browser.
             </p>
           </div>
-          <div>
-            <h4 className="font-bold mb-4 text-slate-900 dark:text-white text-sm">PDF Tools</h4>
-            <ul className="space-y-2.5 text-sm text-slate-500 dark:text-slate-400">
-              <li><Link to="/merge" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Merge PDF</Link></li>
-              <li><Link to="/split" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Split PDF</Link></li>
-              <li><Link to="/compress" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Compress PDF</Link></li>
-              <li><Link to="/increase-size" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Increase PDF Size</Link></li>
-              <li><Link to="/id-card-joiner" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">ID Card Joiner</Link></li>
-              <li><Link to="/pvc-card-maker" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">PVC Card Maker</Link></li>
-              <li><Link to="/stamp-paper-aligner" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">E-Stamp Aligner</Link></li>
-              <li><Link to="/assignment-cover-page" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Assignment Cover Page</Link></li>
-              <li><Link to="/rubber-stamp" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Digital Rubber Stamp</Link></li>
-              <li><Link to="/scan-to-print" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Scan to Print QR</Link></li>
-              <li><Link to="/gang-print-sheet" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Gang-Print Sheet</Link></li>
-              <li><Link to="/land-record-darkener" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Land Record Darkener</Link></li>
-              <li><Link to="/micro-pocket-notes" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Micro-Pocket Notes</Link></li>
-              <li><Link to="/lab-journal-formatter" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Lab Journal Formatter</Link></li>
-              <li><Link to="/board-notes-cleaner" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Board Notes Cleaner</Link></li>
-              <li><Link to="/resume-compactor" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Resume 1-Page Compactor</Link></li>
-              <li><Link to="/report-header-swapper" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Report Header Swapper</Link></li>
-              <li><Link to="/print-cost-calculator" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Print Cost &amp; UPI QR</Link></li>
-              <li><Link to="/zero-trace-print" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Zero-Trace Print</Link></li>
-              <li><Link to="/counter-kiosk" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Counter Print Kiosk</Link></li>
-              <li><Link to="/talking-notes" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Talking Notes Audio QR</Link></li>
-              <li><Link to="/admit-card-optimizer" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Admit Card 1-Page + GPS</Link></li>
-              <li><Link to="/court-evidence-formatter" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Court Evidence Formatter</Link></li>
-              <li><Link to="/smart-kyc-slip" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Smart KYC OCR Slip</Link></li>
-              <li><Link to="/pamphlet-maker" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Pamphlet &amp; Flyer Maker</Link></li>
-              <li><Link to="/doc-forensics" className="hover:text-rose-600 dark:hover:text-rose-400 font-semibold transition-colors">🔬 DocForensics™</Link></li>
-              <li><Link to="/true-vector-4k" className="hover:text-rose-600 dark:hover:text-rose-400 font-semibold transition-colors">⚡ TrueVector 4K™</Link></li>
-              <li><Link to="/contract-redline" className="hover:text-rose-600 dark:hover:text-rose-400 font-semibold transition-colors">⚖️ Contract Redliner™</Link></li>
-              <li><Link to="/airgap-cleanroom" className="hover:text-rose-600 dark:hover:text-rose-400 font-semibold transition-colors">🛡️ Airgap Cleanroom™</Link></li>
-              <li><Link to="/edit" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Edit PDF</Link></li>
-              <li><Link to="/protect" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Protect PDF</Link></li>
-              <li><Link to="/rotate-pages" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Rotate PDF</Link></li>
-            </ul>
-          </div>
-          <div>
-            <h4 className="font-bold mb-4 text-slate-900 dark:text-white text-sm">Convert</h4>
-            <ul className="space-y-2.5 text-sm text-slate-500 dark:text-slate-400">
-              <li><Link to="/pdf-to-word" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">PDF to Word</Link></li>
-              <li><Link to="/pdf-to-excel" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">PDF to Excel</Link></li>
-              <li><Link to="/pdf-to-jpg" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">PDF to JPG</Link></li>
-              <li><Link to="/jpg-to-pdf" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">JPG to PDF</Link></li>
-              <li><Link to="/pdf-to-images" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">PDF to Images</Link></li>
-            </ul>
-          </div>
-          <div>
-            <h4 className="font-bold mb-4 text-slate-900 dark:text-white text-sm">Image Tools</h4>
-            <ul className="space-y-2.5 text-sm text-slate-500 dark:text-slate-400">
-              <li><Link to="/image-resizer" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Image Resizer</Link></li>
-              <li><Link to="/image-crop" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Image Cropper</Link></li>
-              <li><Link to="/image-converter" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Format Converter</Link></li>
-              <li><Link to="/remove-background" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Remove Background</Link></li>
-              <li><Link to="/color-extractor" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Color Extractor</Link></li>
-            </ul>
-          </div>
-          <div>
-            <h4 className="font-bold mb-4 text-slate-900 dark:text-white text-sm">Company</h4>
-            <ul className="space-y-2.5 text-sm text-slate-500 dark:text-slate-400">
-              <li><Link to="/all-tools" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">All Tools</Link></li>
-              <li><Link to="/pricing" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Pricing</Link></li>
-              <li><Link to="/about" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">About & Leadership</Link></li>
-              <li><Link to="/team" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Founding Team</Link></li>
-              <li><Link to="/contact" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Contact</Link></li>
-              <li><Link to="/privacy" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Privacy Policy</Link></li>
-              <li><Link to="/terms" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Terms of Service</Link></li>
-            </ul>
-          </div>
-        </div>
-
-        {/* Founding Team & Leadership Strip */}
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-10">
-          <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/50 p-5 sm:p-6 shadow-xs">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between pb-4 mb-4 border-b border-slate-100 dark:border-slate-700/60 gap-2">
-              <div className="flex items-center gap-2">
-                <span className="text-[11px] font-bold tracking-widest text-rose-600 dark:text-rose-400 uppercase">
-                  Founding Team &amp; Leadership
-                </span>
-                <span className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 rounded-full">
-                  Verified Founders (3)
-                </span>
-              </div>
-              <Link
-                to="/about"
-                className="text-xs font-bold text-rose-600 dark:text-rose-400 hover:underline flex items-center gap-1 self-start sm:self-auto"
-              >
-                Meet All 3 Co-founders &amp; Leadership Story &rarr;
-              </Link>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
-              {TEAM_MEMBERS.map((member) => (
-                <div
-                  key={member.id}
-                  className="flex items-center justify-between p-3 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200/60 dark:border-slate-700/60 hover:border-slate-300 dark:hover:border-slate-600 transition-all"
-                >
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-11 h-11 rounded-xl overflow-hidden border border-rose-500/20 bg-slate-200 dark:bg-slate-800 shadow-xs shrink-0 flex items-center justify-center font-bold text-xs text-white bg-gradient-to-br from-rose-500 to-indigo-600">
-                      {member.photo ? (
-                        <img
-                          src={member.photo}
-                          alt={member.name}
-                          className="w-full h-full object-cover object-top"
-                          onError={(e) => {
-                            (e.currentTarget as HTMLElement).style.display = 'none';
-                          }}
-                        />
-                      ) : (
-                        member.initials
-                      )}
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-xs font-bold text-slate-900 dark:text-white truncate">
-                        {member.name}
-                      </p>
-                      <p className="text-[11px] font-medium text-rose-600 dark:text-rose-400 truncate">
-                        {member.role}
-                      </p>
-                      <p className="text-[10px] text-slate-500 dark:text-slate-400 truncate">
-                        {member.location}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-1 shrink-0 ml-2">
-                    {member.linkedin && (
-                      <a
-                        href={member.linkedin}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        aria-label={`${member.name} LinkedIn`}
-                        title="LinkedIn Profile"
-                        className="p-1.5 rounded-lg bg-[#0A66C2] hover:bg-[#004182] text-white transition-colors shadow-xs"
-                      >
-                        <Linkedin className="w-3.5 h-3.5 fill-current" />
-                      </a>
-                    )}
-                    {member.github && (
-                      <a
-                        href={member.github}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        aria-label={`${member.name} GitHub`}
-                        title="GitHub Profile"
-                        className="p-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white transition-colors"
-                      >
-                        <Github className="w-3.5 h-3.5" />
-                      </a>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
+          <FooterLinkColumn title="PDF Tools" items={FOOTER_PDF_TOOLS} initialLimit={5} />
+          <FooterLinkColumn title="Convert" items={FOOTER_CONVERT_TOOLS} initialLimit={5} />
+          <FooterLinkColumn title="Image Tools" items={FOOTER_IMAGE_TOOLS} initialLimit={5} />
+          <FooterLinkColumn title="Company" items={FOOTER_COMPANY_LINKS} initialLimit={5} />
         </div>
 
         {/* Bottom bar */}
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-8 pt-6 border-t border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-400 dark:text-slate-500">
           <span>&copy; {new Date().getFullYear()} PDF Media Suite. All rights reserved.</span>
-          <div className="flex gap-5">
+          <div className="flex flex-wrap items-center gap-5">
+            <button
+              type="button"
+              onClick={handleWipeTraces}
+              title="Clear recent tools, favorites, local print queues & browser cache on shared/cyber-cafe PCs"
+              className="inline-flex items-center gap-1.5 text-slate-500 hover:text-rose-600 dark:text-slate-400 dark:hover:text-rose-400 font-medium transition-colors cursor-pointer"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              {tracesWiped ? 'Traces Cleared ✓' : 'Clear Traces (Shared PC)'}
+            </button>
             <Link to="/privacy" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Privacy Policy</Link>
             <Link to="/terms" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Terms of Service</Link>
             <Link to="/contact" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Contact</Link>

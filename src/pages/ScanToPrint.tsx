@@ -49,6 +49,11 @@ import ToolSEOSection from '../components/ToolSEOSection';
 import { apiFetch, API_BASE } from '../lib/api';
 import { escapeHtml } from '../lib/utils';
 import {
+  generateSecretToken,
+  encryptBytesWithKey,
+  decryptBytesWithKey,
+} from '../lib/privacy';
+import {
   getSharedFilesFromCache,
   clearSharedFilesCache,
   promptPWAInstall,
@@ -109,8 +114,20 @@ interface CustomerGroup {
 
 // ─── Storage Keys ──────────────────────────────────────────────────────────
 const PMS_PERMANENT_PIN_KEY = 'pms_permanent_counter_pin';
+const PMS_ROOM_SECRET_KEY = 'pms_permanent_room_secret';
+const PMS_ROOM_E2EE_KEY = 'pms_permanent_room_e2ee_key';
 const PMS_SHOP_NAME_KEY = 'pms_shop_name';
 const PMS_SENDER_DEVICE_ID_KEY = 'pms_sender_device_id';
+
+const parseE2eeKeyFromHash = (hashStr: string): string => {
+  try {
+    const clean = hashStr.startsWith('#') ? hashStr.slice(1) : hashStr;
+    const p = new URLSearchParams(clean);
+    return (p.get('k') || '').trim();
+  } catch {
+    return '';
+  }
+};
 
 const getSenderDeviceId = (): string => {
   if (typeof window === 'undefined') return 'dev_' + Date.now().toString(36);
@@ -238,6 +255,9 @@ export default function ScanToPrint() {
 
   // ── URL / mode detection ─────────────────────────────────────────────────
   const [sessionCode, setSessionCode] = useState<string>('');
+  const [roomReadToken, setRoomReadToken] = useState<string>('');
+  const [counterE2eeKey, setCounterE2eeKey] = useState<string>('');
+  const [senderE2eeKey, setSenderE2eeKey] = useState<string>('');
   const [isSenderMode, setIsSenderMode] = useState<boolean>(false);
   const [targetCounterPin, setTargetCounterPin] = useState<string>('');
   const [pinDigits, setPinDigits] = useState<string[]>(['', '', '', '', '', '']);
@@ -547,10 +567,14 @@ export default function ScanToPrint() {
     const existingSession = params.get('session');
     const isFromShare = params.get('from_share') === 'true' || params.get('mode') === 'send';
 
-    // Always generate or load the Counter PIN so if the user switches to Counter Station it's ready
+    // Always generate or load the Counter PIN, Room Read Secret, and E2EE Key
     let permanentPin = '';
+    let roomSecret = '';
+    let roomE2ee = '';
     try {
       permanentPin = localStorage.getItem(PMS_PERMANENT_PIN_KEY) || '';
+      roomSecret = localStorage.getItem(PMS_ROOM_SECRET_KEY) || '';
+      roomE2ee = localStorage.getItem(PMS_ROOM_E2EE_KEY) || '';
     } catch {}
     if (!permanentPin) {
       try {
@@ -560,9 +584,24 @@ export default function ScanToPrint() {
     if (!permanentPin) {
       permanentPin = generateCleanPin();
     }
+    if (!roomSecret || roomSecret.length < 16) {
+      roomSecret = generateSecretToken(24);
+    }
+    if (!roomE2ee || roomE2ee.length < 32) {
+      roomE2ee = generateSecretToken(32);
+    }
     try {
       localStorage.setItem(PMS_PERMANENT_PIN_KEY, permanentPin);
+      localStorage.setItem(PMS_ROOM_SECRET_KEY, roomSecret);
+      localStorage.setItem(PMS_ROOM_E2EE_KEY, roomE2ee);
     } catch {}
+    setRoomReadToken(roomSecret);
+    setCounterE2eeKey(roomE2ee);
+
+    const hashKey = parseE2eeKeyFromHash(window.location.hash || '');
+    if (hashKey) {
+      setSenderE2eeKey(hashKey);
+    }
 
     if (existingSession) {
       const pin = existingSession.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
@@ -720,9 +759,11 @@ export default function ScanToPrint() {
               if (!raw) return;
 
               let extractedPin = '';
+              let extractedHashKey = '';
               try {
                 const parsedUrl = new URL(raw);
                 extractedPin = (parsedUrl.searchParams.get('session') || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+                extractedHashKey = parseE2eeKeyFromHash(parsedUrl.hash || '');
               } catch {
                 extractedPin = raw.toUpperCase().replace(/[^A-Z0-9]/g, '');
               }
@@ -731,6 +772,9 @@ export default function ScanToPrint() {
                 if (scanInterval) clearInterval(scanInterval);
                 stream.getTracks().forEach((t) => t.stop());
                 playChime();
+                if (extractedHashKey) {
+                  setSenderE2eeKey(extractedHashKey);
+                }
                 const chars = extractedPin.slice(0, 6).split('');
                 while (chars.length < 6) chars.push('');
                 setPinDigits(chars);
@@ -843,11 +887,12 @@ export default function ScanToPrint() {
   const isLocalHostEnv = typeof window !== 'undefined' &&
     (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
 
+  const e2eeHashFragment = counterE2eeKey ? `#k=${counterE2eeKey}` : '';
   const mobileLink = typeof window !== 'undefined'
     ? isLocalHostEnv
-      ? `https://www.pdfmediasuite.in/scan-to-print?session=${sessionCode}`
-      : `${window.location.origin}/scan-to-print?session=${sessionCode}`
-    : `https://www.pdfmediasuite.in/scan-to-print?session=${sessionCode}`;
+      ? `https://www.pdfmediasuite.in/scan-to-print?session=${sessionCode}${e2eeHashFragment}`
+      : `${window.location.origin}/scan-to-print?session=${sessionCode}${e2eeHashFragment}`
+    : `https://www.pdfmediasuite.in/scan-to-print?session=${sessionCode}${e2eeHashFragment}`;
 
   useEffect(() => {
     if (!mobileLink || !sessionCode) return;
@@ -855,13 +900,11 @@ export default function ScanToPrint() {
       width: 300,
       margin: 2,
       color: { dark: '#0f172a', light: '#ffffff' },
-      errorCorrectionLevel: 'H', // Highest — survives printed damage
+      errorCorrectionLevel: 'M',
     })
       .then((url) => setQrDataUrl(url))
       .catch(() => {
-        setQrDataUrl(
-          `https://api.qrserver.com/v1/create-qr-code/?size=280x280&margin=10&ecc=H&data=${encodeURIComponent(mobileLink)}`
-        );
+        setQrDataUrl('');
       });
   }, [mobileLink, sessionCode]);
 
@@ -950,7 +993,7 @@ export default function ScanToPrint() {
           setConnectedMobiles((n) => n + 1);
           const activeConnJobIds = new Set<string>();
 
-          conn.on('data', (data: any) => {
+          conn.on('data', async (data: any) => {
             if (!data || typeof data !== 'object') return;
 
             if (data.action === 'JOB_START') {
@@ -1010,7 +1053,10 @@ export default function ScanToPrint() {
                     validChunks.length >= (transfer.totalChunks || 1) &&
                     (!transfer.size || transfer.receivedBytes >= transfer.size * 0.95)
                   ) {
-                    assembledBlob = new Blob(validChunks, { type: transfer.type });
+                    const rawBlob = new Blob(validChunks, { type: transfer.type });
+                    const rawBuf = await rawBlob.arrayBuffer();
+                    const { buffer: plainBuf } = await decryptBytesWithKey(rawBuf, counterE2eeKey);
+                    assembledBlob = new Blob([plainBuf], { type: transfer.type });
                     blobUrl = URL.createObjectURL(assembledBlob);
                   } else {
                     console.warn(
@@ -1140,7 +1186,7 @@ export default function ScanToPrint() {
 
           conn.on('open', () => setMobileConnectionStatus('connected'));
 
-          conn.on('data', (data: any) => {
+          conn.on('data', async (data: any) => {
             if (data?.action === 'JOB_ACK' && data.jobId) {
               const assignedTok = data.customerToken || data.tokenNum;
               if (assignedTok) setCustomerToken(assignedTok);
@@ -1190,20 +1236,56 @@ export default function ScanToPrint() {
         peer?.destroy();
       } catch {}
     };
-  }, [sessionCode, targetCounterPin, isSenderMode, addIncomingJob, peerReconnectKey]);
+  }, [sessionCode, targetCounterPin, isSenderMode, addIncomingJob, peerReconnectKey, counterE2eeKey]);
 
   // ─── Backend API Polling (Local + Cloud Relay Fallback) ─────────────────
   useEffect(() => {
-    if (isSenderMode || !sessionCode) return;
+    if (isSenderMode || !sessionCode || !roomReadToken) return;
 
     let cancelled = false;
+    const registeredBases = new Set<string>();
+
+    const registerRoomWithBase = async (baseUrl: string): Promise<boolean> => {
+      try {
+        const fd = new FormData();
+        fd.append('session_id', sessionCode);
+        fd.append('read_token', roomReadToken);
+        const res = await fetch(`${baseUrl}/api/print-drop/register`, {
+          method: 'POST',
+          body: fd,
+        });
+        if (res.ok) {
+          registeredBases.add(baseUrl);
+          return true;
+        }
+        if (res.status === 409) {
+          setPinNotice(`Counter PIN "${sessionCode}" is already claimed by another station. Please tap Reset / Change PIN.`);
+        }
+        return false;
+      } catch {
+        return false;
+      }
+    };
 
     const fetchRelayJobsFromBase = async (baseUrl: string): Promise<boolean> => {
       try {
+        if (!registeredBases.has(baseUrl)) {
+          await registerRoomWithBase(baseUrl);
+        }
         const ctrl = new AbortController();
         const tid = setTimeout(() => ctrl.abort(), 4500);
-        const res = await fetch(`${baseUrl}/api/print-drop/jobs/${sessionCode}`, { signal: ctrl.signal });
+        let res = await fetch(`${baseUrl}/api/print-drop/jobs/${sessionCode}`, {
+          headers: { 'X-Room-Token': roomReadToken },
+          signal: ctrl.signal,
+        });
         clearTimeout(tid);
+        if (res.status === 412) {
+          const okReg = await registerRoomWithBase(baseUrl);
+          if (!okReg) return false;
+          res = await fetch(`${baseUrl}/api/print-drop/jobs/${sessionCode}`, {
+            headers: { 'X-Room-Token': roomReadToken },
+          });
+        }
         if (!res.ok) return false;
         // Mark station online via cloud relay as soon as any relay endpoint responds
         setPeerStatus((curr) => (curr === 'online' ? 'online' : 'cloud'));
@@ -1217,9 +1299,13 @@ export default function ScanToPrint() {
             if (j.fileUrl && !fileBlobUrl) {
               try {
                 const fileUrlFull = j.fileUrl.startsWith('http') ? j.fileUrl : `${baseUrl}${j.fileUrl}`;
-                const fileRes = await fetch(fileUrlFull);
+                const fileRes = await fetch(fileUrlFull, {
+                  headers: { 'X-Room-Token': roomReadToken },
+                });
                 if (fileRes.ok) {
-                  downloadedBlob = await fileRes.blob();
+                  const rawArrayBuf = await fileRes.arrayBuffer();
+                  const { buffer: plainBuf } = await decryptBytesWithKey(rawArrayBuf, counterE2eeKey);
+                  downloadedBlob = new Blob([plainBuf], { type: j.type || 'application/pdf' });
                   fileBlobUrl = URL.createObjectURL(downloadedBlob);
                 }
               } catch {}
@@ -1281,7 +1367,7 @@ export default function ScanToPrint() {
       cancelled = true;
       if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
     };
-  }, [isSenderMode, sessionCode, addIncomingJob]);
+  }, [isSenderMode, sessionCode, roomReadToken, counterE2eeKey, addIncomingJob]);
 
   // ─── Print QR Code (Shopkeeper can print and stick on counter) ───────────
   const handlePrintQr = () => {
@@ -1415,15 +1501,24 @@ export default function ScanToPrint() {
     win.document.close();
   };
 
-  // ─── Relay Upload (Fallback / secondary guarantee with localhost auto-fallback) ───
-  const uploadViaRelay = (file: File, copies: number, colorMode: 'bw' | 'color', jobId: string): Promise<boolean> => {
+  // ─── Relay Upload (Fallback / secondary guarantee with E2EE & localhost auto-fallback) ───
+  const uploadViaRelay = async (file: File, copies: number, colorMode: 'bw' | 'color', jobId: string): Promise<boolean> => {
+    let payloadFile: File | Blob = file;
+    if (senderE2eeKey) {
+      try {
+        const plainBuf = await file.arrayBuffer();
+        const encBuf = await encryptBytesWithKey(plainBuf, senderE2eeKey);
+        payloadFile = new Blob([encBuf], { type: 'application/octet-stream' });
+      } catch {}
+    }
+
     const attemptUploadToBase = (baseUrl: string): Promise<boolean> =>
       new Promise((resolve) => {
         const xhr = new XMLHttpRequest();
         const formData = new FormData();
         const activeSession = isSenderMode ? (targetCounterPin || sessionCode) : sessionCode;
         formData.append('session_id', activeSession);
-        formData.append('file', file);
+        formData.append('file', payloadFile, file.name);
         formData.append('copies', String(copies));
         formData.append('color_mode', colorMode);
         formData.append('sender_device_id', getSenderDeviceId());
@@ -1525,14 +1620,17 @@ export default function ScanToPrint() {
         const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
         let beamedViaWebRtc = false;
 
-        // ── Channel A: WebRTC Sliding-Window High-Speed Stream ───────────
+        // ── Channel A: WebRTC Sliding-Window High-Speed Stream (with E2EE when QR key active) ──
         if (mobileConnRef.current?.open) {
           try {
             const dc: RTCDataChannel | null = mobileConnRef.current.dataChannel ?? null;
+            const plainBuf = await file.arrayBuffer();
+            const wireBuf = senderE2eeKey ? await encryptBytesWithKey(plainBuf, senderE2eeKey) : plainBuf;
+            const wireSize = wireBuf.byteLength;
 
             // Determine adaptive chunk size based on connection quality
             let chunkSize = CHUNK_SIZE_SMALL;
-            const totalChunksSmall = Math.ceil(file.size / chunkSize);
+            const totalChunksSmall = Math.ceil(wireSize / chunkSize);
 
             mobileConnRef.current.send({
               action: 'JOB_START',
@@ -1540,7 +1638,7 @@ export default function ScanToPrint() {
               senderDeviceId: getSenderDeviceId(),
               deviceLabel: getDeviceLabel(),
               name: file.name,
-              size: file.size,
+              size: wireSize,
               type: file.type || 'application/pdf',
               timestamp,
               totalChunks: totalChunksSmall,
@@ -1553,11 +1651,11 @@ export default function ScanToPrint() {
             const tStart = Date.now();
 
             // Phase 1: Warm-up with small chunks (first WINDOW_SIZE chunks)
-            while (nextChunkIdx < Math.min(WINDOW_SIZE, Math.ceil(file.size / CHUNK_SIZE_SMALL))) {
+            while (nextChunkIdx < Math.min(WINDOW_SIZE, Math.ceil(wireSize / CHUNK_SIZE_SMALL))) {
               if (senderAbortRef.current) break;
               const start = nextChunkIdx * CHUNK_SIZE_SMALL;
-              const end = Math.min(start + CHUNK_SIZE_SMALL, file.size);
-              const buf = await file.slice(start, end).arrayBuffer();
+              const end = Math.min(start + CHUNK_SIZE_SMALL, wireSize);
+              const buf = wireBuf.slice(start, end);
 
               mobileConnRef.current.send({ action: 'JOB_CHUNK', jobId, index: nextChunkIdx, chunk: buf });
               sentBytes += (end - start);
@@ -1565,8 +1663,8 @@ export default function ScanToPrint() {
 
               // Update UI every 2 chunks during warmup
               if (nextChunkIdx % 2 === 0) {
-                setSenderProgress(Math.round((sentBytes / file.size) * 85));
-                setSenderStatusText(`Streaming ${file.name} (${(sentBytes / 1048576).toFixed(1)} / ${(file.size / 1048576).toFixed(1)} MB)...`);
+                setSenderProgress(Math.round((sentBytes / wireSize) * 85));
+                setSenderStatusText(`Streaming ${file.name} (${(sentBytes / 1048576).toFixed(1)} / ${(wireSize / 1048576).toFixed(1)} MB)...`);
               }
             }
 
@@ -1577,25 +1675,21 @@ export default function ScanToPrint() {
             // ── Sliding window for remaining file ──────────────────────────
             let offset = sentBytes;
 
-            while (offset < file.size) {
+            while (offset < wireSize) {
               if (senderAbortRef.current) break;
 
-              const windowPromises: Promise<{ buf: ArrayBuffer; idx: number }>[] = [];
+              const windowChunks: { buf: ArrayBuffer; idx: number }[] = [];
 
-              for (let w = 0; w < WINDOW_SIZE && offset + w * chunkSize < file.size; w++) {
+              for (let w = 0; w < WINDOW_SIZE && offset + w * chunkSize < wireSize; w++) {
                 const chunkStart = offset + w * chunkSize;
-                const chunkEnd = Math.min(chunkStart + chunkSize, file.size);
+                const chunkEnd = Math.min(chunkStart + chunkSize, wireSize);
                 const currentIdx = nextChunkIdx + w;
-                windowPromises.push(
-                  file.slice(chunkStart, chunkEnd).arrayBuffer().then((buf) => ({
-                    buf,
-                    idx: currentIdx,
-                  }))
-                );
+                windowChunks.push({
+                  buf: wireBuf.slice(chunkStart, chunkEnd),
+                  idx: currentIdx,
+                });
               }
 
-              // Read all window chunks in parallel (non-blocking I/O)
-              const windowChunks = await Promise.all(windowPromises);
               if (senderAbortRef.current) break;
 
               // Send all window chunks back-to-back
@@ -1612,11 +1706,11 @@ export default function ScanToPrint() {
               nextChunkIdx += windowChunks.length;
 
               // Update progress once per window
-              const pct = Math.round((sentBytes / file.size) * 90);
+              const pct = Math.round((sentBytes / wireSize) * 90);
               setSenderProgress(pct);
               const speedMbps = ((sentBytes / 1048576) / Math.max(0.1, (Date.now() - tStart) / 1000)).toFixed(1);
               setSenderStatusText(
-                `Streaming ${file.name} · ${(sentBytes / 1048576).toFixed(1)} / ${(file.size / 1048576).toFixed(1)} MB · ${speedMbps} MB/s`
+                `Streaming ${file.name} · ${(sentBytes / 1048576).toFixed(1)} / ${(wireSize / 1048576).toFixed(1)} MB · ${speedMbps} MB/s`
               );
 
               // Advance offset by window
@@ -2097,14 +2191,23 @@ export default function ScanToPrint() {
       return;
     }
 
+    const pinChanged = cleanPin !== sessionCode;
+    const nextSecret = pinChanged || !roomReadToken ? generateSecretToken(24) : roomReadToken;
+    const nextE2ee = pinChanged || !counterE2eeKey ? generateSecretToken(32) : counterE2eeKey;
+
     try {
       localStorage.setItem(PMS_PERMANENT_PIN_KEY, cleanPin);
+      localStorage.setItem(PMS_ROOM_SECRET_KEY, nextSecret);
+      localStorage.setItem(PMS_ROOM_E2EE_KEY, nextE2ee);
       if (newShopNameRaw !== undefined) {
         const trimmedShop = newShopNameRaw.trim() || 'Cyber Cafe & E-Mitra Print Station';
         localStorage.setItem(PMS_SHOP_NAME_KEY, trimmedShop);
         setShopName(trimmedShop);
       }
     } catch {}
+
+    setRoomReadToken(nextSecret);
+    setCounterE2eeKey(nextE2ee);
 
     try {
       if (peerRef.current) {

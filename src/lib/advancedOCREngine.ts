@@ -6,7 +6,7 @@
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { createWorker } from 'tesseract.js';
-import { extractTextRegions } from './advancedVisionEngine';
+import { extractTextRegions, isVisionAiEnabled } from './advancedVisionEngine';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
@@ -390,9 +390,9 @@ export async function ocrScannedPages(
   const runs: RichRun[] = [];
   const OCR_SCALE = 2.5;
 
-  // Invisible AI Enhancement attempt
+  // Optional opt-in BYOK AI enhancement (disabled by default — zero external upload)
   try {
-    if (import.meta.env.VITE_GEMINI_API_KEY) {
+    if (isVisionAiEnabled()) {
       let aiSuccess = true;
       for (let pi = 0; pi < scanned.length; pi++) {
         const pa = scanned[pi];

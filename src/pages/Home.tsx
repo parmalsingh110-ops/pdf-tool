@@ -7,16 +7,14 @@ import {
   Presentation, BookOpen, Stamp, Layers2, Lock, Unlock, Droplet, Hash,
   Layers, RefreshCw, Code, ShieldCheck, FileX, MonitorSmartphone,
   Images, Copy, Info, Download, ScanSearch, Clock3, Maximize, Pen,
-  Linkedin, Github, Mail, ExternalLink, Award, CheckCircle2,
+  ChevronDown, ChevronUp,
   Shuffle, FlipHorizontal, Compass, Trash2, Tag, Bookmark,
   ScanLine, FileCheck, Receipt, BookMarked, Printer, Grid,
   Calculator, Monitor, Scale, GraduationCap, Megaphone,
   ShieldAlert, Maximize2, FileWarning, WifiOff,
 } from 'lucide-react';
 import { readRecentTools, type RecentEntry } from '../lib/recentFiles';
-import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
-import { FOUNDER_INFO, TEAM_MEMBERS } from '../config/founderInfo';
 
 
 /* =============================================
@@ -172,6 +170,7 @@ const TOOL_GROUPS = [
 ];
 
 const COLOR_MAP: Record<string, { card: string; iconBg: string; iconText: string; btn: string }> = {
+  indigo: { card: 'hover:border-indigo-300 dark:hover:border-indigo-700', iconBg: 'bg-indigo-50 dark:bg-indigo-950/40', iconText: 'text-indigo-600 dark:text-indigo-400', btn: 'bg-indigo-600 hover:bg-indigo-700' },
   rose: { card: 'hover:border-rose-300 dark:hover:border-rose-700', iconBg: 'bg-rose-50 dark:bg-rose-950/40', iconText: 'text-rose-600 dark:text-rose-400', btn: 'bg-rose-600 hover:bg-rose-700' },
   blue: { card: 'hover:border-blue-300 dark:hover:border-blue-700', iconBg: 'bg-blue-50 dark:bg-blue-950/40', iconText: 'text-blue-600 dark:text-blue-400', btn: 'bg-blue-600 hover:bg-blue-700' },
   sky: { card: 'hover:border-sky-300 dark:hover:border-sky-700', iconBg: 'bg-sky-50 dark:bg-sky-950/40', iconText: 'text-sky-600 dark:text-sky-400', btn: 'bg-sky-600 hover:bg-sky-700' },
@@ -182,32 +181,36 @@ const COLOR_MAP: Record<string, { card: string; iconBg: string; iconText: string
 
 export default function Home() {
   useSEO(
-    'PDF Media Suite | 110+ Free Online PDF, Image & Document Tools',
-    'Free online PDF editor, merger, splitter, compressor, converter, OCR and 110+ productivity tools. Fast, 100% private in browser — no file uploads, no signup required.'
+    'PDF Media Suite | 100+ Free Online PDF, Image & Document Tools',
+    'Free online PDF editor, merger, splitter, compressor, converter, OCR and 100+ productivity tools. Fast, 100% private in browser — no file uploads, no signup required.'
   );
 
   const [recent, setRecent] = useState<RecentEntry[]>([]);
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     setRecent(readRecentTools().filter((r) => r.path !== '/').slice(0, 4));
   }, []);
 
+  const toggleGroup = (title: string) =>
+    setExpandedGroups((prev) => ({ ...prev, [title]: !prev[title] }));
+
   return (
     <div className="w-full dark:bg-slate-950">
       {/* =============== HERO SECTION =============== */}
-      <section className="relative overflow-hidden min-h-[68vh] px-6 py-20 dark:bg-slate-950">
-        <div className="absolute top-[-120px] right-[-120px] w-[420px] h-[420px] bg-rose-200/30 dark:bg-rose-900/20 rounded-full blur-3xl" />
-        <div className="absolute bottom-[-140px] left-[-140px] w-[360px] h-[360px] bg-indigo-200/30 dark:bg-indigo-900/20 rounded-full blur-3xl" />
+      <section className="relative overflow-hidden px-6 py-16 md:py-20 dark:bg-slate-950">
+        <div className="absolute top-[-120px] right-[-120px] w-[420px] h-[420px] bg-rose-200/30 dark:bg-rose-900/20 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute bottom-[-140px] left-[-140px] w-[360px] h-[360px] bg-indigo-200/30 dark:bg-indigo-900/20 rounded-full blur-3xl pointer-events-none" />
         <div className="relative max-w-7xl mx-auto text-center">
           <span className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-rose-50 dark:bg-rose-950/50 text-rose-700 dark:text-rose-300 text-xs font-bold tracking-wider uppercase">
             <Sparkles className="w-3.5 h-3.5" />
-            85+ Free Online Tools
+            100+ Free Online Tools
           </span>
           <h1 className="mt-6 text-5xl md:text-7xl font-extrabold tracking-tight leading-[0.95] text-slate-900 dark:text-white">
             PDF Media Suite
           </h1>
           <p className="mt-6 text-xl text-rose-600 dark:text-rose-400 font-bold max-w-3xl mx-auto">
-            Free Online PDF, Document & Image Tools
+            Free Online PDF, Document &amp; Image Tools
           </p>
           <p className="mt-4 text-lg md:text-xl text-slate-600 dark:text-slate-300 max-w-3xl mx-auto leading-relaxed">
             PDF Media Suite is a digital-first document productivity platform providing browser-based tools for PDF editing, document conversion, OCR and image/document processing.
@@ -225,13 +228,13 @@ export default function Home() {
       </section>
 
       {recent.length > 0 && (
-        <section className="max-w-7xl mx-auto px-6 pb-12">
-          <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4 sm:p-5">
-            <div className="flex items-center gap-2 mb-3">
+        <section className="max-w-7xl mx-auto px-6 pb-8">
+          <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4">
+            <div className="flex items-center gap-2 mb-2.5">
               <Clock3 className="w-4 h-4 text-rose-500" />
               <h2 className="text-sm font-bold text-slate-900 dark:text-white">Welcome back</h2>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
               {recent.map((tool) => (
                 <Link
                   key={`${tool.path}-${tool.at}`}
@@ -247,75 +250,48 @@ export default function Home() {
         </section>
       )}
 
-      {/* =============== WHAT IS IT? / PROBLEM & SOLUTION =============== */}
-      <section className="max-w-7xl mx-auto px-6 pb-16 pt-8">
-        <div className="grid md:grid-cols-2 gap-12">
-          <div className="p-8 rounded-3xl bg-slate-100 dark:bg-slate-900/50">
-            <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-4">The Problem</h2>
-            <p className="text-slate-600 dark:text-slate-400">
-              Working with PDF and digital documents often requires multiple separate tools for editing, conversion, OCR, compression and document processing. Finding a reliable, privacy-respecting tool for each task is frustrating and inefficient.
-            </p>
-          </div>
-          <div className="p-8 rounded-3xl bg-rose-50 dark:bg-rose-900/20 border border-rose-100 dark:border-rose-900/50">
-            <h2 className="text-2xl font-bold text-rose-700 dark:text-rose-300 mb-4">Our Solution</h2>
-            <p className="text-rose-900/80 dark:text-rose-200">
-              PDF Media Suite brings common PDF, document and image workflows together in a single browser-based software platform. Everything you need is accessible in one place without requiring local software installation.
-            </p>
-          </div>
-        </div>
-      </section>
-
-      {/* =============== HOW IT WORKS =============== */}
-      <section className="max-w-7xl mx-auto px-6 pb-20">
-        <h2 className="text-3xl font-extrabold text-slate-900 dark:text-white text-center mb-10">How it works</h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-          <div className="text-center">
-            <div className="w-12 h-12 mx-auto rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center font-bold text-lg mb-4">1</div>
-            <p className="font-semibold text-slate-900 dark:text-white">Choose a tool</p>
-            <p className="text-sm text-slate-500 dark:text-slate-400 mt-2">Select a document or image tool from our suite.</p>
-          </div>
-          <div className="text-center">
-            <div className="w-12 h-12 mx-auto rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center font-bold text-lg mb-4">2</div>
-            <p className="font-semibold text-slate-900 dark:text-white">Select your file</p>
-            <p className="text-sm text-slate-500 dark:text-slate-400 mt-2">Upload or drop your document into the web application.</p>
-          </div>
-          <div className="text-center">
-            <div className="w-12 h-12 mx-auto rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center font-bold text-lg mb-4">3</div>
-            <p className="font-semibold text-slate-900 dark:text-white">Process</p>
-            <p className="text-sm text-slate-500 dark:text-slate-400 mt-2">Process the document directly in the browser.</p>
-          </div>
-          <div className="text-center">
-            <div className="w-12 h-12 mx-auto rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center font-bold text-lg mb-4">4</div>
-            <p className="font-semibold text-slate-900 dark:text-white">Download</p>
-            <p className="text-sm text-slate-500 dark:text-slate-400 mt-2">Download or continue working with the result.</p>
-          </div>
-        </div>
-      </section>
-
-      {/* =============== WORKING PRODUCT / FEATURES =============== */}
-      <div className="max-w-7xl mx-auto px-6 mb-12">
-        <h2 className="text-3xl font-extrabold text-slate-900 dark:text-white text-center">Product Features</h2>
-        <p className="mt-4 text-center text-slate-600 dark:text-slate-400 max-w-2xl mx-auto">
-          PDF Media Suite is a working browser-based document productivity application with tools for PDF editing, conversion, OCR and image processing. Users can access the available tools directly through the web application below.
-        </p>
-      </div>
+      {/* =============== TOOL CATEGORIES (5 visible + More toggle per category) =============== */}
       {TOOL_GROUPS.map((group) => {
         const c = COLOR_MAP[group.color] || COLOR_MAP.rose;
+        const isExpanded = Boolean(expandedGroups[group.title]);
+        const hasMore = group.tools.length > 5;
+        const visibleTools = isExpanded || !hasMore ? group.tools : group.tools.slice(0, 5);
+        const hiddenCount = group.tools.length - 5;
+
         return (
-          <section key={group.title} className="max-w-7xl mx-auto px-6 pb-16">
-            <div className="mb-8">
-              <h2 className="text-2xl md:text-3xl font-extrabold text-slate-900 dark:text-white">{group.title}</h2>
-              <p className="mt-2 text-slate-600 dark:text-slate-400 text-sm max-w-3xl">{group.desc}</p>
+          <section key={group.title} className="max-w-7xl mx-auto px-6 pb-12">
+            <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-2 mb-5">
+              <div>
+                <h2 className="text-xl md:text-2xl font-extrabold text-slate-900 dark:text-white">{group.title}</h2>
+                <p className="mt-1 text-slate-600 dark:text-slate-400 text-xs sm:text-sm max-w-2xl">{group.desc}</p>
+              </div>
+              {hasMore && (
+                <button
+                  type="button"
+                  onClick={() => toggleGroup(group.title)}
+                  className="self-start sm:self-auto inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-bold border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:border-rose-300 hover:text-rose-600 dark:hover:text-rose-400 transition-colors cursor-pointer shrink-0"
+                >
+                  {isExpanded ? (
+                    <>
+                      Show less <ChevronUp className="w-3.5 h-3.5" />
+                    </>
+                  ) : (
+                    <>
+                      More (+{hiddenCount} tools) <ChevronDown className="w-3.5 h-3.5" />
+                    </>
+                  )}
+                </button>
+              )}
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-              {group.tools.map((tool) => (
+              {visibleTools.map((tool) => (
                 <Link
                   key={tool.path + tool.title}
                   to={tool.path}
-                  className={`rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-5 ${c.card} hover:-translate-y-1 transition-all group`}
+                  className={`rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4 sm:p-5 ${c.card} hover:-translate-y-1 transition-all group`}
                 >
-                  <div className={`w-10 h-10 rounded-xl ${c.iconBg} ${c.iconText} flex items-center justify-center mb-3 group-hover:scale-110 transition-transform`}>
-                    <tool.icon className="w-5 h-5" />
+                  <div className={`w-9 h-9 rounded-xl ${c.iconBg} ${c.iconText} flex items-center justify-center mb-3 group-hover:scale-110 transition-transform`}>
+                    <tool.icon className="w-4 h-4 sm:w-5 sm:h-5" />
                   </div>
                   <h3 className="font-bold text-slate-900 dark:text-white text-sm leading-tight">{tool.title}</h3>
                   <p className="mt-1 text-xs text-slate-500 dark:text-slate-400 line-clamp-2">{tool.desc}</p>
@@ -326,229 +302,56 @@ export default function Home() {
         );
       })}
 
-      <section className="max-w-7xl mx-auto px-6 py-20 border-t border-slate-200 dark:border-slate-800">
-        <div className="grid md:grid-cols-2 gap-16">
-          <div>
-            <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-6">Target Users</h2>
-            <p className="text-slate-600 dark:text-slate-400 mb-4">
-              PDF Media Suite is designed for people who regularly need to edit, convert, process or extract information from digital documents. Our primary users include:
-            </p>
-            <ul className="list-disc list-inside space-y-2 text-slate-600 dark:text-slate-400">
-              <li>Students</li>
-              <li>Educators</li>
-              <li>Professionals</li>
-              <li>Freelancers</li>
-              <li>Small businesses</li>
-              <li>Document-heavy teams</li>
-              <li>Individuals working with PDFs and digital documents</li>
-            </ul>
+      {/* =============== HOW IT WORKS (COMPACT) =============== */}
+      <section className="max-w-7xl mx-auto px-6 py-12 border-t border-slate-200 dark:border-slate-800">
+        <h2 className="text-xl md:text-2xl font-extrabold text-slate-900 dark:text-white text-center mb-8">How it works</h2>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
+          <div className="text-center">
+            <div className="w-10 h-10 mx-auto rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center font-bold text-sm mb-3">1</div>
+            <p className="font-semibold text-sm text-slate-900 dark:text-white">Choose a tool</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Pick any PDF, OCR, or image utility.</p>
           </div>
-          <div>
-            <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-6">Technology</h2>
-            <p className="text-slate-600 dark:text-slate-400">
-              PDF Media Suite is built as a web-based software platform with a modern web frontend and Python-based backend document processing. Technologies include React, TypeScript, Python, FastAPI, and browser-based processing to ensure speed and privacy where possible.
-            </p>
+          <div className="text-center">
+            <div className="w-10 h-10 mx-auto rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center font-bold text-sm mb-3">2</div>
+            <p className="font-semibold text-sm text-slate-900 dark:text-white">Drop your file</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Zero signup or installation needed.</p>
           </div>
-        </div>
-      </section>
-
-      {/* =============== BUSINESS MODEL & PRICING =============== */}
-      <section className="max-w-7xl mx-auto px-6 pb-20">
-        <div className="p-10 rounded-3xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
-          <div className="grid md:grid-cols-2 gap-12">
-            <div>
-              <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-4">Business Model</h2>
-              <p className="text-slate-600 dark:text-slate-400 mb-4">
-                PDF Media Suite is a digital-first software product delivered through the web. The platform is designed to provide document and PDF processing capabilities directly through a browser rather than through consulting or custom development services.
-              </p>
-              <p className="text-slate-600 dark:text-slate-400">
-                As the product grows, the platform may introduce optional premium capabilities or usage-based features to support continued development and infrastructure costs.
-              </p>
-            </div>
-            <div>
-              <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-4">Pricing</h2>
-              <p className="text-slate-600 dark:text-slate-400 mb-4">
-                PDF Media Suite currently provides its core PDF, document and image tools <strong>free of charge</strong>.
-              </p>
-              <p className="text-slate-600 dark:text-slate-400">
-                Reasonable usage limits may apply to certain tools to protect service availability.
-              </p>
-              <div className="mt-6">
-                <Link to="/pricing" className="text-rose-600 dark:text-rose-400 font-semibold hover:underline">Read more about pricing &rarr;</Link>
-              </div>
-            </div>
+          <div className="text-center">
+            <div className="w-10 h-10 mx-auto rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center font-bold text-sm mb-3">3</div>
+            <p className="font-semibold text-sm text-slate-900 dark:text-white">Edit or convert</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Processed quickly &amp; privately.</p>
           </div>
-        </div>
-      </section>
-
-      {/* =============== LEADERSHIP & COMPANY =============== */}
-      <section className="max-w-7xl mx-auto px-6 pb-24">
-        <div className="grid lg:grid-cols-2 gap-8 items-stretch">
-          {/* Founder & Leadership Card */}
-          <div className="p-8 rounded-3xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm flex flex-col justify-between">
-            <div>
-              <div className="flex items-center justify-between mb-5">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/60 px-3 py-1 rounded-full border border-rose-200 dark:border-rose-900/40">
-                  Leadership &amp; Founding Team
-                </span>
-                <span className="text-xs text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-1.5">
-                  <div className="flex -space-x-1.5 overflow-hidden">
-                    <span className="inline-flex h-5 w-5 rounded-full ring-2 ring-white dark:ring-slate-900 bg-rose-600 text-white text-[9px] font-bold items-center justify-center">PG</span>
-                    <span className="inline-flex h-5 w-5 rounded-full ring-2 ring-white dark:ring-slate-900 bg-blue-600 text-white text-[9px] font-bold items-center justify-center">PM</span>
-                    <span className="inline-flex h-5 w-5 rounded-full ring-2 ring-white dark:ring-slate-900 bg-emerald-600 text-white text-[9px] font-bold items-center justify-center">SS</span>
-                  </div>
-                  3 Co-founders
-                </span>
-              </div>
-
-              <div className="space-y-3.5 mb-6">
-                {TEAM_MEMBERS.map((member) => (
-                  <div
-                    key={member.id}
-                    className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/70 dark:border-slate-700/60 flex items-center justify-between gap-3 hover:border-slate-300 dark:hover:border-slate-600 transition-all"
-                  >
-                    <div className="flex items-center gap-3.5 min-w-0">
-                      <div className="relative w-12 h-12 rounded-xl overflow-hidden shrink-0 border border-rose-500/20 bg-slate-200 dark:bg-slate-800 shadow-xs flex items-center justify-center text-white font-bold text-xs bg-gradient-to-br from-rose-500 to-indigo-600">
-                        {member.photo ? (
-                          <img
-                            src={member.photo}
-                            alt={member.name}
-                            className="w-full h-full object-cover object-top"
-                            onError={(e) => {
-                              (e.currentTarget as HTMLElement).style.display = 'none';
-                            }}
-                          />
-                        ) : (
-                          member.initials
-                        )}
-                      </div>
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <h4 className="text-sm font-bold text-slate-900 dark:text-white truncate">
-                            {member.name}
-                          </h4>
-                          <span className="text-[10px] font-semibold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/60 px-1.5 py-0.5 rounded border border-rose-200/50 dark:border-rose-900/40 shrink-0">
-                            {member.badge.split('&')[0].trim()}
-                          </span>
-                        </div>
-                        <p className="text-xs text-slate-600 dark:text-slate-300 font-medium truncate mt-0.5">
-                          {member.title}
-                        </p>
-                        <p className="text-[11px] text-slate-400 dark:text-slate-500 truncate">
-                          {member.location}
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      {member.linkedin && (
-                        <a
-                          href={member.linkedin}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          aria-label={`${member.name} LinkedIn`}
-                          title="LinkedIn Profile"
-                          className="p-2 rounded-xl bg-[#0A66C2] hover:bg-[#004182] text-white transition-colors shadow-xs"
-                        >
-                          <Linkedin className="w-3.5 h-3.5 fill-current" />
-                        </a>
-                      )}
-                      {member.github && (
-                        <a
-                          href={member.github}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          aria-label={`${member.name} GitHub`}
-                          title="GitHub Profile"
-                          className="p-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white transition-colors"
-                        >
-                          <Github className="w-3.5 h-3.5" />
-                        </a>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="pt-4 border-t border-slate-100 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3">
-              <span className="text-xs text-slate-500 dark:text-slate-400">
-                100% Privacy-First &amp; Document Security
-              </span>
-
-              <Link
-                to="/about"
-                className="text-xs font-bold text-rose-600 dark:text-rose-400 hover:underline flex items-center gap-1"
-              >
-                Meet All 3 Co-founders &amp; Full Story &rarr;
-              </Link>
-            </div>
-          </div>
-
-          {/* Company & Support Card */}
-          <div className="p-8 rounded-3xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm flex flex-col justify-between">
-            <div>
-              <div className="flex items-center justify-between mb-5">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-3 py-1 rounded-full">
-                  Company & Infrastructure
-                </span>
-                <span className="text-xs text-rose-600 dark:text-rose-400 font-semibold">
-                  110+ Active Tools
-                </span>
-              </div>
-
-              <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-2">
-                PDF Media Suite
-              </h3>
-              <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed mb-6">
-                An independent, founder-led software platform delivering private, high-speed document computing right in your browser. Supported by scalable Google Cloud compute instances for high-throughput OCR and conversion tasks.
-              </p>
-
-              <div className="space-y-3 mb-6">
-                <div className="p-4 rounded-2xl bg-rose-50/60 dark:bg-rose-950/30 border border-rose-100 dark:border-rose-900/40">
-                  <span className="text-xs font-bold text-rose-700 dark:text-rose-300 block mb-0.5">
-                    Official Support & Business Enquiries
-                  </span>
-                  <a
-                    href="mailto:support@pdfmediasuite.in"
-                    className="text-base font-bold text-slate-900 dark:text-white hover:text-rose-600 dark:hover:text-rose-400 transition-colors"
-                  >
-                    support@pdfmediasuite.in
-                  </a>
-                </div>
-                <div className="text-xs text-slate-500 dark:text-slate-400 pl-1">
-                  Founder Direct: <a href={`mailto:${FOUNDER_INFO.email}`} className="text-slate-700 dark:text-slate-300 font-medium hover:underline">{FOUNDER_INFO.email}</a>
-                </div>
-              </div>
-            </div>
-
-            <div className="pt-5 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs">
-              <span className="text-slate-400">Jaipur, Rajasthan, India</span>
-              <Link to="/contact" className="font-bold text-rose-600 dark:text-rose-400 hover:underline">
-                Contact & Support Hub &rarr;
-              </Link>
-            </div>
+          <div className="text-center">
+            <div className="w-10 h-10 mx-auto rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center font-bold text-sm mb-3">4</div>
+            <p className="font-semibold text-sm text-slate-900 dark:text-white">Download result</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Save print-ready output instantly.</p>
           </div>
         </div>
       </section>
 
       {/* =============== CTA =============== */}
-      <section className="max-w-7xl mx-auto px-6 pb-24">
-        <div className="rounded-3xl overflow-hidden border border-slate-200 dark:border-slate-700 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-700 dark:from-slate-950 dark:via-slate-900 dark:to-slate-800 p-10 md:p-14 text-white">
-          <h2 className="text-4xl font-extrabold max-w-2xl leading-tight">
-            Ready to try the product?
-          </h2>
-          <p className="mt-4 text-slate-200 max-w-xl">
-            Access our free browser-based suite of document productivity tools right now.
-          </p>
-          <div className="mt-8 flex flex-wrap gap-4">
-            <Link to="/all-tools" className="px-6 py-3 rounded-full bg-white text-slate-900 font-bold">View All 85+ Tools</Link>
-            <Link to="/protect" className="px-6 py-3 rounded-full border border-white/40 text-white font-semibold">Security Tools</Link>
+      <section className="max-w-7xl mx-auto px-6 pb-16">
+        <div className="rounded-3xl overflow-hidden border border-slate-200 dark:border-slate-700 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-700 dark:from-slate-950 dark:via-slate-900 dark:to-slate-800 p-8 md:p-12 text-white flex flex-col md:flex-row md:items-center justify-between gap-6">
+          <div>
+            <h2 className="text-2xl md:text-3xl font-extrabold leading-tight">
+              Need a specific document tool?
+            </h2>
+            <p className="mt-2 text-sm text-slate-200 max-w-xl">
+              Explore all 100+ free PDF, OCR, student, and e-Mitra utilities — or read more about our team.
+            </p>
+            <div className="mt-4 flex flex-wrap gap-5 text-xs text-slate-200">
+              <div className="inline-flex items-center gap-1.5"><FileText className="w-3.5 h-3.5" />100+ tools</div>
+              <div className="inline-flex items-center gap-1.5"><Shield className="w-3.5 h-3.5" />Privacy-first</div>
+              <div className="inline-flex items-center gap-1.5"><Download className="w-3.5 h-3.5" />No watermarks</div>
+            </div>
           </div>
-          <div className="mt-10 flex gap-6 text-sm text-slate-200">
-            <div className="inline-flex items-center gap-2"><FileText className="w-4 h-4" />85+ tools</div>
-            <div className="inline-flex items-center gap-2"><Shield className="w-4 h-4" />100% private</div>
-            <div className="inline-flex items-center gap-2"><Download className="w-4 h-4" />No uploads</div>
+          <div className="flex flex-wrap gap-3 shrink-0">
+            <Link to="/all-tools" className="px-6 py-3 rounded-full bg-white text-slate-900 text-sm font-bold hover:bg-slate-100 transition-colors">
+              View All 100+ Tools
+            </Link>
+            <Link to="/about" className="px-6 py-3 rounded-full border border-white/40 text-white text-sm font-semibold hover:bg-white/10 transition-colors">
+              About &amp; Team
+            </Link>
           </div>
         </div>
       </section>

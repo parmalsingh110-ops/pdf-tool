@@ -57,8 +57,8 @@ export default function ToolSEOSection({
 
   const defaultFeatures = [
     {
-      title: '100% Client-Side Privacy',
-      desc: 'Your files are processed directly inside your browser. No files are uploaded to cloud servers or stored.',
+      title: 'Browser-First Zero-Retention Privacy',
+      desc: 'Core tools run directly inside your browser. Server-assisted conversions and E2EE print relays run ephemerally with immediate deletion and zero storage.',
     },
     {
       title: 'Ultra-Fast Performance',

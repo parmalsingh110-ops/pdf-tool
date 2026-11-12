@@ -22,6 +22,9 @@ Run:
 
 import os
 import re
+import hmac
+import hashlib
+import secrets
 import shutil
 import tempfile
 import subprocess
@@ -30,6 +33,7 @@ import json
 import time
 import logging
 import asyncio
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form, BackgroundTasks, Request, Response
@@ -44,6 +48,7 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
+load_dotenv(Path(__file__).resolve().parent / ".env")
 load_dotenv()
 
 # ─── Logging Setup ─────────────────────────────────────────────
@@ -108,6 +113,60 @@ def get_real_client_ip(request: Request) -> str:
 
 limiter = Limiter(key_func=get_real_client_ip)
 
+@asynccontextmanager
+async def _app_lifespan(app_instance: FastAPI):
+    """Startup & background janitor: sweeps stale temp/spool files so abandoned uploads never linger."""
+    def _sweep_old_files():
+        now = time.time()
+        try:
+            if TEMP_DIR.exists():
+                for p in TEMP_DIR.iterdir():
+                    try:
+                        if now - p.stat().st_mtime > 1800:  # 30 minutes
+                            if p.is_dir():
+                                shutil.rmtree(p, ignore_errors=True)
+                            else:
+                                p.unlink(missing_ok=True)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        try:
+            if PRINT_DROP_SPOOL_DIR.exists():
+                for folder in PRINT_DROP_SPOOL_DIR.iterdir():
+                    if folder.is_dir():
+                        try:
+                            if now - folder.stat().st_mtime > 1200:
+                                shutil.rmtree(folder, ignore_errors=True)
+                        except Exception:
+                            pass
+        except Exception:
+            pass
+
+    _sweep_old_files()
+
+    async def _periodic_janitor():
+        while True:
+            try:
+                await asyncio.sleep(60)
+                _prune_expired_print_rooms()
+                _sweep_old_files()
+            except asyncio.CancelledError:
+                break
+            except Exception as exc:
+                logger.warning(f"[Janitor] Sweep notice: {exc}")
+
+    janitor_task = asyncio.create_task(_periodic_janitor())
+    try:
+        yield
+    finally:
+        janitor_task.cancel()
+        try:
+            await janitor_task
+        except asyncio.CancelledError:
+            pass
+
+
 # ─── FastAPI App ─────────────────────────────────────────────────
 docs_url = "/docs" if ENABLE_DOCS else None
 redoc_url = "/redoc" if ENABLE_DOCS else None
@@ -119,6 +178,7 @@ app = FastAPI(
     docs_url=docs_url,
     redoc_url=redoc_url,
     openapi_url=openapi_url,
+    lifespan=_app_lifespan,
 )
 
 # Attach rate limiter to app state
@@ -214,8 +274,13 @@ class BandwidthLoggerMiddleware(BaseHTTPMiddleware):
                 client_ip = forwarded.split(",")[0].strip() if forwarded else (
                     request.client.host if request.client else "unknown"
                 )
+                try:
+                    import telemetry as _telemetry_mod
+                    masked_ip = _telemetry_mod.hash_ip(client_ip) or "anon"
+                except Exception:
+                    masked_ip = hashlib.sha256(client_ip.encode("utf-8")).hexdigest()[:12]
                 logger.info(
-                    f"[BANDWIDTH] {client_ip} | {request.method} {request.url.path} "
+                    f"[BANDWIDTH] ip:{masked_ip} | {request.method} {request.url.path} "
                     f"→ {response.status_code} | {size_kb}KB | {elapsed_ms}ms"
                 )
 
@@ -483,20 +548,43 @@ def is_pdf_scanned(inp_path: Path) -> bool:
         return False
 
 
-async def run_hybrid_ocr(inp_path: Path, out_path: Path, lang: str = "eng+hin", deskew: bool = True, rotate: bool = True, force_ocr: bool = False):
+async def run_hybrid_ocr(
+    inp_path: Path,
+    out_path: Path,
+    lang: str = "eng+hin",
+    deskew: bool = True,
+    rotate: bool = True,
+    force_ocr: bool = False,
+    strict_local: bool = False,
+    engine_mode: str = "pro_local",
+    clean_watermarks: bool = True,
+):
     """
-    Hybrid OCR: tries iLovePDF API first (if keys present), falls back to local OCRmyPDF.
-    iLovePDF API key is ALWAYS read from server-side environment variables — never from frontend.
+    Pro Hybrid OCR Pipeline:
+    - Primary Local AI Engine (`pro_local`): PyMuPDF composite rendering (resolves multi-layer OCG/CropBox/Rotate)
+      + OpenCV watermark/background cleaner + RapidOCR (ONNX PP-OCRv4) + Tesseract Devanagari TSV fusion
+      + PyMuPDF `render_mode=3` / `morph` sub-point invisible text overlay.
+    - Never calls external iLovePDF API when strict_local=True, ALLOW_EXTERNAL_ILOVEPDF_OCR=false,
+      Hindi ("hin") is requested, or engine_mode is "pro_local" / "ocrmypdf".
+    - Supports optional `engine_mode="hybrid"` / `"ilovepdf"` when explicitly requested and keys exist.
     """
     from fastapi.concurrency import run_in_threadpool
 
+    allow_external = os.environ.get("ALLOW_EXTERNAL_ILOVEPDF_OCR", "true").strip().lower() not in ("0", "false", "no")
     ilovepdf_pub = os.environ.get("ILOVEPDF_PUBLIC_KEY", "").strip()
     ilovepdf_sec = os.environ.get("ILOVEPDF_SECRET_KEY", "").strip()
+    mode = (engine_mode or "pro_local").strip().lower()
 
-    if "hin" in lang.lower():
-        logger.info(f"[OCR] Hindi language requested. Bypassing iLovePDF and using local OCRmyPDF directly.")
-    elif ilovepdf_pub and ilovepdf_sec:
-        logger.info(f"[OCR] Using iLovePDF API for: {inp_path.name}")
+    use_ilovepdf = (
+        mode in ("hybrid", "ilovepdf")
+        and not strict_local
+        and allow_external
+        and "hin" not in lang.lower()
+        and bool(ilovepdf_pub and ilovepdf_sec)
+    )
+
+    if use_ilovepdf:
+        logger.info("[OCR] Using iLovePDF API (explicit hybrid mode, server-side keys)")
         def run_ilovepdf():
             import concurrent.futures
 
@@ -508,39 +596,59 @@ async def run_hybrid_ocr(inp_path: Path, out_path: Path, lang: str = "eng+hin", 
 
                 out_dir = Path(tempfile.gettempdir()) / uuid.uuid4().hex
                 out_dir.mkdir(exist_ok=True)
-                task.download(str(out_dir))
+                try:
+                    task.download(str(out_dir))
 
-                downloaded_files = list(out_dir.iterdir())
-                if not downloaded_files:
+                    downloaded_files = list(out_dir.iterdir())
+                    if not downloaded_files:
+                        raise RuntimeError("iLovePDF returned no output files")
+                    shutil.move(str(downloaded_files[0]), str(out_path))
+                finally:
                     shutil.rmtree(out_dir, ignore_errors=True)
-                    raise RuntimeError("iLovePDF returned no output files")
-                shutil.move(str(downloaded_files[0]), str(out_path))
-                shutil.rmtree(out_dir, ignore_errors=True)
 
-                # Guard: ensure the downloaded file is non-empty
                 if not out_path.exists() or out_path.stat().st_size == 0:
                     raise RuntimeError("iLovePDF produced an empty output file")
 
-            # Run with a timeout to prevent hung iLovePDF calls from blocking workers
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
                 future = executor.submit(_do_ilovepdf)
                 try:
-                    future.result(timeout=90)  # 90-second timeout for iLovePDF
+                    future.result(timeout=90)
                 except concurrent.futures.TimeoutError:
                     raise RuntimeError("iLovePDF OCR timed out after 90 seconds")
 
         try:
             await run_in_threadpool(run_ilovepdf)
-            logger.info(f"[OCR] iLovePDF succeeded for: {inp_path.name}")
+            logger.info("[OCR] iLovePDF succeeded")
             return True
         except Exception as e:
-            # Log the error without exposing the API key or internal state
-            logger.error(f"[OCR] iLovePDF API failed: {type(e).__name__}. Falling back to local OCR.")
-            # Clean up any partial output before local fallback
+            logger.error(f"[OCR] iLovePDF API failed: {type(e).__name__}. Falling back to Pro Local OCR.")
             if out_path.exists():
                 out_path.unlink(missing_ok=True)
 
-    logger.info(f"[OCR] Using local OCRmyPDF for: {inp_path.name}")
+    # Try Pro Multi-Layer Local OCR (RapidOCR ONNX + OpenCV Watermark Cleaner + PyMuPDF 3-Tr Pixel-Lock)
+    if mode != "ocrmypdf":
+        try:
+            from ocr_engine import make_searchable_pdf_pro
+
+            logger.info(f"[OCR] Running Pro Multi-Layer Local OCR (lang={lang}, clean_watermarks={clean_watermarks})")
+            pages_done, words_done = await run_in_threadpool(
+                make_searchable_pdf_pro,
+                inp_path,
+                out_path,
+                lang,
+                force_ocr,
+                clean_watermarks,
+            )
+            if out_path.exists() and out_path.stat().st_size > 0 and words_done > 0:
+                logger.info(f"[OCR] Pro Local OCR succeeded ({pages_done} pages, {words_done} words)")
+                return True
+            logger.warning("[OCR] Pro Local OCR produced 0 words, falling back to OCRmyPDF.")
+            out_path.unlink(missing_ok=True)
+        except Exception as pro_err:
+            logger.warning(f"[OCR] Pro Local OCR fallback triggered ({type(pro_err).__name__}: {pro_err})")
+            out_path.unlink(missing_ok=True)
+
+    logger.info("[OCR] Using local OCRmyPDF engine")
     try:
         import ocrmypdf
     except ImportError:
@@ -555,13 +663,11 @@ async def run_hybrid_ocr(inp_path: Path, out_path: Path, lang: str = "eng+hin", 
             optimize=1,
             progress_bar=False
         )
-    await run_in_threadpool(run_ocrmypdf)
 
-    # Guard: local OCR must also produce a non-empty file
+    await run_in_threadpool(run_ocrmypdf)
     if not out_path.exists() or out_path.stat().st_size == 0:
         raise RuntimeError("Local OCRmyPDF produced no output")
-
-    logger.info(f"[OCR] Local OCRmyPDF succeeded for: {inp_path.name}")
+    logger.info("[OCR] Local OCRmyPDF succeeded")
     return True
 
 
@@ -651,7 +757,7 @@ def validate_ocr_output(original_pdf: Path, ocr_pdf: Path) -> tuple[bool, str]:
         return False, f"Validation error: {type(e).__name__}: {str(e)[:200]}"
 
 
-async def ensure_auto_ocr(inp_path: Path, force: bool = False) -> Path:
+async def ensure_auto_ocr(inp_path: Path, force: bool = False, strict_local: bool = False) -> Path:
     """
     If the PDF is scanned (or force=True), run hybrid OCR and return the path
     to a validated OCR PDF.
@@ -677,11 +783,11 @@ async def ensure_auto_ocr(inp_path: Path, force: bool = False) -> Path:
     ocr_error_detail = ""
 
     try:
-        await run_hybrid_ocr(inp_path, out_path, force_ocr=force)
+        await run_hybrid_ocr(inp_path, out_path, force_ocr=force, strict_local=strict_local)
         ocr_succeeded = True
     except Exception as e:
         ocr_error_detail = f"{type(e).__name__}: {str(e)[:300]}"
-        logger.error(f"[Auto-OCR] Both iLovePDF and local OCR failed: {ocr_error_detail}")
+        logger.error(f"[Auto-OCR] OCR processing failed: {ocr_error_detail}")
 
     if not ocr_succeeded:
         # Clean up any partial output
@@ -722,6 +828,7 @@ def remove_scanned_page_backgrounds_from_docx(docx_path: str, pdf_path: str):
     while preserving legitimate media (logos, photos, tables) using localized image fallbacks,
     and making the OCR text visible securely.
     """
+    temp_dir = None
     try:
         import zipfile
         import tempfile
@@ -816,7 +923,6 @@ def remove_scanned_page_backgrounds_from_docx(docx_path: str, pdf_path: str):
             
         doc_xml_path = os.path.join(temp_dir, 'word', 'document.xml')
         if not os.path.exists(doc_xml_path):
-            shutil.rmtree(temp_dir, ignore_errors=True)
             return
 
         namespaces = {'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main',
@@ -1038,14 +1144,16 @@ def remove_scanned_page_backgrounds_from_docx(docx_path: str, pdf_path: str):
                     # for ZIP entry names. os.path.relpath uses backslashes on Windows,
                     # which causes MS Word to completely fail reading the document structure.
                     zip_out.write(file_path, arcname.replace('\\', '/'))
-                    
-        shutil.rmtree(temp_dir, ignore_errors=True)
-        try:
-            shutil.copy(docx_path, "scratch/debug_after.docx")
-        except Exception as e: pass
         logger.info(f"[RemoveBackgrounds] Successfully processed {docx_path}")
     except Exception as e:
         logger.error(f"[RemoveBackgrounds] Failed: {e}")
+    finally:
+        if temp_dir:
+            try:
+                import shutil as _shutil_cleanup
+                _shutil_cleanup.rmtree(temp_dir, ignore_errors=True)
+            except Exception:
+                pass
 
 # ─── Helper: Table detection for scanned PDFs ─────────────────
 
@@ -1365,7 +1473,7 @@ def _build_clean_docx_from_ocr_pdf(pdf_path: Path, out_path: Path):
 
 @app.post("/convert/pdf-to-word")
 @limiter.limit("10/minute")
-async def pdf_to_word(request: Request, file: UploadFile = File(...), force_ocr: bool = Form(False)):
+async def pdf_to_word(request: Request, file: UploadFile = File(...), force_ocr: bool = Form(False), strict_local: bool = Form(False)):
     inp = temp_path(".pdf")
     out = temp_path(".docx")
     try:
@@ -1381,7 +1489,7 @@ async def pdf_to_word(request: Request, file: UploadFile = File(...), force_ocr:
             # APPROACH: OCR → extract text via PyMuPDF → fresh python-docx
             # ══════════════════════════════════════════════════════════════════
             logger.info(f"[PDF2Word] Scanned PDF detected → OCR + clean DOCX path")
-            inp = await ensure_auto_ocr(inp, force=True)
+            inp = await ensure_auto_ocr(inp, force=True, strict_local=strict_local)
             from fastapi.concurrency import run_in_threadpool
             await run_in_threadpool(_build_clean_docx_from_ocr_pdf, inp, out)
 
@@ -1744,7 +1852,7 @@ def _build_rich_span_docx(pdf_path: Path, out_path: Path):
 
 @app.post("/convert/pdf-to-word-plaintext")
 @limiter.limit("10/minute")
-async def pdf_to_word_plaintext(request: Request, file: UploadFile = File(...), force_ocr: bool = Form(False)):
+async def pdf_to_word_plaintext(request: Request, file: UploadFile = File(...), force_ocr: bool = Form(False), strict_local: bool = Form(False)):
     try:
         import fitz
         from docx import Document
@@ -1758,7 +1866,7 @@ async def pdf_to_word_plaintext(request: Request, file: UploadFile = File(...), 
         check_pdf_page_count(inp, "pdf-to-word-plaintext")
 
         # 1. OCR if necessary — raises HTTP 422 on failure, never silently continues
-        inp = await ensure_auto_ocr(inp, force=force_ocr)
+        inp = await ensure_auto_ocr(inp, force=force_ocr, strict_local=strict_local)
 
         # 2. Extract plain text using fitz in threadpool to avoid blocking async event loop
         logger.info(f"[PDF2Word-Plaintext] Extracting text from {inp.name}")
@@ -1901,7 +2009,7 @@ def _extract_tables_to_excel(inp: Path, out: Path, method: str) -> int:
 
 @app.post("/convert/pdf-to-excel")
 @limiter.limit("10/minute")
-async def pdf_to_excel(request: Request, file: UploadFile = File(...), method: str = Form("auto"), force_ocr: bool = Form(False)):
+async def pdf_to_excel(request: Request, file: UploadFile = File(...), method: str = Form("auto"), force_ocr: bool = Form(False), strict_local: bool = Form(False)):
     try:
         import pdfplumber, openpyxl
     except ImportError:
@@ -1913,7 +2021,7 @@ async def pdf_to_excel(request: Request, file: UploadFile = File(...), method: s
         inp.write_bytes(await safe_read_upload(file))
         check_pdf_page_count(inp, "pdf-to-excel")
         # Raises HTTP 422 on OCR failure — never silently continues with image-only PDF
-        inp = await ensure_auto_ocr(inp, force=force_ocr)
+        inp = await ensure_auto_ocr(inp, force=force_ocr, strict_local=strict_local)
 
         from fastapi.concurrency import run_in_threadpool
         await run_in_threadpool(_extract_tables_to_excel, inp, out, method)
@@ -2242,6 +2350,7 @@ async def pdf_to_ppt(
     request: Request,
     file: UploadFile = File(...),
     force_ocr: bool = Form(False),
+    strict_local: bool = Form(False),
 ):
     """
     Scanned PDF → Structural PowerPoint (tables + text boxes, no background image).
@@ -2256,7 +2365,7 @@ async def pdf_to_ppt(
         check_pdf_page_count(inp, "pdf-to-ppt")
 
         # OCR step: adds a text layer to scanned PDFs
-        inp = await ensure_auto_ocr(inp, force=force_ocr)
+        inp = await ensure_auto_ocr(inp, force=force_ocr, strict_local=strict_local)
 
         # Build structural PPTX in a threadpool (CPU-bound)
         from fastapi.concurrency import run_in_threadpool
@@ -2372,7 +2481,10 @@ async def make_searchable(
     lang: str = Form("hin+eng"),
     deskew: bool = Form(True),
     rotate: bool = Form(True),
-    force_ocr: bool = Form(False)
+    force_ocr: bool = Form(False),
+    strict_local: bool = Form(False),
+    engine_mode: str = Form("pro_local"),
+    clean_watermarks: bool = Form(True),
 ):
     inp = temp_path(".pdf")
     out = temp_path("_searchable.pdf")
@@ -2380,7 +2492,7 @@ async def make_searchable(
         inp.write_bytes(await safe_read_upload(file))
         check_pdf_page_count(inp, "make-searchable")
 
-        # Smart Check: If it's not scanned and user didn't force OCR, skip to save credits!
+        # Smart Check: If it's not scanned and user didn't force OCR, skip to save processing!
         if not force_ocr and not is_pdf_scanned(inp):
             logger.info(f"[OCR] Skipping OCR — PDF already has text. (Credit Saver)")
             # Just return the original file
@@ -2392,7 +2504,17 @@ async def make_searchable(
                 background=BackgroundTask(cleanup, inp)
             )
 
-        await run_hybrid_ocr(inp, out, lang=lang, deskew=deskew, rotate=rotate, force_ocr=force_ocr)
+        await run_hybrid_ocr(
+            inp,
+            out,
+            lang=lang,
+            deskew=deskew,
+            rotate=rotate,
+            force_ocr=force_ocr,
+            strict_local=strict_local,
+            engine_mode=engine_mode,
+            clean_watermarks=clean_watermarks,
+        )
         stem = safe_filename(file.filename, "document")
         out_name = Path(stem).stem + "_searchable.pdf"
         return FileResponse(
@@ -3050,72 +3172,132 @@ async def edit_pdf_endpoint(request: Request, file: UploadFile = File(...), edit
             cp2 = fitz.Point(p2.x + 2/3 * (p1.x - p2.x), p2.y + 2/3 * (p1.y - p2.y))
             return cp1, cp2
 
-        def _draw_vector_harfbuzz(target_page, text_str: str, font_file: Path, font_sz: float, orig_x: float, base_y: float, fill_rgb=(0, 0, 0), text_align=fitz.TEXT_ALIGN_LEFT, box_width: float = 0.0):
+        def _draw_vector_harfbuzz(
+            target_page,
+            text_str: str,
+            font_file: Path,
+            font_sz: float,
+            orig_x: float,
+            base_y: float,
+            fill_rgb=(0, 0, 0),
+            text_align=fitz.TEXT_ALIGN_LEFT,
+            box_width: float = 0.0,
+            is_italic: bool = False,
+            underline: bool = False,
+            strikethrough: bool = False,
+        ):
             from fontTools.pens.recordingPen import RecordingPen
             hb, hb_font, upem, tt_font, glyph_set, glyph_order = _get_hb_components(font_file)
             scale_factor = font_sz / upem
+            line_height = font_sz * 1.25
+            shear = 0.2125 if is_italic else 0.0  # tan(12 deg)
 
-            buf = hb.Buffer()
-            buf.add_str(text_str)
-            buf.guess_segment_properties()
-            hb.shape(hb_font, buf)
-
-            total_adv = sum(pos.x_advance for pos in buf.glyph_positions) * scale_factor
-            ins_x = orig_x
-            if text_align == fitz.TEXT_ALIGN_CENTER and box_width > total_adv:
-                ins_x = orig_x + (box_width - total_adv) / 2
-            elif text_align == fitz.TEXT_ALIGN_RIGHT and box_width > total_adv:
-                ins_x = orig_x + (box_width - total_adv)
+            lines = text_str.replace("\r\n", "\n").split("\n")
+            shaped_lines = []
+            for line_txt in lines:
+                if not line_txt:
+                    shaped_lines.append(([], 0.0))
+                    continue
+                buf = hb.Buffer()
+                buf.add_str(line_txt)
+                buf.guess_segment_properties()
+                hb.shape(hb_font, buf)
+                pairs = list(zip(buf.glyph_infos, buf.glyph_positions))
+                for info, _ in pairs:
+                    if info.codepoint == 0:
+                        cluster_ch = line_txt[info.cluster] if 0 <= info.cluster < len(line_txt) else ""
+                        if cluster_ch and not cluster_ch.isspace():
+                            raise ValueError(f"Unsupported glyph U+{ord(cluster_ch):04X} for vector HarfBuzz")
+                adv = sum(pos.x_advance for _, pos in pairs) * scale_factor
+                shaped_lines.append((pairs, adv))
 
             shape = target_page.new_shape()
-            cur_x = ins_x
-            cur_y = base_y
+            max_adv = 0.0
+            deco_jobs = []
 
-            for info, pos in zip(buf.glyph_infos, buf.glyph_positions):
-                gid = info.codepoint
-                gname = glyph_order[gid]
-                pen = RecordingPen()
-                glyph_set[gname].draw(pen)
+            for line_idx, (pairs, total_adv) in enumerate(shaped_lines):
+                if total_adv > max_adv:
+                    max_adv = total_adv
+                if not pairs:
+                    continue
 
-                gx = cur_x + pos.x_offset * scale_factor
-                gy = cur_y - pos.y_offset * scale_factor
+                line_base_y = base_y + line_idx * line_height
+                ins_x = orig_x
+                if text_align == fitz.TEXT_ALIGN_CENTER and box_width > total_adv:
+                    ins_x = orig_x + (box_width - total_adv) / 2
+                elif text_align == fitz.TEXT_ALIGN_RIGHT and box_width > total_adv:
+                    ins_x = orig_x + (box_width - total_adv)
 
-                curr_pt = fitz.Point(gx, gy)
-                start_pt = fitz.Point(gx, gy)
+                cur_x = ins_x
+                cur_y = line_base_y
 
-                for op, args in pen.value:
-                    if op == 'moveTo':
-                        p = args[0]
-                        curr_pt = fitz.Point(gx + p[0] * scale_factor, gy - p[1] * scale_factor)
-                        start_pt = curr_pt
-                    elif op == 'lineTo':
-                        p = args[0]
-                        target = fitz.Point(gx + p[0] * scale_factor, gy - p[1] * scale_factor)
-                        shape.draw_line(curr_pt, target)
-                        curr_pt = target
-                    elif op == 'qCurveTo':
-                        pts = [fitz.Point(gx + p[0] * scale_factor, gy - p[1] * scale_factor) for p in args]
-                        for i in range(len(pts) - 1):
-                            p1 = pts[i]
-                            p2 = pts[i+1] if i == len(pts)-2 else fitz.Point((pts[i].x + pts[i+1].x)/2, (pts[i].y + pts[i+1].y)/2)
-                            cp1, cp2 = _q_to_cubic(curr_pt, p1, p2)
-                            shape.draw_bezier(curr_pt, cp1, cp2, p2)
-                            curr_pt = p2
-                    elif op == 'curveTo':
-                        p1, p2, p3 = [fitz.Point(gx + p[0] * scale_factor, gy - p[1] * scale_factor) for p in args]
-                        shape.draw_bezier(curr_pt, p1, p2, p3)
-                        curr_pt = p3
-                    elif op == 'closePath':
-                        if curr_pt != start_pt:
-                            shape.draw_line(curr_pt, start_pt)
-                        curr_pt = start_pt
+                def _pt(px: float, py: float) -> fitz.Point:
+                    if shear != 0.0:
+                        px = px + (line_base_y - py) * shear
+                    return fitz.Point(px, py)
 
-                cur_x += pos.x_advance * scale_factor
-                cur_y -= pos.y_advance * scale_factor
+                for info, pos in pairs:
+                    gid = info.codepoint
+                    gname = glyph_order[gid]
+                    pen = RecordingPen()
+                    glyph_set[gname].draw(pen)
+
+                    gx = cur_x + pos.x_offset * scale_factor
+                    gy = cur_y - pos.y_offset * scale_factor
+
+                    curr_pt = _pt(gx, gy)
+                    start_pt = curr_pt
+
+                    for op, args in pen.value:
+                        if op == 'moveTo':
+                            p = args[0]
+                            curr_pt = _pt(gx + p[0] * scale_factor, gy - p[1] * scale_factor)
+                            start_pt = curr_pt
+                        elif op == 'lineTo':
+                            p = args[0]
+                            target = _pt(gx + p[0] * scale_factor, gy - p[1] * scale_factor)
+                            shape.draw_line(curr_pt, target)
+                            curr_pt = target
+                        elif op == 'qCurveTo':
+                            pts = [_pt(gx + p[0] * scale_factor, gy - p[1] * scale_factor) for p in args]
+                            for i in range(len(pts) - 1):
+                                p1 = pts[i]
+                                p2 = pts[i+1] if i == len(pts)-2 else fitz.Point((pts[i].x + pts[i+1].x)/2, (pts[i].y + pts[i+1].y)/2)
+                                cp1, cp2 = _q_to_cubic(curr_pt, p1, p2)
+                                shape.draw_bezier(curr_pt, cp1, cp2, p2)
+                                curr_pt = p2
+                        elif op == 'curveTo':
+                            p1, p2, p3 = [_pt(gx + p[0] * scale_factor, gy - p[1] * scale_factor) for p in args]
+                            shape.draw_bezier(curr_pt, p1, p2, p3)
+                            curr_pt = p3
+                        elif op == 'closePath':
+                            if curr_pt != start_pt:
+                                shape.draw_line(curr_pt, start_pt)
+                            curr_pt = start_pt
+
+                    cur_x += pos.x_advance * scale_factor
+                    cur_y -= pos.y_advance * scale_factor
+
+                if (underline or strikethrough) and total_adv > 0:
+                    deco_jobs.append((ins_x, line_base_y, total_adv))
 
             shape.finish(color=None, fill=fill_rgb, even_odd=True)
             shape.commit()
-            return total_adv
+
+            if deco_jobs:
+                deco_shape = target_page.new_shape()
+                stroke_w = max(0.55, font_sz * 0.068)
+                for dx0, dbase, dw in deco_jobs:
+                    if underline:
+                        uy = dbase + font_sz * 0.14
+                        deco_shape.draw_line(fitz.Point(dx0, uy), fitz.Point(dx0 + dw, uy))
+                    if strikethrough:
+                        sy = dbase - font_sz * 0.30
+                        deco_shape.draw_line(fitz.Point(dx0, sy), fitz.Point(dx0 + dw, sy))
+                deco_shape.finish(color=fill_rgb, width=stroke_w)
+                deco_shape.commit()
+
+            return max_adv
 
         for action in edit_actions:
             page_idx = action.get("page", 0)
@@ -3136,83 +3318,66 @@ async def edit_pdf_endpoint(request: Request, file: UploadFile = File(...), edit
             orig_h = float(action.get("origH", h))
             new_text = action.get("newText", "")
 
-            # Redact: use exact bounding box of the ORIGINAL text (no padding) to delete it from source
+            # Redact: use exact bounding box of the ORIGINAL text to delete it from source
             rect = fitz.Rect(orig_x, orig_y, orig_x + orig_w, orig_y + orig_h)
-            
-            # Extract original baseline and font metrics from the native text being replaced
             annot_rect = fitz.Rect(orig_x - 0.5, orig_y - 0.5, orig_x + orig_w + 0.5, orig_y + orig_h + 0.5)
+
+            # Extract dominant visible/matching span inside annot_rect
             orig_dict = page.get_text("dict", clip=annot_rect)
             detected_baseline = None
             detected_font = None
             detected_size = None
+            best_score = -1.0
             for blk in orig_dict.get("blocks", []):
                 for ln in blk.get("lines", []):
                     for sp in ln.get("spans", []):
-                        if sp.get("text", "").strip():
+                        sp_txt = sp.get("text", "").strip()
+                        if not sp_txt:
+                            continue
+                        sb = sp.get("bbox", [0, 0, 0, 0])
+                        overlap = fitz.Rect(sb) & rect
+                        ov_area = overlap.width * overlap.height if not overlap.is_empty else 0.0
+                        score = ov_area + len(sp_txt) * 0.5
+                        if score > best_score:
+                            best_score = score
                             detected_baseline = sp.get("origin", [0, 0])[1]
                             detected_font = sp.get("font")
                             detected_size = sp.get("size")
-                            break
-                    if detected_baseline is not None:
-                        break
-                if detected_baseline is not None:
-                    break
 
-            words = page.get_text("words", clip=annot_rect)
-            has_native_text = len(words) > 0
+            # Distinguish true VISIBLE vector text (render_mode != 3) from invisible OCR 3-Tr text
+            # sitting over a scanned raster image!
+            traces_in_rect = [
+                t for t in page.get_texttrace()
+                if fitz.Rect(t.get("bbox", (0, 0, 0, 0))).intersects(annot_rect)
+            ]
+            has_visible_native = any(t.get("type", 0) != 3 for t in traces_in_rect)
+            has_invisible_ocr = any(t.get("type", 0) == 3 for t in traces_in_rect)
 
-            if has_native_text:
-                # Clean native text deletion: remove text without ANY colored rectangle
-                page.add_redact_annot(annot_rect, fill=None)
-                page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE)
-            else:
-                # Scanned PDF: sample edge pixels to get dominant background color
-                bg_color = (1, 1, 1)
-                bg_req = str(action.get("bgColor", "")).lower()
-                if bg_req in ["#ffffff", "#fbfcfc", "#fcfcfc", "#fafafa", "#f7f7f7", "white", ""]:
-                    bg_color = (1, 1, 1)
-                else:
-                    try:
-                        pm = page.get_pixmap(clip=rect)
-                        from collections import Counter
-                        edges = []
-                        for px in range(pm.width):
-                            edges.append(pm.pixel(px, 0))
-                            edges.append(pm.pixel(px, pm.height - 1))
-                        for py in range(pm.height):
-                            edges.append(pm.pixel(0, py))
-                            edges.append(pm.pixel(pm.width - 1, py))
-                        if edges:
-                            mc = Counter(edges).most_common(1)[0][0]
-                            r_b, g_b, b_b = mc[0], mc[1], mc[2]
-                            # Snap near-white paper or light background to pure white
-                            if r_b > 230 and g_b > 230 and b_b > 230:
-                                bg_color = (1, 1, 1)
-                            else:
-                                bg_color = (r_b / 255.0, g_b / 255.0, b_b / 255.0)
-                    except Exception:
-                        bg_color = (1, 1, 1)
-                
-                # Expand rect slightly vertically (1pt) so full scanned character is cleanly cleared
-                clean_scan_rect = fitz.Rect(x - 0.5, y - 0.5, x + w + 0.5, y + h + 1.2)
-                page.add_redact_annot(clean_scan_rect, fill=bg_color)
-                page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_PIXELS)
-
-            if not new_text:
-                continue
+            page_image_rects = []
+            try:
+                for img_info in page.get_images(full=True):
+                    page_image_rects.extend(page.get_image_rects(img_info[0]))
+            except Exception:
+                page_image_rects = []
+            has_raster_underneath = any(ir.intersects(annot_rect) for ir in page_image_rects)
 
             fg_color  = hex_to_rgb(action.get("color", "#000000"))
-            orig_size = float(action.get("fontSize", 12))
+            has_explicit_size = action.get("fontSize") is not None
+            orig_size = float(action.get("fontSize") or detected_size or 12)
             is_bold   = bool(action.get("bold"))
             is_italic = bool(action.get("italic"))
+            is_underline = bool(action.get("underline"))
+            is_strike    = bool(action.get("strikethrough"))
 
             # Smart font matching based on detected/specified font family
-            f_fam = str(action.get("fontFamily") or action.get("fontName") or "").lower()
-            is_serif = any(x in f_fam for x in [
+            # Strip "sans-serif" before checking for "serif" substring!
+            f_fam = str(action.get("fontFamily") or action.get("fontName") or detected_font or "").lower()
+            f_fam_clean = f_fam.replace("sans-serif", "").replace("sans serif", "")
+            is_serif = any(x in f_fam_clean for x in [
                 "times", "serif", "georgia", "palatino", "garamond", "cambria",
                 "roman", "bookman", "minion", "baskerville", "caslon"
             ])
-            is_mono = any(x in f_fam for x in [
+            is_mono = any(x in f_fam_clean for x in [
                 "courier", "mono", "consolas", "code", "menlo", "inconsolata",
                 "sourcecode", "jetbrains", "lucida"
             ])
@@ -3261,9 +3426,135 @@ async def edit_pdf_endpoint(request: Request, file: UploadFile = File(...), edit
             if raw_baseline is not None:
                 baseline_y = raw_baseline + dy
             elif h > 0:
-                baseline_y = y + h * 0.78
+                baseline_y = y + orig_size * 0.94
             else:
                 baseline_y = None
+
+            if has_visible_native or (has_invisible_ocr and not has_raster_underneath):
+                # Pure vector PDF: clean text deletion without painting any colored box
+                page.add_redact_annot(annot_rect, fill=None)
+                page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE)
+            else:
+                # Scanned PDF OR Searchable OCR PDF over raster image:
+                # Use Adobe-style Seamless Scan Blender (texture-preserving inpainting +
+                # neighbor ink/stroke/blur/grain matching + tight feathered RGBA composite)
+                seamless_applied = False
+                try:
+                    from scan_blender import apply_seamless_scan_edit
+                    scan_base = baseline_y if baseline_y is not None else (y + orig_size * 0.85)
+                    scan_res = apply_seamless_scan_edit(
+                        page=page,
+                        orig_rect=rect,
+                        new_x=x,
+                        new_y=y,
+                        new_w=w,
+                        new_h=h,
+                        new_text=new_text,
+                        font_size_pt=orig_size,
+                        baseline_pt=scan_base,
+                        fg_rgb=fg_color,
+                        is_bold=is_bold,
+                        is_italic=is_italic,
+                        is_serif=is_serif,
+                        is_mono=is_mono,
+                        underline=is_underline,
+                        strikethrough=is_strike,
+                        text_align=align,
+                        has_explicit_size=has_explicit_size,
+                    )
+                    if scan_res is not None:
+                        # Remove old invisible 3-Tr OCR text cleanly without painting flat boxes
+                        if has_invisible_ocr:
+                            page.add_redact_annot(annot_rect, fill=None)
+                            page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE)
+                        page.insert_image(scan_res["paste_rect"], stream=scan_res["png_bytes"])
+                        # Keep newly edited word searchable via invisible render_mode=3 text layer
+                        if new_text.strip():
+                            try:
+                                tr = scan_res["text_rect"]
+                                s_fs = max(4.0, float(scan_res["font_size_pt"]))
+                                s_base = float(scan_res["baseline_pt"])
+                                if has_non_latin(new_text):
+                                    d_path = _resolve_font_path(is_bold)
+                                    if d_path is not None:
+                                        page.insert_text(
+                                            fitz.Point(tr.x0, s_base),
+                                            new_text.replace("\n", " "),
+                                            fontsize=s_fs,
+                                            fontname="scan_dev_ocr",
+                                            fontfile=str(d_path),
+                                            render_mode=3,
+                                        )
+                                else:
+                                    page.insert_text(
+                                        fitz.Point(tr.x0, s_base),
+                                        new_text.replace("\n", " "),
+                                        fontsize=s_fs,
+                                        fontname="helv",
+                                        render_mode=3,
+                                    )
+                            except Exception:
+                                pass
+                        seamless_applied = True
+                except Exception as scan_err:
+                    logger.warning(f"[EditPDF] Seamless scan blend fallback triggered: {scan_err}")
+
+                if seamless_applied:
+                    continue
+
+                # Fallback redaction path if scan_blender could not run
+                bg_color = (1, 1, 1)
+                bg_req = str(action.get("bgColor", "")).strip().lower()
+                if bg_req in ["#ffffff", "#fbfcfc", "#fcfcfc", "#fafafa", "#f7f7f7", "white"]:
+                    bg_color = (1, 1, 1)
+                elif bg_req.startswith("#") and len(bg_req) == 7:
+                    try:
+                        parsed_bg = hex_to_rgb(bg_req)
+                        lum_bg = 0.299 * parsed_bg[0] + 0.587 * parsed_bg[1] + 0.114 * parsed_bg[2]
+                        chroma_bg = max(parsed_bg) - min(parsed_bg)
+                        is_neutral_white = (lum_bg >= 0.94) or (chroma_bg <= 0.085 and lum_bg >= 0.78)
+                        bg_color = (1, 1, 1) if is_neutral_white else parsed_bg
+                    except Exception:
+                        bg_color = (1, 1, 1)
+                else:
+                    try:
+                        ring_rect = fitz.Rect(
+                            max(0.0, rect.x0 - 2.0),
+                            max(0.0, rect.y0 - 2.0),
+                            min(page.rect.width, rect.x1 + 2.0),
+                            min(page.rect.height, rect.y1 + 2.0),
+                        )
+                        pm = page.get_pixmap(clip=ring_rect)
+                        edges = []
+                        if pm.width >= 2 and pm.height >= 2:
+                            for px in range(pm.width):
+                                edges.append(pm.pixel(px, 0)[:3])
+                                edges.append(pm.pixel(px, pm.height - 1)[:3])
+                            for py in range(pm.height):
+                                edges.append(pm.pixel(0, py)[:3])
+                                edges.append(pm.pixel(pm.width - 1, py)[:3])
+                        if edges:
+                            edges.sort(key=lambda c: 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2], reverse=True)
+                            bright = edges[:max(1, len(edges) // 2)]
+                            r_b = sum(c[0] for c in bright) / len(bright)
+                            g_b = sum(c[1] for c in bright) / len(bright)
+                            b_b = sum(c[2] for c in bright) / len(bright)
+                            lum_b = 0.299 * r_b + 0.587 * g_b + 0.114 * b_b
+                            chroma_b = max(r_b, g_b, b_b) - min(r_b, g_b, b_b)
+                            if lum_b >= 242 or (chroma_b <= 22 and lum_b >= 200):
+                                bg_color = (1, 1, 1)
+                            else:
+                                bg_color = (r_b / 255.0, g_b / 255.0, b_b / 255.0)
+                    except Exception:
+                        bg_color = (1, 1, 1)
+
+                # Clear original raster text + invisible OCR layer cleanly using orig_* coords
+                clean_scan_rect = fitz.Rect(orig_x - 0.8, orig_y - 0.8, orig_x + orig_w + 0.8, orig_y + orig_h + 1.4)
+                page.add_redact_annot(clean_scan_rect, fill=bg_color)
+                page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_PIXELS)
+
+            if not new_text:
+                continue
 
             # ── Hindi/Devanagari font handling with True Native Vector HarfBuzz ──
             inserted = False
@@ -3271,10 +3562,10 @@ async def edit_pdf_endpoint(request: Request, file: UploadFile = File(...), edit
                 deva_path = _resolve_font_path(is_bold)
                 if deva_path is not None:
                     text_size = orig_size
-                    if detected_size is not None and (orig_size == 12.0 or orig_size == 16.0 or abs(orig_size - detected_size) < 2.0):
+                    if not has_explicit_size and detected_size is not None:
                         text_size = detected_size
 
-                    base_calc = baseline_y if baseline_y is not None else (y + text_size * 0.85)
+                    base_calc = baseline_y if baseline_y is not None else (y + text_size * 0.90)
 
                     try:
                         # 1. Pure Native PDF Vector Bézier path insertion shaped via HarfBuzz
@@ -3288,7 +3579,10 @@ async def edit_pdf_endpoint(request: Request, file: UploadFile = File(...), edit
                             base_y=base_calc,
                             fill_rgb=fg_color,
                             text_align=align,
-                            box_width=w
+                            box_width=w,
+                            is_italic=is_italic,
+                            underline=is_underline,
+                            strikethrough=is_strike,
                         )
                         inserted = True
                     except Exception as vector_err:
@@ -3339,17 +3633,15 @@ async def edit_pdf_endpoint(request: Request, file: UploadFile = File(...), edit
             if not inserted and baseline_y is not None and "\n" not in new_text:
                 try:
                     text_size = orig_size
-                    # If detected_size exists and orig_size was default or close, match detected_size
-                    if detected_size is not None and (orig_size == 12.0 or orig_size == 16.0 or abs(orig_size - detected_size) < 2.0):
+                    if not has_explicit_size and detected_size is not None:
                         text_size = detected_size
 
                     # Compute insertion X based on alignment
                     ins_x = x
-                    if align == fitz.TEXT_ALIGN_CENTER:
-                        ins_w = fitz.get_text_length(new_text, fontname=fontname, fontsize=text_size)
+                    ins_w = fitz.get_text_length(new_text, fontname=fontname, fontsize=text_size)
+                    if align == fitz.TEXT_ALIGN_CENTER and w > ins_w:
                         ins_x = x + (w - ins_w) / 2
-                    elif align == fitz.TEXT_ALIGN_RIGHT:
-                        ins_w = fitz.get_text_length(new_text, fontname=fontname, fontsize=text_size)
+                    elif align == fitz.TEXT_ALIGN_RIGHT and w > ins_w:
                         ins_x = x + w - ins_w
 
                     page.insert_text(
@@ -3359,6 +3651,17 @@ async def edit_pdf_endpoint(request: Request, file: UploadFile = File(...), edit
                         fontname=fontname,
                         color=fg_color
                     )
+                    if is_underline or is_strike:
+                        deco_shape = page.new_shape()
+                        stroke_w = max(0.55, text_size * 0.068)
+                        if is_underline:
+                            uy = baseline_y + text_size * 0.14
+                            deco_shape.draw_line(fitz.Point(ins_x, uy), fitz.Point(ins_x + ins_w, uy))
+                        if is_strike:
+                            sy = baseline_y - text_size * 0.30
+                            deco_shape.draw_line(fitz.Point(ins_x, sy), fitz.Point(ins_x + ins_w, sy))
+                        deco_shape.finish(color=fg_color, width=stroke_w)
+                        deco_shape.commit()
                     inserted = True
                 except Exception as ins_err:
                     logger.warning(f"[EditPDF] Baseline text insert error: {ins_err}")
@@ -3442,6 +3745,13 @@ async def analyze_text_layout(
         page_height = pg.rect.height
         page_width = pg.rect.width
 
+        # Check which text spans are invisible OCR (render_mode == 3)
+        invisible_boxes = [
+            fitz.Rect(t.get("bbox", (0, 0, 0, 0)))
+            for t in pg.get_texttrace()
+            if t.get("type", 0) == 3
+        ]
+
         # get_text("dict") returns blocks > lines > spans
         # Each span has: text, font, size, color (int RGB), bbox, flags (bold/italic)
         blocks_data = pg.get_text("dict", flags=fitz.TEXT_PRESERVE_WHITESPACE)
@@ -3466,6 +3776,9 @@ async def analyze_text_layout(
 
                     font_name: str = span.get("font", "")
                     font_size: float = round(span.get("size", 12), 2)
+
+                    span_rect = fitz.Rect(bbox)
+                    is_invisible_ocr = any(span_rect.intersects(ib) for ib in invisible_boxes)
 
                     # flags bit 4 = bold, bit 1 = italic (fitz PDF flags)
                     flags = span.get("flags", 0)
@@ -3510,6 +3823,7 @@ async def analyze_text_layout(
                         "mono": is_mono,
                         "color": color_hex,
                         "baseline": round(origin[1], 2),
+                        "isInvisibleOcr": is_invisible_ocr,
                     })
 
         words_out = []
@@ -3537,6 +3851,7 @@ async def analyze_text_layout(
                 "italic": matched_s["italic"] if matched_s else False,
                 "color": matched_s["color"] if matched_s else "#000000",
                 "baseline": matched_s.get("baseline", round(wy1, 2)) if matched_s else round(wy1, 2),
+                "isInvisibleOcr": matched_s.get("isInvisibleOcr", False) if matched_s else False,
             })
 
         doc.close()
@@ -3922,61 +4237,93 @@ async def webpage_to_pdf(
 
         async with WEBPAGE_TO_PDF_SEMAPHORE:
             async with async_playwright() as p:
+                browser = None
                 try:
-                    browser = await p.chromium.launch(
-                        headless=True,
-                        args=["--no-sandbox", "--disable-dev-shm-usage"]
-                    )
-                except Exception as launch_err:
-                    err_msg = str(launch_err)
-                    if "Executable doesn't exist" in err_msg or "playwright install" in err_msg:
-                        logger.info("[WebpageToPdf] Chromium binary missing on server — downloading automatically...")
-                        import subprocess
-                        import sys
-                        from fastapi.concurrency import run_in_threadpool
-                        await run_in_threadpool(
-                            subprocess.run,
-                            [sys.executable, "-m", "playwright", "install", "chromium"],
-                            check=True,
-                            timeout=180
-                        )
+                    try:
                         browser = await p.chromium.launch(
                             headless=True,
                             args=["--no-sandbox", "--disable-dev-shm-usage"]
                         )
-                    else:
-                        raise launch_err
+                    except Exception as launch_err:
+                        err_msg = str(launch_err)
+                        if "Executable doesn't exist" in err_msg or "playwright install" in err_msg:
+                            logger.info("[WebpageToPdf] Chromium binary missing on server — downloading automatically...")
+                            import subprocess
+                            import sys
+                            await run_in_threadpool(
+                                subprocess.run,
+                                [sys.executable, "-m", "playwright", "install", "chromium"],
+                                check=True,
+                                timeout=180
+                            )
+                            browser = await p.chromium.launch(
+                                headless=True,
+                                args=["--no-sandbox", "--disable-dev-shm-usage"]
+                            )
+                        else:
+                            raise launch_err
 
-                page = await browser.new_page(
-                    user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-                )
-                try:
-                    await page.goto(url, wait_until="load", timeout=20000)
-                except Exception as goto_err:
-                    logger.warning(f"[WebpageToPdf] Initial load wait timed out ({goto_err}) — continuing with domcontentloaded state")
+                    page = await browser.new_page(
+                        user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+                    )
+
+                    # Subresource / Redirect SSRF Interceptor (blocks internal IPs, file://, cloud metadata)
+                    validated_hosts: set[str] = set()
+                    from urllib.parse import urlparse as _urlparse
+
+                    async def _ssrf_route_guard(route):
+                        req_url = route.request.url
+                        lower_u = req_url.lower()
+                        if lower_u.startswith(("data:", "blob:", "about:")):
+                            await route.continue_()
+                            return
+                        try:
+                            parsed = _urlparse(req_url)
+                            if parsed.scheme not in ALLOWED_URL_SCHEMES:
+                                await route.abort()
+                                return
+                            host_key = (parsed.hostname or "").lower()
+                            if host_key not in validated_hosts:
+                                await run_in_threadpool(_validate_url, req_url)
+                                validated_hosts.add(host_key)
+                            await route.continue_()
+                        except Exception:
+                            logger.warning(f"[WebpageToPdf] Blocked restricted subresource URL: {req_url[:120]}")
+                            await route.abort()
+
+                    await page.route("**/*", _ssrf_route_guard)
+
                     try:
-                        await page.goto(url, wait_until="domcontentloaded", timeout=10000)
-                    except Exception:
-                        pass  # If page is already partially loaded, proceed to render
+                        await page.goto(url, wait_until="load", timeout=20000)
+                    except Exception as goto_err:
+                        logger.warning(f"[WebpageToPdf] Initial load wait timed out ({goto_err}) — continuing with domcontentloaded state")
+                        try:
+                            await page.goto(url, wait_until="domcontentloaded", timeout=10000)
+                        except Exception:
+                            pass  # If page is already partially loaded, proceed to render
 
-                # Post-navigation SSRF guard: ensure HTTP 301/302 redirects did not land on internal/private IPs
-                if page.url and page.url != "about:blank":
-                    _validate_url(page.url)
+                    # Post-navigation SSRF guard: ensure HTTP 301/302 redirects did not land on internal/private IPs
+                    if page.url and page.url != "about:blank":
+                        _validate_url(page.url)
 
-                import asyncio
-                await asyncio.sleep(1.0)
+                    await asyncio.sleep(1.0)
 
-                await page.pdf(
-                    path=str(out),
-                    format=paper_format,
-                    landscape=landscape,
-                    print_background=background,
-                    margin={
-                        "top": margin, "right": margin,
-                        "bottom": margin, "left": margin
-                    }
-                )
-                await browser.close()
+                    await page.pdf(
+                        path=str(out),
+                        format=paper_format,
+                        landscape=landscape,
+                        print_background=background,
+                        margin={
+                            "top": margin, "right": margin,
+                            "bottom": margin, "left": margin
+                        }
+                    )
+                finally:
+                    if browser is not None:
+                        try:
+                            await browser.close()
+                        except Exception:
+                            pass
 
         if not out.exists() or out.stat().st_size == 0:
             raise RuntimeError("Playwright did not generate a PDF.")
@@ -4110,13 +4457,13 @@ async def replace_font(
         return FileResponse(
             str(out), media_type="application/pdf",
             filename=out_name,
-            background=BackgroundTask(cleanup, inp, out)
+            background=BackgroundTask(cleanup, inp, out, no_text)
         )
     except HTTPException:
-        cleanup(inp, out)
+        cleanup(inp, out, no_text)
         raise
     except Exception as e:
-        cleanup(inp, out)
+        cleanup(inp, out, no_text)
         raise safe_error(e, "replace-font")
 
 
@@ -4541,6 +4888,199 @@ async def ocr_analyze(request: Request, file: UploadFile = File(...)):
         cleanup(inp)
 
 
+@app.post("/ocr/page-words")
+@limiter.limit("30/minute")
+async def ocr_page_words(
+    request: Request,
+    file: UploadFile = File(...),
+    page: int = Form(0),
+    lang: str = Form("hin+eng"),
+):
+    """
+    Fast single-page word-level OCR endpoint for the Advanced PDF Editor.
+    Uses hybrid RapidOCR (ONNX PP-OCRv4) + OpenCV watermark/illumination cleaner + Tesseract TSV
+    so scanned/colored cards (like Aadhaar with Hindi+English) produce accurate clickable word boxes.
+    Coordinates returned are in CropBox-relative top-left PDF points (matching pdf.js canvas at scale=1).
+    """
+    inp = temp_path(".pdf")
+    try:
+        inp.write_bytes(await safe_read_upload(file))
+        check_pdf_page_count(inp, "ocr-page-words")
+
+        import fitz
+        import cv2
+        import numpy as np
+        from ocr_engine import _ocr_page_words, find_devanagari_font
+
+        raw_lang = (lang or "hin+eng").strip().lower()
+        if "hin" in raw_lang and "eng" in raw_lang:
+            norm_lang = "hin+eng"
+        elif "hin" in raw_lang:
+            norm_lang = "hin"
+        else:
+            norm_lang = "eng"
+
+        doc = fitz.open(str(inp))
+        try:
+            if page < 0 or page >= len(doc):
+                raise HTTPException(400, f"Page index {page} is out of range (0 to {len(doc)-1}).")
+
+            pg = doc[page]
+            page_w = float(pg.rect.width)
+            page_h = float(pg.rect.height)
+            max_dim_pt = max(page_w, page_h, 1.0)
+            eff_dpi = min(400, max(180, int((2500.0 * 72.0) / max_dim_pt)))
+            if max_dim_pt * (eff_dpi / 72.0) > 3600.0:
+                eff_dpi = max(120, int((3600.0 * 72.0) / max_dim_pt))
+
+            pix = pg.get_pixmap(dpi=eff_dpi, alpha=False)
+        finally:
+            doc.close()
+
+        if pix.width < 16 or pix.height < 16:
+            return JSONResponse({
+                "page": page,
+                "pageWidth": round(page_w, 2),
+                "pageHeight": round(page_h, 2),
+                "words": [],
+            })
+
+        img_rgb = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, pix.n)
+        if pix.n == 3:
+            img_bgr = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
+        elif pix.n == 4:
+            img_bgr = cv2.cvtColor(img_rgb, cv2.COLOR_RGBA2BGR)
+        else:
+            img_bgr = cv2.cvtColor(img_rgb, cv2.COLOR_GRAY2BGR)
+
+        latin_font = fitz.Font("helv")
+        dev_font_path = find_devanagari_font()
+        dev_font = fitz.Font(fontfile=str(dev_font_path)) if dev_font_path else None
+
+        ocr_words = await run_in_threadpool(
+            _ocr_page_words,
+            img_bgr,
+            norm_lang,
+            True,
+            latin_font,
+            dev_font,
+        )
+
+        sx = page_w / float(pix.width)
+        sy = page_h / float(pix.height)
+        ih, iw = img_bgr.shape[:2]
+        words_out = []
+
+        for w in ocr_words:
+            txt = (w.text or "").strip()
+            if not txt:
+                continue
+            ix0 = max(0, min(iw - 1, int(round(w.x0))))
+            iy0 = max(0, min(ih - 1, int(round(w.y0))))
+            ix1 = max(ix0 + 1, min(iw, int(round(w.x1))))
+            iy1 = max(iy0 + 1, min(ih, int(round(w.y1))))
+            bw_px = ix1 - ix0
+            bh_px = iy1 - iy0
+            if bw_px < 2 or bh_px < 2:
+                continue
+
+            # Sample foreground ink color from darkest pixels inside the box
+            fg_hex = "#000000"
+            patch = img_bgr[iy0:iy1, ix0:ix1]
+            if patch.size > 0:
+                lum_patch = 0.114 * patch[:, :, 0] + 0.587 * patch[:, :, 1] + 0.299 * patch[:, :, 2]
+                flat_lum = lum_patch.reshape(-1)
+                flat_bgr = patch.reshape(-1, 3)
+                k_dark = max(1, len(flat_lum) // 10)
+                dark_idx = np.argpartition(flat_lum, k_dark - 1)[:k_dark]
+                fg_bgr = np.median(flat_bgr[dark_idx], axis=0)
+                fg_b, fg_g, fg_r = int(round(fg_bgr[0])), int(round(fg_bgr[1])), int(round(fg_bgr[2]))
+                fg_hex = f"#{fg_r:02x}{fg_g:02x}{fg_b:02x}"
+
+            # Sample background color from outer margin strips (preserving tinted ID/card paper!)
+            bg_hex = "#ffffff"
+            pad_px = max(3, int(round(bh_px * 0.28)))
+            samples_bgr = []
+            if ix0 - pad_px >= 0:
+                left_strip = img_bgr[iy0:iy1, max(0, ix0 - pad_px):ix0]
+                if left_strip.size > 0:
+                    samples_bgr.append(left_strip.reshape(-1, 3))
+            if ix1 + pad_px <= iw:
+                right_strip = img_bgr[iy0:iy1, ix1:min(iw, ix1 + pad_px)]
+                if right_strip.size > 0:
+                    samples_bgr.append(right_strip.reshape(-1, 3))
+            if not samples_bgr:
+                rx0 = max(0, ix0 - pad_px)
+                ry0 = max(0, iy0 - pad_px)
+                rx1 = min(iw, ix1 + pad_px)
+                ry1 = min(ih, iy1 + pad_px)
+                ring_all = img_bgr[ry0:ry1, rx0:rx1]
+                if ring_all.size > 0:
+                    samples_bgr.append(ring_all.reshape(-1, 3))
+
+            if samples_bgr:
+                ring_px = np.vstack(samples_bgr)
+                lum_ring = 0.114 * ring_px[:, 0] + 0.587 * ring_px[:, 1] + 0.299 * ring_px[:, 2]
+                bright_mask = lum_ring >= float(np.percentile(lum_ring, 65))
+                bright_px = ring_px[bright_mask] if np.any(bright_mask) else ring_px
+                bg_bgr = np.median(bright_px, axis=0)
+                bg_b, bg_g, bg_r = int(round(bg_bgr[0])), int(round(bg_bgr[1])), int(round(bg_bgr[2]))
+                lum_b = 0.299 * bg_r + 0.587 * bg_g + 0.114 * bg_b
+                chroma_b = max(bg_r, bg_g, bg_b) - min(bg_r, bg_g, bg_b)
+                if lum_b >= 242 or (chroma_b <= 22 and lum_b >= 195):
+                    bg_hex = "#ffffff"
+                else:
+                    bg_hex = f"#{bg_r:02x}{bg_g:02x}{bg_b:02x}"
+
+            x_pt = round(w.x0 * sx, 2)
+            y_pt = round(w.y0 * sy, 2)
+            w_pt = round(max(1.0, (w.x1 - w.x0) * sx), 2)
+            h_pt = round(max(2.0, (w.y1 - w.y0) * sy), 2)
+            # Tight OCR ink boxes cover ascender/cap-to-baseline (~0.76*em) OR upper matra + body (~0.98*em)
+            # OR descenders/lower matras (`gjpqy`, `ुूृ्`). Compute accurate typographic em size & baseline:
+            has_descender = any(c in "gjpqy" for c in txt) or any(c in "\u0941\u0942\u0943" for c in txt)
+            has_dev_upper = ("\u0930\u094D" in txt) or any(c in "\u093F\u0940\u0947\u0948\u094B\u094C\u0902\u0901\u0945\u0949" for c in txt)
+            if has_descender and has_dev_upper:
+                em_divisor = 1.20
+                base_frac = 0.78
+            elif has_descender:
+                em_divisor = 0.96
+                base_frac = 0.78
+            elif has_dev_upper:
+                em_divisor = 0.98
+                base_frac = 0.95
+            else:
+                em_divisor = 0.76
+                base_frac = 0.95
+            font_sz = round(max(4.0, min(160.0, h_pt / em_divisor)), 1)
+            base_pt = round(y_pt + h_pt * base_frac, 2)
+
+            words_out.append({
+                "text": txt,
+                "x": x_pt,
+                "y": y_pt,
+                "w": w_pt,
+                "h": h_pt,
+                "fontSize": font_sz,
+                "baseline": base_pt,
+                "fgColor": fg_hex,
+                "bgColor": bg_hex,
+            })
+
+        return JSONResponse({
+            "page": page,
+            "pageWidth": round(page_w, 2),
+            "pageHeight": round(page_h, 2),
+            "words": words_out,
+        })
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise safe_error(e, "ocr-page-words")
+    finally:
+        cleanup(inp)
+
+
 @app.post("/remove-watermark")
 @limiter.limit("20/minute")
 async def remove_watermark(
@@ -4567,6 +5107,7 @@ async def remove_watermark(
     """
     inp = temp_path(".pdf")
     out = temp_path(".pdf")
+    scheduled_cleanup = False
     try:
         inp.write_bytes(await safe_read_upload(file))
         check_pdf_page_count(inp, "remove-watermark")
@@ -4655,6 +5196,7 @@ async def remove_watermark(
 
         background_tasks.add_task(cleanup, inp)
         background_tasks.add_task(cleanup, out)
+        scheduled_cleanup = True
 
         safe_name = safe_filename(file.filename, "clean_output.pdf")
         return FileResponse(
@@ -4668,9 +5210,8 @@ async def remove_watermark(
     except Exception as e:
         raise safe_error(e, "remove-watermark")
     finally:
-        # Only clean up if background_tasks didn't register them (error path)
-        # cleanup() is idempotent (no-op if file doesn't exist), so safe to call here too.
-        pass
+        if not scheduled_cleanup:
+            cleanup(inp, out)
 
 
 # ─── Telemetry & Feedback Endpoints ─────────────────────────────
@@ -4739,14 +5280,24 @@ async def report_telemetry_error(request: Request):
         return {"success": False, "error": str(e)}
 
 
+def _extract_admin_header_key(request: Request) -> str:
+    """Extract admin key strictly from request headers (never from URL query params)."""
+    auth_header = request.headers.get("Authorization", "")
+    bearer_key = auth_header.replace("Bearer ", "").strip() if auth_header.startswith("Bearer ") else ""
+    return (request.headers.get("X-Admin-Key") or bearer_key or "").strip()
+
+
 @app.get("/api/admin/telemetry")
 @limiter.limit("20/minute")
 async def get_admin_telemetry(request: Request):
     """Retrieve full telemetry, ratings, and error analytics for admin dashboard."""
     import telemetry
-    auth_header = request.headers.get("Authorization", "")
-    bearer_key = auth_header.replace("Bearer ", "").strip() if auth_header.startswith("Bearer ") else ""
-    key = request.headers.get("X-Admin-Key") or bearer_key or request.query_params.get("key", "")
+    if not telemetry.is_admin_configured():
+        raise HTTPException(
+            status_code=503,
+            detail="Admin passcode is not configured on the server. Set ADMIN_SECRET_KEY environment variable."
+        )
+    key = _extract_admin_header_key(request)
     if not telemetry.verify_admin_key(key):
         raise HTTPException(status_code=401, detail="Unauthorized: Access denied")
 
@@ -4758,9 +5309,12 @@ async def get_admin_telemetry(request: Request):
 async def change_admin_passcode(request: Request):
     """Allow authorized admin to update their passcode directly."""
     import telemetry
-    auth_header = request.headers.get("Authorization", "")
-    bearer_key = auth_header.replace("Bearer ", "").strip() if auth_header.startswith("Bearer ") else ""
-    key = request.headers.get("X-Admin-Key") or bearer_key or request.query_params.get("key", "")
+    if not telemetry.is_admin_configured():
+        raise HTTPException(
+            status_code=503,
+            detail="Admin passcode is not configured on the server. Set ADMIN_SECRET_KEY environment variable."
+        )
+    key = _extract_admin_header_key(request)
     if not telemetry.verify_admin_key(key):
         raise HTTPException(status_code=401, detail="Unauthorized: Access denied")
 
@@ -4787,9 +5341,12 @@ async def change_admin_passcode(request: Request):
 async def test_webhook(request: Request):
     """Send test alert to verify Discord or Telegram notifications."""
     import telemetry
-    auth_header = request.headers.get("Authorization", "")
-    bearer_key = auth_header.replace("Bearer ", "").strip() if auth_header.startswith("Bearer ") else ""
-    key = request.headers.get("X-Admin-Key") or bearer_key or request.query_params.get("key", "")
+    if not telemetry.is_admin_configured():
+        raise HTTPException(
+            status_code=503,
+            detail="Admin passcode is not configured on the server. Set ADMIN_SECRET_KEY environment variable."
+        )
+    key = _extract_admin_header_key(request)
     if not telemetry.verify_admin_key(key):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
@@ -4813,9 +5370,51 @@ PRINT_DROP_ROOMS: dict = {}
 PRINT_DROP_ROOM_TIMESTAMPS: dict = {}
 PRINT_DROP_ROOM_TOKENS: dict = {}
 PRINT_DROP_DEVICE_TOKENS: dict = {}
+PRINT_DROP_ROOM_SECRETS: dict = {}
 PRINT_DROP_SPOOL_DIR = Path(tempfile.gettempdir()) / "pms_print_spool"
 PRINT_DROP_SPOOL_DIR.mkdir(parents=True, exist_ok=True)
 PIN_CHARS = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"  # 32 unambiguous chars (no 0/O, 1/I/L)
+
+
+def _hash_room_token(token: str) -> str:
+    return hashlib.sha256(token.strip().encode("utf-8")).hexdigest()
+
+
+def _get_room_secret_hash(clean_session: str) -> str:
+    h = PRINT_DROP_ROOM_SECRETS.get(clean_session, "")
+    if h:
+        return h
+    secret_file = PRINT_DROP_SPOOL_DIR / clean_session / ".room_secret"
+    if secret_file.exists():
+        try:
+            h = secret_file.read_text(encoding="utf-8").strip()
+            if h:
+                PRINT_DROP_ROOM_SECRETS[clean_session] = h
+                return h
+        except Exception:
+            pass
+    return ""
+
+
+def _set_room_secret_hash(clean_session: str, secret_hash: str):
+    PRINT_DROP_ROOM_SECRETS[clean_session] = secret_hash
+    session_folder = PRINT_DROP_SPOOL_DIR / clean_session
+    session_folder.mkdir(parents=True, exist_ok=True)
+    try:
+        (session_folder / ".room_secret").write_text(secret_hash, encoding="utf-8")
+    except Exception:
+        pass
+
+
+def _extract_room_token(request: Request) -> str:
+    hdr = request.headers.get("X-Room-Token", "").strip()
+    if hdr:
+        return hdr
+    auth = request.headers.get("Authorization", "").strip()
+    if auth.startswith("Bearer "):
+        return auth[7:].strip()
+    return ""
+
 
 def _prune_expired_print_rooms():
     """Background garbage collection: strictly frees RAM and temp files older than 20 minutes."""
@@ -4827,6 +5426,7 @@ def _prune_expired_print_rooms():
             PRINT_DROP_ROOM_TIMESTAMPS.pop(s, None)
             PRINT_DROP_ROOM_TOKENS.pop(s, None)
             PRINT_DROP_DEVICE_TOKENS.pop(s, None)
+            PRINT_DROP_ROOM_SECRETS.pop(s, None)
             session_folder = PRINT_DROP_SPOOL_DIR / s
             if session_folder.exists():
                 shutil.rmtree(session_folder, ignore_errors=True)
@@ -4848,6 +5448,7 @@ def _prune_expired_print_rooms():
                 PRINT_DROP_ROOM_TIMESTAMPS.pop(s, None)
                 PRINT_DROP_ROOM_TOKENS.pop(s, None)
                 PRINT_DROP_DEVICE_TOKENS.pop(s, None)
+                PRINT_DROP_ROOM_SECRETS.pop(s, None)
                 session_folder = PRINT_DROP_SPOOL_DIR / s
                 if session_folder.exists():
                     shutil.rmtree(session_folder, ignore_errors=True)
@@ -4856,18 +5457,59 @@ def _prune_expired_print_rooms():
 
 @app.get("/api/print-drop/new-session")
 async def print_drop_new_session():
-    """Generate a guaranteed unique, collision-proof 6-character room PIN."""
-    import random
+    """Generate a guaranteed unique, collision-proof 6-character room PIN + secret read token."""
     _prune_expired_print_rooms()
+    read_token = secrets.token_urlsafe(24)
+    secret_hash = _hash_room_token(read_token)
     for _ in range(20):
-        pin = "".join(random.choice(PIN_CHARS) for _ in range(6))
-        if pin not in PRINT_DROP_ROOMS:
+        pin = "".join(secrets.choice(PIN_CHARS) for _ in range(6))
+        if pin not in PRINT_DROP_ROOMS and not _get_room_secret_hash(pin):
             PRINT_DROP_ROOMS[pin] = []
             PRINT_DROP_ROOM_TIMESTAMPS[pin] = time.time()
-            return {"success": True, "session_id": pin}
-    # Fallback with timestamp salt if all 20 collided
-    fallback_pin = "".join(random.choice(PIN_CHARS) for _ in range(4)) + f"{int(time.time()) % 100:02d}"
-    return {"success": True, "session_id": fallback_pin}
+            _set_room_secret_hash(pin, secret_hash)
+            return {"success": True, "session_id": pin, "read_token": read_token}
+    fallback_pin = "".join(secrets.choice(PIN_CHARS) for _ in range(4)) + f"{int(time.time()) % 100:02d}"
+    PRINT_DROP_ROOMS[fallback_pin] = []
+    PRINT_DROP_ROOM_TIMESTAMPS[fallback_pin] = time.time()
+    _set_room_secret_hash(fallback_pin, secret_hash)
+    return {"success": True, "session_id": fallback_pin, "read_token": read_token}
+
+
+@app.post("/api/print-drop/register")
+@limiter.limit("30/minute")
+async def print_drop_register(
+    request: Request,
+    session_id: str = Form(...),
+    read_token: str = Form(""),
+):
+    """Bind a Counter PC's secret read_token to its room PIN (returns 409 if room is already claimed by another station)."""
+    _prune_expired_print_rooms()
+    clean_session = re.sub(r"[^A-Z0-9]", "", session_id.strip().upper())
+    if len(clean_session) < 3 or len(clean_session) > 12:
+        raise HTTPException(status_code=400, detail="Invalid session room PIN")
+    if clean_session in ("KIOSKSTATION", "AUDIONOTES"):
+        raise HTTPException(status_code=400, detail="Shared global rooms are disabled for security. Use an isolated room PIN.")
+
+    token = (read_token or _extract_room_token(request)).strip()
+    if len(token) < 16:
+        raise HTTPException(status_code=400, detail="Invalid room secret token")
+
+    candidate_hash = _hash_room_token(token)
+    existing_hash = _get_room_secret_hash(clean_session)
+    if existing_hash:
+        if not hmac.compare_digest(candidate_hash, existing_hash):
+            raise HTTPException(status_code=409, detail="Room PIN is already claimed by another active station.")
+        PRINT_DROP_ROOM_TIMESTAMPS[clean_session] = time.time()
+        return {"success": True, "session_id": clean_session}
+
+    # Prevent claiming a room that already has pending unauthenticated files from someone else
+    if PRINT_DROP_ROOMS.get(clean_session):
+        raise HTTPException(status_code=409, detail="Room already active; please choose a fresh PIN.")
+
+    PRINT_DROP_ROOMS.setdefault(clean_session, [])
+    PRINT_DROP_ROOM_TIMESTAMPS[clean_session] = time.time()
+    _set_room_secret_hash(clean_session, candidate_hash)
+    return {"success": True, "session_id": clean_session}
 
 @app.post("/api/print-drop/upload")
 @limiter.limit("60/minute")
@@ -4891,6 +5533,8 @@ async def print_drop_upload(
     clean_session = re.sub(r"[^A-Z0-9]", "", session_id.strip().upper())
     if len(clean_session) < 3 or len(clean_session) > 12:
         raise HTTPException(status_code=400, detail="Invalid session room PIN")
+    if clean_session in ("KIOSKSTATION", "AUDIONOTES"):
+        raise HTTPException(status_code=400, detail="Shared global rooms are disabled. Use an isolated room PIN.")
 
     # Anti-Spam Queue Cap: Max 30 pending uncollected files per room
     current_queue = PRINT_DROP_ROOMS.get(clean_session, [])
@@ -4960,29 +5604,43 @@ async def print_drop_upload(
     return {"success": True, "job_id": final_job_id, "token_num": room_token, "session_id": clean_session}
 
 @app.get("/api/print-drop/jobs/{session_id}")
-async def print_drop_poll(session_id: str, peek: bool = False):
-    """Retrieve and clear new jobs for the counter PC queue (or non-destructively peek when peek=true)."""
+async def print_drop_poll(request: Request, session_id: str, peek: bool = False):
+    """Retrieve and clear new jobs for the authenticated counter PC queue."""
     clean_session = re.sub(r"[^A-Z0-9]", "", session_id.strip().upper())
+    expected_hash = _get_room_secret_hash(clean_session)
+    if not expected_hash:
+        raise HTTPException(status_code=412, detail="Room not registered")
+    provided = _extract_room_token(request)
+    if not provided or not hmac.compare_digest(_hash_room_token(provided), expected_hash):
+        raise HTTPException(status_code=403, detail="Unauthorized: Invalid room token")
+
     if peek:
         jobs = list(PRINT_DROP_ROOMS.get(clean_session, []))
     else:
         jobs = PRINT_DROP_ROOMS.pop(clean_session, [])
-    if clean_session in PRINT_DROP_ROOM_TIMESTAMPS:
-        PRINT_DROP_ROOM_TIMESTAMPS[clean_session] = time.time()
+    PRINT_DROP_ROOM_TIMESTAMPS[clean_session] = time.time()
     return {"success": True, "jobs": jobs}
 
 @app.get("/api/print-drop/file/{session_id}/{job_id}")
-async def print_drop_download_file(session_id: str, job_id: str, keep: bool = False):
-    """Serve spooled document to counter PC with immediate streaming and post-delivery deletion (unless keep=true or persistent room)."""
+async def print_drop_download_file(request: Request, session_id: str, job_id: str, keep: bool = False):
+    """Serve spooled document to authenticated counter PC with immediate post-delivery deletion."""
     clean_session = re.sub(r"[^A-Z0-9]", "", session_id.strip().upper())
-    safe_job_id = re.sub(r"[^a-zA-Z0-9_-]", "", job_id)
+    expected_hash = _get_room_secret_hash(clean_session)
+    if not expected_hash:
+        raise HTTPException(status_code=403, detail="Unauthorized: Room is not registered")
+    provided = _extract_room_token(request)
+    if not provided or not hmac.compare_digest(_hash_room_token(provided), expected_hash):
+        raise HTTPException(status_code=403, detail="Unauthorized: Invalid room token")
 
+    safe_job_id = re.sub(r"[^a-zA-Z0-9_-]", "", job_id)
     file_path = PRINT_DROP_SPOOL_DIR / clean_session / f"{safe_job_id}.bin"
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="Document expired or already processed")
 
-    persist_file = keep or clean_session in ("AUDIONOTES", "KIOSKSTATION")
-    media_type = "audio/webm" if clean_session == "AUDIONOTES" else "application/octet-stream"
+    # Only per-note Talking Notes rooms (TN...) allow multi-student reads during the 20-min TTL
+    is_audio_note = clean_session.startswith("TN")
+    persist_file = is_audio_note and keep
+    media_type = "audio/webm" if is_audio_note else "application/octet-stream"
 
     return FileResponse(
         path=str(file_path),

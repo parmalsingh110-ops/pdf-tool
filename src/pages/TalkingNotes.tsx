@@ -15,6 +15,7 @@ import {
   Plus,
   Radio,
   BookOpen,
+  ShieldCheck,
 } from 'lucide-react';
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 import QRCode from 'qrcode';
@@ -24,7 +25,25 @@ import { useSEO } from '../hooks/useSEO';
 import { usePageSEO } from '../lib/usePageSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
 import { downloadBlob } from '../lib/utils';
-import { apiFetch, API_BASE } from '../lib/api';
+import { apiFetch } from '../lib/api';
+import {
+  generateSecretToken,
+  encryptBytesWithKey,
+  decryptBytesWithKey,
+} from '../lib/privacy';
+
+const makeNoteRoomId = (): string => {
+  const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+  let suffix = '';
+  if (typeof window !== 'undefined' && window.crypto?.getRandomValues) {
+    const arr = new Uint8Array(8);
+    window.crypto.getRandomValues(arr);
+    for (let i = 0; i < 8; i++) suffix += chars[arr[i] % chars.length];
+  } else {
+    for (let i = 0; i < 8; i++) suffix += chars[Math.floor(Math.random() * chars.length)];
+  }
+  return `TN${suffix}`;
+};
 
 interface AudioAnnotation {
   id: string;
@@ -67,19 +86,71 @@ export default function TalkingNotes() {
   // Canvas Preview
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [enableCloudQrAudio, setEnableCloudQrAudio] = useState(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Student QR Scan Playback State (?id=...&note=...)
+  // Student QR Scan Playback State (?room=...&id=...&note=...#t=...&k=...)
   const [scannedNoteId, setScannedNoteId] = useState<string | null>(() => {
     if (typeof window === 'undefined') return null;
     const params = new URLSearchParams(window.location.search);
     return params.get('id') || params.get('play');
   });
+  const [scannedNoteRoom] = useState<string>(() => {
+    if (typeof window === 'undefined') return '';
+    return new URLSearchParams(window.location.search).get('room') || '';
+  });
+  const [scannedAudioToken] = useState<string>(() => {
+    if (typeof window === 'undefined') return '';
+    const h = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash;
+    return new URLSearchParams(h).get('t') || '';
+  });
+  const [scannedAudioKey] = useState<string>(() => {
+    if (typeof window === 'undefined') return '';
+    const h = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash;
+    return new URLSearchParams(h).get('k') || '';
+  });
+  const [scannedAudioBlobUrl, setScannedAudioBlobUrl] = useState<string>('');
+  const [scannedAudioError, setScannedAudioError] = useState<string>('');
   const [scannedNoteLabel, setScannedNoteLabel] = useState<string>(() => {
     if (typeof window === 'undefined') return 'Teacher Voice Note';
     const params = new URLSearchParams(window.location.search);
     return params.get('note') || 'Teacher Voice Note';
   });
+
+  useEffect(() => {
+    if (!scannedNoteId || !scannedNoteRoom || !scannedAudioToken) return;
+    let cancelled = false;
+    let objUrl = '';
+    setScannedAudioError('');
+
+    (async () => {
+      try {
+        const res = await apiFetch(
+          `/api/print-drop/file/${encodeURIComponent(scannedNoteRoom)}/${encodeURIComponent(scannedNoteId)}?keep=1`,
+          { headers: { 'X-Room-Token': scannedAudioToken } }
+        );
+        if (!res.ok) {
+          throw new Error(res.status === 404 ? 'This temporary voice note has expired (20 min TTL).' : 'Unauthorized or unavailable audio note.');
+        }
+        const rawBuf = await res.arrayBuffer();
+        const { buffer: plainBuf } = await decryptBytesWithKey(rawBuf, scannedAudioKey);
+        if (cancelled) return;
+        objUrl = URL.createObjectURL(new Blob([plainBuf], { type: 'audio/webm' }));
+        setScannedAudioBlobUrl(objUrl);
+      } catch (err: any) {
+        if (!cancelled) {
+          setScannedAudioError(err?.message || 'Could not load voice note.');
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      if (objUrl) {
+        try { URL.revokeObjectURL(objUrl); } catch {}
+      }
+    };
+  }, [scannedNoteId, scannedNoteRoom, scannedAudioToken, scannedAudioKey]);
 
   const handleFileUpload = async (file: File) => {
     if (file.type !== 'application/pdf') {
@@ -238,35 +309,51 @@ export default function TalkingNotes() {
           const page = doc.getPage(anno.pageNum - 1);
           const { width, height } = page.getSize();
 
-          // Upload audio blob to cloud spool so scanning the printed QR code plays the teacher's voice note on any phone
-          if (anno.audioBlob) {
-            try {
-              const fd = new FormData();
-              fd.append('session_id', 'AUDIONOTES');
-              fd.append('job_id', anno.id);
-              fd.append('sender_device_id', 'talking_notes');
-              fd.append('device_label', anno.label || 'Voice Note');
-              fd.append('copies', '1');
-              fd.append('color_mode', 'bw');
-              fd.append('orientation', 'auto');
-              fd.append('file', anno.audioBlob, `${anno.id}.webm`);
-              await apiFetch('/api/print-drop/upload', {
-                method: 'POST',
-                body: fd,
-              });
-            } catch (uploadErr) {
-              console.warn('[TalkingNotes] Cloud audio upload skipped:', uploadErr);
-            }
-          }
-
-          // Standard QR Code encoding link (Audio note player route)
           const origin =
             typeof window !== 'undefined' &&
             window.location.hostname !== 'localhost' &&
             window.location.hostname !== '127.0.0.1'
               ? window.location.origin
               : 'https://pdfmediasuite.in';
-          const targetUrl = `${origin}/audio-note?id=${encodeURIComponent(anno.id)}&note=${encodeURIComponent(anno.label)}`;
+
+          let targetUrl = `${origin}/audio-note?note=${encodeURIComponent(anno.label)}`;
+
+          // Upload encrypted audio blob into an isolated per-note room ONLY if cloud QR playback is enabled
+          if (anno.audioBlob && enableCloudQrAudio) {
+            try {
+              const noteRoom = makeNoteRoomId();
+              const noteToken = generateSecretToken(24);
+              const noteKey = generateSecretToken(32);
+
+              const regFd = new FormData();
+              regFd.append('session_id', noteRoom);
+              regFd.append('read_token', noteToken);
+              await apiFetch('/api/print-drop/register', { method: 'POST', body: regFd });
+
+              const plainBuf = await anno.audioBlob.arrayBuffer();
+              const encBuf = await encryptBytesWithKey(plainBuf, noteKey);
+              const encBlob = new Blob([encBuf], { type: 'application/octet-stream' });
+
+              const fd = new FormData();
+              fd.append('session_id', noteRoom);
+              fd.append('job_id', anno.id);
+              fd.append('sender_device_id', 'talking_notes');
+              fd.append('device_label', anno.label || 'Voice Note');
+              fd.append('copies', '1');
+              fd.append('color_mode', 'bw');
+              fd.append('orientation', 'auto');
+              fd.append('file', encBlob, `${anno.id}.webm`);
+              const upRes = await apiFetch('/api/print-drop/upload', {
+                method: 'POST',
+                body: fd,
+              });
+              if (upRes.ok) {
+                targetUrl = `${origin}/audio-note?room=${encodeURIComponent(noteRoom)}&id=${encodeURIComponent(anno.id)}&note=${encodeURIComponent(anno.label)}#t=${noteToken}&k=${noteKey}`;
+              }
+            } catch (uploadErr) {
+              console.warn('[TalkingNotes] Cloud audio upload skipped:', uploadErr);
+            }
+          }
 
           try {
             // Instant 100% Local In-Browser QR Generation
@@ -373,14 +460,30 @@ export default function TalkingNotes() {
           </div>
 
           {pdfBytes && (
-            <button
-              onClick={handleExportPdf}
-              disabled={isProcessing}
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white shadow-md shadow-indigo-200 dark:shadow-none transition-all disabled:opacity-50"
-            >
-              <Download className="w-4 h-4" />
-              {isProcessing ? 'Generating Talking PDF...' : 'Download Talking Handout PDF'}
-            </button>
+            <div className="flex flex-wrap items-center gap-3">
+              <label
+                className="inline-flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 cursor-pointer"
+                title="When OFF, audio stays 100% inside the downloaded PDF attachment with zero server upload."
+              >
+                <input
+                  type="checkbox"
+                  checked={enableCloudQrAudio}
+                  onChange={(e) => setEnableCloudQrAudio(e.target.checked)}
+                  className="accent-indigo-600 rounded"
+                />
+                <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+                <span>Temp Encrypted QR Playback (20m)</span>
+              </label>
+
+              <button
+                onClick={handleExportPdf}
+                disabled={isProcessing}
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white shadow-md shadow-indigo-200 dark:shadow-none transition-all disabled:opacity-50"
+              >
+                <Download className="w-4 h-4" />
+                {isProcessing ? 'Generating Talking PDF...' : 'Download Talking Handout PDF'}
+              </button>
+            </div>
           )}
         </div>
 
@@ -397,12 +500,22 @@ export default function TalkingNotes() {
               </p>
             </div>
             <div className="flex items-center gap-3 w-full sm:w-auto">
-              <audio
-                controls
-                autoPlay
-                src={`${API_BASE}/api/print-drop/file/AUDIONOTES/${encodeURIComponent(scannedNoteId)}?keep=1`}
-                className="w-full sm:w-72 h-10 rounded-xl"
-              />
+              {scannedAudioError ? (
+                <div className="text-xs font-semibold bg-rose-500/20 border border-rose-300/40 px-3 py-2 rounded-xl text-rose-100">
+                  {scannedAudioError}
+                </div>
+              ) : scannedAudioBlobUrl ? (
+                <audio
+                  controls
+                  autoPlay
+                  src={scannedAudioBlobUrl}
+                  className="w-full sm:w-72 h-10 rounded-xl"
+                />
+              ) : (
+                <div className="text-xs text-indigo-100 font-medium px-3 py-2">
+                  Decrypting audio note...
+                </div>
+              )}
               <button
                 onClick={() => setScannedNoteId(null)}
                 className="px-3 py-2 rounded-xl bg-indigo-700 hover:bg-indigo-800 text-xs font-bold"

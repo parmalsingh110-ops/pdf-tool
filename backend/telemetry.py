@@ -31,8 +31,9 @@ DB_PATH = DATA_DIR / "telemetry.db"
 load_dotenv(BACKEND_DIR / ".env")
 load_dotenv(BACKEND_DIR.parent / ".env")
 
-# Admin Secret Key (from env or default)
-ADMIN_SECRET_KEY = os.environ.get("ADMIN_SECRET_KEY", "pdfadmin2026")
+# Admin Secret Key (must come from env or hashed SQLite setting — no insecure hardcoded fallback)
+ADMIN_SECRET_KEY = os.environ.get("ADMIN_SECRET_KEY", "").strip()
+_PBKDF2_PREFIX = "pbkdf2_sha256$"
 
 def get_discord_webhook(webhook_url: Optional[str] = None) -> str:
     """Return configured Discord webhook URL dynamically."""
@@ -113,8 +114,22 @@ def init_db():
         logger.error("Failed to initialize telemetry database: %s", e)
 
 
-def get_admin_passcode() -> str:
-    """Return configured passcode (checks DB first, then ADMIN_SECRET_KEY env var, then default)."""
+def _hash_passcode(passcode: str) -> str:
+    salt = os.urandom(16).hex()
+    dk = hashlib.pbkdf2_hmac("sha256", passcode.strip().encode("utf-8"), bytes.fromhex(salt), 200_000)
+    return f"{_PBKDF2_PREFIX}{salt}${dk.hex()}"
+
+
+def _verify_hashed_passcode(passcode: str, stored: str) -> bool:
+    try:
+        _, salt_hex, hash_hex = stored.split("$", 2)
+        dk = hashlib.pbkdf2_hmac("sha256", passcode.strip().encode("utf-8"), bytes.fromhex(salt_hex), 200_000)
+        return hmac.compare_digest(dk.hex(), hash_hex)
+    except Exception:
+        return False
+
+
+def _get_stored_db_passcode() -> Optional[str]:
     try:
         with get_db_connection() as conn:
             cursor = conn.cursor()
@@ -124,21 +139,29 @@ def get_admin_passcode() -> str:
                 return str(row[0])
     except Exception as e:
         logger.warning("Could not read admin passcode from DB: %s", e)
-    return os.environ.get("ADMIN_SECRET_KEY", "pdfadmin2026")
+    return None
+
+
+def is_admin_configured() -> bool:
+    """Return True only when a DB passcode or ADMIN_SECRET_KEY env var is explicitly set."""
+    if _get_stored_db_passcode():
+        return True
+    return bool(os.environ.get("ADMIN_SECRET_KEY", "").strip())
 
 
 def set_admin_passcode(new_passcode: str) -> bool:
-    """Persist new admin passcode into SQLite settings table."""
+    """Persist salted PBKDF2 hash of admin passcode into SQLite settings table."""
     if not new_passcode or len(new_passcode.strip()) < 6:
         return False
     try:
+        hashed = _hash_passcode(new_passcode.strip())
         with get_db_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 INSERT INTO system_settings (key, value, updated_at)
                 VALUES ('admin_passcode', ?, CURRENT_TIMESTAMP)
                 ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
-            """, (new_passcode.strip(),))
+            """, (hashed,))
             conn.commit()
             return True
     except Exception as e:
@@ -147,19 +170,33 @@ def set_admin_passcode(new_passcode: str) -> bool:
 
 
 def verify_admin_key(key: str) -> bool:
-    """Constant-time comparison of admin passcode to protect against timing attacks."""
-    if not key:
+    """Constant-time verification of admin passcode (never falls back to hardcoded defaults)."""
+    if not key or not key.strip():
         return False
-    expected = get_admin_passcode()
-    return hmac.compare_digest(key.strip(), expected.strip())
+    candidate = key.strip()
+    db_val = _get_stored_db_passcode()
+    if db_val:
+        if db_val.startswith(_PBKDF2_PREFIX):
+            return _verify_hashed_passcode(candidate, db_val)
+        # Legacy plaintext entry in SQLite: verify then transparently upgrade to salted hash
+        if hmac.compare_digest(candidate, db_val.strip()):
+            set_admin_passcode(candidate)
+            return True
+        return False
+    env_secret = os.environ.get("ADMIN_SECRET_KEY", "").strip()
+    if not env_secret:
+        return False
+    return hmac.compare_digest(candidate, env_secret)
+
+
+_RUNTIME_IP_SALT = os.environ.get("IP_HASH_SALT", "").strip() or os.urandom(16).hex()
 
 
 def hash_ip(ip: str) -> str:
-    """Anonymize IP address for privacy while allowing spam deduplication."""
+    """Anonymize IP address for privacy while allowing short-term deduplication."""
     if not ip:
         return ""
-    salt = "pdf_tool_privacy_salt"
-    return hashlib.sha256(f"{ip}_{salt}".encode()).hexdigest()[:16]
+    return hashlib.sha256(f"{ip}_{_RUNTIME_IP_SALT}".encode()).hexdigest()[:12]
 
 
 def _sync_send_discord(target_url: str, payload_data: bytes):
@@ -304,6 +341,28 @@ def save_feedback(
     return feedback_id
 
 
+def _sanitize_file_info(file_info: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Strip client document filenames from telemetry; retain only extension, size, and MIME type."""
+    if not file_info or not isinstance(file_info, dict):
+        return {}
+    raw_name = str(file_info.get("name", "") or "")
+    ext = ""
+    if "." in raw_name:
+        ext = "." + raw_name.rsplit(".", 1)[-1].lower()[:12]
+    safe: Dict[str, Any] = {}
+    if ext:
+        safe["extension"] = ext
+    if file_info.get("extension"):
+        safe["extension"] = str(file_info["extension"])[:16]
+    if file_info.get("size") is not None:
+        safe["size"] = file_info.get("size")
+    if file_info.get("sizeFormatted"):
+        safe["sizeFormatted"] = str(file_info["sizeFormatted"])[:32]
+    if file_info.get("type"):
+        safe["type"] = str(file_info["type"])[:64]
+    return safe
+
+
 def save_error(
     tool_path: str,
     tool_name: str,
@@ -313,9 +372,10 @@ def save_error(
     user_agent: str = "",
     client_ip: str = ""
 ) -> int:
-    """Log an automatic error occurrence into SQLite and alert webhooks."""
+    """Log an automatic error occurrence into SQLite and alert webhooks (without storing PII filenames)."""
     ip_h = hash_ip(client_ip)
-    file_info_json = json.dumps(file_info or {})
+    safe_info = _sanitize_file_info(file_info)
+    file_info_json = json.dumps(safe_info)
     error_id = -1
     try:
         with get_db_connection() as conn:
@@ -352,8 +412,8 @@ def save_error(
         {"name": "Tool", "value": f"`{tool_name}` ({tool_path})", "inline": True},
         {"name": "Error", "value": f"```{error_message[:300]}```", "inline": False},
     ]
-    if file_info:
-        file_desc = f"Name: {file_info.get('name', 'N/A')} | Size: {file_info.get('sizeFormatted', 'N/A')}"
+    if safe_info:
+        file_desc = f"Type: {safe_info.get('extension', safe_info.get('type', 'N/A'))} | Size: {safe_info.get('sizeFormatted', 'N/A')}"
         disc_fields.append({"name": "File Details", "value": file_desc, "inline": False})
 
     send_discord_alert(
@@ -369,8 +429,8 @@ def save_error(
         f"• *Tool:* `{tool_name}` ({tool_path})\n"
         f"• *Error:* `{error_message[:200]}`\n"
     )
-    if file_info:
-        tg_msg += f"• *File:* {file_info.get('name', 'N/A')} ({file_info.get('sizeFormatted', 'N/A')})\n"
+    if safe_info:
+        tg_msg += f"• *File:* {safe_info.get('extension', safe_info.get('type', 'N/A'))} ({safe_info.get('sizeFormatted', 'N/A')})\n"
     send_telegram_alert(tg_msg)
 
     return error_id
