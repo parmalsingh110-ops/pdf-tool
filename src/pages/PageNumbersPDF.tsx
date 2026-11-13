@@ -1,12 +1,15 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
+import { motion, useReducedMotion } from 'motion/react';
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
-import { Download, FileText, Hash, Check, Eye, Layers, Sparkles, RefreshCw } from 'lucide-react';
+import { Download, FileText, Hash, Check, CheckCircle2, Eye, RefreshCw } from 'lucide-react';
 import FileDropzone from '../components/FileDropzone';
 import * as pdfjsLib from 'pdfjs-dist';
 import '../lib/pdfWorker';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { AnimatedNumber, PearlScanOverlay, PearlStageSwitch } from '../components/pearl/PearlMotion';
+import { useAutoRevokeUrl, toArrayBufferBytes } from '../lib/blobUrl';
 
 type NumberPosition = 'bottom-center' | 'bottom-right' | 'bottom-left' | 'top-center' | 'top-right' | 'top-left';
 type NumberFormat = 'page-n-of-total' | 'n-of-total' | 'page-n' | 'just-n' | 'dash-n-dash';
@@ -58,6 +61,9 @@ export default function PageNumbersPDF() {
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [numberedUrl, setNumberedUrl] = useState<string | null>(null);
+
+  useAutoRevokeUrl(numberedUrl);
+  const prefersReduced = useReducedMotion();
 
   const getFormattedText = (pageIdx: number, total: number) => {
     const num = pageIdx + startNumber;
@@ -214,7 +220,7 @@ export default function PageNumbersPDF() {
       });
 
       const pdfBytes = await pdfDoc.save();
-      const blob = new Blob([pdfBytes as any], { type: 'application/pdf' });
+      const blob = new Blob([toArrayBufferBytes(pdfBytes)], { type: 'application/pdf' });
       setNumberedUrl(URL.createObjectURL(blob));
     } catch (error) {
       console.error('Error adding page numbers:', error);
@@ -235,115 +241,153 @@ export default function PageNumbersPDF() {
     >
       <div className="flex flex-col items-center w-full">
 
+      <PearlStageSwitch
+        stageKey={!file ? 'upload' : numberedUrl ? 'result' : 'configure'}
+        className="w-full max-w-6xl"
+      >
       {!file ? (
-        <FileDropzone onDrop={handleDrop} multiple={false} title="Drop PDF here or click to select" />
+        <div className="w-full max-w-3xl mx-auto">
+          <FileDropzone onDrop={handleDrop} multiple={false} title="Drop PDF here or click to select" />
+        </div>
       ) : numberedUrl ? (
         /* Success Screen */
-        <div className="w-full max-w-lg bg-white dark:bg-slate-900/90 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-800 p-8 text-center">
-          <div className="w-16 h-16 bg-pink-100 dark:bg-pink-950/50 text-pink-600 dark:text-pink-400 rounded-full flex items-center justify-center mx-auto mb-4">
-            <Check className="w-8 h-8" />
+        <div className="w-full max-w-lg mx-auto pms-glass-panel rounded-3xl p-8 text-center">
+          <div className="p-6 rounded-2xl bg-gradient-to-br from-emerald-500/12 via-white/75 to-teal-500/12 dark:from-emerald-950/50 dark:via-slate-900/80 dark:to-teal-950/40 border border-emerald-200/80 dark:border-emerald-800/60 mb-5">
+            <motion.div
+              initial={prefersReduced ? false : { scale: 0.6, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              transition={{ type: 'spring', stiffness: 420, damping: 24 }}
+              className="w-16 h-16 bg-gradient-to-br from-emerald-400 to-teal-500 text-white rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-emerald-500/25"
+            >
+              <CheckCircle2 className="w-8 h-8" />
+            </motion.div>
+            <h3 className="text-2xl font-bold text-gray-900 dark:text-slate-100 mb-1">Page Numbers Added!</h3>
+            <p className="text-sm text-gray-600 dark:text-slate-400 mb-6 tabular-nums">
+              <AnimatedNumber value={pageCount} /> pages numbered successfully.
+            </p>
+            <motion.a
+              whileHover={prefersReduced ? undefined : { scale: 1.02 }}
+              whileTap={prefersReduced ? undefined : { scale: 0.98 }}
+              href={numberedUrl}
+              download={`numbered_${file.name}`}
+              className="pms-btn-primary relative overflow-hidden inline-flex items-center justify-center gap-2 w-full py-4 font-bold rounded-xl shadow-md"
+            >
+              <span className="pms-shimmer pointer-events-none" />
+              <Download className="w-5 h-5" /> Download Numbered PDF
+            </motion.a>
           </div>
-          <h3 className="text-2xl font-bold text-gray-900 dark:text-slate-100 mb-1">Page Numbers Added!</h3>
-          <p className="text-gray-500 dark:text-slate-400 mb-6">{pageCount} pages numbered successfully.</p>
-          <a
-            href={numberedUrl}
-            download={`numbered_${file.name}`}
-            className="inline-flex items-center justify-center gap-2 w-full py-4 bg-pink-600 text-white font-bold rounded-xl hover:bg-pink-700 transition-colors shadow-md mb-4"
-          >
-            <Download className="w-5 h-5" /> Download Numbered PDF
-          </a>
-          <br />
           <button
             onClick={() => { setFile(null); setNumberedUrl(null); }}
-            className="text-gray-500 dark:text-slate-400 hover:text-gray-800 dark:hover:text-slate-200 font-medium text-sm mt-2"
+            className="text-gray-600 dark:text-slate-400 hover:text-gray-900 dark:hover:text-slate-200 font-semibold text-sm mt-1 transition-colors"
           >
             Number another PDF
           </button>
         </div>
       ) : (
         /* Interactive Workspace */
-        <div className="w-full max-w-6xl grid grid-cols-1 lg:grid-cols-12 gap-8">
+        <div className="w-full grid grid-cols-1 lg:grid-cols-12 gap-8">
 
           {/* Left: Controls (7 cols) */}
-          <div className="lg:col-span-7 space-y-6">
+          <div className="relative overflow-hidden lg:col-span-7 pms-glass-panel rounded-3xl p-5 sm:p-6 space-y-5">
+            <PearlScanOverlay active={isProcessing} label={`Numbering ${pageCount || ''} PDF pages...`} />
 
             {/* File info bar */}
-            <div className="flex items-center gap-4 p-4 bg-white dark:bg-slate-900/90 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-800">
-              <div className="w-12 h-12 bg-pink-100 dark:bg-pink-950/50 text-pink-600 dark:text-pink-400 rounded-xl flex items-center justify-center shrink-0">
+            <div className="flex items-center gap-4 p-4 bg-white/75 dark:bg-slate-900/75 rounded-2xl border border-[var(--pms-border)]">
+              <div className="w-12 h-12 bg-[var(--pms-soft-rose)] text-[var(--pms-rose)] border border-[var(--pms-border)] rounded-xl flex items-center justify-center shrink-0">
                 <FileText className="w-6 h-6" />
               </div>
               <div className="flex-1 min-w-0">
                 <p className="font-semibold text-gray-900 dark:text-slate-100 truncate">{file.name}</p>
-                <p className="text-xs text-gray-500 dark:text-slate-400">{pageCount} total pages · {(file.size / 1024 / 1024).toFixed(2)} MB</p>
+                <p className="text-xs text-gray-500 dark:text-slate-400 tabular-nums">{pageCount} total pages · {(file.size / 1024 / 1024).toFixed(2)} MB</p>
               </div>
               <button
                 onClick={() => { setFile(null); setPreviewThumb(null); }}
-                className="text-xs text-gray-400 dark:text-slate-500 hover:text-red-500 dark:hover:text-red-400 px-3 py-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/40 transition-colors shrink-0"
+                className="text-xs font-semibold text-gray-600 dark:text-slate-300 hover:text-rose-600 dark:hover:text-rose-400 px-3 py-1.5 rounded-xl border border-[var(--pms-border)] bg-white/80 dark:bg-slate-800/80 hover:bg-[var(--pms-soft-rose)] transition-colors shrink-0"
               >
                 Change
               </button>
             </div>
 
             {/* 1. Position Picker (6 positions) */}
-            <div className="bg-white dark:bg-slate-900/90 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-800 p-6 space-y-3">
+            <div className="bg-white/75 dark:bg-slate-900/75 rounded-2xl border border-[var(--pms-border)] p-5 space-y-3">
               <label className="block text-sm font-bold text-gray-800 dark:text-slate-200">
                 Placement Position on Page
               </label>
               <div className="grid grid-cols-3 gap-2.5">
-                {POSITIONS.map(p => (
+                {POSITIONS.map(p => {
+                  const active = position === p.id;
+                  return (
                   <button
                     key={p.id}
                     onClick={() => setPosition(p.id)}
-                    className={`p-3 rounded-xl border text-center transition-all ${
-                      position === p.id
-                        ? 'border-pink-600 bg-pink-50 dark:bg-pink-950/40 text-pink-900 dark:text-pink-200 font-bold shadow-xs'
-                        : 'border-gray-200 dark:border-slate-700 text-gray-600 dark:text-slate-300 hover:border-gray-300 dark:hover:border-slate-600'
+                    className={`relative overflow-hidden p-3 rounded-xl border text-center transition-colors ${
+                      active
+                        ? 'border-[var(--pms-rose)] text-rose-950 dark:text-rose-100 font-bold shadow-xs'
+                        : 'border-[var(--pms-border)] bg-white/70 dark:bg-slate-900/70 text-gray-600 dark:text-slate-300 hover:border-[var(--pms-border-strong)]'
                     }`}
                   >
-                    <div className="text-xs">{p.label}</div>
+                    {active && (
+                      <motion.span
+                        layoutId="pagenum-pos-pill"
+                        transition={{ type: 'spring', stiffness: 450, damping: 32 }}
+                        className="absolute inset-0 bg-[var(--pms-soft-rose)] pointer-events-none"
+                      />
+                    )}
+                    <div className="relative z-10 text-xs">{p.label}</div>
                   </button>
-                ))}
+                );
+                })}
               </div>
             </div>
 
             {/* 2. Format selector */}
-            <div className="bg-white dark:bg-slate-900/90 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-800 p-6 space-y-3">
+            <div className="bg-white/75 dark:bg-slate-900/75 rounded-2xl border border-[var(--pms-border)] p-5 space-y-3">
               <label className="block text-sm font-bold text-gray-800 dark:text-slate-200">
                 Numbering Format
               </label>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {FORMATS.map(f => (
+                {FORMATS.map(f => {
+                  const active = format === f.id;
+                  return (
                   <button
                     key={f.id}
                     onClick={() => setFormat(f.id)}
-                    className={`p-3 rounded-xl border text-left transition-all flex items-center justify-between ${
-                      format === f.id
-                        ? 'border-pink-600 bg-pink-50 dark:bg-pink-950/40 text-pink-900 dark:text-pink-200 font-semibold shadow-xs'
-                        : 'border-gray-200 dark:border-slate-700 text-gray-600 dark:text-slate-300 hover:border-gray-300 dark:hover:border-slate-600'
+                    className={`relative overflow-hidden p-3 rounded-xl border text-left transition-colors flex items-center justify-between ${
+                      active
+                        ? 'border-[var(--pms-rose)] text-rose-950 dark:text-rose-100 font-semibold shadow-xs'
+                        : 'border-[var(--pms-border)] bg-white/70 dark:bg-slate-900/70 text-gray-600 dark:text-slate-300 hover:border-[var(--pms-border-strong)]'
                     }`}
                   >
-                    <div>
+                    {active && (
+                      <motion.span
+                        layoutId="pagenum-fmt-pill"
+                        transition={{ type: 'spring', stiffness: 450, damping: 32 }}
+                        className="absolute inset-0 bg-[var(--pms-soft-rose)] pointer-events-none"
+                      />
+                    )}
+                    <div className="relative z-10">
                       <div className="text-xs font-semibold">{f.label}</div>
-                      <div className="text-[11px] text-gray-400 dark:text-slate-500 mt-0.5 font-mono">{f.preview}</div>
+                      <div className="text-[11px] text-gray-500 dark:text-slate-400 mt-0.5 font-mono">{f.preview}</div>
                     </div>
-                    {format === f.id && <Check className="w-4 h-4 text-pink-600 dark:text-pink-400 shrink-0" />}
+                    {active && <Check className="relative z-10 w-4 h-4 text-[var(--pms-rose)] shrink-0" />}
                   </button>
-                ))}
+                );
+                })}
               </div>
             </div>
 
             {/* 3. Page range & Cover page options */}
-            <div className="bg-white dark:bg-slate-900/90 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-800 p-6 space-y-4">
+            <div className="bg-white/75 dark:bg-slate-900/75 rounded-2xl border border-[var(--pms-border)] p-5 space-y-4">
               <label className="block text-sm font-bold text-gray-800 dark:text-slate-200">
                 Page Range & Cover Options
               </label>
               <div className="space-y-3">
-                <label className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-slate-800/60 rounded-xl cursor-pointer hover:bg-gray-100/80 dark:hover:bg-slate-800 transition-colors">
+                <label className="flex items-center gap-3 p-3 bg-white/70 dark:bg-slate-800/60 border border-[var(--pms-border)] rounded-xl cursor-pointer hover:border-[var(--pms-border-strong)] transition-colors">
                   <input
                     type="checkbox"
                     checked={skipFirstPage}
                     onChange={e => setSkipFirstPage(e.target.checked)}
-                    className="rounded text-pink-600 focus:ring-pink-500 w-4 h-4"
+                    className="rounded text-rose-600 focus:ring-rose-500 w-4 h-4"
                   />
                   <div>
                     <span className="text-xs font-semibold text-gray-800 dark:text-slate-200">Skip First Page (Cover Page)</span>
@@ -358,14 +402,14 @@ export default function PageNumbersPDF() {
                     min={1}
                     value={startNumber}
                     onChange={e => setStartNumber(Math.max(1, parseInt(e.target.value) || 1))}
-                    className="w-20 px-3 py-1.5 bg-white dark:bg-slate-800/80 border border-gray-200 dark:border-slate-700 text-gray-900 dark:text-slate-100 rounded-lg text-xs font-mono text-center focus:ring-2 focus:ring-pink-500 outline-none"
+                    className="w-20 px-3 py-1.5 bg-white/90 dark:bg-slate-800/80 border border-[var(--pms-border)] text-gray-900 dark:text-slate-100 rounded-xl text-xs font-mono text-center focus:ring-2 focus:ring-rose-500 outline-none"
                   />
                 </div>
               </div>
             </div>
 
             {/* 4. Font, Size, Color & Margin */}
-            <div className="bg-white dark:bg-slate-900/90 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-800 p-6 space-y-4">
+            <div className="bg-white/75 dark:bg-slate-900/75 rounded-2xl border border-[var(--pms-border)] p-5 space-y-4">
               <label className="block text-sm font-bold text-gray-800 dark:text-slate-200">
                 Styling & Typography
               </label>
@@ -383,7 +427,7 @@ export default function PageNumbersPDF() {
                     max={20}
                     value={fontSize}
                     onChange={e => setFontSize(Number(e.target.value))}
-                    className="w-full accent-pink-600"
+                    className="w-full accent-rose-600"
                   />
                 </div>
 
@@ -399,19 +443,19 @@ export default function PageNumbersPDF() {
                     max={60}
                     value={margin}
                     onChange={e => setMargin(Number(e.target.value))}
-                    className="w-full accent-pink-600"
+                    className="w-full accent-rose-600"
                   />
                 </div>
               </div>
 
               {/* Font Family & Color */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-gray-100 dark:border-slate-800">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-[var(--pms-border)]">
                 <div>
                   <label className="block text-xs font-medium text-gray-700 dark:text-slate-300 mb-1.5">Font Style</label>
                   <select
                     value={fontFamily}
                     onChange={e => setFontFamily(e.target.value as FontFamily)}
-                    className="w-full px-3 py-2 border border-gray-200 dark:border-slate-700 rounded-xl text-xs bg-white dark:bg-slate-800 text-gray-800 dark:text-slate-100 focus:ring-2 focus:ring-pink-500 outline-none"
+                    className="w-full px-3 py-2 border border-[var(--pms-border)] rounded-xl text-xs bg-white/90 dark:bg-slate-800 text-gray-800 dark:text-slate-100 focus:ring-2 focus:ring-rose-500 outline-none"
                   >
                     <option value="Helvetica">Helvetica (Standard Clean)</option>
                     <option value="TimesRoman">Times New Roman (Formal)</option>
@@ -428,7 +472,7 @@ export default function PageNumbersPDF() {
                         onClick={() => setColorHex(c.hex)}
                         title={c.name}
                         className={`w-7 h-7 rounded-full border-2 transition-transform ${
-                          colorHex === c.hex ? 'scale-110 border-pink-500 ring-2 ring-pink-200 dark:ring-pink-900/60' : 'border-gray-200 dark:border-slate-700'
+                          colorHex === c.hex ? 'scale-110 border-rose-500 ring-2 ring-rose-200 dark:ring-rose-900/60' : 'border-gray-200 dark:border-slate-700'
                         }`}
                         style={{ backgroundColor: c.hex }}
                       />
@@ -439,11 +483,14 @@ export default function PageNumbersPDF() {
             </div>
 
             {/* Action Button */}
-            <button
+            <motion.button
+              whileHover={prefersReduced || isProcessing ? undefined : { scale: 1.01 }}
+              whileTap={prefersReduced || isProcessing ? undefined : { scale: 0.99 }}
               onClick={addPageNumbers}
               disabled={isProcessing}
-              className="w-full py-4 bg-pink-600 text-white text-base font-bold rounded-xl hover:bg-pink-700 transition-colors disabled:opacity-50 shadow-md flex items-center justify-center gap-2"
+              className="pms-btn-primary relative overflow-hidden w-full py-4 text-base font-bold rounded-xl disabled:opacity-50 shadow-md flex items-center justify-center gap-2"
             >
+              <span className="pms-shimmer pointer-events-none" />
               {isProcessing ? (
                 <>
                   <RefreshCw className="w-5 h-5 animate-spin" /> Numbering Pages...
@@ -453,30 +500,30 @@ export default function PageNumbersPDF() {
                   <Hash className="w-5 h-5" /> Add Page Numbers to PDF
                 </>
               )}
-            </button>
+            </motion.button>
           </div>
 
           {/* Right: Live Interactive Canvas Preview (5 cols) */}
           <div className="lg:col-span-5 flex flex-col">
-            <div className="bg-white dark:bg-slate-900/90 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-800 p-5 flex flex-col sticky top-24">
+            <div className="pms-glass-panel rounded-3xl p-5 flex flex-col sticky top-24">
               <div className="flex items-center justify-between mb-3">
                 <span className="text-xs font-bold text-gray-700 dark:text-slate-200 flex items-center gap-1.5 uppercase tracking-wider">
-                  <Eye className="w-4 h-4 text-pink-600 dark:text-pink-400" /> Live Page Preview
+                  <Eye className="w-4 h-4 text-[var(--pms-rose)]" /> Live Page Preview
                 </span>
-                <span className="text-[11px] text-pink-600 dark:text-pink-300 font-semibold bg-pink-50 dark:bg-pink-950/50 px-2 py-0.5 rounded-full">
+                <span className="text-[11px] text-rose-700 dark:text-rose-200 font-semibold bg-[var(--pms-soft-rose)] border border-[var(--pms-border)] px-2.5 py-0.5 rounded-full">
                   {skipFirstPage ? 'Previewing Page 2' : 'Previewing Page 1'}
                 </span>
               </div>
 
-              {/* Canvas Preview Container */}
-              <div className="bg-slate-100 dark:bg-slate-800/80 rounded-xl border border-gray-200 dark:border-slate-700 p-3 min-h-[460px] flex items-center justify-center relative overflow-hidden">
+              {/* Canvas Preview Container - explicit white paper frame */}
+              <div className="bg-white/60 dark:bg-slate-900/60 rounded-2xl border border-[var(--pms-border)] p-3 min-h-[460px] flex items-center justify-center relative overflow-hidden">
                 {loadingPreview ? (
                   <div className="flex flex-col items-center gap-2 text-gray-500 dark:text-slate-400">
-                    <div className="w-6 h-6 border-2 border-pink-500 border-t-transparent rounded-full animate-spin" />
+                    <div className="w-6 h-6 border-2 border-rose-500 border-t-transparent rounded-full animate-spin" />
                     <span className="text-xs">Updating preview...</span>
                   </div>
                 ) : previewThumb ? (
-                  <div className="relative shadow-md rounded overflow-hidden max-h-[500px]">
+                  <div className="relative bg-white shadow-md rounded-xl border border-gray-200 overflow-hidden max-h-[500px] p-1">
                     <img
                       src={previewThumb}
                       alt="Live Page Preview"
@@ -488,13 +535,14 @@ export default function PageNumbersPDF() {
                 )}
               </div>
 
-              <p className="text-[11px] text-gray-400 dark:text-slate-500 text-center mt-3">
+              <p className="text-[11px] text-gray-500 dark:text-slate-400 text-center mt-3">
                 Preview reflects live placement, font size, margin, and format.
               </p>
             </div>
           </div>
         </div>
       )}
+      </PearlStageSwitch>
       </div>
     </ToolWorkspaceShell>
   );

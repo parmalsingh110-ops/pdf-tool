@@ -70,6 +70,13 @@ MAX_PDF_PAGES: int = int(os.environ.get("MAX_PDF_PAGES", "300"))
 MAX_DPI: int = int(os.environ.get("MAX_DPI", "300"))
 MIN_DPI: int = 72
 MAX_PROCESSING_SECONDS: int = int(os.environ.get("MAX_PROCESSING_SECONDS", "300"))
+MAX_IMAGE_PIXELS: int = int(os.environ.get("MAX_IMAGE_PIXELS", "100000000"))
+
+try:
+    from PIL import Image as _PILImage
+    _PILImage.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS
+except Exception:
+    pass
 
 # Disable /docs and /redoc in production (set ENABLE_DOCS=true to re-enable)
 ENABLE_DOCS: bool = os.environ.get("ENABLE_DOCS", "false").lower() == "true"
@@ -79,7 +86,21 @@ _raw_origins = os.environ.get(
     "ALLOWED_ORIGINS",
     "https://www.pdfmediasuite.in,https://pdfmediasuite.in,http://localhost:3000,http://localhost:4173,http://127.0.0.1:3000"
 )
-ALLOWED_ORIGINS: list[str] = [o.strip() for o in _raw_origins.split(",") if o.strip()]
+ALLOWED_ORIGINS_SET = {
+    "https://www.pdfmediasuite.in",
+    "https://pdfmediasuite.in",
+    "http://localhost:3000",
+    "http://localhost:4173",
+    "http://127.0.0.1:3000",
+}
+for o in _raw_origins.split(","):
+    cleaned = o.strip().strip('"').strip("'").rstrip("/")
+    if cleaned:
+        ALLOWED_ORIGINS_SET.add(cleaned)
+        if "pdfmediasuite.in" in cleaned:
+            ALLOWED_ORIGINS_SET.add("https://pdfmediasuite.in")
+            ALLOWED_ORIGINS_SET.add("https://www.pdfmediasuite.in")
+ALLOWED_ORIGINS: list[str] = list(ALLOWED_ORIGINS_SET)
 
 # LibreOffice concurrency: limit concurrent soffice processes to avoid RAM exhaustion
 LIBREOFFICE_SEMAPHORE = asyncio.Semaphore(int(os.environ.get("MAX_CONCURRENT_LIBREOFFICE", "2")))
@@ -191,12 +212,22 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 # 1. GZip compression
 app.add_middleware(GZipMiddleware, minimum_size=500)
 
-# 2. CORS — restricted to known production origins
+# 2. CORS — restricted to known production origins & subdomains
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
+    allow_origin_regex=r"^https:\/\/([a-zA-Z0-9-]+\.)*pdfmediasuite\.in$",
     allow_methods=["GET", "POST", "HEAD", "OPTIONS"],
-    allow_headers=["*"],
+    allow_headers=[
+        "Content-Type",
+        "Authorization",
+        "X-Admin-Key",
+        "X-Room-Token",
+        "Accept",
+        "Origin",
+        "X-Requested-With",
+        "Cache-Control",
+    ],
     expose_headers=["X-Match-Count"],
     allow_credentials=False,
 )
@@ -449,6 +480,7 @@ def health(request: Request, response: Response):
 
 # Web Share Target Fallback: hydrates shared files into client CacheStorage + IndexedDB if SW was bypassed
 @app.api_route("/share-target", methods=["GET", "POST"])
+@limiter.limit("15/minute")
 async def share_target_fallback(request: Request):
     from fastapi.responses import RedirectResponse, HTMLResponse
     import base64
@@ -459,14 +491,20 @@ async def share_target_fallback(request: Request):
 
     try:
         MAX_SHARE_FILE_BYTES = 25 * 1024 * 1024  # 25 MB max per shared file
+        MAX_SHARE_FILES = 10
+        MAX_TOTAL_SHARE_BYTES = 50 * 1024 * 1024
         form = await request.form()
         extracted_files = []
+        total_bytes = 0
         for _, value in form.multi_items():
+            if len(extracted_files) >= MAX_SHARE_FILES:
+                break
             if hasattr(value, "read") and hasattr(value, "filename"):
                 raw_bytes = await value.read(MAX_SHARE_FILE_BYTES + 1024)
-                if raw_bytes and len(raw_bytes) <= MAX_SHARE_FILE_BYTES:
+                if raw_bytes and len(raw_bytes) <= MAX_SHARE_FILE_BYTES and (total_bytes + len(raw_bytes)) <= MAX_TOTAL_SHARE_BYTES:
+                    total_bytes += len(raw_bytes)
                     extracted_files.append({
-                        "name": getattr(value, "filename", None) or f"Shared_Document_{int(time.time())}.pdf",
+                        "name": safe_filename(getattr(value, "filename", None), f"Shared_Document_{int(time.time())}.pdf"),
                         "type": getattr(value, "content_type", None) or "application/pdf",
                         "size": len(raw_bytes),
                         "b64": base64.b64encode(raw_bytes).decode("ascii"),
@@ -4191,15 +4229,21 @@ def _validate_url(url: str) -> str:
         raw_ip = sockaddr[0]
         try:
             ip = ipaddress.ip_address(raw_ip)
-            if (
-                ip.is_private
-                or ip.is_loopback
-                or ip.is_link_local
-                or ip.is_reserved
-                or ip.is_multicast
-                or ip.is_unspecified
-            ):
-                raise HTTPException(400, f"Access to private/internal network addresses ({raw_ip}) is prohibited.")
+            check_ips = [ip]
+            if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+                check_ips.append(ip.ipv4_mapped)
+            for candidate in check_ips:
+                if (
+                    candidate.is_private
+                    or candidate.is_loopback
+                    or candidate.is_link_local
+                    or candidate.is_reserved
+                    or candidate.is_multicast
+                    or candidate.is_unspecified
+                ):
+                    raise HTTPException(400, f"Access to private/internal network addresses ({raw_ip}) is prohibited.")
+        except HTTPException:
+            raise
         except ValueError:
             raise HTTPException(400, "Invalid IP resolution result.")
 
@@ -4387,12 +4431,12 @@ async def replace_font(
         gs_exe = "gs" if shutil.which("gs") else "gswin64c" if shutil.which("gswin64c") else "gswin32c"
         try:
             subprocess.run([
-                gs_exe, "-q", "-dNOPAUSE", "-dBATCH", 
-                "-sDEVICE=pdfwrite", "-dFILTERTEXT", 
+                gs_exe, "-q", "-dNOPAUSE", "-dBATCH", "-dSAFER",
+                "-sDEVICE=pdfwrite", "-dFILTERTEXT",
                 f"-sOutputFile={no_text}", str(inp)
-            ], check=True, capture_output=True)
+            ], check=True, capture_output=True, timeout=120)
             has_gs = True
-        except (subprocess.CalledProcessError, FileNotFoundError):
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError):
             has_gs = False
 
         src_doc = fitz.open(str(inp))
@@ -4604,7 +4648,7 @@ async def compress_pdf(
         check_pdf_page_count(inp, "compress-pdf")
 
         gs_cmd = [
-            "gs", "-sDEVICE=pdfwrite", "-dCompatibilityLevel=1.4",
+            "gs", "-dSAFER", "-sDEVICE=pdfwrite", "-dCompatibilityLevel=1.4",
             f"-dPDFSETTINGS=/{quality}", "-dNOPAUSE", "-dQUIET",
             "-dBATCH", f"-sOutputFile={out}", str(inp)
         ]
@@ -5223,6 +5267,7 @@ except Exception as _te_err:
 
 
 @app.post("/api/feedback")
+@limiter.limit("10/minute")
 async def submit_feedback(request: Request):
     """Save user rating and feedback with optional instant alerts."""
     try:
@@ -5233,7 +5278,7 @@ async def submit_feedback(request: Request):
         feedback_type = str(body.get("feedback_type", "general")).strip()
         comment = str(body.get("comment", "")).strip()
         user_agent = request.headers.get("user-agent", "")
-        client_ip = request.client.host if request.client else ""
+        client_ip = get_real_client_ip(request)
 
         import telemetry
         fid = telemetry.save_feedback(
@@ -5248,10 +5293,11 @@ async def submit_feedback(request: Request):
         return {"success": True, "id": fid}
     except Exception as e:
         logger.error(f"[FEEDBACK] Error processing feedback: {e}")
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": "Unable to save feedback right now."}
 
 
 @app.post("/api/telemetry/error")
+@limiter.limit("30/minute")
 async def report_telemetry_error(request: Request):
     """Log an automatic crash/error occurrence for diagnostics and alerts."""
     try:
@@ -5271,7 +5317,7 @@ async def report_telemetry_error(request: Request):
             else {}
         )
         user_agent = request.headers.get("user-agent", "")
-        client_ip = request.client.host if request.client else ""
+        client_ip = get_real_client_ip(request)
 
         import telemetry
         eid = telemetry.save_error(
@@ -5286,7 +5332,7 @@ async def report_telemetry_error(request: Request):
         return {"success": True, "id": eid}
     except Exception as e:
         logger.error(f"[TELEMETRY] Error logging telemetry: {e}")
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": "Unable to record telemetry."}
 
 
 def _extract_admin_header_key(request: Request) -> str:
@@ -5425,6 +5471,29 @@ def _extract_room_token(request: Request) -> str:
     return ""
 
 
+def _read_disk_room_queue(clean_session: str) -> list[dict]:
+    q_file = PRINT_DROP_SPOOL_DIR / clean_session / ".jobs.json"
+    if not q_file.exists():
+        return []
+    try:
+        data = json.loads(q_file.read_text(encoding="utf-8"))
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+def _write_disk_room_queue(clean_session: str, jobs: list[dict]) -> None:
+    session_folder = PRINT_DROP_SPOOL_DIR / clean_session
+    session_folder.mkdir(parents=True, exist_ok=True)
+    q_file = session_folder / ".jobs.json"
+    tmp_file = session_folder / f".jobs_{uuid.uuid4().hex[:8]}.tmp"
+    try:
+        tmp_file.write_text(json.dumps(jobs), encoding="utf-8")
+        tmp_file.replace(q_file)
+    except Exception:
+        tmp_file.unlink(missing_ok=True)
+
+
 def _prune_expired_print_rooms():
     """Background garbage collection: strictly frees RAM and temp files older than 20 minutes."""
     try:
@@ -5440,12 +5509,18 @@ def _prune_expired_print_rooms():
             if session_folder.exists():
                 shutil.rmtree(session_folder, ignore_errors=True)
 
-        # Also sweep any individual spooled .bin files older than 15 minutes inside active rooms
+        # Also sweep any individual spooled .bin files older than 15 minutes and stale room folders on disk
         if PRINT_DROP_SPOOL_DIR.exists():
             for bin_file in PRINT_DROP_SPOOL_DIR.glob("*/*.bin"):
                 try:
                     if now - bin_file.stat().st_mtime > 900:
                         bin_file.unlink(missing_ok=True)
+                except Exception:
+                    pass
+            for sdir in PRINT_DROP_SPOOL_DIR.iterdir():
+                try:
+                    if sdir.is_dir() and (now - sdir.stat().st_mtime > 1200):
+                        shutil.rmtree(sdir, ignore_errors=True)
                 except Exception:
                     pass
 
@@ -5465,7 +5540,8 @@ def _prune_expired_print_rooms():
         logging.warning(f"ScanToPrint cleanup notice: {e}")
 
 @app.get("/api/print-drop/new-session")
-async def print_drop_new_session():
+@limiter.limit("20/minute")
+async def print_drop_new_session(request: Request):
     """Generate a guaranteed unique, collision-proof 6-character room PIN + secret read token."""
     _prune_expired_print_rooms()
     read_token = secrets.token_urlsafe(24)
@@ -5512,7 +5588,7 @@ async def print_drop_register(
         return {"success": True, "session_id": clean_session}
 
     # Prevent claiming a room that already has pending unauthenticated files from someone else
-    if PRINT_DROP_ROOMS.get(clean_session):
+    if PRINT_DROP_ROOMS.get(clean_session) or _read_disk_room_queue(clean_session):
         raise HTTPException(status_code=409, detail="Room already active; please choose a fresh PIN.")
 
     PRINT_DROP_ROOMS.setdefault(clean_session, [])
@@ -5545,8 +5621,17 @@ async def print_drop_upload(
     if clean_session in ("KIOSKSTATION", "AUDIONOTES"):
         raise HTTPException(status_code=400, detail="Shared global rooms are disabled. Use an isolated room PIN.")
 
-    # Anti-Spam Queue Cap: Max 30 pending uncollected files per room
-    current_queue = PRINT_DROP_ROOMS.get(clean_session, [])
+    # Require an active registered counter station so attackers cannot squat or spam unused PINs
+    if not _get_room_secret_hash(clean_session):
+        raise HTTPException(
+            status_code=404,
+            detail="Counter station PIN is inactive. Ask the operator to keep Scan-to-Print open."
+        )
+
+    # Anti-Spam Queue Cap: Max 30 pending uncollected files per room (check both RAM and disk fallback)
+    disk_queue = _read_disk_room_queue(clean_session)
+    ram_queue = PRINT_DROP_ROOMS.get(clean_session, [])
+    current_queue = disk_queue if len(disk_queue) >= len(ram_queue) else ram_queue
     if len(current_queue) >= 30:
         raise HTTPException(
             status_code=429,
@@ -5575,27 +5660,31 @@ async def print_drop_upload(
         raise
     except Exception as e:
         file_path.unlink(missing_ok=True)
-        raise HTTPException(status_code=500, detail=f"Failed to stream file: {str(e)}")
+        logger.error(f"[PRINT-DROP] Stream failure for room={clean_session}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to stream uploaded file.")
 
     mime = file.content_type or "application/pdf"
     # Map device ID to room token if provided, so subsequent files from same phone share customer token
     device_token_map = PRINT_DROP_DEVICE_TOKENS.setdefault(clean_session, {})
-    clean_device_id = (sender_device_id or "").strip()
+    clean_device_id = re.sub(r"[^a-zA-Z0-9_-]", "", (sender_device_id or "").strip())[:48]
     if clean_device_id and clean_device_id in device_token_map:
         room_token = device_token_map[clean_device_id]
     else:
-        room_token = PRINT_DROP_ROOM_TOKENS.get(clean_session, 0) + 1
+        room_token = max(PRINT_DROP_ROOM_TOKENS.get(clean_session, 0), len(current_queue)) + 1
         PRINT_DROP_ROOM_TOKENS[clean_session] = room_token
         if clean_device_id:
             device_token_map[clean_device_id] = room_token
+
+    safe_label = re.sub(r"[\x00-\x1f\x7f<>]", "", (device_label or "Mobile Phone").strip())[:32] or "Mobile Phone"
+    safe_doc_name = safe_filename(file.filename, "Document.pdf")
 
     # Lightweight metadata (< 250 bytes in RAM)
     job = {
         "id": final_job_id,
         "tokenNum": room_token,
         "senderDeviceId": clean_device_id,
-        "deviceLabel": (device_label or "Mobile Phone").strip()[:32],
-        "name": file.filename or "Document.pdf",
+        "deviceLabel": safe_label,
+        "name": safe_doc_name,
         "size": total_size,
         "type": mime,
         "fileUrl": f"/api/print-drop/file/{clean_session}/{final_job_id}",
@@ -5604,15 +5693,15 @@ async def print_drop_upload(
         "colorMode": "color" if color_mode == "color" else "bw",
     }
 
-    if clean_session not in PRINT_DROP_ROOMS:
-        PRINT_DROP_ROOMS[clean_session] = []
-
-    PRINT_DROP_ROOMS[clean_session].append(job)
+    updated_queue = list(current_queue) + [job]
+    PRINT_DROP_ROOMS[clean_session] = updated_queue
+    _write_disk_room_queue(clean_session, updated_queue)
     PRINT_DROP_ROOM_TIMESTAMPS[clean_session] = time.time()
 
     return {"success": True, "job_id": final_job_id, "token_num": room_token, "session_id": clean_session}
 
 @app.get("/api/print-drop/jobs/{session_id}")
+@limiter.limit("120/minute")
 async def print_drop_poll(request: Request, session_id: str, peek: bool = False):
     """Retrieve and clear new jobs for the authenticated counter PC queue."""
     clean_session = re.sub(r"[^A-Z0-9]", "", session_id.strip().upper())
@@ -5623,14 +5712,21 @@ async def print_drop_poll(request: Request, session_id: str, peek: bool = False)
     if not provided or not hmac.compare_digest(_hash_room_token(provided), expected_hash):
         raise HTTPException(status_code=403, detail="Unauthorized: Invalid room token")
 
+    ram_jobs = PRINT_DROP_ROOMS.get(clean_session, [])
+    disk_jobs = _read_disk_room_queue(clean_session)
+    merged = disk_jobs if len(disk_jobs) >= len(ram_jobs) else ram_jobs
+
     if peek:
-        jobs = list(PRINT_DROP_ROOMS.get(clean_session, []))
+        jobs = list(merged)
     else:
-        jobs = PRINT_DROP_ROOMS.pop(clean_session, [])
+        jobs = list(merged)
+        PRINT_DROP_ROOMS[clean_session] = []
+        _write_disk_room_queue(clean_session, [])
     PRINT_DROP_ROOM_TIMESTAMPS[clean_session] = time.time()
     return {"success": True, "jobs": jobs}
 
 @app.get("/api/print-drop/file/{session_id}/{job_id}")
+@limiter.limit("60/minute")
 async def print_drop_download_file(request: Request, session_id: str, job_id: str, keep: bool = False):
     """Serve spooled document to authenticated counter PC with immediate post-delivery deletion."""
     clean_session = re.sub(r"[^A-Z0-9]", "", session_id.strip().upper())

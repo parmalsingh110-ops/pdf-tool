@@ -5,6 +5,7 @@ Supports optional instant notifications to Telegram or Discord via webhooks.
 """
 
 import os
+import re
 import sqlite3
 import hashlib
 import hmac
@@ -20,6 +21,38 @@ from dotenv import load_dotenv
 
 logger = logging.getLogger("pdf_tool.telemetry")
 _ALERT_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=4, thread_name_prefix="telemetry_alert")
+_RETENTION_DAYS = int(os.environ.get("TELEMETRY_RETENTION_DAYS", "90"))
+
+_SENSITIVE_TEXT_PATTERNS = [
+    (re.compile(r"AIza[0-9A-Za-z\-_]{20,}"), "[REDACTED_KEY]"),
+    (re.compile(r"Bearer\s+[A-Za-z0-9\-._~+/]+=*", re.IGNORECASE), "Bearer [REDACTED]"),
+    (re.compile(r"#(?:k|t|key|token)=[^&\s\"']+", re.IGNORECASE), "#[REDACTED]"),
+    (re.compile(r"([?&](?:token|key|secret|passcode|auth|read_token)=)[^&\s\"']+", re.IGNORECASE), r"\1[REDACTED]"),
+]
+
+
+def sanitize_telemetry_text(text: str, max_len: int = 2000) -> str:
+    """Scrub API keys, room tokens, URL hash secrets, and overly long payloads before storing telemetry."""
+    if not text:
+        return ""
+    cleaned = str(text)
+    for pat, repl in _SENSITIVE_TEXT_PATTERNS:
+        cleaned = pat.sub(repl, cleaned)
+    return cleaned[:max_len]
+
+
+def _escape_tg(text: str) -> str:
+    """Escape Telegram legacy Markdown control characters so arbitrary text never breaks webhook delivery."""
+    if not text:
+        return ""
+    return (
+        str(text)
+        .replace("\\", "\\\\")
+        .replace("_", "\\_")
+        .replace("*", "\\*")
+        .replace("`", "\\`")
+        .replace("[", "\\[")
+    )
 
 # Database Path
 BACKEND_DIR = Path(__file__).resolve().parent
@@ -108,6 +141,11 @@ def init_db():
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_feedback_tool ON tool_feedback(tool_path)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_errors_tool ON error_telemetry(tool_path)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_errors_created ON error_telemetry(created_at)")
+            # Prune historical records beyond retention window for privacy minimization
+            if _RETENTION_DAYS > 0:
+                cutoff = f"-{_RETENTION_DAYS} days"
+                cursor.execute("DELETE FROM tool_feedback WHERE created_at < datetime('now', ?)", (cutoff,))
+                cursor.execute("DELETE FROM error_telemetry WHERE created_at < datetime('now', ?)", (cutoff,))
             conn.commit()
             logger.info("Telemetry database initialized successfully at %s", DB_PATH)
     except Exception as e:
@@ -280,6 +318,8 @@ def save_feedback(
 ) -> int:
     """Save user rating and feedback into SQLite and notify webhooks for all ratings."""
     ip_h = hash_ip(client_ip)
+    safe_comment = sanitize_telemetry_text(comment, 1000)
+    safe_ua = (user_agent or "")[:180]
     feedback_id = -1
     try:
         with get_db_connection() as conn:
@@ -289,7 +329,7 @@ def save_feedback(
                 INSERT INTO tool_feedback (tool_path, tool_name, rating, feedback_type, comment, user_agent, ip_hash)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
-                (tool_path, tool_name, rating, feedback_type, comment, user_agent, ip_h)
+                (tool_path[:120], tool_name[:120], rating, feedback_type[:40], safe_comment, safe_ua, ip_h)
             )
             conn.commit()
             feedback_id = cursor.lastrowid
@@ -305,8 +345,8 @@ def save_feedback(
         {"name": "Rating", "value": f"{stars} ({safe_rating}/5)", "inline": True},
         {"name": "Type / Category", "value": feedback_type or "General", "inline": True},
     ]
-    if comment:
-        disc_fields.append({"name": "User Comment", "value": comment[:500], "inline": False})
+    if safe_comment:
+        disc_fields.append({"name": "User Comment", "value": safe_comment[:500], "inline": False})
     else:
         disc_fields.append({"name": "User Comment", "value": "*(No comment provided)*", "inline": False})
 
@@ -330,12 +370,12 @@ def save_feedback(
 
     tg_msg = (
         f"🌟 *New User Review* ({safe_rating}/5)\n"
-        f"• *Tool:* `{tool_name}` ({tool_path})\n"
+        f"• *Tool:* `{_escape_tg(tool_name)}` ({_escape_tg(tool_path)})\n"
         f"• *Rating:* {stars} ({safe_rating}/5)\n"
-        f"• *Category:* {feedback_type}\n"
+        f"• *Category:* {_escape_tg(feedback_type)}\n"
     )
-    if comment:
-        tg_msg += f"• *Comment:* {comment}\n"
+    if safe_comment:
+        tg_msg += f"• *Comment:* {_escape_tg(safe_comment)}\n"
     send_telegram_alert(tg_msg)
 
     return feedback_id
@@ -372,8 +412,11 @@ def save_error(
     user_agent: str = "",
     client_ip: str = ""
 ) -> int:
-    """Log an automatic error occurrence into SQLite and alert webhooks (without storing PII filenames)."""
+    """Log an automatic error occurrence into SQLite and alert webhooks (without storing PII filenames or tokens)."""
     ip_h = hash_ip(client_ip)
+    safe_msg = sanitize_telemetry_text(error_message, 1000)
+    safe_stack = sanitize_telemetry_text(error_stack, 4000)
+    safe_ua = (user_agent or "")[:180]
     safe_info = _sanitize_file_info(file_info)
     file_info_json = json.dumps(safe_info)
     error_id = -1
@@ -385,7 +428,7 @@ def save_error(
                 INSERT INTO error_telemetry (tool_path, tool_name, error_message, error_stack, file_info, user_agent, ip_hash)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
-                (tool_path, tool_name, error_message, error_stack, file_info_json, user_agent, ip_h)
+                (tool_path[:120], tool_name[:120], safe_msg, safe_stack, file_info_json, safe_ua, ip_h)
             )
             conn.commit()
             error_id = cursor.lastrowid
@@ -394,7 +437,7 @@ def save_error(
         return -1
 
     # Filter out client-side dynamic chunk refresh / deployment cache errors
-    lower_err = (error_message or "").lower()
+    lower_err = (safe_msg or "").lower()
     if any(k in lower_err for k in [
         "failed to fetch dynamically imported module",
         "dynamically imported module",
@@ -404,13 +447,13 @@ def save_error(
         "_result.default",
         "reading default",
     ]):
-        logger.info("Suppressed deployment chunk reload alert from Discord/Telegram: %s", error_message)
+        logger.info("Suppressed deployment chunk reload alert from Discord/Telegram: %s", safe_msg)
         return error_id
 
     # Send instant crash alert with high-visibility styling
     disc_fields = [
         {"name": "Tool", "value": f"`{tool_name}` ({tool_path})", "inline": True},
-        {"name": "Error", "value": f"```{error_message[:300]}```", "inline": False},
+        {"name": "Error", "value": f"```{safe_msg[:300]}```", "inline": False},
     ]
     if safe_info:
         file_desc = f"Type: {safe_info.get('extension', safe_info.get('type', 'N/A'))} | Size: {safe_info.get('sizeFormatted', 'N/A')}"
@@ -426,11 +469,11 @@ def save_error(
 
     tg_msg = (
         f"🚨 *Tool Failure Alert!*\n"
-        f"• *Tool:* `{tool_name}` ({tool_path})\n"
-        f"• *Error:* `{error_message[:200]}`\n"
+        f"• *Tool:* `{_escape_tg(tool_name)}` ({_escape_tg(tool_path)})\n"
+        f"• *Error:* `{_escape_tg(safe_msg[:200])}`\n"
     )
     if safe_info:
-        tg_msg += f"• *File:* {safe_info.get('extension', safe_info.get('type', 'N/A'))} ({safe_info.get('sizeFormatted', 'N/A')})\n"
+        tg_msg += f"• *File:* {_escape_tg(safe_info.get('extension', safe_info.get('type', 'N/A')))} ({_escape_tg(safe_info.get('sizeFormatted', 'N/A'))})\n"
     send_telegram_alert(tg_msg)
 
     return error_id
@@ -534,7 +577,7 @@ def get_telemetry_summary() -> Dict[str, Any]:
         logger.error("Failed to generate telemetry summary: %s", e)
         return {
             "success": False,
-            "error": str(e),
+            "error": "Failed to generate telemetry summary.",
             "summary": {"total_feedback": 0, "avg_rating": 5.0, "total_errors": 0, "errors_24h": 0},
             "tool_stats": [],
             "recent_feedback": [],

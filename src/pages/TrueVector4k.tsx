@@ -1,9 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   Sparkles,
-  Maximize2,
   Download,
-  Upload,
   RefreshCw,
   ChevronLeft,
   ChevronRight,
@@ -13,12 +11,17 @@ import {
   FileCheck,
   CheckCircle2,
 } from 'lucide-react';
+import { motion, useReducedMotion } from 'motion/react';
 import * as pdfjsLib from 'pdfjs-dist';
 import { PDFDocument } from 'pdf-lib';
 import '../lib/pdfWorker';
 import { useSEO } from '../hooks/useSEO';
 import { usePageSEO } from '../lib/usePageSEO';
+import FileDropzone from '../components/FileDropzone';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { PearlScanOverlay } from '../components/pearl/PearlMotion';
 import ToolSEOSection from '../components/ToolSEOSection';
+import { toArrayBufferBytes } from '../lib/blobUrl';
 import { dataUrlToBytes, downloadBlob } from '../lib/utils';
 
 interface EnhanceConfig {
@@ -251,7 +254,7 @@ export default function TrueVector4k() {
   const [enhancedPdfBlob, setEnhancedPdfBlob] = useState<Blob | null>(null);
   const [originalDimensions, setOriginalDimensions] = useState<{ width: number; height: number }>({ width: 595, height: 842 });
 
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const prefersReduced = useReducedMotion();
   const pdfDocRef = useRef<any>(null);
 
   // Preset Handler
@@ -372,7 +375,7 @@ export default function TrueVector4k() {
         });
 
         const pdfBytes = await newPdf.save();
-        const pdfBlob = new Blob([pdfBytes as any], { type: 'application/pdf' });
+        const pdfBlob = new Blob([toArrayBufferBytes(pdfBytes)], { type: 'application/pdf' });
         setEnhancedPdfBlob(pdfBlob);
       } catch (err) {
         console.error('[TrueVector4k] Restoration failure:', err);
@@ -422,7 +425,7 @@ export default function TrueVector4k() {
       }
 
       const finalBytes = await newPdf.save();
-      const finalBlob = new Blob([finalBytes as any], { type: 'application/pdf' });
+      const finalBlob = new Blob([toArrayBufferBytes(finalBytes)], { type: 'application/pdf' });
       downloadBlob(finalBlob, `TrueVector_4K_All_${file.name}`);
     } catch (err) {
       console.error('All pages processing error:', err);
@@ -433,30 +436,33 @@ export default function TrueVector4k() {
   };
 
   return (
-    <div className="w-full min-h-screen bg-slate-950 text-slate-100 py-10 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-7xl mx-auto space-y-8">
-        {/* Header */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-6">
-          <div>
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-950/80 border border-cyan-700/60 text-xs font-bold text-cyan-400 mb-2">
-              <Sparkles className="w-4 h-4 text-cyan-400" /> Neural 4K De-Pixelator &amp; Document Restorer
-            </div>
-            <h1 className="text-3xl font-extrabold tracking-tight text-white flex items-center gap-3">
-              TrueVector 4K™ <span className="text-xs px-2.5 py-0.5 rounded-md bg-cyan-500/20 text-cyan-400 font-mono">Ultra-HD 300+ DPI</span>
-            </h1>
-            <p className="mt-1 text-sm text-slate-400 max-w-2xl">
-              Turn blurry 72 DPI scans, faded receipts, and railway notes into razor-sharp 4K documents. Whitens dirty backgrounds while <span className="text-cyan-300 font-semibold">preserving authentic blue pen signatures, red seals, and colored stamps</span>.
-            </p>
-          </div>
+    <ToolWorkspaceShell
+      title="TrueVector 4K™"
+      subtitle="Turn blurry 72 DPI scans, faded receipts, and railway notes into razor-sharp 4K documents. Whitens dirty backgrounds while preserving authentic blue pen signatures, red seals, and colored stamps."
+      categoryLabel="Neural 4K De-Pixelator & Document Restorer • Ultra-HD 300+ DPI"
+      icon={Sparkles}
+      microVariant="ocr"
+      tone="sky"
+      trustNote="Supersampled dual-chromaticity pixel restoration • Runs 100% locally in browser"
+    >
+      <div className="w-full max-w-7xl mx-auto space-y-8 relative">
+        <PearlScanOverlay
+          active={isProcessingAll}
+          label={`Supersampling all pages to 4K (${allPagesProgress.current}/${allPagesProgress.total})...`}
+        />
 
-          {enhancedPdfBlob && (
+        {enhancedPdfBlob && (
+          <div className="pms-glass-panel p-4 rounded-2xl flex flex-wrap items-center justify-between gap-3">
+            <span className="text-xs font-bold text-[var(--pms-ink)]">
+              Restored Page {currentPage} / {totalPages} • 300+ DPI Laser Ultra-HD
+            </span>
             <div className="flex flex-wrap items-center gap-3">
               {enhancedImageUrl && (
                 <button
-                  onClick={() => downloadBlob(new Blob([dataUrlToBytes(enhancedImageUrl) as BlobPart], { type: 'image/jpeg' }), `4K_Enhanced_${file?.name.replace(/\.pdf$/i, '') || 'page'}_p${currentPage}.jpg`)}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs transition-colors"
+                  onClick={() => downloadBlob(new Blob([toArrayBufferBytes(dataUrlToBytes(enhancedImageUrl))], { type: 'image/jpeg' }), `4K_Enhanced_${file?.name.replace(/\.pdf$/i, '') || 'page'}_p${currentPage}.jpg`)}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-white/75 dark:bg-slate-800/80 hover:bg-white dark:hover:bg-slate-800 border border-[var(--pms-border)] text-[var(--pms-ink)] font-bold text-xs transition-colors"
                 >
-                  <ImageIcon className="w-3.5 h-3.5 text-cyan-400" /> High-Res JPG
+                  <ImageIcon className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" /> High-Res JPG
                 </button>
               )}
 
@@ -464,7 +470,7 @@ export default function TrueVector4k() {
                 <button
                   disabled={isProcessingAll}
                   onClick={handleDownloadAllPages}
-                  className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-cyan-800/60 font-bold text-xs transition-colors disabled:opacity-50"
+                  className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-sky-50/90 dark:bg-sky-950/60 hover:bg-sky-100 dark:hover:bg-sky-900/60 text-sky-800 dark:text-sky-300 border border-sky-200 dark:border-sky-800/60 font-bold text-xs transition-colors disabled:opacity-50"
                 >
                   <FileCheck className="w-4 h-4" />
                   {isProcessingAll
@@ -475,87 +481,85 @@ export default function TrueVector4k() {
 
               <button
                 onClick={() => downloadBlob(enhancedPdfBlob, `TrueVector_4K_p${currentPage}_${file?.name || 'document.pdf'}`)}
-                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-bold text-xs shadow-lg shadow-cyan-950 transition-all"
+                className="pms-btn-primary inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-xs"
               >
                 <Download className="w-4 h-4" /> Download 4K Ultra-HD PDF
               </button>
             </div>
-          )}
-        </div>
+          </div>
+        )}
 
         {/* Feature Badges Banner */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <div className="flex items-center gap-2.5 p-3 rounded-2xl bg-slate-900/80 border border-slate-800 text-xs">
-            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-            <span className="text-slate-300">
-              <strong className="text-white">Authentic Color Preserved:</strong> Blue ink signatures, red seals &amp; logos remain vivid.
+          <div className="flex items-center gap-2.5 p-3.5 rounded-2xl pms-glass-panel text-xs">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+            <span className="text-[var(--pms-muted)]">
+              <strong className="text-[var(--pms-ink)]">Authentic Color Preserved:</strong> Blue ink signatures, red seals &amp; logos remain vivid.
             </span>
           </div>
-          <div className="flex items-center gap-2.5 p-3 rounded-2xl bg-slate-900/80 border border-slate-800 text-xs">
-            <CheckCircle2 className="w-4 h-4 text-cyan-400 shrink-0" />
-            <span className="text-slate-300">
-              <strong className="text-white">Pure Paper Bleach:</strong> Cleans scanner yellowing, photocopy haze &amp; toner noise.
+          <div className="flex items-center gap-2.5 p-3.5 rounded-2xl pms-glass-panel text-xs">
+            <CheckCircle2 className="w-4 h-4 text-sky-600 dark:text-sky-400 shrink-0" />
+            <span className="text-[var(--pms-muted)]">
+              <strong className="text-[var(--pms-ink)]">Pure Paper Bleach:</strong> Cleans scanner yellowing, photocopy haze &amp; toner noise.
             </span>
           </div>
-          <div className="flex items-center gap-2.5 p-3 rounded-2xl bg-slate-900/80 border border-slate-800 text-xs">
-            <CheckCircle2 className="w-4 h-4 text-indigo-400 shrink-0" />
-            <span className="text-slate-300">
-              <strong className="text-white">Laser Edge Accutance:</strong> Razor-sharp 300+ DPI anti-aliased text curves.
+          <div className="flex items-center gap-2.5 p-3.5 rounded-2xl pms-glass-panel text-xs">
+            <CheckCircle2 className="w-4 h-4 text-indigo-600 dark:text-indigo-400 shrink-0" />
+            <span className="text-[var(--pms-muted)]">
+              <strong className="text-[var(--pms-ink)]">Laser Edge Accutance:</strong> Razor-sharp 300+ DPI anti-aliased text curves.
             </span>
           </div>
         </div>
 
         {/* Upload State */}
         {!file && (
-          <div
-            onClick={() => fileInputRef.current?.click()}
-            className="border-2 border-dashed border-slate-800 hover:border-cyan-500/60 rounded-3xl p-16 text-center bg-slate-900/60 hover:bg-slate-900 cursor-pointer transition-all group"
+          <motion.div
+            initial={prefersReduced ? false : { opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: prefersReduced ? 0 : 0.22 }}
+            className="w-full max-w-2xl mx-auto"
           >
-            <input
-              type="file"
-              ref={fileInputRef}
-              onChange={(e) => e.target.files?.[0] && handleFileUpload(e.target.files[0])}
-              accept="application/pdf"
-              className="hidden"
+            <FileDropzone
+              onDrop={(files) => files[0] && handleFileUpload(files[0])}
+              multiple={false}
+              accept={{ 'application/pdf': ['.pdf'] }}
+              title="Upload Blurry Scan, Railway Bill, or Court Order"
+              subtitle="Restores fuzzy scans into crystal-clear 4K Ultra-HD documents. Retains authentic blue signatures and red rubber stamps."
             />
-            <div className="w-16 h-16 rounded-2xl bg-cyan-950/50 border border-cyan-800/40 text-cyan-400 flex items-center justify-center mx-auto mb-4 group-hover:scale-110 transition-transform">
-              <Maximize2 className="w-8 h-8" />
-            </div>
-            <h3 className="text-lg font-bold text-white mb-1">Upload Blurry Scan, Railway Bill, or Court Order</h3>
-            <p className="text-xs text-slate-400 max-w-md mx-auto mb-4">
-              Restores fuzzy scans into crystal-clear 4K Ultra-HD documents. Retains authentic blue signatures and red rubber stamps.
-            </p>
-            <span className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-800 text-xs font-bold text-slate-200">
-              <Upload className="w-3.5 h-3.5" /> Select Scanned PDF
-            </span>
-          </div>
+          </motion.div>
         )}
 
         {/* Processing State */}
         {isProcessing && (
-          <div className="p-16 rounded-3xl bg-slate-900 border border-slate-800 text-center space-y-4">
-            <div className="w-12 h-12 border-4 border-cyan-500 border-t-transparent rounded-full animate-spin mx-auto" />
-            <h3 className="text-lg font-bold text-white">Enhancing to 4K Ultra-HD Laser Quality...</h3>
-            <p className="text-xs text-cyan-400 font-mono">{processingStatus}</p>
+          <div className="p-16 rounded-3xl pms-glass-panel text-center space-y-4 relative overflow-hidden max-w-xl mx-auto">
+            <PearlScanOverlay active={isProcessing} label={processingStatus || 'Supersampling to 300+ DPI Ultra-HD...'} />
+            <div className="w-12 h-12 border-4 border-sky-500 border-t-transparent rounded-full animate-spin mx-auto" />
+            <h3 className="text-lg font-bold text-[var(--pms-ink)]">Enhancing to 4K Ultra-HD Laser Quality...</h3>
+            <p className="text-xs text-sky-600 dark:text-sky-400 font-mono">{processingStatus}</p>
           </div>
         )}
 
         {/* Workspace */}
         {!isProcessing && file && originalImageUrl && enhancedImageUrl && (
-          <div className="space-y-6">
+          <motion.div
+            initial={prefersReduced ? false : { opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: prefersReduced ? 0 : 0.24 }}
+            className="space-y-6"
+          >
             {/* Pro Control Toolbar */}
-            <div className="p-5 rounded-3xl bg-slate-900 border border-slate-800 flex flex-wrap items-center justify-between gap-5">
+            <div className="p-5 rounded-3xl pms-glass-panel flex flex-wrap items-center justify-between gap-5">
               {/* Presets */}
               <div className="flex flex-wrap items-center gap-2">
-                <span className="text-[11px] font-bold text-slate-400 mr-1 flex items-center gap-1">
-                  <SlidersHorizontal className="w-3.5 h-3.5 text-cyan-400" /> Presets:
+                <span className="text-[11px] font-bold text-[var(--pms-muted)] mr-1 flex items-center gap-1">
+                  <SlidersHorizontal className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" /> Presets:
                 </span>
                 <button
                   onClick={() => handlePresetChange('vivid_color')}
                   className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
                     presetMode === 'vivid_color'
-                      ? 'bg-cyan-500 text-slate-950 shadow-md shadow-cyan-950'
-                      : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                      ? 'bg-sky-600 text-white shadow-sm'
+                      : 'bg-white/70 dark:bg-slate-800/80 border border-[var(--pms-border)] text-[var(--pms-ink)] hover:bg-white dark:hover:bg-slate-800'
                   }`}
                 >
                   <Palette className="w-3 h-3" /> 🎨 Vivid Color (Default)
@@ -564,8 +568,8 @@ export default function TrueVector4k() {
                   onClick={() => handlePresetChange('laser_bw')}
                   className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
                     presetMode === 'laser_bw'
-                      ? 'bg-cyan-500 text-slate-950 shadow-md shadow-cyan-950'
-                      : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                      ? 'bg-sky-600 text-white shadow-sm'
+                      : 'bg-white/70 dark:bg-slate-800/80 border border-[var(--pms-border)] text-[var(--pms-ink)] hover:bg-white dark:hover:bg-slate-800'
                   }`}
                 >
                   ⚡ Laser B&amp;W
@@ -574,8 +578,8 @@ export default function TrueVector4k() {
                   onClick={() => handlePresetChange('blueprint')}
                   className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
                     presetMode === 'blueprint'
-                      ? 'bg-cyan-500 text-slate-950 shadow-md shadow-cyan-950'
-                      : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                      ? 'bg-sky-600 text-white shadow-sm'
+                      : 'bg-white/70 dark:bg-slate-800/80 border border-[var(--pms-border)] text-[var(--pms-ink)] hover:bg-white dark:hover:bg-slate-800'
                   }`}
                 >
                   📐 Blueprint &amp; CAD
@@ -584,8 +588,8 @@ export default function TrueVector4k() {
                   onClick={() => handlePresetChange('photocopy')}
                   className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
                     presetMode === 'photocopy'
-                      ? 'bg-cyan-500 text-slate-950 shadow-md shadow-cyan-950'
-                      : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                      ? 'bg-sky-600 text-white shadow-sm'
+                      : 'bg-white/70 dark:bg-slate-800/80 border border-[var(--pms-border)] text-[var(--pms-ink)] hover:bg-white dark:hover:bg-slate-800'
                   }`}
                 >
                   📑 Photocopy Clean
@@ -595,7 +599,7 @@ export default function TrueVector4k() {
               {/* Sliders */}
               <div className="flex items-center flex-wrap gap-5">
                 {/* Color Mode Switch */}
-                <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-2xl border border-slate-800">
+                <div className="flex items-center gap-1 bg-white/60 dark:bg-slate-900/75 p-1 rounded-2xl border border-[var(--pms-border)]">
                   <button
                     onClick={() => {
                       setColorMode('color');
@@ -611,7 +615,7 @@ export default function TrueVector4k() {
                       }
                     }}
                     className={`px-2.5 py-1 rounded-xl text-xs font-bold transition-colors ${
-                      colorMode === 'color' ? 'bg-cyan-500 text-slate-950' : 'text-slate-400 hover:text-white'
+                      colorMode === 'color' ? 'bg-sky-600 text-white shadow-xs' : 'text-[var(--pms-muted)] hover:text-[var(--pms-ink)]'
                     }`}
                   >
                     Color
@@ -631,7 +635,7 @@ export default function TrueVector4k() {
                       }
                     }}
                     className={`px-2.5 py-1 rounded-xl text-xs font-bold transition-colors ${
-                      colorMode === 'bw' ? 'bg-cyan-500 text-slate-950' : 'text-slate-400 hover:text-white'
+                      colorMode === 'bw' ? 'bg-sky-600 text-white shadow-xs' : 'text-[var(--pms-muted)] hover:text-[var(--pms-ink)]'
                     }`}
                   >
                     B&amp;W
@@ -640,9 +644,9 @@ export default function TrueVector4k() {
 
                 {/* Sharpness Slider */}
                 <div className="space-y-1">
-                  <div className="flex justify-between text-[11px] font-bold text-slate-300">
+                  <div className="flex justify-between text-[11px] font-bold text-[var(--pms-ink)]">
                     <span>Edge Sharpness</span>
-                    <span className="text-cyan-400 font-mono">{sharpnessLevel.toFixed(1)}x</span>
+                    <span className="text-sky-600 dark:text-sky-400 font-mono">{sharpnessLevel.toFixed(1)}x</span>
                   </div>
                   <input
                     type="range"
@@ -651,15 +655,15 @@ export default function TrueVector4k() {
                     step="0.1"
                     value={sharpnessLevel}
                     onChange={(e) => setSharpnessLevel(Number(e.target.value))}
-                    className="w-24 accent-cyan-500"
+                    className="w-24 accent-sky-500"
                   />
                 </div>
 
                 {/* Paper Whitening Slider */}
                 <div className="space-y-1">
-                  <div className="flex justify-between text-[11px] font-bold text-slate-300">
+                  <div className="flex justify-between text-[11px] font-bold text-[var(--pms-ink)]">
                     <span>Paper Whitening</span>
-                    <span className="text-cyan-400 font-mono">{paperWhitening}</span>
+                    <span className="text-sky-600 dark:text-sky-400 font-mono">{paperWhitening}</span>
                   </div>
                   <input
                     type="range"
@@ -668,15 +672,15 @@ export default function TrueVector4k() {
                     step="1"
                     value={paperWhitening}
                     onChange={(e) => setPaperWhitening(Number(e.target.value))}
-                    className="w-24 accent-cyan-500"
+                    className="w-24 accent-sky-500"
                   />
                 </div>
 
                 {/* Ink Darkening Slider */}
                 <div className="space-y-1">
-                  <div className="flex justify-between text-[11px] font-bold text-slate-300">
+                  <div className="flex justify-between text-[11px] font-bold text-[var(--pms-ink)]">
                     <span>Ink Darkness</span>
-                    <span className="text-cyan-400 font-mono">{inkDarkening}%</span>
+                    <span className="text-sky-600 dark:text-sky-400 font-mono">{inkDarkening}%</span>
                   </div>
                   <input
                     type="range"
@@ -685,16 +689,16 @@ export default function TrueVector4k() {
                     step="5"
                     value={inkDarkening}
                     onChange={(e) => setInkDarkening(Number(e.target.value))}
-                    className="w-24 accent-cyan-500"
+                    className="w-24 accent-sky-500"
                   />
                 </div>
 
                 {/* Color Vibrance Slider (Only when Color Mode is active) */}
                 {colorMode === 'color' && (
                   <div className="space-y-1">
-                    <div className="flex justify-between text-[11px] font-bold text-slate-300">
+                    <div className="flex justify-between text-[11px] font-bold text-[var(--pms-ink)]">
                       <span>Color Vibrance</span>
-                      <span className="text-cyan-400 font-mono">{colorVibrance}%</span>
+                      <span className="text-sky-600 dark:text-sky-400 font-mono">{colorVibrance}%</span>
                     </div>
                     <input
                       type="range"
@@ -703,29 +707,29 @@ export default function TrueVector4k() {
                       step="5"
                       value={colorVibrance}
                       onChange={(e) => setColorVibrance(Number(e.target.value))}
-                      className="w-24 accent-cyan-500"
+                      className="w-24 accent-sky-500"
                     />
                   </div>
                 )}
 
                 <button
                   onClick={handleRecalculate}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-cyan-950 border border-cyan-800 text-cyan-300 font-bold text-xs hover:bg-cyan-900 transition-colors shadow-xs"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-sky-50/90 dark:bg-sky-950/70 border border-sky-200 dark:border-sky-800 text-sky-700 dark:text-sky-300 font-bold text-xs hover:bg-sky-100 dark:hover:bg-sky-900 transition-colors"
                 >
                   <RefreshCw className="w-3.5 h-3.5" /> Re-Enhance
                 </button>
               </div>
 
               {/* Zoom & Page Controls */}
-              <div className="flex items-center gap-3">
-                <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-2xl border border-slate-800">
-                  <span className="text-[11px] font-bold text-slate-400 px-2">Zoom:</span>
+              <div className="flex items-center gap-3 flex-wrap">
+                <div className="flex items-center gap-1 bg-white/60 dark:bg-slate-900/75 p-1 rounded-2xl border border-[var(--pms-border)]">
+                  <span className="text-[11px] font-bold text-[var(--pms-muted)] px-2">Zoom:</span>
                   {[100, 200, 400].map((z) => (
                     <button
                       key={z}
                       onClick={() => setZoomLevel(z)}
                       className={`px-2.5 py-1 rounded-xl text-xs font-mono font-bold transition-colors ${
-                        zoomLevel === z ? 'bg-cyan-500 text-slate-950' : 'text-slate-400 hover:text-white'
+                        zoomLevel === z ? 'bg-sky-600 text-white' : 'text-[var(--pms-muted)] hover:text-[var(--pms-ink)]'
                       }`}
                     >
                       {z}%
@@ -733,7 +737,7 @@ export default function TrueVector4k() {
                   ))}
                 </div>
 
-                <div className="flex items-center gap-1.5 bg-slate-950 p-1 rounded-2xl border border-slate-800">
+                <div className="flex items-center gap-1.5 bg-white/60 dark:bg-slate-900/75 p-1 rounded-2xl border border-[var(--pms-border)]">
                   <button
                     disabled={currentPage <= 1}
                     onClick={() => {
@@ -741,11 +745,11 @@ export default function TrueVector4k() {
                       setCurrentPage(next);
                       processPage(pdfDocRef.current, next);
                     }}
-                    className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-40 transition-colors"
+                    className="p-1.5 rounded-xl bg-white/80 dark:bg-slate-800 text-[var(--pms-ink)] hover:bg-white dark:hover:bg-slate-700 disabled:opacity-40 transition-colors"
                   >
                     <ChevronLeft className="w-3.5 h-3.5" />
                   </button>
-                  <span className="text-xs font-bold text-slate-300 px-1 font-mono">
+                  <span className="text-xs font-bold text-[var(--pms-ink)] px-1 font-mono">
                     {currentPage} / {totalPages}
                   </span>
                   <button
@@ -755,7 +759,7 @@ export default function TrueVector4k() {
                       setCurrentPage(next);
                       processPage(pdfDocRef.current, next);
                     }}
-                    className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-40 transition-colors"
+                    className="p-1.5 rounded-xl bg-white/80 dark:bg-slate-800 text-[var(--pms-ink)] hover:bg-white dark:hover:bg-slate-700 disabled:opacity-40 transition-colors"
                   >
                     <ChevronRight className="w-3.5 h-3.5" />
                   </button>
@@ -766,14 +770,14 @@ export default function TrueVector4k() {
             {/* Split Screen Before / After Comparison */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
               {/* Left: Original Blurry Scan */}
-              <div className="rounded-3xl border border-slate-800 bg-slate-900 p-4 space-y-3">
+              <div className="rounded-3xl pms-glass-panel p-4 space-y-3">
                 <div className="flex items-center justify-between text-xs font-bold">
-                  <span className="text-slate-400">ORIGINAL SCAN (Raster Pixels)</span>
-                  <span className="px-2 py-0.5 rounded-md bg-amber-950 text-amber-400 border border-amber-800/60 font-mono text-[10px]">
+                  <span className="text-[var(--pms-muted)]">ORIGINAL SCAN (Raster Pixels)</span>
+                  <span className="px-2 py-0.5 rounded-md bg-amber-50 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800/60 font-mono text-[10px]">
                     72–150 DPI Blurry / Faded
                   </span>
                 </div>
-                <div className="rounded-2xl overflow-auto border border-slate-800/80 bg-slate-950 flex items-start justify-center p-2 max-h-[640px]">
+                <div className="rounded-2xl overflow-auto border border-[var(--pms-border)] bg-white flex items-start justify-center p-2 max-h-[640px]">
                   <img
                     src={originalImageUrl}
                     alt="Original Blurry Scan"
@@ -784,16 +788,16 @@ export default function TrueVector4k() {
               </div>
 
               {/* Right: TrueVector 4K Ultra-HD Restored */}
-              <div className="rounded-3xl border border-cyan-800/60 bg-slate-900 p-4 space-y-3 shadow-xl shadow-cyan-950/20">
+              <div className="rounded-3xl pms-glass-panel border border-sky-400/50 dark:border-sky-700/60 p-4 space-y-3">
                 <div className="flex items-center justify-between text-xs font-bold">
-                  <span className="text-cyan-400 flex items-center gap-1.5">
+                  <span className="text-sky-700 dark:text-sky-400 flex items-center gap-1.5">
                     <Sparkles className="w-3.5 h-3.5" /> TRUEVECTOR 4K (Ultra-HD Restored)
                   </span>
-                  <span className="px-2 py-0.5 rounded-md bg-cyan-950 text-cyan-300 border border-cyan-700 font-mono text-[10px]">
+                  <span className="px-2 py-0.5 rounded-md bg-sky-50 dark:bg-sky-950 text-sky-800 dark:text-sky-300 border border-sky-200 dark:border-sky-700 font-mono text-[10px]">
                     300+ DPI Laser Crisp • {colorMode === 'color' ? 'True Colors Preserved' : 'Laser Monochrome'}
                   </span>
                 </div>
-                <div className="rounded-2xl overflow-auto border border-cyan-900/40 bg-white flex items-start justify-center p-2 max-h-[640px]">
+                <div className="rounded-2xl overflow-auto border border-sky-200 dark:border-sky-900/40 bg-white flex items-start justify-center p-2 max-h-[640px]">
                   <img
                     src={enhancedImageUrl}
                     alt="TrueVector 4K Restored Document"
@@ -803,7 +807,7 @@ export default function TrueVector4k() {
                 </div>
               </div>
             </div>
-          </div>
+          </motion.div>
         )}
 
         <ToolSEOSection
@@ -819,6 +823,6 @@ export default function TrueVector4k() {
           ]}
         />
       </div>
-    </div>
+    </ToolWorkspaceShell>
   );
 }

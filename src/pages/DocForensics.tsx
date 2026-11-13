@@ -4,28 +4,25 @@ import {
   ShieldCheck,
   AlertTriangle,
   Search,
-  Upload,
-  FileText,
   Layers,
-  Sparkles,
   Download,
-  Eye,
-  CheckCircle2,
   ChevronLeft,
   ChevronRight,
-  Maximize2,
-  Lock,
   Cpu,
   Clock,
-  Info,
 } from 'lucide-react';
+import { motion, useReducedMotion } from 'motion/react';
 import * as pdfjsLib from 'pdfjs-dist';
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 import '../lib/pdfWorker';
 import { useSEO } from '../hooks/useSEO';
 import { usePageSEO } from '../lib/usePageSEO';
+import FileDropzone from '../components/FileDropzone';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { AnimatedNumber, PearlScanOverlay } from '../components/pearl/PearlMotion';
 import ToolSEOSection from '../components/ToolSEOSection';
 import { apiFetch } from '../lib/api';
+import { toArrayBufferBytes } from '../lib/blobUrl';
 import { downloadBlob } from '../lib/utils';
 
 function cleanWinAnsi(str: string): string {
@@ -93,8 +90,8 @@ export default function DocForensics() {
   const [selectedAnomaly, setSelectedAnomaly] = useState<Anomaly | null>(null);
 
   // Canvas Viewport
+  const prefersReduced = useReducedMotion();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const pdfDocRef = useRef<any>(null);
   const [pageViewport, setPageViewport] = useState<{ width: number; height: number }>({ width: 595, height: 842 });
   const [pageNativeSize, setPageNativeSize] = useState<{ width: number; height: number }>({ width: 595, height: 842 });
@@ -394,7 +391,7 @@ export default function DocForensics() {
       });
 
       const reportBytes = await doc.save();
-      const blob = new Blob([reportBytes as any], { type: 'application/pdf' });
+      const blob = new Blob([toArrayBufferBytes(reportBytes)], { type: 'application/pdf' });
       downloadBlob(blob, `Forensic_Report_${file.name.replace(/\.pdf$/i, '')}.pdf`);
     } catch (e) {
       console.error(e);
@@ -407,274 +404,317 @@ export default function DocForensics() {
   );
 
   return (
-    <div className="w-full min-h-screen bg-slate-950 text-slate-100 py-10 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-7xl mx-auto space-y-8">
-        {/* Header */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-6">
-          <div>
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-red-950/80 border border-red-700/60 text-xs font-bold text-red-400 mb-2">
-              <ShieldAlert className="w-4 h-4 text-red-400" /> Digital Forensics &amp; Document Forgery Inspector
-            </div>
-            <h1 className="text-3xl font-extrabold tracking-tight text-white flex items-center gap-3">
-              DocForensics™ <span className="text-xs px-2 py-0.5 rounded-md bg-red-500/20 text-red-400 font-mono">v2.4 Neural</span>
-            </h1>
-            <p className="mt-1 text-sm text-slate-400 max-w-2xl">
-              Inspect PDFs for artificial salary slip tampering, whiteout rectangle attacks, font family mismatches, and graphic editor (Canva / Photoshop) fingerprints.
-            </p>
-          </div>
-
-          {scanComplete && (
-            <button
-              onClick={handleDownloadReport}
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-2xl bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white font-bold text-xs shadow-lg shadow-red-950 transition-all"
-            >
-              <Download className="w-4 h-4" /> Export Forensic PDF Certificate
-            </button>
-          )}
-        </div>
-
+    <ToolWorkspaceShell
+      title="DocForensics™"
+      subtitle="Inspect PDFs for artificial salary slip tampering, whiteout rectangle attacks, font family mismatches, and graphic editor (Canva / Photoshop) fingerprints."
+      categoryLabel="Digital Forensics & Document Forgery Inspector"
+      icon={ShieldAlert}
+      microVariant="compare"
+      tone="rose"
+      trustNote="Forensic stream, font-splice, and XRef revision inspection"
+    >
+      <div className="space-y-8">
         {/* Upload State */}
         {!file && (
-          <div
-            onClick={() => fileInputRef.current?.click()}
-            className="border-2 border-dashed border-slate-800 hover:border-red-500/60 rounded-3xl p-16 text-center bg-slate-900/60 hover:bg-slate-900 cursor-pointer transition-all group"
+          <motion.div
+            initial={prefersReduced ? false : { opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.28 }}
           >
-            <input
-              type="file"
-              ref={fileInputRef}
-              onChange={(e) => e.target.files?.[0] && handleFileUpload(e.target.files[0])}
-              accept="application/pdf"
-              className="hidden"
+            <FileDropzone
+              onDrop={(files) => files[0] && handleFileUpload(files[0])}
+              multiple={false}
+              accept={{ 'application/pdf': ['.pdf'] }}
+              title="Drop Salary Slip, Degree, Bank Statement or Invoice"
+              subtitle="Scans internal vector streams, font definitions, and revision histories for spliced numbers and masked text"
             />
-            <div className="w-16 h-16 rounded-2xl bg-red-950/50 border border-red-800/40 text-red-400 flex items-center justify-center mx-auto mb-4 group-hover:scale-110 transition-transform">
-              <Search className="w-8 h-8" />
-            </div>
-            <h3 className="text-lg font-bold text-white mb-1">Drop Salary Slip, Degree, Bank Statement or Invoice</h3>
-            <p className="text-xs text-slate-400 max-w-md mx-auto mb-4">
-              Scans internal vector streams, font definitions, and revision histories for spliced numbers and masked text.
-            </p>
-            <span className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-800 text-xs font-bold text-slate-200">
-              <Upload className="w-3.5 h-3.5" /> Select PDF Document
-            </span>
-          </div>
+          </motion.div>
         )}
 
-        {/* Scanning Spinner */}
+        {/* Scanning State */}
         {isScanning && (
-          <div className="p-16 rounded-3xl bg-slate-900 border border-slate-800 text-center space-y-4">
-            <div className="w-12 h-12 border-4 border-red-500 border-t-transparent rounded-full animate-spin mx-auto" />
-            <h3 className="text-lg font-bold text-white">Running Deep Forensic Stream Scan...</h3>
-            <p className="text-xs text-slate-400">
+          <motion.div
+            initial={prefersReduced ? false : { opacity: 0, scale: 0.98 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="relative overflow-hidden p-14 rounded-3xl pms-glass-panel text-center space-y-4"
+          >
+            <PearlScanOverlay active={isScanning} label="Running Deep Forensic Stream Scan..." />
+            <div className="w-14 h-14 rounded-2xl bg-rose-500/15 border border-rose-500/30 text-rose-600 dark:text-rose-400 flex items-center justify-center mx-auto">
+              <Search className="w-7 h-7 animate-pulse" />
+            </div>
+            <h3 className="text-lg font-extrabold" style={{ color: 'var(--pms-ink)' }}>
+              Running Deep Forensic Stream Scan...
+            </h3>
+            <p className="text-xs max-w-md mx-auto" style={{ color: 'var(--pms-muted)' }}>
               Analyzing XRef revision trailers, font metrics, and white-box vector intersections.
             </p>
-          </div>
+          </motion.div>
         )}
 
         {/* Forensic Workspace */}
         {scanComplete && file && (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-            {/* Left 4 Cols: Scorecard & Anomalies Feed */}
-            <div className="lg:col-span-5 space-y-6">
-              {/* Scorecard Box */}
-              <div
-                className={`p-6 rounded-3xl border ${
-                  riskLevel === 'CRITICAL'
-                    ? 'bg-red-950/30 border-red-800/80'
-                    : riskLevel === 'HIGH'
-                    ? 'bg-amber-950/30 border-amber-800/80'
-                    : 'bg-emerald-950/30 border-emerald-800/80'
-                }`}
+          <motion.div
+            initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.3 }}
+            className="space-y-6"
+          >
+            {/* Action Bar */}
+            <div className="p-4 rounded-3xl pms-glass-panel flex flex-wrap items-center justify-between gap-4">
+              <div className="flex items-center gap-3 min-w-0">
+                <span className="text-xs px-2.5 py-1 rounded-full bg-rose-500/15 border border-rose-500/30 text-rose-600 dark:text-rose-400 font-mono font-bold shrink-0">
+                  v2.4 Neural
+                </span>
+                <span className="text-sm font-bold truncate" style={{ color: 'var(--pms-ink)' }}>
+                  {file.name}
+                </span>
+              </div>
+              <button
+                onClick={handleDownloadReport}
+                className="pms-btn-primary inline-flex items-center gap-2 px-5 py-2.5 rounded-2xl font-bold text-xs shadow-lg cursor-pointer"
               >
-                <div className="flex items-center justify-between mb-4">
-                  <div>
-                    <span className="text-[10px] uppercase font-bold tracking-widest text-slate-400 block">
-                      Tamper Probability
-                    </span>
-                    <h3 className="text-3xl font-black tracking-tight text-white flex items-center gap-2">
-                      {tamperScore}%
+                <Download className="w-4 h-4" /> Export Forensic PDF Certificate
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+              {/* Left 5 Cols: Scorecard & Anomalies Feed */}
+              <div className="lg:col-span-5 space-y-6">
+                {/* Scorecard Box */}
+                <div
+                  className={`p-6 rounded-3xl pms-glass-panel border ${
+                    riskLevel === 'CRITICAL'
+                      ? 'border-rose-500/50 bg-rose-500/5 dark:bg-rose-950/30'
+                      : riskLevel === 'HIGH'
+                      ? 'border-amber-500/50 bg-amber-500/5 dark:bg-amber-950/30'
+                      : 'border-emerald-500/50 bg-emerald-500/5 dark:bg-emerald-950/30'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-4">
+                    <div>
                       <span
-                        className={`text-xs px-2.5 py-1 rounded-full font-bold uppercase ${
-                          riskLevel === 'CRITICAL'
-                            ? 'bg-red-500/20 text-red-400 border border-red-500/40'
-                            : riskLevel === 'HIGH'
-                            ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40'
-                            : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
-                        }`}
+                        className="text-[10px] uppercase font-bold tracking-widest block"
+                        style={{ color: 'var(--pms-muted)' }}
                       >
-                        {riskLevel} RISK
+                        Tamper Probability
                       </span>
-                    </h3>
+                      <h3
+                        className="text-3xl font-black tracking-tight flex items-center gap-2 mt-1"
+                        style={{ color: 'var(--pms-ink)' }}
+                      >
+                        <AnimatedNumber value={tamperScore} suffix="%" />
+                        <span
+                          className={`text-xs px-2.5 py-1 rounded-full font-bold uppercase ${
+                            riskLevel === 'CRITICAL'
+                              ? 'bg-rose-500/15 text-rose-700 dark:text-rose-400 border border-rose-500/40'
+                              : riskLevel === 'HIGH'
+                              ? 'bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/40'
+                              : 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/40'
+                          }`}
+                        >
+                          {riskLevel} RISK
+                        </span>
+                      </h3>
+                    </div>
+                    {riskLevel === 'LOW' ? (
+                      <ShieldCheck className="w-10 h-10 text-emerald-600 dark:text-emerald-400" />
+                    ) : (
+                      <ShieldAlert className="w-10 h-10 text-rose-600 dark:text-rose-400 animate-pulse" />
+                    )}
                   </div>
-                  {riskLevel === 'LOW' ? (
-                    <ShieldCheck className="w-10 h-10 text-emerald-400" />
-                  ) : (
-                    <ShieldAlert className="w-10 h-10 text-red-400 animate-pulse" />
+                  <p className="text-xs leading-relaxed" style={{ color: 'var(--pms-muted)' }}>
+                    {verdict}
+                  </p>
+                </div>
+
+                {/* Metadata Fingerprint Card */}
+                <div className="p-5 rounded-3xl pms-glass-panel space-y-3">
+                  <div
+                    className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider"
+                    style={{ color: 'var(--pms-muted)' }}
+                  >
+                    <Cpu className="w-4 h-4 text-cyan-600 dark:text-cyan-400" /> Metadata &amp; Software Fingerprint
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div className="p-3 rounded-2xl bg-slate-100/80 dark:bg-slate-950/80 border border-slate-200/80 dark:border-slate-800">
+                      <span className="text-[10px] block" style={{ color: 'var(--pms-muted)' }}>
+                        Generator / Producer
+                      </span>
+                      <span className="font-mono font-semibold truncate block" style={{ color: 'var(--pms-ink)' }}>
+                        {metadataAudit?.producer || 'Unknown'}
+                      </span>
+                    </div>
+                    <div className="p-3 rounded-2xl bg-slate-100/80 dark:bg-slate-950/80 border border-slate-200/80 dark:border-slate-800">
+                      <span className="text-[10px] block" style={{ color: 'var(--pms-muted)' }}>
+                        Creator Application
+                      </span>
+                      <span className="font-mono font-semibold truncate block" style={{ color: 'var(--pms-ink)' }}>
+                        {metadataAudit?.creator || 'Unknown'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {metadataAudit?.software_warning && (
+                    <div className="p-3 rounded-2xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800/60 text-xs text-rose-800 dark:text-rose-300 flex items-start gap-2">
+                      <AlertTriangle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0 mt-0.5" />
+                      <span>{metadataAudit.software_warning}</span>
+                    </div>
+                  )}
+                  {metadataAudit?.revision_warning && (
+                    <div className="p-3 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 text-xs text-amber-800 dark:text-amber-300 flex items-start gap-2">
+                      <Clock className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                      <span>{metadataAudit.revision_warning}</span>
+                    </div>
                   )}
                 </div>
-                <p className="text-xs text-slate-300 leading-relaxed">{verdict}</p>
-              </div>
 
-              {/* Metadata Fingerprint Card */}
-              <div className="p-5 rounded-3xl bg-slate-900/90 border border-slate-800 space-y-3">
-                <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-400">
-                  <Cpu className="w-4 h-4 text-cyan-400" /> Metadata &amp; Software Fingerprint
-                </div>
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  <div className="p-3 rounded-2xl bg-slate-950 border border-slate-800">
-                    <span className="text-[10px] text-slate-500 block">Generator / Producer</span>
-                    <span className="font-mono text-white truncate block">{metadataAudit?.producer || 'Unknown'}</span>
+                {/* Detected Anomalies List */}
+                <div className="p-5 rounded-3xl pms-glass-panel space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div
+                      className="text-xs font-bold uppercase tracking-wider flex items-center gap-1.5"
+                      style={{ color: 'var(--pms-muted)' }}
+                    >
+                      <Layers className="w-4 h-4 text-rose-600 dark:text-rose-400" /> Detected Forensic Anomalies (
+                      {anomalies.length})
+                    </div>
+                    <span className="text-[10px] font-mono" style={{ color: 'var(--pms-muted)' }}>
+                      Page {currentPage} of {totalPages}
+                    </span>
                   </div>
-                  <div className="p-3 rounded-2xl bg-slate-950 border border-slate-800">
-                    <span className="text-[10px] text-slate-500 block">Creator Application</span>
-                    <span className="font-mono text-white truncate block">{metadataAudit?.creator || 'Unknown'}</span>
-                  </div>
-                </div>
 
-                {metadataAudit?.software_warning && (
-                  <div className="p-3 rounded-2xl bg-red-950/40 border border-red-800/60 text-xs text-red-300 flex items-start gap-2">
-                    <AlertTriangle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
-                    <span>{metadataAudit.software_warning}</span>
-                  </div>
-                )}
-                {metadataAudit?.revision_warning && (
-                  <div className="p-3 rounded-2xl bg-amber-950/40 border border-amber-800/60 text-xs text-amber-300 flex items-start gap-2">
-                    <Clock className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-                    <span>{metadataAudit.revision_warning}</span>
-                  </div>
-                )}
-              </div>
-
-              {/* Detected Anomalies List */}
-              <div className="p-5 rounded-3xl bg-slate-900/90 border border-slate-800 space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-                    <Layers className="w-4 h-4 text-red-400" /> Detected Forensic Anomalies ({anomalies.length})
-                  </div>
-                  <span className="text-[10px] text-slate-500 font-mono">Page {currentPage} of {totalPages}</span>
-                </div>
-
-                {anomalies.length === 0 ? (
-                  <div className="p-4 rounded-2xl bg-slate-950/60 text-center text-xs text-slate-400">
-                    No obvious vector whiteouts or font family tampering detected.
-                  </div>
-                ) : (
-                  <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
-                    {anomalies.map((anom) => (
-                      <div
-                        key={anom.id}
-                        onClick={() => {
-                          if (anom.page > 0) {
-                            setCurrentPage(anom.page);
-                          }
-                          setSelectedAnomaly(anom);
-                        }}
-                        className={`p-3.5 rounded-2xl border cursor-pointer transition-all ${
-                          selectedAnomaly?.id === anom.id
-                            ? 'bg-red-950/50 border-red-500 shadow-md shadow-red-950'
-                            : 'bg-slate-950/80 border-slate-800 hover:border-slate-700'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between gap-2 mb-1">
-                          <span className="font-bold text-xs text-white truncate">{anom.title}</span>
-                          <span
-                            className={`text-[9px] px-2 py-0.5 rounded-md font-mono font-bold ${
-                              anom.severity === 'CRITICAL'
-                                ? 'bg-red-500/20 text-red-400'
-                                : 'bg-amber-500/20 text-amber-400'
-                            }`}
-                          >
-                            {anom.page > 0 ? `p.${anom.page}` : 'Doc Level'}
-                          </span>
+                  {anomalies.length === 0 ? (
+                    <div
+                      className="p-4 rounded-2xl bg-slate-100/70 dark:bg-slate-950/60 text-center text-xs"
+                      style={{ color: 'var(--pms-muted)' }}
+                    >
+                      No obvious vector whiteouts or font family tampering detected.
+                    </div>
+                  ) : (
+                    <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
+                      {anomalies.map((anom) => (
+                        <div
+                          key={anom.id}
+                          onClick={() => {
+                            if (anom.page > 0) {
+                              setCurrentPage(anom.page);
+                            }
+                            setSelectedAnomaly(anom);
+                          }}
+                          className={`p-3.5 rounded-2xl border cursor-pointer transition-all ${
+                            selectedAnomaly?.id === anom.id
+                              ? 'bg-rose-50/90 dark:bg-rose-950/50 border-rose-500 shadow-md shadow-rose-500/10'
+                              : 'bg-white/75 dark:bg-slate-950/80 border-slate-200/80 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-2 mb-1">
+                            <span className="font-bold text-xs truncate" style={{ color: 'var(--pms-ink)' }}>
+                              {anom.title}
+                            </span>
+                            <span
+                              className={`text-[9px] px-2 py-0.5 rounded-md font-mono font-bold ${
+                                anom.severity === 'CRITICAL'
+                                  ? 'bg-rose-500/15 text-rose-700 dark:text-rose-400'
+                                  : 'bg-amber-500/15 text-amber-700 dark:text-amber-400'
+                              }`}
+                            >
+                              {anom.page > 0 ? `p.${anom.page}` : 'Doc Level'}
+                            </span>
+                          </div>
+                          <p className="text-[11px] leading-snug" style={{ color: 'var(--pms-muted)' }}>
+                            {anom.description}
+                          </p>
                         </div>
-                        <p className="text-[11px] text-slate-400 leading-snug">{anom.description}</p>
-                      </div>
-                    ))}
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Right 7 Cols: Interactive Document Viewer with Heatmap Overlay */}
+              <div className="lg:col-span-7 space-y-4">
+                <div className="p-4 rounded-3xl pms-glass-panel flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <button
+                      disabled={currentPage <= 1}
+                      onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                      className="p-2 rounded-xl bg-slate-200/80 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 disabled:opacity-40 transition-colors cursor-pointer"
+                      style={{ color: 'var(--pms-ink)' }}
+                    >
+                      <ChevronLeft className="w-4 h-4" />
+                    </button>
+                    <span className="text-xs font-bold" style={{ color: 'var(--pms-ink)' }}>
+                      Page {currentPage} of {totalPages}
+                    </span>
+                    <button
+                      disabled={currentPage >= totalPages}
+                      onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                      className="p-2 rounded-xl bg-slate-200/80 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 disabled:opacity-40 transition-colors cursor-pointer"
+                      style={{ color: 'var(--pms-ink)' }}
+                    >
+                      <ChevronRight className="w-4 h-4" />
+                    </button>
                   </div>
-                )}
-              </div>
-            </div>
 
-            {/* Right 7 Cols: Interactive Document Viewer with Heatmap Overlay */}
-            <div className="lg:col-span-7 space-y-4">
-              <div className="p-4 rounded-3xl bg-slate-900 border border-slate-800 shadow-xl flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <button
-                    disabled={currentPage <= 1}
-                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                    className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-40 transition-colors"
-                  >
-                    <ChevronLeft className="w-4 h-4" />
-                  </button>
-                  <span className="text-xs font-bold text-slate-300">
-                    Page {currentPage} of {totalPages}
-                  </span>
-                  <button
-                    disabled={currentPage >= totalPages}
-                    onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-                    className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-40 transition-colors"
-                  >
-                    <ChevronRight className="w-4 h-4" />
-                  </button>
+                  <div className="inline-flex items-center gap-2 text-xs" style={{ color: 'var(--pms-muted)' }}>
+                    <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-ping" />
+                    Heatmap Mode: Active
+                  </div>
                 </div>
 
-                <div className="inline-flex items-center gap-2 text-xs text-slate-400">
-                  <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-ping" />
-                  Heatmap Mode: Active
-                </div>
-              </div>
+                {/* Canvas Container with Overlay SVG */}
+                <div className="relative rounded-3xl overflow-hidden pms-glass-panel flex items-center justify-center p-4">
+                  <div className="relative inline-block shadow-2xl rounded-lg overflow-hidden bg-white">
+                    <canvas ref={canvasRef} className="block rounded-lg max-w-full h-auto bg-white" />
 
-              {/* Canvas Container with Overlay SVG */}
-              <div className="relative rounded-3xl overflow-hidden border border-slate-800 bg-slate-950 flex items-center justify-center p-4">
-                <div className="relative inline-block shadow-2xl">
-                  <canvas ref={canvasRef} className="block rounded-lg max-w-full h-auto" />
+                    {/* Red Forensic Heatmap Markers Overlay */}
+                    <svg
+                      className="absolute inset-0 pointer-events-none w-full h-full"
+                      viewBox={`0 0 ${pageViewport.width} ${pageViewport.height}`}
+                    >
+                      {currentPageAnomalies.map((anom) => {
+                        if (!anom.bbox || !Array.isArray(anom.bbox) || anom.bbox.length !== 4) return null;
+                        const [x0, y0, x1, y1] = anom.bbox;
+                        const scaleX = pageNativeSize.width > 0 ? pageViewport.width / pageNativeSize.width : 1.4;
+                        const scaleY = pageNativeSize.height > 0 ? pageViewport.height / pageNativeSize.height : 1.4;
+                        const bx = Math.max(0, x0 * scaleX - 3);
+                        const by = Math.max(0, y0 * scaleY - 3);
+                        const bw = Math.max(16, (x1 - x0) * scaleX + 6);
+                        const bh = Math.max(12, (y1 - y0) * scaleY + 6);
+                        const isSelected = selectedAnomaly?.id === anom.id;
 
-                  {/* Red Forensic Heatmap Markers Overlay */}
-                  <svg
-                    className="absolute inset-0 pointer-events-none w-full h-full"
-                    viewBox={`0 0 ${pageViewport.width} ${pageViewport.height}`}
-                  >
-                    {currentPageAnomalies.map((anom) => {
-                      if (!anom.bbox || !Array.isArray(anom.bbox) || anom.bbox.length !== 4) return null;
-                      const [x0, y0, x1, y1] = anom.bbox;
-                      const scaleX = pageNativeSize.width > 0 ? pageViewport.width / pageNativeSize.width : 1.4;
-                      const scaleY = pageNativeSize.height > 0 ? pageViewport.height / pageNativeSize.height : 1.4;
-                      const bx = Math.max(0, x0 * scaleX - 3);
-                      const by = Math.max(0, y0 * scaleY - 3);
-                      const bw = Math.max(16, (x1 - x0) * scaleX + 6);
-                      const bh = Math.max(12, (y1 - y0) * scaleY + 6);
-                      const isSelected = selectedAnomaly?.id === anom.id;
-
-                      return (
-                        <g key={anom.id}>
-                          <rect
-                            x={bx}
-                            y={by}
-                            width={bw}
-                            height={bh}
-                            fill={isSelected ? 'rgba(239, 68, 68, 0.45)' : 'rgba(239, 68, 68, 0.22)'}
-                            stroke={isSelected ? '#ff0000' : 'rgba(239, 68, 68, 0.95)'}
-                            strokeWidth={isSelected ? '3.5' : '2.5'}
-                            strokeDasharray={isSelected ? 'none' : '4 2'}
-                            rx="4"
-                          />
-                          <text
-                            x={bx + 4}
-                            y={Math.max(12, by - 4)}
-                            fill="#ef4444"
-                            fontSize="10"
-                            fontWeight="bold"
-                            fontFamily="monospace"
-                          >
-                            ⚠️ TAMPER ALERT [{anom.type}]
-                          </text>
-                        </g>
-                      );
-                    })}
-                  </svg>
+                        return (
+                          <g key={anom.id}>
+                            <rect
+                              x={bx}
+                              y={by}
+                              width={bw}
+                              height={bh}
+                              fill={isSelected ? 'rgba(239, 68, 68, 0.45)' : 'rgba(239, 68, 68, 0.22)'}
+                              stroke={isSelected ? '#ff0000' : 'rgba(239, 68, 68, 0.95)'}
+                              strokeWidth={isSelected ? '3.5' : '2.5'}
+                              strokeDasharray={isSelected ? 'none' : '4 2'}
+                              rx="4"
+                            />
+                            <text
+                              x={bx + 4}
+                              y={Math.max(12, by - 4)}
+                              fill="#ef4444"
+                              fontSize="10"
+                              fontWeight="bold"
+                              fontFamily="monospace"
+                            >
+                              ⚠️ TAMPER ALERT [{anom.type}]
+                            </text>
+                          </g>
+                        );
+                      })}
+                    </svg>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
+          </motion.div>
         )}
 
         <ToolSEOSection
@@ -689,6 +729,6 @@ export default function DocForensics() {
           ]}
         />
       </div>
-    </div>
+    </ToolWorkspaceShell>
   );
 }

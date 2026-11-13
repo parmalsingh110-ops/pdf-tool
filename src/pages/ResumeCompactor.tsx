@@ -1,15 +1,13 @@
 import React, { useState } from 'react';
+import { motion, useReducedMotion } from 'motion/react';
 import {
   Upload,
   Download,
-  FileCheck2,
-  Sparkles,
   FileText,
   CheckCircle2,
   AlertCircle,
   Minimize2,
-  Sliders,
-  Layers,
+  Loader2,
 } from 'lucide-react';
 import { PDFDocument, rgb } from 'pdf-lib';
 import * as pdfjsLib from 'pdfjs-dist';
@@ -18,6 +16,9 @@ import { useSEO } from '../hooks/useSEO';
 import { usePageSEO } from '../lib/usePageSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
 import { downloadBlob } from '../lib/utils';
+import { toArrayBufferBytes, useAutoRevokeUrl } from '../lib/blobUrl';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { AnimatedNumber, PearlScanOverlay } from '../components/pearl/PearlMotion';
 
 type CompactionMode = 'smart_auto' | 'tight_margin' | 'extreme_single';
 
@@ -42,6 +43,9 @@ export default function ResumeCompactor() {
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [processedPdfBlob, setProcessedPdfBlob] = useState<Blob | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+
+  useAutoRevokeUrl(previewUrl);
+  const prefersReduced = useReducedMotion();
 
   // Load PDF
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -70,7 +74,7 @@ export default function ResumeCompactor() {
 
       setProcessedPdfBlob(null);
       setPreviewUrl(null);
-    } catch (err) {
+    } catch {
       alert('Error reading PDF. Please ensure it is a valid document.');
     } finally {
       setIsProcessing(false);
@@ -230,8 +234,8 @@ export default function ResumeCompactor() {
         }
       }
 
-      const pdfBytes = await outDoc.save();
-      const blob = new Blob([pdfBytes as any], { type: 'application/pdf' });
+      const pdfBytes = toArrayBufferBytes(await outDoc.save());
+      const blob = new Blob([pdfBytes], { type: 'application/pdf' });
       setProcessedPdfBlob(blob);
       setPreviewUrl(URL.createObjectURL(blob));
     } catch (err) {
@@ -247,46 +251,64 @@ export default function ResumeCompactor() {
     downloadBlob(processedPdfBlob, `1_Page_Resume_${file?.name || 'document.pdf'}`);
   };
 
-  return (
-    <div className="w-full min-h-screen bg-slate-50 dark:bg-slate-950 py-8 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-7xl mx-auto space-y-8">
-        {/* Header */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-50 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-900 text-blue-700 dark:text-blue-300 text-xs font-bold mb-2">
-              <Sparkles className="w-3.5 h-3.5" /> Campus Placements Essential
-            </div>
-            <h1 className="text-3xl sm:text-4xl font-extrabold text-slate-900 dark:text-white">
-              Strict 1-Page Resume Compactor
-            </h1>
-            <p className="text-sm text-slate-600 dark:text-slate-400 mt-1 max-w-2xl">
-              Don't let 3 trailing lines spill onto Page 2 and get rejected by HR. Automatically compact and micro-scale your resume into exactly 1 clean page!
-            </p>
-          </div>
+  const modes: { id: CompactionMode; label: string }[] = [
+    { id: 'smart_auto', label: 'Smart Auto' },
+    { id: 'tight_margin', label: 'Tight Margin' },
+    { id: 'extreme_single', label: 'Proportional' },
+  ];
 
-          <div className="flex items-center gap-3">
-            <button
-              onClick={handleDownload}
-              disabled={!processedPdfBlob}
-              className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-md disabled:opacity-40 flex items-center gap-2 transition-all"
-            >
-              <Download className="w-4 h-4" /> Download 1-Page Resume
-            </button>
-          </div>
+  return (
+    <ToolWorkspaceShell
+      title="Strict 1-Page Resume Compactor"
+      subtitle="Don't let 3 trailing lines spill onto Page 2 and get rejected by HR. Automatically compact and micro-scale your resume into exactly 1 clean page!"
+      categoryLabel="Campus Placements Essential"
+      icon={Minimize2}
+      microVariant="compress"
+      tone="blue"
+      trustNote="100% vector text & ATS readable · Local browser processing"
+    >
+      <div className="space-y-8">
+        {/* Top Action Bar */}
+        <div className="flex justify-end">
+          <motion.button
+            whileHover={prefersReduced || !processedPdfBlob ? undefined : { scale: 1.02 }}
+            whileTap={prefersReduced || !processedPdfBlob ? undefined : { scale: 0.98 }}
+            onClick={handleDownload}
+            disabled={!processedPdfBlob}
+            className="pms-btn-primary px-6 py-3 rounded-2xl font-bold text-xs sm:text-sm disabled:opacity-40 flex items-center gap-2 cursor-pointer"
+          >
+            <Download className="w-4 h-4" /> Download 1-Page Resume
+          </motion.button>
         </div>
 
         {/* Workspace */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
           {/* Controls (5 Cols) */}
           <div className="lg:col-span-5 space-y-6">
-            <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200/90 dark:border-slate-800 p-6 shadow-sm space-y-5">
-              <label className="border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-2xl p-6 text-center block cursor-pointer hover:border-blue-500 transition-colors">
-                <Upload className="w-8 h-8 mx-auto text-blue-600 mb-2" />
-                <span className="font-bold text-sm text-slate-700 dark:text-slate-200 block">
+            <div className="relative pms-glass-panel rounded-3xl p-6 space-y-5 overflow-hidden">
+              <PearlScanOverlay active={isProcessing} label="Analyzing text bounds & compacting to 1 page…" />
+
+              <label
+                className="border-2 border-dashed rounded-2xl p-6 text-center block cursor-pointer hover:border-sky-400 transition-colors"
+                style={{
+                  borderColor: 'var(--pms-border-strong)',
+                  backgroundColor: 'var(--pms-white)',
+                }}
+              >
+                <div className="w-12 h-12 rounded-2xl bg-[var(--pms-soft-blue)] text-[var(--pms-blue)] flex items-center justify-center mx-auto mb-2.5">
+                  <Upload className="w-6 h-6" />
+                </div>
+                <span className="font-bold text-sm text-slate-800 dark:text-slate-100 block truncate">
                   {file ? file.name : 'Upload Multi-Page Resume PDF'}
                 </span>
-                <span className="text-xs text-slate-400 mt-1 block">
-                  {origPageCount > 0 ? `Detected ${origPageCount} Pages` : 'Upload your 1.2 or 2-page resume'}
+                <span className="text-xs text-slate-500 dark:text-slate-400 mt-1 block">
+                  {origPageCount > 0 ? (
+                    <>
+                      Detected <AnimatedNumber value={origPageCount} /> Page{origPageCount === 1 ? '' : 's'}
+                    </>
+                  ) : (
+                    'Upload your 1.2 or 2-page resume'
+                  )}
                 </span>
                 <input
                   type="file"
@@ -298,20 +320,58 @@ export default function ResumeCompactor() {
 
               {/* Status Alert */}
               {origPageCount > 1 && (
-                <div className="p-3.5 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 flex items-center gap-3 text-xs text-amber-800 dark:text-amber-200">
+                <motion.div
+                  initial={prefersReduced ? false : { opacity: 0, y: -6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="p-3.5 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 flex items-center gap-3 text-xs text-amber-800 dark:text-amber-200"
+                >
                   <AlertCircle className="w-5 h-5 shrink-0 text-amber-600" />
                   <span>
                     Your resume is currently <strong>{origPageCount} pages long</strong>. HR recruiters strongly recommend a single page for candidates with &lt;5 years experience.
                   </span>
-                </div>
+                </motion.div>
               )}
 
+              {/* Compaction Mode */}
+              <div>
+                <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 mb-2">
+                  Compaction Strategy
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  {modes.map((m) => {
+                    const active = compactionMode === m.id;
+                    return (
+                      <button
+                        key={m.id}
+                        type="button"
+                        onClick={() => setCompactionMode(m.id)}
+                        className="relative py-2 px-2 rounded-xl border text-[11px] font-bold transition-colors cursor-pointer overflow-hidden"
+                        style={{
+                          borderColor: active ? 'var(--pms-blue)' : 'var(--pms-border)',
+                          backgroundColor: active ? 'var(--pms-soft-blue)' : 'var(--pms-white)',
+                          color: active ? 'var(--pms-blue)' : 'var(--pms-ink)',
+                        }}
+                      >
+                        {active && (
+                          <motion.span
+                            layoutId="resume-compaction-mode"
+                            transition={{ type: 'spring', stiffness: 420, damping: 30 }}
+                            className="absolute inset-0 rounded-xl ring-2 ring-sky-500/30 pointer-events-none"
+                          />
+                        )}
+                        <span className="relative z-10">{m.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
               {/* Compaction Sliders */}
-              <div className="space-y-4 pt-2">
+              <div className="space-y-4 pt-2 border-t border-[var(--pms-border)]">
                 <div>
                   <div className="flex justify-between text-xs font-bold text-slate-600 dark:text-slate-300 mb-1">
                     <span>Content Scale Factor</span>
-                    <span>{contentScale}%</span>
+                    <span className="text-[var(--pms-blue)]">{contentScale}%</span>
                   </div>
                   <input
                     type="range"
@@ -319,7 +379,7 @@ export default function ResumeCompactor() {
                     max="100"
                     value={contentScale}
                     onChange={(e) => setContentScale(Number(e.target.value))}
-                    className="w-full accent-blue-600"
+                    className="w-full accent-sky-600"
                   />
                   <p className="text-[10px] text-slate-400 mt-0.5">Scales vector text &amp; layout proportionally</p>
                 </div>
@@ -327,7 +387,7 @@ export default function ResumeCompactor() {
                 <div>
                   <div className="flex justify-between text-xs font-bold text-slate-600 dark:text-slate-300 mb-1">
                     <span>Outer Margin Padding</span>
-                    <span>{marginScale} pt</span>
+                    <span className="text-[var(--pms-blue)]">{marginScale} pt</span>
                   </div>
                   <input
                     type="range"
@@ -335,48 +395,56 @@ export default function ResumeCompactor() {
                     max="35"
                     value={marginScale}
                     onChange={(e) => setMarginScale(Number(e.target.value))}
-                    className="w-full accent-blue-600"
+                    className="w-full accent-sky-600"
                   />
                   <p className="text-[10px] text-slate-400 mt-0.5">Tightens side margins to reclaim 20% vertical space</p>
                 </div>
               </div>
 
               {/* Action Button */}
-              <button
+              <motion.button
+                whileHover={prefersReduced || !file || isProcessing ? undefined : { scale: 1.01 }}
+                whileTap={prefersReduced || !file || isProcessing ? undefined : { scale: 0.985 }}
                 onClick={handleCompact}
                 disabled={!file || isProcessing}
-                className="w-full py-3.5 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm shadow-md transition-all flex items-center justify-center gap-2 disabled:opacity-40"
+                className="w-full pms-btn-primary py-3.5 rounded-2xl font-bold text-sm flex items-center justify-center gap-2 disabled:opacity-40 cursor-pointer"
               >
+                {isProcessing && <Loader2 className="w-4 h-4 animate-spin" />}
                 {isProcessing ? 'Compacting Resume...' : 'Compact to Exactly 1 Page'}
-              </button>
+              </motion.button>
             </div>
           </div>
 
           {/* Real-Time Preview (7 Cols) */}
-          <div className="lg:col-span-7 bg-white dark:bg-slate-900 rounded-3xl border border-slate-200/90 dark:border-slate-800 p-6 shadow-sm space-y-4">
-            <div className="flex items-center justify-between">
-              <h2 className="text-sm font-bold uppercase tracking-wider text-slate-500">
+          <div className="lg:col-span-7 pms-glass-panel rounded-3xl p-6 space-y-4">
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="text-sm font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
                 1-Page Strict Output Preview
               </h2>
               {processedPdfBlob && (
-                <span className="text-xs font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/60 px-3 py-1 rounded-full border border-emerald-200 flex items-center gap-1.5">
+                <motion.span
+                  initial={prefersReduced ? false : { scale: 0.8, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  transition={{ type: 'spring', stiffness: 360, damping: 20 }}
+                  className="text-xs font-bold text-emerald-700 dark:text-emerald-300 bg-[var(--pms-soft-mint)] px-3 py-1 rounded-full border border-emerald-200/80 dark:border-emerald-800/60 flex items-center gap-1.5"
+                >
                   <CheckCircle2 className="w-3.5 h-3.5" /> 100% Guaranteed 1-Page
-                </span>
+                </motion.span>
               )}
             </div>
 
-            <div className="w-full bg-slate-100 dark:bg-slate-950/80 rounded-2xl p-4 flex items-center justify-center min-h-[460px] border border-slate-200/70 dark:border-slate-800">
+            <div className="w-full bg-white dark:bg-slate-950/80 rounded-2xl p-4 flex items-center justify-center min-h-[460px] border border-[var(--pms-border)]">
               {previewUrl ? (
                 <iframe
                   src={previewUrl}
                   title="1 Page Resume Preview"
-                  className="w-full h-[580px] rounded-xl border border-slate-300 dark:border-slate-700"
+                  className="w-full h-[580px] rounded-xl border border-slate-200 dark:border-slate-700 bg-white"
                 />
               ) : (
                 <div className="text-center space-y-3 text-slate-400">
-                  <FileText className="w-12 h-12 mx-auto opacity-30 text-blue-500" />
+                  <FileText className="w-12 h-12 mx-auto opacity-30 text-sky-500" />
                   <p className="text-xs font-semibold">
-                    Upload your resume and click "Compact to Exactly 1 Page" to preview the result.
+                    Upload your resume and click &quot;Compact to Exactly 1 Page&quot; to preview the result.
                   </p>
                 </div>
               )}
@@ -384,7 +452,6 @@ export default function ResumeCompactor() {
           </div>
         </div>
 
-        {/* SEO Guide Section */}
         <ToolSEOSection
           toolName="Strict 1-Page Resume Compactor"
           headline="Fit 2-Page CV Strictly into 1 Page for Campus Placements &amp; ATS"
@@ -409,6 +476,6 @@ export default function ResumeCompactor() {
           ]}
         />
       </div>
-    </div>
+    </ToolWorkspaceShell>
   );
 }

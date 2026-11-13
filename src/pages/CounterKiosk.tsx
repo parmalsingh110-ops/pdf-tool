@@ -6,26 +6,21 @@ import {
   Printer,
   Upload,
   CheckCircle2,
-  Clock,
-  Layers,
-  Palette,
-  User,
-  Phone,
-  FileText,
   Trash2,
   Lock,
   Unlock,
-  Settings,
-  Sparkles,
   Ticket,
   Copy,
   Check,
   ShieldCheck,
 } from 'lucide-react';
+import { motion, useReducedMotion } from 'motion/react';
 import * as pdfjsLib from 'pdfjs-dist';
 import '../lib/pdfWorker';
 import { useSEO } from '../hooks/useSEO';
 import { usePageSEO } from '../lib/usePageSEO';
+import PearlAuroraBackground from '../components/pearl/PearlAuroraBackground';
+import { AnimatedNumber } from '../components/pearl/PearlMotion';
 import ToolSEOSection from '../components/ToolSEOSection';
 import { apiFetch } from '../lib/api';
 import {
@@ -91,6 +86,8 @@ export default function CounterKiosk() {
     '/counter-kiosk'
   );
 
+  const prefersReduced = useReducedMotion();
+
   const [stationId] = useState<string>(() => {
     if (typeof window === 'undefined') return 'KSDEFAULT';
     const urlStation = (new URLSearchParams(window.location.search).get('station') || '')
@@ -152,7 +149,10 @@ export default function CounterKiosk() {
   const [viewMode, setViewMode] = useState<'customer' | 'shopkeeper'>('customer');
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [pinInput, setPinInput] = useState('');
+  const [pinError, setPinError] = useState('');
   const [showPinModal, setShowPinModal] = useState(false);
+  const [newShopPin, setNewShopPin] = useState('');
+  const [pinSavedMsg, setPinSavedMsg] = useState('');
   const [queue, setQueue] = useState<KioskJob[]>(() => {
     try {
       // Wipe legacy unencrypted localStorage key if present
@@ -177,6 +177,17 @@ export default function CounterKiosk() {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const queueUrlsRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    const urls = queueUrlsRef.current;
+    return () => {
+      urls.forEach((u) => {
+        try { URL.revokeObjectURL(u); } catch {}
+      });
+      urls.clear();
+    };
+  }, []);
 
   // BroadcastChannel + Authenticated Cloud Relay Polling (Isolated per-shop room)
   useEffect(() => {
@@ -201,6 +212,9 @@ export default function CounterKiosk() {
         if (res.ok) isRegistered = true;
       } catch {}
     };
+
+    // Register immediately on mount so paired tablets or direct uploads never hit an inactive room window
+    void registerStation();
 
     const pollInterval = setInterval(async () => {
       try {
@@ -229,6 +243,7 @@ export default function CounterKiosk() {
                 const rawBuf = await fileRes.arrayBuffer();
                 const { buffer: plainBuf } = await decryptBytesWithKey(rawBuf, stationE2eeKey);
                 blobUrl = URL.createObjectURL(new Blob([plainBuf], { type: j.type || 'application/pdf' }));
+                queueUrlsRef.current.add(blobUrl);
               }
             } catch {}
             incomingJobs.push({
@@ -294,23 +309,22 @@ export default function CounterKiosk() {
 
   const handleFileChange = async (file: File) => {
     setUploadedFile(file);
-    const reader = new FileReader();
-    reader.onload = async (e) => {
-      const dataUrl = e.target?.result as string;
-      setFileDataUrl(dataUrl);
+    const nextBlobUrl = URL.createObjectURL(file);
+    queueUrlsRef.current.add(nextBlobUrl);
+    setFileDataUrl(nextBlobUrl);
 
-      if (file.type === 'application/pdf') {
-        try {
-          const doc = await pdfjsLib.getDocument({ data: atob(dataUrl.split(',')[1]) }).promise;
-          setPageCount(doc.numPages);
-        } catch {
-          setPageCount(1);
-        }
-      } else {
+    if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
+      try {
+        const buf = await file.arrayBuffer();
+        const doc = await pdfjsLib.getDocument({ data: new Uint8Array(buf) }).promise;
+        setPageCount(Math.max(1, doc.numPages));
+        try { await doc.destroy(); } catch {}
+      } catch {
         setPageCount(1);
       }
-    };
-    reader.readAsDataURL(file);
+    } else {
+      setPageCount(1);
+    }
   };
 
   // Cost calculation
@@ -388,6 +402,7 @@ export default function CounterKiosk() {
     try {
       if (job.fileDataUrl.startsWith('data:') || job.fileDataUrl.startsWith('blob:')) {
         let blobUrl = job.fileDataUrl;
+        let transient = false;
         if (job.fileDataUrl.startsWith('data:')) {
           const parts = job.fileDataUrl.split(';base64,');
           const mime = parts[0]?.split(':')[1] || 'application/pdf';
@@ -395,8 +410,12 @@ export default function CounterKiosk() {
           const arr = new Uint8Array(raw.length);
           for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
           blobUrl = URL.createObjectURL(new Blob([arr], { type: mime }));
+          transient = true;
         }
         window.open(blobUrl, '_blank');
+        if (transient) {
+          setTimeout(() => { try { URL.revokeObjectURL(blobUrl); } catch {} }, 60000);
+        }
       } else {
         window.open(job.fileDataUrl, '_blank');
       }
@@ -408,28 +427,46 @@ export default function CounterKiosk() {
   };
 
   const handleDismissJob = (jobId: string) => {
+    const target = queue.find((j) => j.id === jobId);
+    if (target?.fileDataUrl?.startsWith('blob:')) {
+      try { URL.revokeObjectURL(target.fileDataUrl); } catch {}
+      queueUrlsRef.current.delete(target.fileDataUrl);
+    }
     const updated = queue.filter((j) => j.id !== jobId);
     saveQueue(updated);
   };
 
   const handleClearAll = () => {
     if (confirm('Clear all completed and pending print queue items?')) {
+      queue.forEach((j) => {
+        if (j.fileDataUrl?.startsWith('blob:')) {
+          try { URL.revokeObjectURL(j.fileDataUrl); } catch {}
+          queueUrlsRef.current.delete(j.fileDataUrl);
+        }
+      });
       saveQueue([]);
     }
   };
 
   return (
-    <div className={`w-full min-h-screen ${viewMode === 'customer' ? 'bg-slate-900 text-white' : 'bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white'} transition-colors py-8 px-4 sm:px-6`}>
-      <div className="max-w-5xl mx-auto space-y-6">
+    <div
+      className="relative w-full min-h-screen overflow-x-clip py-8 px-4 sm:px-6 transition-colors"
+      style={{ backgroundColor: 'var(--pms-pearl)', color: 'var(--pms-ink)' }}
+    >
+      <PearlAuroraBackground mode="workspace" />
+
+      <div className="relative z-10 max-w-5xl mx-auto space-y-6">
         {/* Kiosk Mode Top Navigation Bar */}
-        <div className="flex items-center justify-between pb-4 border-b border-slate-700/60">
+        <div className="pms-glass-header rounded-2xl px-4 py-3 flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-black">
+            <div className="w-10 h-10 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 flex items-center justify-center font-black shrink-0">
               <Monitor className="w-5 h-5" />
             </div>
             <div>
-              <h1 className="text-xl font-black tracking-tight">Counter Self-Print Kiosk</h1>
-              <p className="text-xs text-slate-400">
+              <h1 className="text-xl font-black tracking-tight" style={{ color: 'var(--pms-ink)' }}>
+                Counter Self-Print Kiosk
+              </h1>
+              <p className="text-xs" style={{ color: 'var(--pms-muted)' }}>
                 {viewMode === 'customer' ? 'Customer Self-Order Terminal' : 'Shopkeeper Live Queue'}
               </p>
             </div>
@@ -438,7 +475,8 @@ export default function CounterKiosk() {
           <div className="flex items-center gap-2">
             <button
               onClick={toggleFullscreen}
-              className="p-2.5 rounded-xl bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 transition-colors"
+              className="p-2.5 rounded-xl pms-glass-panel hover:border-emerald-500/40 transition-colors cursor-pointer"
+              style={{ color: 'var(--pms-ink)' }}
               title="Toggle Fullscreen"
             >
               {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
@@ -447,14 +485,15 @@ export default function CounterKiosk() {
             {viewMode === 'customer' ? (
               <button
                 onClick={() => setShowPinModal(true)}
-                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-slate-800 text-slate-300 hover:bg-slate-700"
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold pms-glass-panel hover:border-emerald-500/40 transition-colors cursor-pointer"
+                style={{ color: 'var(--pms-ink)' }}
               >
-                <Lock className="w-3.5 h-3.5" /> Shop View
+                <Lock className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" /> Shop View
               </button>
             ) : (
               <button
                 onClick={() => setViewMode('customer')}
-                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-emerald-600 text-white hover:bg-emerald-700"
+                className="pms-btn-primary inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold cursor-pointer"
               >
                 <Monitor className="w-3.5 h-3.5" /> Switch to Customer Screen
               </button>
@@ -464,13 +503,20 @@ export default function CounterKiosk() {
 
         {/* CUSTOMER SELF-SERVICE VIEW */}
         {viewMode === 'customer' && !completedJob && (
-          <div className="max-w-2xl mx-auto space-y-6 py-4 animate-in fade-in duration-200">
+          <motion.div
+            initial={prefersReduced ? false : { opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.25 }}
+            className="max-w-2xl mx-auto space-y-6 py-4"
+          >
             <div className="text-center space-y-1">
-              <span className="text-xs uppercase tracking-widest text-emerald-400 font-extrabold">
+              <span className="text-xs uppercase tracking-widest text-emerald-600 dark:text-emerald-400 font-extrabold">
                 Fast &amp; Private Self-Print
               </span>
-              <h2 className="text-3xl font-black">Order Your Print in 30 Seconds</h2>
-              <p className="text-xs text-slate-400">
+              <h2 className="text-3xl font-black" style={{ color: 'var(--pms-ink)' }}>
+                Order Your Print in 30 Seconds
+              </h2>
+              <p className="text-xs" style={{ color: 'var(--pms-muted)' }}>
                 Drop your file below, choose Black &amp; White or Color, and collect your token number.
               </p>
             </div>
@@ -478,7 +524,7 @@ export default function CounterKiosk() {
             {/* Dropzone */}
             <div
               onClick={() => fileInputRef.current?.click()}
-              className="border-2 border-dashed border-slate-700 hover:border-emerald-500 rounded-3xl p-8 text-center bg-slate-800/60 hover:bg-slate-800 cursor-pointer transition-all group"
+              className="pms-glass-panel border-2 border-dashed border-emerald-500/35 hover:border-emerald-500/80 rounded-3xl p-8 text-center cursor-pointer transition-all group"
             >
               <input
                 type="file"
@@ -487,13 +533,13 @@ export default function CounterKiosk() {
                 accept="application/pdf,image/*"
                 className="hidden"
               />
-              <div className="w-14 h-14 rounded-2xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center mx-auto mb-3 group-hover:scale-110 transition-transform">
+              <div className="w-14 h-14 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mx-auto mb-3 group-hover:scale-110 transition-transform">
                 <Upload className="w-7 h-7" />
               </div>
-              <h4 className="text-base font-bold text-white mb-1">
+              <h4 className="text-base font-bold mb-1" style={{ color: 'var(--pms-ink)' }}>
                 {uploadedFile ? uploadedFile.name : 'Tap to Select PDF or Image'}
               </h4>
-              <p className="text-xs text-slate-400">
+              <p className="text-xs" style={{ color: 'var(--pms-muted)' }}>
                 {uploadedFile ? `${pageCount} Page(s) detected` : 'Supports PDF, JPG, PNG from mobile or pendrive'}
               </p>
             </div>
@@ -501,14 +547,16 @@ export default function CounterKiosk() {
             {/* Options */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs font-bold text-slate-400 mb-1.5">Color Option</label>
+                <label className="block text-xs font-bold mb-1.5" style={{ color: 'var(--pms-muted)' }}>
+                  Color Option
+                </label>
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     onClick={() => setPrintType('bw')}
-                    className={`py-3 px-3 rounded-2xl font-bold text-xs flex flex-col items-center gap-1 transition-all ${
+                    className={`py-3 px-3 rounded-2xl font-bold text-xs flex flex-col items-center gap-1 transition-all cursor-pointer ${
                       printType === 'bw'
-                        ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-950 ring-2 ring-emerald-400'
-                        : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                        ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-600/20 ring-2 ring-emerald-400'
+                        : 'pms-glass-panel hover:border-emerald-500/40'
                     }`}
                   >
                     <span className="text-sm">📄 Black &amp; White</span>
@@ -517,10 +565,10 @@ export default function CounterKiosk() {
 
                   <button
                     onClick={() => setPrintType('color')}
-                    className={`py-3 px-3 rounded-2xl font-bold text-xs flex flex-col items-center gap-1 transition-all ${
+                    className={`py-3 px-3 rounded-2xl font-bold text-xs flex flex-col items-center gap-1 transition-all cursor-pointer ${
                       printType === 'color'
-                        ? 'bg-rose-600 text-white shadow-lg shadow-rose-950 ring-2 ring-rose-400'
-                        : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                        ? 'bg-rose-600 text-white shadow-lg shadow-rose-600/20 ring-2 ring-rose-400'
+                        : 'pms-glass-panel hover:border-rose-500/40'
                     }`}
                   >
                     <span className="text-sm">🎨 Full Color</span>
@@ -530,14 +578,16 @@ export default function CounterKiosk() {
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-400 mb-1.5">Sides &amp; Duplex</label>
+                <label className="block text-xs font-bold mb-1.5" style={{ color: 'var(--pms-muted)' }}>
+                  Sides &amp; Duplex
+                </label>
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     onClick={() => setSides('single')}
-                    className={`py-3 px-3 rounded-2xl font-bold text-xs flex flex-col items-center gap-1 transition-all ${
+                    className={`py-3 px-3 rounded-2xl font-bold text-xs flex flex-col items-center gap-1 transition-all cursor-pointer ${
                       sides === 'single'
-                        ? 'bg-emerald-600 text-white ring-2 ring-emerald-400'
-                        : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                        ? 'bg-emerald-600 text-white ring-2 ring-emerald-400 shadow-lg shadow-emerald-600/20'
+                        : 'pms-glass-panel hover:border-emerald-500/40'
                     }`}
                   >
                     <span>Single Side</span>
@@ -546,10 +596,10 @@ export default function CounterKiosk() {
 
                   <button
                     onClick={() => setSides('duplex')}
-                    className={`py-3 px-3 rounded-2xl font-bold text-xs flex flex-col items-center gap-1 transition-all ${
+                    className={`py-3 px-3 rounded-2xl font-bold text-xs flex flex-col items-center gap-1 transition-all cursor-pointer ${
                       sides === 'duplex'
-                        ? 'bg-emerald-600 text-white ring-2 ring-emerald-400'
-                        : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                        ? 'bg-emerald-600 text-white ring-2 ring-emerald-400 shadow-lg shadow-emerald-600/20'
+                        : 'pms-glass-panel hover:border-emerald-500/40'
                     }`}
                   >
                     <span>Both Sides</span>
@@ -562,25 +612,31 @@ export default function CounterKiosk() {
             {/* Customer Name & Copies */}
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs font-bold text-slate-400 mb-1">Your Name (Optional)</label>
+                <label className="block text-xs font-bold mb-1" style={{ color: 'var(--pms-muted)' }}>
+                  Your Name (Optional)
+                </label>
                 <input
                   type="text"
                   placeholder="e.g. Rahul, Priya"
                   value={customerName}
                   onChange={(e) => setCustomerName(e.target.value)}
-                  className="w-full px-4 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-emerald-500"
+                  className="w-full px-4 py-2.5 rounded-xl bg-white/80 dark:bg-slate-900/75 border border-slate-200 dark:border-slate-700 text-sm text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:border-emerald-500"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-400 mb-1">Number of Copies</label>
+                <label className="block text-xs font-bold mb-1" style={{ color: 'var(--pms-muted)' }}>
+                  Number of Copies
+                </label>
                 <div className="flex items-center gap-2">
                   {[1, 2, 3, 5].map((num) => (
                     <button
                       key={num}
                       onClick={() => setCopies(num)}
-                      className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition-all ${
-                        copies === num ? 'bg-emerald-600 text-white ring-2 ring-emerald-400' : 'bg-slate-800 text-slate-300'
+                      className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                        copies === num
+                          ? 'bg-emerald-600 text-white ring-2 ring-emerald-400 shadow-md shadow-emerald-600/20'
+                          : 'pms-glass-panel hover:border-emerald-500/40'
                       }`}
                     >
                       {num}
@@ -595,79 +651,129 @@ export default function CounterKiosk() {
               <button
                 onClick={handleSubmitJob}
                 disabled={!uploadedFile || isSubmitting}
-                className="w-full py-4 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white font-black text-base shadow-xl shadow-emerald-950/50 disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-3"
+                className="pms-btn-primary w-full py-4 rounded-2xl font-black text-base shadow-xl disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-3 cursor-pointer"
               >
                 <Ticket className="w-5 h-5" />
-                Submit to Print Queue (Estimated: ₹{estimatedCost})
+                <span>
+                  Submit to Print Queue (Estimated: <AnimatedNumber value={estimatedCost} prefix="₹" />)
+                </span>
               </button>
             </div>
-          </div>
+          </motion.div>
         )}
 
         {/* CUSTOMER TOKEN CONFIRMATION SCREEN */}
         {viewMode === 'customer' && completedJob && (
-          <div className="max-w-md mx-auto py-10 text-center space-y-6 bg-slate-800/80 p-8 rounded-3xl border border-slate-700 animate-in zoom-in-95 duration-200">
-            <div className="w-16 h-16 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center mx-auto">
+          <motion.div
+            initial={prefersReduced ? false : { opacity: 0, scale: 0.96 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ duration: 0.25 }}
+            className="max-w-md mx-auto py-10 text-center space-y-6 pms-glass-panel p-8 rounded-3xl"
+          >
+            <div className="w-16 h-16 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mx-auto">
               <CheckCircle2 className="w-10 h-10" />
             </div>
 
             <div>
-              <span className="text-xs uppercase tracking-widest text-emerald-400 font-extrabold">
+              <span className="text-xs uppercase tracking-widest text-emerald-600 dark:text-emerald-400 font-extrabold">
                 ORDER PLACED IN QUEUE
               </span>
-              <div className="text-7xl font-black text-white mt-2">
+              <div className="text-7xl font-black mt-2" style={{ color: 'var(--pms-ink)' }}>
                 #{String(completedJob.tokenNumber).padStart(2, '0')}
               </div>
-              <p className="text-sm text-slate-300 mt-2 font-semibold">
+              <p className="text-sm mt-2 font-semibold" style={{ color: 'var(--pms-muted)' }}>
                 {completedJob.customerName}
               </p>
             </div>
 
-            <div className="bg-slate-900/80 p-4 rounded-2xl text-xs space-y-2 border border-slate-700 text-left">
-              <div className="flex justify-between text-slate-400">
+            <div className="bg-slate-100/80 dark:bg-slate-900/75 p-4 rounded-2xl text-xs space-y-2 border border-slate-200/80 dark:border-slate-700/80 text-left">
+              <div className="flex justify-between" style={{ color: 'var(--pms-muted)' }}>
                 <span>File:</span>
-                <span className="text-white font-bold truncate max-w-[200px]">{completedJob.fileName}</span>
+                <span className="font-bold truncate max-w-[200px]" style={{ color: 'var(--pms-ink)' }}>
+                  {completedJob.fileName}
+                </span>
               </div>
-              <div className="flex justify-between text-slate-400">
+              <div className="flex justify-between" style={{ color: 'var(--pms-muted)' }}>
                 <span>Pages &amp; Mode:</span>
-                <span className="text-white font-bold">
+                <span className="font-bold" style={{ color: 'var(--pms-ink)' }}>
                   {completedJob.totalPages} Pgs • {completedJob.printType.toUpperCase()} ({completedJob.copies} copy)
                 </span>
               </div>
-              <div className="flex justify-between text-slate-400 pt-2 border-t border-slate-800">
+              <div
+                className="flex justify-between pt-2 border-t border-slate-200/80 dark:border-slate-800"
+                style={{ color: 'var(--pms-muted)' }}
+              >
                 <span>Amount Payable at Counter:</span>
-                <span className="text-emerald-400 font-black text-base">₹{completedJob.estimatedCost}</span>
+                <span className="text-emerald-600 dark:text-emerald-400 font-black text-base">
+                  ₹{completedJob.estimatedCost}
+                </span>
               </div>
             </div>
 
-            <p className="text-xs text-slate-400">
+            <p className="text-xs" style={{ color: 'var(--pms-muted)' }}>
               Please pay ₹{completedJob.estimatedCost} at the counter. Your print will be ready in 1 minute!
             </p>
 
             <button
               onClick={() => setCompletedJob(null)}
-              className="w-full py-3 rounded-xl bg-slate-700 hover:bg-slate-600 text-white font-bold text-xs transition-colors"
+              className="w-full py-3 rounded-xl pms-glass-panel hover:border-emerald-500/40 font-bold text-xs transition-colors cursor-pointer"
+              style={{ color: 'var(--pms-ink)' }}
             >
               Order Another Print
             </button>
-          </div>
+          </motion.div>
         )}
 
         {/* SHOPKEEPER VIEW */}
         {viewMode === 'shopkeeper' && (
-          <div className="space-y-6">
+          <motion.div
+            initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.25 }}
+            className="space-y-6"
+          >
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <h2 className="text-2xl font-black text-slate-900 dark:text-white">Live Print Jobs Queue</h2>
-                <p className="text-xs text-slate-500 flex items-center gap-2">
-                  <span>{queue.filter((j) => j.status === 'pending').length} pending jobs waiting to print</span>
+                <h2 className="text-2xl font-black" style={{ color: 'var(--pms-ink)' }}>
+                  Live Print Jobs Queue
+                </h2>
+                <p className="text-xs flex items-center gap-2" style={{ color: 'var(--pms-muted)' }}>
+                  <span>
+                    <AnimatedNumber value={queue.filter((j) => j.status === 'pending').length} /> pending jobs waiting to print
+                  </span>
                   <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-bold">
                     <ShieldCheck className="w-3.5 h-3.5" /> Station: {stationId} (E2EE Isolated)
                   </span>
                 </p>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="inline-flex items-center gap-1.5 pms-glass-panel px-2.5 py-1.5 rounded-xl">
+                  <input
+                    type="password"
+                    maxLength={4}
+                    inputMode="numeric"
+                    placeholder="New 4-digit PIN"
+                    value={newShopPin}
+                    onChange={(e) => setNewShopPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                    className="w-24 bg-transparent text-xs font-bold text-slate-800 dark:text-slate-100 outline-none placeholder:text-slate-400"
+                  />
+                  <button
+                    type="button"
+                    disabled={newShopPin.length !== 4}
+                    onClick={() => {
+                      try {
+                        localStorage.setItem(KIOSK_SHOP_PIN_KEY, newShopPin);
+                        setNewShopPin('');
+                        setPinSavedMsg('PIN updated');
+                        setTimeout(() => setPinSavedMsg(''), 2000);
+                      } catch {}
+                    }}
+                    className="px-2 py-1 rounded-lg text-[11px] font-bold bg-emerald-600 text-white disabled:opacity-40 cursor-pointer"
+                  >
+                    {pinSavedMsg || 'Set PIN'}
+                  </button>
+                </div>
                 <button
                   type="button"
                   onClick={() => {
@@ -676,7 +782,8 @@ export default function CounterKiosk() {
                     setCopiedTabletLink(true);
                     setTimeout(() => setCopiedTabletLink(false), 2000);
                   }}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-slate-200/80 dark:bg-slate-800 text-slate-800 dark:text-slate-200 hover:bg-emerald-50 dark:hover:bg-emerald-950/50 transition-colors"
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold pms-glass-panel hover:border-emerald-500/40 transition-colors cursor-pointer"
+                  style={{ color: 'var(--pms-ink)' }}
                 >
                   {copiedTabletLink ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
                   {copiedTabletLink ? 'Tablet Link Copied!' : 'Copy Paired Tablet Link'}
@@ -684,7 +791,7 @@ export default function CounterKiosk() {
                 {queue.length > 0 && (
                   <button
                     onClick={handleClearAll}
-                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40"
+                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 cursor-pointer"
                   >
                     <Trash2 className="w-3.5 h-3.5" /> Clear Queue
                   </button>
@@ -693,10 +800,12 @@ export default function CounterKiosk() {
             </div>
 
             {queue.length === 0 ? (
-              <div className="p-12 text-center rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-3">
-                <Ticket className="w-10 h-10 mx-auto text-slate-300 dark:text-slate-600" />
-                <h4 className="text-base font-bold text-slate-700 dark:text-slate-300">No Orders in Queue Yet</h4>
-                <p className="text-xs text-slate-400">
+              <div className="p-12 text-center rounded-3xl pms-glass-panel space-y-3">
+                <Ticket className="w-10 h-10 mx-auto text-slate-400 dark:text-slate-600" />
+                <h4 className="text-base font-bold" style={{ color: 'var(--pms-ink)' }}>
+                  No Orders in Queue Yet
+                </h4>
+                <p className="text-xs" style={{ color: 'var(--pms-muted)' }}>
                   Leave the Customer Screen open on your counter tablet. When a customer submits, it will ring and show up here instantly!
                 </p>
               </div>
@@ -705,10 +814,10 @@ export default function CounterKiosk() {
                 {queue.map((job) => (
                   <div
                     key={job.id}
-                    className={`p-5 rounded-3xl border transition-all ${
+                    className={`p-5 rounded-3xl pms-glass-panel border transition-all ${
                       job.status === 'printed'
-                        ? 'bg-slate-100 dark:bg-slate-900/40 border-slate-200 dark:border-slate-800 opacity-60'
-                        : 'bg-white dark:bg-slate-900 border-emerald-500/40 shadow-md shadow-emerald-950/10'
+                        ? 'opacity-60'
+                        : 'border-emerald-500/40 shadow-md shadow-emerald-950/10'
                     }`}
                   >
                     <div className="flex items-start justify-between mb-3">
@@ -717,8 +826,12 @@ export default function CounterKiosk() {
                           #{String(job.tokenNumber).padStart(2, '0')}
                         </span>
                         <div>
-                          <h4 className="font-bold text-sm text-slate-900 dark:text-white">{job.customerName}</h4>
-                          <span className="text-[11px] text-slate-400">{job.timestamp}</span>
+                          <h4 className="font-bold text-sm" style={{ color: 'var(--pms-ink)' }}>
+                            {job.customerName}
+                          </h4>
+                          <span className="text-[11px]" style={{ color: 'var(--pms-muted)' }}>
+                            {job.timestamp}
+                          </span>
                         </div>
                       </div>
 
@@ -727,7 +840,7 @@ export default function CounterKiosk() {
                       </span>
                     </div>
 
-                    <div className="space-y-1 text-xs text-slate-600 dark:text-slate-400 mb-4 bg-slate-50 dark:bg-slate-800/60 p-3 rounded-2xl">
+                    <div className="space-y-1 text-xs text-slate-600 dark:text-slate-400 mb-4 bg-slate-100/75 dark:bg-slate-800/60 p-3 rounded-2xl">
                       <div className="truncate font-semibold text-slate-800 dark:text-slate-200">
                         📄 {job.fileName}
                       </div>
@@ -745,13 +858,13 @@ export default function CounterKiosk() {
                     <div className="flex items-center gap-2">
                       <button
                         onClick={() => handleShopkeeperPrint(job)}
-                        className="flex-1 py-2.5 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white flex items-center justify-center gap-1.5 shadow-sm"
+                        className="pms-btn-primary flex-1 py-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm cursor-pointer"
                       >
                         <Printer className="w-3.5 h-3.5" /> Direct Print (Ctrl+P)
                       </button>
                       <button
                         onClick={() => handleDismissJob(job.id)}
-                        className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-400 hover:text-rose-600"
+                        className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-400 hover:text-rose-600 cursor-pointer"
                         title="Remove"
                       >
                         <Trash2 className="w-4 h-4" />
@@ -761,19 +874,27 @@ export default function CounterKiosk() {
                 ))}
               </div>
             )}
-          </div>
+          </motion.div>
         )}
 
         {/* PIN Verification Modal */}
         {showPinModal && (
-          <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
-            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-xs w-full text-center space-y-4 shadow-2xl">
-              <div className="w-12 h-12 rounded-2xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center mx-auto">
+          <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-md flex items-center justify-center p-4">
+            <motion.div
+              initial={prefersReduced ? false : { opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="pms-glass-panel rounded-3xl p-6 max-w-xs w-full text-center space-y-4 shadow-2xl"
+            >
+              <div className="w-12 h-12 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mx-auto">
                 <Lock className="w-6 h-6" />
               </div>
               <div>
-                <h4 className="text-base font-bold text-white">Shopkeeper PIN</h4>
-                <p className="text-xs text-slate-400">Default PIN is 1234</p>
+                <h4 className="text-base font-bold" style={{ color: 'var(--pms-ink)' }}>
+                  Shopkeeper PIN
+                </h4>
+                <p className="text-xs" style={{ color: 'var(--pms-muted)' }}>
+                  Enter your 4-digit shopkeeper counter PIN
+                </p>
               </div>
               <input
                 type="password"
@@ -781,13 +902,21 @@ export default function CounterKiosk() {
                 autoFocus
                 placeholder="PIN"
                 value={pinInput}
-                onChange={(e) => setPinInput(e.target.value)}
-                className="w-full text-center tracking-widest text-xl py-2 bg-slate-800 border border-slate-700 rounded-xl text-white outline-none focus:border-emerald-500"
+                onChange={(e) => {
+                  setPinInput(e.target.value);
+                  if (pinError) setPinError('');
+                }}
+                className="w-full text-center tracking-widest text-xl py-2 bg-white/80 dark:bg-slate-900/80 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white outline-none focus:border-emerald-500"
               />
+              {pinError && <p className="text-xs font-semibold text-rose-500 dark:text-rose-400">{pinError}</p>}
               <div className="grid grid-cols-2 gap-2">
                 <button
-                  onClick={() => setShowPinModal(false)}
-                  className="py-2.5 text-xs font-bold text-slate-400 hover:text-white"
+                  onClick={() => {
+                    setShowPinModal(false);
+                    setPinError('');
+                  }}
+                  className="py-2.5 text-xs font-bold hover:opacity-80 cursor-pointer"
+                  style={{ color: 'var(--pms-muted)' }}
                 >
                   Cancel
                 </button>
@@ -804,16 +933,17 @@ export default function CounterKiosk() {
                       setViewMode('shopkeeper');
                       setShowPinModal(false);
                       setPinInput('');
+                      setPinError('');
                     } else {
-                      alert('Incorrect PIN. Please enter your shopkeeper PIN.');
+                      setPinError('Incorrect PIN. Please enter your shopkeeper PIN.');
                     }
                   }}
-                  className="py-2.5 text-xs font-bold bg-emerald-600 rounded-xl text-white"
+                  className="pms-btn-primary py-2.5 text-xs font-bold rounded-xl cursor-pointer"
                 >
                   Unlock
                 </button>
               </div>
-            </div>
+            </motion.div>
           </div>
         )}
 

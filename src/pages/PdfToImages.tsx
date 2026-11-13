@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
-import { Images, Download, Loader2, Copy, Check, Eye, Maximize2, Archive, Sliders, Sparkles, FileText, X } from 'lucide-react';
+import { useState } from 'react';
+import { Images, Download, Loader2, Copy, Check, Maximize2, Archive, Sliders, FileText, X } from 'lucide-react';
+import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import * as pdfjsLib from 'pdfjs-dist';
 import JSZip from 'jszip';
 import '../lib/pdfWorker';
@@ -7,6 +8,8 @@ import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { useAutoRevokeUrl } from '../lib/blobUrl';
+import { AnimatedNumber, PearlScanOverlay, PearlStageSwitch } from '../components/pearl/PearlMotion';
 
 interface RenderedImage {
   pageNumber: number;
@@ -17,6 +20,8 @@ interface RenderedImage {
 }
 
 export default function PdfToImages() {
+  const prefersReduced = useReducedMotion();
+
   useSEO(
     'PDF to Images Converter Online Free — High-Res Gallery & ZIP Export | PDF Media Suite',
     'Free online tool to convert PDF pages into JPG or PNG images. Interactive visual gallery, individual image download, clipboard copy, and bulk ZIP export.'
@@ -38,6 +43,8 @@ export default function PdfToImages() {
 
   const [images, setImages] = useState<RenderedImage[]>([]);
   const [zipUrl, setZipUrl] = useState<string | null>(null);
+
+  useAutoRevokeUrl(zipUrl);
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
   const [activeLightbox, setActiveLightbox] = useState<RenderedImage | null>(null);
 
@@ -201,261 +208,325 @@ export default function PdfToImages() {
       tone="emerald"
     >
       <div className="flex flex-col items-center justify-center max-w-6xl mx-auto w-full">
-
-      {!file ? (
-        <div className="w-full max-w-2xl">
-          <FileDropzone onDrop={handleDrop} multiple={false} title="Select PDF to Convert to Images" />
-        </div>
-      ) : images.length === 0 ? (
-        <div className="w-full max-w-2xl bg-white dark:bg-slate-900 rounded-3xl shadow-xl border border-gray-200 dark:border-slate-800 p-8 space-y-6">
-          <div className="flex items-center gap-4 p-4 bg-gray-50 dark:bg-slate-800/60 rounded-2xl border border-gray-200 dark:border-slate-700">
-            <div className="w-12 h-12 bg-emerald-100 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400 rounded-xl flex items-center justify-center shrink-0">
-              <FileText className="w-6 h-6" />
+        <PearlStageSwitch
+          stageKey={!file ? 'upload' : images.length === 0 ? 'configure' : 'gallery'}
+          className="w-full flex flex-col items-center"
+        >
+          {!file ? (
+            <div className="w-full max-w-2xl">
+              <FileDropzone onDrop={handleDrop} multiple={false} title="Select PDF to Convert to Images" />
             </div>
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-bold text-gray-900 dark:text-white truncate">{file.name}</p>
-              <p className="text-xs text-gray-500 dark:text-slate-400">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
-            </div>
-          </div>
+          ) : images.length === 0 ? (
+            <div className="w-full max-w-2xl pms-glass-panel rounded-3xl p-8 space-y-6 relative overflow-hidden">
+              <PearlScanOverlay
+                active={isProcessing}
+                label={progressMsg || 'Rendering high-resolution PDF pages...'}
+              />
 
-          {/* Export Settings */}
-          <div className="space-y-4">
-            <h3 className="text-xs font-bold text-gray-700 dark:text-slate-300 uppercase tracking-wider flex items-center gap-2">
-              <Sliders className="w-3.5 h-3.5" /> Output Image Settings
-            </h3>
-
-            {/* Format Selector */}
-            <div className="grid grid-cols-3 gap-2">
-              {[
-                { id: 'jpeg', name: 'JPG (Balanced)' },
-                { id: 'png', name: 'PNG (Lossless)' },
-                { id: 'webp', name: 'WebP (Compact)' },
-              ].map((fmt) => (
-                <button
-                  key={fmt.id}
-                  type="button"
-                  onClick={() => setFormat(fmt.id as any)}
-                  className={`py-2.5 px-3 rounded-xl text-xs font-bold border transition-all ${
-                    format === fmt.id
-                      ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
-                      : 'bg-white dark:bg-slate-800 text-gray-700 dark:text-slate-300 border-gray-200 dark:border-slate-700 hover:border-gray-300'
-                  }`}
+              <div className="flex items-center gap-4 p-4 bg-white/75 dark:bg-slate-900/75 rounded-2xl border border-[var(--pms-border)]">
+                <div
+                  className="w-12 h-12 rounded-xl flex items-center justify-center shrink-0"
+                  style={{ backgroundColor: 'var(--pms-soft-blue)', color: 'var(--pms-blue)' }}
                 >
-                  {fmt.name}
-                </button>
-              ))}
-            </div>
+                  <FileText className="w-6 h-6" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-bold text-[var(--pms-ink)] truncate">{file.name}</p>
+                  <p className="text-xs text-[var(--pms-muted)]">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
+                </div>
+              </div>
 
-            {/* DPI / Scale Selector */}
-            <div className="p-4 bg-gray-50 dark:bg-slate-800/60 rounded-2xl border border-gray-200 dark:border-slate-700 space-y-3">
-              <label className="text-xs font-semibold text-gray-700 dark:text-slate-300 flex justify-between">
-                <span>Resolution / Sharpness</span>
-                <span className="font-bold text-emerald-600 dark:text-emerald-400">
-                  {scaleFactor === 1.0 ? 'Standard Web (1x)' : scaleFactor === 2.0 ? 'High-Res 200 DPI (2x)' : 'Ultra Print 300 DPI (3x)'}
-                </span>
-              </label>
-              <div className="grid grid-cols-3 gap-2">
-                {[
-                  { scale: 1.0, label: '1x Web' },
-                  { scale: 2.0, label: '2x High-Res' },
-                  { scale: 3.0, label: '3x Print (300 DPI)' },
-                ].map((item) => (
-                  <button
-                    key={item.scale}
-                    type="button"
-                    onClick={() => setScaleFactor(item.scale)}
-                    className={`py-2 px-2.5 rounded-lg text-xs font-bold border transition-all ${
-                      scaleFactor === item.scale
-                        ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-500'
-                        : 'bg-white dark:bg-slate-900 text-gray-600 dark:text-slate-400 border-gray-200 dark:border-slate-700'
-                    }`}
+              {/* Export Settings */}
+              <div className="space-y-4">
+                <h3 className="text-xs font-bold text-[var(--pms-ink)] uppercase tracking-wider flex items-center gap-2">
+                  <Sliders className="w-3.5 h-3.5" style={{ color: 'var(--pms-blue)' }} /> Output Image Settings
+                </h3>
+
+                {/* Format Selector */}
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { id: 'jpeg', name: 'JPG (Balanced)' },
+                    { id: 'png', name: 'PNG (Lossless)' },
+                    { id: 'webp', name: 'WebP (Compact)' },
+                  ].map((fmt) => {
+                    const active = format === fmt.id;
+                    return (
+                      <button
+                        key={fmt.id}
+                        type="button"
+                        onClick={() => setFormat(fmt.id as 'jpeg' | 'png' | 'webp')}
+                        style={{
+                          borderColor: active ? 'var(--pms-blue)' : 'var(--pms-border)',
+                        }}
+                        className={`relative py-2.5 px-3 rounded-xl text-xs font-bold border transition-colors ${
+                          active
+                            ? 'text-[var(--pms-ink)]'
+                            : 'bg-white/75 dark:bg-slate-900/75 text-[var(--pms-muted)] hover:text-[var(--pms-ink)]'
+                        }`}
+                      >
+                        {active && (
+                          <motion.span
+                            layoutId="pdftoimages-format-pill"
+                            transition={prefersReduced ? { duration: 0 } : { type: 'spring', stiffness: 420, damping: 32 }}
+                            className="absolute inset-0 rounded-[11px]"
+                            style={{ backgroundColor: 'var(--pms-soft-blue)' }}
+                          />
+                        )}
+                        <span className="relative z-10">{fmt.name}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* DPI / Scale Selector */}
+                <div className="p-4 bg-white/75 dark:bg-slate-900/75 rounded-2xl border border-[var(--pms-border)] space-y-3">
+                  <label className="text-xs font-semibold text-[var(--pms-ink)] flex justify-between">
+                    <span>Resolution / Sharpness</span>
+                    <span className="font-bold" style={{ color: 'var(--pms-violet)' }}>
+                      {scaleFactor === 1.0 ? 'Standard Web (1x)' : scaleFactor === 2.0 ? 'High-Res 200 DPI (2x)' : 'Ultra Print 300 DPI (3x)'}
+                    </span>
+                  </label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {[
+                      { scale: 1.0, label: '1x Web' },
+                      { scale: 2.0, label: '2x High-Res' },
+                      { scale: 3.0, label: '3x Print (300 DPI)' },
+                    ].map((item) => {
+                      const active = scaleFactor === item.scale;
+                      return (
+                        <button
+                          key={item.scale}
+                          type="button"
+                          onClick={() => setScaleFactor(item.scale)}
+                          style={{
+                            borderColor: active ? 'var(--pms-violet)' : 'var(--pms-border)',
+                          }}
+                          className={`relative py-2 px-2.5 rounded-xl text-xs font-bold border transition-colors ${
+                            active
+                              ? 'text-[var(--pms-ink)]'
+                              : 'bg-white/75 dark:bg-slate-900/75 text-[var(--pms-muted)] hover:text-[var(--pms-ink)]'
+                          }`}
+                        >
+                          {active && (
+                            <motion.span
+                              layoutId="pdftoimages-scale-pill"
+                              transition={prefersReduced ? { duration: 0 } : { type: 'spring', stiffness: 420, damping: 32 }}
+                              className="absolute inset-0 rounded-[11px]"
+                              style={{ backgroundColor: 'var(--pms-soft-lavender)' }}
+                            />
+                          )}
+                          <span className="relative z-10">{item.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              {/* Progress bar */}
+              {isProcessing && (
+                <div className="space-y-2 p-4 bg-white/80 dark:bg-slate-900/80 rounded-2xl border border-[var(--pms-border)]">
+                  <div className="flex justify-between text-xs font-semibold text-[var(--pms-ink)]">
+                    <span>{progressMsg}</span>
+                    <AnimatedNumber value={progressPercent} suffix="%" className="font-mono font-bold" />
+                  </div>
+                  <div className="w-full bg-slate-200 dark:bg-slate-800 rounded-full h-2 overflow-hidden">
+                    <motion.div
+                      className="h-2 rounded-full"
+                      style={{ backgroundColor: 'var(--pms-blue)' }}
+                      initial={false}
+                      animate={{ width: `${progressPercent}%` }}
+                      transition={prefersReduced ? { duration: 0 } : { duration: 0.25 }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Action Buttons */}
+              <div className="flex flex-col sm:flex-row gap-3 pt-2">
+                <motion.button
+                  type="button"
+                  whileHover={prefersReduced ? undefined : { scale: 1.01 }}
+                  whileTap={prefersReduced ? undefined : { scale: 0.98 }}
+                  onClick={convertPdfToImages}
+                  disabled={isProcessing}
+                  className="pms-btn-primary flex-1 py-4 font-bold rounded-2xl disabled:opacity-50 flex items-center justify-center gap-2 text-base"
+                >
+                  {isProcessing ? (
+                    <>
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                      Extracting Pages to Images...
+                    </>
+                  ) : (
+                    <>
+                      <Images className="w-5 h-5" />
+                      Convert PDF to Images Now
+                    </>
+                  )}
+                </motion.button>
+                <button
+                  type="button"
+                  onClick={resetAll}
+                  disabled={isProcessing}
+                  className="px-6 py-4 bg-white/75 dark:bg-slate-900/75 hover:bg-white dark:hover:bg-slate-800 border border-[var(--pms-border)] text-[var(--pms-ink)] font-semibold rounded-2xl transition-all text-sm disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            /* Interactive Gallery of Rendered Images */
+            <div className="w-full space-y-6">
+              {/* Top Actions Bar */}
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-4 p-5 pms-glass-panel rounded-3xl">
+                <div className="flex items-center gap-3">
+                  <div
+                    className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
+                    style={{ backgroundColor: 'var(--pms-soft-mint)', color: 'var(--pms-ink)' }}
                   >
-                    {item.label}
+                    <Images className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-sm text-[var(--pms-ink)] truncate max-w-sm">{file.name}</h3>
+                    <p className="text-xs text-[var(--pms-muted)]">
+                      <AnimatedNumber value={images.length} /> Image(s) Rendered in {format.toUpperCase()}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  {zipUrl && (
+                    <motion.a
+                      whileHover={prefersReduced ? undefined : { scale: 1.02 }}
+                      whileTap={prefersReduced ? undefined : { scale: 0.98 }}
+                      href={zipUrl}
+                      download={`${file.name.replace(/\.[^/.]+$/, '')}_all_images.zip`}
+                      className="pms-btn-primary inline-flex items-center gap-1.5 px-4 py-2.5 font-bold rounded-xl text-xs"
+                    >
+                      <Archive className="w-4 h-4" />
+                      Download All ({images.length}) as ZIP
+                    </motion.a>
+                  )}
+                  <button
+                    type="button"
+                    onClick={resetAll}
+                    className="px-3.5 py-2.5 text-xs bg-white/75 dark:bg-slate-900/75 hover:bg-white dark:hover:bg-slate-900 border border-[var(--pms-border)] rounded-xl text-[var(--pms-ink)] font-semibold transition-colors"
+                  >
+                    Convert Another
                   </button>
+                </div>
+              </div>
+
+              {/* Images Grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                {images.map((img, idx) => (
+                  <motion.div
+                    key={img.pageNumber}
+                    initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={prefersReduced ? { duration: 0 } : { duration: 0.22, delay: Math.min(idx * 0.03, 0.24) }}
+                    className="pms-glass-panel rounded-2xl overflow-hidden flex flex-col group hover:shadow-md transition-shadow"
+                  >
+                    {/* Image Container with Hover Actions */}
+                    <div className="relative aspect-[3/4] bg-white overflow-hidden flex items-center justify-center p-2">
+                      <img
+                        src={img.dataUrl}
+                        alt={`Page ${img.pageNumber}`}
+                        className="w-full h-full object-contain"
+                      />
+
+                      {/* Lightbox Trigger Overlay */}
+                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setActiveLightbox(img)}
+                          title="Zoom Lightbox"
+                          className="w-9 h-9 rounded-full bg-white/95 text-slate-900 flex items-center justify-center hover:scale-110 transition-transform shadow-md"
+                        >
+                          <Maximize2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Card Footer Actions */}
+                    <div className="p-3 border-t border-[var(--pms-border)] bg-white/75 dark:bg-slate-900/75 flex items-center justify-between text-xs">
+                      <div>
+                        <span className="font-bold text-[var(--pms-ink)]">Page {img.pageNumber}</span>
+                        <span className="text-[10px] text-[var(--pms-muted)] block">{img.width} × {img.height}px</span>
+                      </div>
+
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => copyToClipboard(img, idx)}
+                          title="Copy to Clipboard"
+                          className="p-1.5 rounded-lg text-[var(--pms-muted)] hover:text-[var(--pms-ink)] hover:bg-slate-200/70 dark:hover:bg-slate-800 transition-colors"
+                        >
+                          {copiedIdx === idx ? <Check className="w-4 h-4 text-emerald-500" /> : <Copy className="w-4 h-4" />}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => downloadSingleImage(img)}
+                          title="Download Image"
+                          className="p-1.5 rounded-lg text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 transition-colors font-bold"
+                        >
+                          <Download className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  </motion.div>
                 ))}
               </div>
-            </div>
-          </div>
 
-          {/* Progress bar */}
-          {isProcessing && (
-            <div className="space-y-2 p-4 bg-emerald-50 dark:bg-emerald-950/20 rounded-2xl border border-emerald-200 dark:border-emerald-900/50">
-              <div className="flex justify-between text-xs font-semibold text-emerald-900 dark:text-emerald-300">
-                <span>{progressMsg}</span>
-                <span>{progressPercent}%</span>
-              </div>
-              <div className="w-full bg-emerald-200 dark:bg-emerald-900/40 rounded-full h-2 overflow-hidden">
-                <div
-                  className="bg-emerald-600 h-2 rounded-full transition-all duration-300"
-                  style={{ width: `${progressPercent}%` }}
-                />
-              </div>
-            </div>
-          )}
-
-          {/* Action Buttons */}
-          <div className="flex flex-col sm:flex-row gap-3 pt-2">
-            <button
-              onClick={convertPdfToImages}
-              disabled={isProcessing}
-              className="flex-1 py-4 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-2xl transition-all shadow-md hover:shadow-lg disabled:opacity-50 flex items-center justify-center gap-2 text-base"
-            >
-              {isProcessing ? (
-                <>
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                  Extracting Pages to Images...
-                </>
-              ) : (
-                <>
-                  <Images className="w-5 h-5" />
-                  Convert PDF to Images Now
-                </>
-              )}
-            </button>
-            <button
-              onClick={resetAll}
-              disabled={isProcessing}
-              className="px-6 py-4 bg-gray-100 hover:bg-gray-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-gray-700 dark:text-slate-300 font-semibold rounded-2xl transition-all text-sm"
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      ) : (
-        /* Interactive Gallery of Rendered Images */
-        <div className="w-full space-y-6">
-          {/* Top Actions Bar */}
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-4 p-5 bg-white dark:bg-slate-900 rounded-3xl border border-gray-200 dark:border-slate-800 shadow-sm">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-emerald-100 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400 rounded-xl flex items-center justify-center shrink-0">
-                <Images className="w-5 h-5" />
-              </div>
-              <div>
-                <h3 className="font-bold text-sm text-gray-900 dark:text-white truncate max-w-sm">{file.name}</h3>
-                <p className="text-xs text-gray-500 dark:text-slate-400">
-                  {images.length} Image(s) Rendered in {format.toUpperCase()}
-                </p>
-              </div>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2">
-              {zipUrl && (
-                <a
-                  href={zipUrl}
-                  download={`${file.name.replace(/\.[^/.]+$/, '')}_all_images.zip`}
-                  className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs transition-colors shadow-xs"
-                >
-                  <Archive className="w-4 h-4" />
-                  Download All ({images.length}) as ZIP
-                </a>
-              )}
-              <button
-                type="button"
-                onClick={resetAll}
-                className="px-3.5 py-2.5 text-xs text-gray-500 hover:text-gray-900 dark:text-slate-400 dark:hover:text-white font-semibold"
-              >
-                Convert Another
-              </button>
-            </div>
-          </div>
-
-          {/* Images Grid */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-            {images.map((img, idx) => (
-              <div
-                key={img.pageNumber}
-                className="bg-white dark:bg-slate-900 rounded-2xl border border-gray-200 dark:border-slate-800 shadow-xs overflow-hidden flex flex-col group hover:shadow-md transition-all"
-              >
-                {/* Image Container with Hover Actions */}
-                <div className="relative aspect-[3/4] bg-gray-100 dark:bg-slate-800 overflow-hidden flex items-center justify-center">
-                  <img
-                    src={img.dataUrl}
-                    alt={`Page ${img.pageNumber}`}
-                    className="w-full h-full object-contain"
-                  />
-
-                  {/* Lightbox Trigger Overlay */}
-                  <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setActiveLightbox(img)}
-                      title="Zoom Lightbox"
-                      className="w-9 h-9 rounded-full bg-white/90 text-gray-900 flex items-center justify-center hover:scale-110 transition-transform shadow-md"
-                    >
-                      <Maximize2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-
-                {/* Card Footer Actions */}
-                <div className="p-3 border-t border-gray-100 dark:border-slate-800 flex items-center justify-between text-xs">
-                  <div>
-                    <span className="font-bold text-gray-800 dark:text-slate-200">Page {img.pageNumber}</span>
-                    <span className="text-[10px] text-gray-400 block">{img.width} × {img.height}px</span>
-                  </div>
-
-                  <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      onClick={() => copyToClipboard(img, idx)}
-                      title="Copy to Clipboard"
-                      className="p-1.5 rounded-lg text-gray-600 dark:text-slate-400 hover:bg-gray-100 dark:hover:bg-slate-800 transition-colors"
-                    >
-                      {copiedIdx === idx ? <Check className="w-4 h-4 text-emerald-500" /> : <Copy className="w-4 h-4" />}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => downloadSingleImage(img)}
-                      title="Download Image"
-                      className="p-1.5 rounded-lg text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 transition-colors font-bold"
-                    >
-                      <Download className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {/* Full Screen Lightbox Modal */}
-          {activeLightbox && (
-            <div
-              onClick={() => setActiveLightbox(null)}
-              className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4"
-            >
-              <div
-                onClick={(e) => e.stopPropagation()}
-                className="relative max-w-4xl max-h-[90vh] bg-slate-900 rounded-3xl p-4 flex flex-col items-center"
-              >
-                <div className="w-full flex items-center justify-between mb-2 px-2 text-white text-xs">
-                  <span className="font-bold">Page {activeLightbox.pageNumber} ({activeLightbox.width} × {activeLightbox.height} px)</span>
-                  <button
-                    type="button"
+              {/* Full Screen Lightbox Modal */}
+              <AnimatePresence>
+                {activeLightbox && (
+                  <motion.div
+                    initial={prefersReduced ? false : { opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={prefersReduced ? undefined : { opacity: 0 }}
                     onClick={() => setActiveLightbox(null)}
-                    className="p-1 rounded-full hover:bg-slate-800 text-gray-300"
+                    className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4"
                   >
-                    <X className="w-5 h-5" />
-                  </button>
-                </div>
-                <img
-                  src={activeLightbox.dataUrl}
-                  alt={`Page ${activeLightbox.pageNumber} Preview`}
-                  className="max-h-[75vh] object-contain rounded-xl"
-                />
-                <div className="mt-3 flex gap-3">
-                  <button
-                    type="button"
-                    onClick={() => downloadSingleImage(activeLightbox)}
-                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs flex items-center gap-1.5"
-                  >
-                    <Download className="w-4 h-4" /> Download Image
-                  </button>
-                </div>
-              </div>
+                    <motion.div
+                      initial={prefersReduced ? false : { opacity: 0, scale: 0.96 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={prefersReduced ? undefined : { opacity: 0, scale: 0.96 }}
+                      transition={prefersReduced ? { duration: 0 } : { duration: 0.2 }}
+                      onClick={(e) => e.stopPropagation()}
+                      className="relative max-w-4xl max-h-[90vh] bg-slate-900 border border-slate-700 rounded-3xl p-4 flex flex-col items-center shadow-2xl"
+                    >
+                      <div className="w-full flex items-center justify-between mb-2 px-2 text-white text-xs">
+                        <span className="font-bold">Page {activeLightbox.pageNumber} ({activeLightbox.width} × {activeLightbox.height} px)</span>
+                        <button
+                          type="button"
+                          onClick={() => setActiveLightbox(null)}
+                          className="p-1 rounded-full hover:bg-slate-800 text-gray-300"
+                        >
+                          <X className="w-5 h-5" />
+                        </button>
+                      </div>
+                      <img
+                        src={activeLightbox.dataUrl}
+                        alt={`Page ${activeLightbox.pageNumber} Preview`}
+                        className="max-h-[75vh] object-contain rounded-xl bg-white"
+                      />
+                      <div className="mt-3 flex gap-3">
+                        <button
+                          type="button"
+                          onClick={() => downloadSingleImage(activeLightbox)}
+                          className="pms-btn-primary px-4 py-2 font-bold rounded-xl text-xs flex items-center gap-1.5"
+                        >
+                          <Download className="w-4 h-4" /> Download Image
+                        </button>
+                      </div>
+                    </motion.div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
           )}
-        </div>
-      )}
+        </PearlStageSwitch>
       </div>
     </ToolWorkspaceShell>
   );

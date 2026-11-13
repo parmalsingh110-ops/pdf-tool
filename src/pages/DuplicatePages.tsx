@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
-import { Copy, Loader2, Trash2, Check, Download, ExternalLink, Eye, CheckCircle2, AlertTriangle, ShieldCheck, FileText, Sparkles } from 'lucide-react';
+import { useState } from 'react';
+import { motion, useReducedMotion } from 'motion/react';
+import { Copy, Loader2, Trash2, Download, ExternalLink, Eye, CheckCircle2, ShieldCheck, FileText, Sparkles } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
 import { PDFDocument } from 'pdf-lib';
 import '../lib/pdfWorker';
@@ -7,6 +8,8 @@ import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { AnimatedNumber, PearlScanOverlay, PearlStageSwitch } from '../components/pearl/PearlMotion';
+import { useAutoRevokeUrl, toArrayBufferBytes } from '../lib/blobUrl';
 
 interface PageInfo {
   index: number; // 1-based
@@ -43,7 +46,10 @@ export default function DuplicatePages() {
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [resultUrl, setResultUrl] = useState<string | null>(null);
+
+  useAutoRevokeUrl(resultUrl);
   const [showPreview, setShowPreview] = useState(true);
+  const prefersReduced = useReducedMotion();
 
   const handleDrop = async (files: File[]) => {
     if (!files[0]) return;
@@ -139,7 +145,7 @@ export default function DuplicatePages() {
       copied.forEach((p) => doc.addPage(p));
 
       const bytes = await doc.save();
-      const blob = new Blob([bytes as any], { type: 'application/pdf' });
+      const blob = new Blob([toArrayBufferBytes(bytes)], { type: 'application/pdf' });
       setResultUrl(URL.createObjectURL(blob));
     } catch (e: any) {
       console.error('De-duplication failed:', e);
@@ -170,28 +176,34 @@ export default function DuplicatePages() {
     >
       <div className="flex flex-col items-center justify-center max-w-6xl mx-auto w-full">
 
+      <PearlStageSwitch
+        stageKey={!file ? 'upload' : loading ? 'loading' : !resultUrl ? 'configure' : 'result'}
+        className="w-full"
+      >
       {!file ? (
-        <div className="w-full max-w-2xl">
+        <div className="w-full max-w-2xl mx-auto">
           <FileDropzone onDrop={handleDrop} multiple={false} title="Select PDF to Find Duplicates" />
         </div>
       ) : loading ? (
-        <div className="w-full max-w-2xl bg-white dark:bg-slate-900 rounded-3xl p-12 border border-gray-200 dark:border-slate-800 text-center space-y-4">
-          <Loader2 className="w-10 h-10 animate-spin text-rose-600 mx-auto" />
+        <div className="relative overflow-hidden w-full max-w-2xl mx-auto pms-glass-panel rounded-3xl p-12 text-center space-y-4">
+          <PearlScanOverlay active label="Computing perceptual pixel fingerprints..." />
+          <Loader2 className="w-10 h-10 animate-spin text-[var(--pms-rose)] mx-auto" />
           <h3 className="text-lg font-bold text-gray-900 dark:text-white">Scanning Document for Duplicates...</h3>
           <p className="text-sm text-gray-500 dark:text-slate-400">Computing perceptual pixel fingerprints across all pages</p>
         </div>
       ) : !resultUrl ? (
-        <div className="w-full bg-white dark:bg-slate-900 rounded-3xl shadow-xl border border-gray-200 dark:border-slate-800 p-6 md:p-8 space-y-6">
+        <div className="relative overflow-hidden w-full pms-glass-panel rounded-3xl p-6 md:p-8 space-y-6">
+          <PearlScanOverlay active={busy} label={`Removing ${markedCount} duplicate page(s)...`} />
           {/* Top Status Banner */}
-          <div className="flex flex-col md:flex-row items-center justify-between gap-4 p-5 bg-gray-50 dark:bg-slate-800/60 rounded-2xl border border-gray-200 dark:border-slate-700">
+          <div className="flex flex-col md:flex-row items-center justify-between gap-4 p-5 bg-white/75 dark:bg-slate-900/75 rounded-2xl border border-[var(--pms-border)]">
             <div className="flex items-center gap-4 min-w-0 w-full md:w-auto">
-              <div className="w-12 h-12 bg-rose-100 dark:bg-rose-950/50 text-rose-600 dark:text-rose-400 rounded-xl flex items-center justify-center shrink-0">
+              <div className="w-12 h-12 bg-[var(--pms-soft-rose)] text-[var(--pms-rose)] border border-[var(--pms-border)] rounded-xl flex items-center justify-center shrink-0">
                 <FileText className="w-6 h-6" />
               </div>
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-bold text-gray-900 dark:text-white truncate">{file.name}</p>
-                <p className="text-xs text-gray-500 dark:text-slate-400">
-                  {pages.length} total pages • Found <strong className="text-rose-600 dark:text-rose-400">{totalDuplicates} duplicate page(s)</strong>
+                <p className="text-xs text-gray-500 dark:text-slate-400 tabular-nums">
+                  {pages.length} total pages • Found <strong className="text-[var(--pms-rose)]">{totalDuplicates} duplicate page(s)</strong>
                 </p>
               </div>
             </div>
@@ -201,20 +213,20 @@ export default function DuplicatePages() {
                 <button
                   type="button"
                   onClick={selectAllDuplicates}
-                  className="px-3 py-1.5 bg-rose-100 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 font-bold rounded-lg text-xs"
+                  className="px-3.5 py-1.5 bg-[var(--pms-soft-rose)] text-rose-800 dark:text-rose-200 border border-[var(--pms-border)] font-bold rounded-xl text-xs hover:brightness-95 transition-all"
                 >
                   Select All Duplicates
                 </button>
                 <button
                   type="button"
                   onClick={deselectAllDuplicates}
-                  className="px-3 py-1.5 bg-gray-200 dark:bg-slate-700 text-gray-700 dark:text-slate-300 font-semibold rounded-lg text-xs"
+                  className="px-3.5 py-1.5 bg-white/80 dark:bg-slate-800/80 border border-[var(--pms-border)] text-gray-700 dark:text-slate-200 font-semibold rounded-xl text-xs hover:bg-white dark:hover:bg-slate-700 transition-colors"
                 >
                   Keep All
                 </button>
               </div>
             ) : (
-              <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/30 px-3 py-1.5 rounded-xl border border-emerald-200 dark:border-emerald-800">
+              <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-700 dark:text-emerald-300 bg-[var(--pms-soft-mint)] px-3.5 py-1.5 rounded-xl border border-emerald-300/60 dark:border-emerald-800">
                 <ShieldCheck className="w-4 h-4" /> 100% Unique Pages — No Duplicates
               </div>
             )}
@@ -224,7 +236,7 @@ export default function DuplicatePages() {
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-bold text-gray-900 dark:text-white uppercase tracking-wider flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-rose-500" />
+                <Sparkles className="w-4 h-4 text-[var(--pms-rose)]" />
                 Page Inventory & Duplicate Status
               </h3>
               <span className="text-xs text-gray-500 dark:text-slate-400">
@@ -232,20 +244,20 @@ export default function DuplicatePages() {
               </span>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-3 max-h-[440px] overflow-y-auto p-4 bg-gray-50 dark:bg-slate-950 rounded-2xl border border-gray-200 dark:border-slate-800 shadow-inner">
+            <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-3 max-h-[440px] overflow-y-auto p-4 bg-white/55 dark:bg-slate-950/60 rounded-2xl border border-[var(--pms-border)] shadow-inner">
               {pages.map((p, i) => (
                 <div
                   key={p.index}
                   onClick={() => p.isDuplicate && toggleRemoval(i)}
-                  className={`group relative rounded-xl overflow-hidden border-2 transition-all p-1.5 bg-white dark:bg-slate-900 flex flex-col ${
+                  className={`group relative rounded-xl overflow-hidden border-2 transition-all p-1.5 bg-white/85 dark:bg-slate-900/85 flex flex-col ${
                     p.markedForRemoval
-                      ? 'border-rose-500 ring-2 ring-rose-200 dark:ring-rose-900/60 shadow-md cursor-pointer'
+                      ? 'border-rose-500 ring-2 ring-rose-200/70 dark:ring-rose-900/60 shadow-md cursor-pointer'
                       : p.isDuplicate
                       ? 'border-amber-300 dark:border-amber-700 cursor-pointer'
-                      : 'border-gray-200 dark:border-slate-800'
+                      : 'border-[var(--pms-border)]'
                   }`}
                 >
-                  <div className="relative aspect-[3/4] w-full overflow-hidden rounded bg-gray-100 dark:bg-slate-800 flex items-center justify-center">
+                  <div className="relative aspect-[3/4] w-full overflow-hidden rounded-lg bg-white border border-gray-200 flex items-center justify-center">
                     <img
                       src={p.url}
                       alt={`Page ${p.index}`}
@@ -266,7 +278,7 @@ export default function DuplicatePages() {
                     {p.isDuplicate ? (
                       <span className={`text-[10px] font-bold px-1 py-0.5 rounded ${
                         p.markedForRemoval
-                          ? 'bg-rose-100 dark:bg-rose-900/40 text-rose-700 dark:text-rose-300'
+                          ? 'bg-[var(--pms-soft-rose)] text-rose-700 dark:text-rose-300'
                           : 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300'
                       }`}>
                         {p.markedForRemoval ? 'Delete' : `Clone of P.${p.duplicateOf}`}
@@ -282,11 +294,14 @@ export default function DuplicatePages() {
 
           {/* Action Footer */}
           <div className="flex flex-col sm:flex-row gap-3 pt-2">
-            <button
+            <motion.button
+              whileHover={prefersReduced || busy || markedCount === 0 ? undefined : { scale: 1.01 }}
+              whileTap={prefersReduced || busy || markedCount === 0 ? undefined : { scale: 0.99 }}
               onClick={removeDuplicates}
               disabled={busy || markedCount === 0}
-              className="flex-1 py-4 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-2xl transition-all shadow-md hover:shadow-lg disabled:opacity-50 flex items-center justify-center gap-2 text-base"
+              className="pms-btn-primary relative overflow-hidden flex-1 py-4 font-bold rounded-2xl shadow-md hover:shadow-lg disabled:opacity-50 flex items-center justify-center gap-2 text-base"
             >
+              <span className="pms-shimmer pointer-events-none" />
               {busy ? (
                 <>
                   <Loader2 className="w-5 h-5 animate-spin" />
@@ -300,11 +315,11 @@ export default function DuplicatePages() {
                     : 'No Duplicates Selected'}
                 </>
               )}
-            </button>
+            </motion.button>
             <button
               onClick={resetAll}
               disabled={busy}
-              className="px-6 py-4 bg-gray-100 hover:bg-gray-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-gray-700 dark:text-slate-300 font-semibold rounded-2xl transition-all text-sm"
+              className="px-6 py-4 bg-white/80 hover:bg-white dark:bg-slate-800/80 dark:hover:bg-slate-700 border border-[var(--pms-border)] text-gray-700 dark:text-slate-200 font-semibold rounded-2xl transition-all text-sm"
             >
               Cancel
             </button>
@@ -312,32 +327,40 @@ export default function DuplicatePages() {
         </div>
       ) : (
         /* Success Screen with Live Preview */
-        <div className="w-full max-w-4xl bg-white dark:bg-slate-900 rounded-3xl shadow-xl border border-gray-200 dark:border-slate-800 p-8 text-center space-y-6">
-          <div className="p-8 bg-green-50 dark:bg-green-950/30 rounded-3xl border border-green-200 dark:border-green-800">
-            <div className="w-16 h-16 bg-green-100 dark:bg-green-900/50 text-green-600 dark:text-green-400 rounded-full flex items-center justify-center mx-auto mb-4">
+        <div className="w-full max-w-4xl mx-auto pms-glass-panel rounded-3xl p-8 text-center space-y-6">
+          <div className="p-8 rounded-3xl bg-gradient-to-br from-emerald-500/12 via-white/75 to-teal-500/12 dark:from-emerald-950/50 dark:via-slate-900/80 dark:to-teal-950/40 border border-emerald-200/80 dark:border-emerald-800/60">
+            <motion.div
+              initial={prefersReduced ? false : { scale: 0.6, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              transition={{ type: 'spring', stiffness: 420, damping: 24 }}
+              className="w-16 h-16 bg-gradient-to-br from-emerald-400 to-teal-500 text-white rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-emerald-500/25"
+            >
               <CheckCircle2 className="w-8 h-8" />
-            </div>
-            <h3 className="text-2xl md:text-3xl font-extrabold text-green-900 dark:text-green-200 mb-2">
+            </motion.div>
+            <h3 className="text-2xl md:text-3xl font-extrabold text-gray-900 dark:text-white mb-2">
               Duplicates Removed Successfully!
             </h3>
-            <p className="text-green-700 dark:text-green-400 mb-6 text-sm max-w-md mx-auto">
-              Removed {markedCount} duplicate page(s). Your clean document now has {remainingCount} unique page(s).
+            <p className="text-gray-600 dark:text-slate-300 mb-6 text-sm max-w-md mx-auto tabular-nums">
+              Removed <AnimatedNumber value={markedCount} /> duplicate page(s). Your clean document now has <AnimatedNumber value={remainingCount} /> unique page(s).
             </p>
 
             <div className="flex flex-wrap items-center justify-center gap-3">
-              <a
+              <motion.a
+                whileHover={prefersReduced ? undefined : { scale: 1.02 }}
+                whileTap={prefersReduced ? undefined : { scale: 0.98 }}
                 href={resultUrl}
                 download={`deduped_${file.name}`}
-                className="inline-flex items-center justify-center gap-2 px-8 py-3.5 bg-green-600 hover:bg-green-700 text-white font-bold rounded-2xl transition-all shadow-md hover:shadow-lg text-base"
+                className="pms-btn-primary relative overflow-hidden inline-flex items-center justify-center gap-2 px-8 py-3.5 font-bold rounded-2xl shadow-md hover:shadow-lg text-base"
               >
+                <span className="pms-shimmer pointer-events-none" />
                 <Download className="w-5 h-5" />
                 Download Clean PDF
-              </a>
+              </motion.a>
               <a
                 href={resultUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center justify-center gap-2 px-5 py-3.5 bg-white dark:bg-slate-800 hover:bg-gray-50 dark:hover:bg-slate-700 text-gray-700 dark:text-slate-200 font-semibold rounded-2xl border border-gray-300 dark:border-slate-700 transition-all text-sm shadow-xs"
+                className="inline-flex items-center justify-center gap-2 px-5 py-3.5 bg-white/85 dark:bg-slate-800/85 hover:bg-white dark:hover:bg-slate-700 text-gray-700 dark:text-slate-200 font-semibold rounded-2xl border border-[var(--pms-border)] transition-all text-sm shadow-xs"
               >
                 <ExternalLink className="w-4 h-4" />
                 Open in New Tab
@@ -345,7 +368,7 @@ export default function DuplicatePages() {
               <button
                 type="button"
                 onClick={() => setShowPreview(!showPreview)}
-                className="inline-flex items-center justify-center gap-2 px-5 py-3.5 bg-white dark:bg-slate-800 hover:bg-gray-50 dark:hover:bg-slate-700 text-gray-700 dark:text-slate-200 font-semibold rounded-2xl border border-gray-300 dark:border-slate-700 transition-all text-sm shadow-xs"
+                className="inline-flex items-center justify-center gap-2 px-5 py-3.5 bg-white/85 dark:bg-slate-800/85 hover:bg-white dark:hover:bg-slate-700 text-gray-700 dark:text-slate-200 font-semibold rounded-2xl border border-[var(--pms-border)] transition-all text-sm shadow-xs"
               >
                 <Eye className="w-4 h-4" />
                 {showPreview ? 'Hide Preview' : 'Show Live Preview'}
@@ -357,7 +380,7 @@ export default function DuplicatePages() {
                 <p className="text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wider mb-2">
                   Deduplicated PDF Output Preview
                 </p>
-                <div className="w-full h-[550px] rounded-2xl border border-gray-200 dark:border-slate-700 overflow-hidden bg-gray-100 dark:bg-slate-950 shadow-inner">
+                <div className="w-full h-[550px] rounded-2xl border border-[var(--pms-border)] overflow-hidden bg-white dark:bg-slate-950 shadow-inner">
                   <iframe
                     src={resultUrl}
                     title="Deduplicated PDF Preview"
@@ -377,6 +400,7 @@ export default function DuplicatePages() {
           </button>
         </div>
       )}
+      </PearlStageSwitch>
       </div>
     </ToolWorkspaceShell>
   );

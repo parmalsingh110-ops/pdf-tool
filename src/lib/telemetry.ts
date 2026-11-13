@@ -12,7 +12,7 @@
 
 import { isChunkLoadError, handleChunkLoadFailure } from './chunkReloader';
 import { isDomMutationError } from './domResilience';
-import { isAllowedBackendOverride } from './privacy';
+import { isAllowedBackendOverride, sanitizeSensitiveText } from './privacy';
 
 export interface ToolFeedbackPayload {
   toolPath: string;
@@ -310,7 +310,15 @@ export async function reportToolError(payload: ToolErrorPayload): Promise<void> 
       };
     }
 
-    enqueueItem('error', { ...payload, fileInfo: safeFileInfo });
+    const cleanMessage = sanitizeSensitiveText(payload.errorMessage || 'Unknown error', 800);
+    const cleanStack = payload.errorStack ? sanitizeSensitiveText(payload.errorStack, 3000) : undefined;
+
+    enqueueItem('error', {
+      ...payload,
+      errorMessage: cleanMessage,
+      errorStack: cleanStack,
+      fileInfo: safeFileInfo,
+    });
   } catch (err) {
     console.debug('[Telemetry] reportToolError error', err);
   }
@@ -336,7 +344,8 @@ export function initGlobalErrorLogging(): void {
 
   // 1. Listen for unhandled runtime errors
   window.addEventListener('error', (event) => {
-    if (!event.filename || event.filename.includes('chrome-extension')) return;
+    const srcFile = event.filename || '';
+    if (srcFile.includes('chrome-extension://') || srcFile.includes('moz-extension://')) return;
 
     // Check for stale chunk load errors (post-deployment cache mismatch)
     if (isChunkLoadError(event.error) || isChunkLoadError(event.message)) {

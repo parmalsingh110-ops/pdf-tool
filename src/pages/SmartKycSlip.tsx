@@ -1,22 +1,16 @@
 import React, { useState, useRef } from 'react';
 import {
   ScanLine,
-  Upload,
   Copy,
   Check,
   Printer,
-  User,
-  CreditCard,
-  MapPin,
-  Calendar,
-  FileText,
-  Sparkles,
-  Building2,
-  CheckCircle2,
 } from 'lucide-react';
+import { motion, AnimatePresence, useReducedMotion } from 'motion/react';
 import { useSEO } from '../hooks/useSEO';
 import { usePageSEO } from '../lib/usePageSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { AnimatedNumber, PearlScanOverlay } from '../components/pearl/PearlMotion';
 import { escapeHtml } from '../lib/utils';
 
 interface KycData {
@@ -31,6 +25,8 @@ interface KycData {
 }
 
 export default function SmartKycSlip() {
+  const prefersReduced = useReducedMotion();
+
   useSEO(
     'Smart KYC OCR & Customer Slip Generator — Aadhaar, PAN & Voter Card | PDF Media Suite',
     'Extract customer details from Aadhaar, PAN, and Voter cards in 1-second. 1-click copy for portal forms and generate printable customer acknowledgement slips.'
@@ -63,10 +59,18 @@ export default function SmartKycSlip() {
   const [shopName, setShopName] = useState<string>('SHARMA E-MITRA & CSC CENTER');
   const [serviceName, setServiceName] = useState<string>('Scholarship Application / Portal Form');
   const [feesCharged, setFeesCharged] = useState<number>(50);
-  const [tokenNo, setTokenNo] = useState<string>(`CSC-${Math.floor(1000 + Math.random() * 9000)}`);
-  const [showSlipPreview, setShowSlipPreview] = useState<boolean>(false);
+  const [tokenNo] = useState<string>(`CSC-${Math.floor(1000 + Math.random() * 9000)}`);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const filledFieldCount = [
+    kycData.fullName,
+    kycData.fatherName,
+    kycData.dob,
+    kycData.gender,
+    kycData.idNumber,
+    kycData.address,
+  ].filter((v) => Boolean(v && v.trim())).length;
 
   const handleCopy = (text: string, fieldName: string) => {
     if (!text) return;
@@ -270,94 +274,110 @@ export default function SmartKycSlip() {
   };
 
   return (
-    <div className="w-full min-h-screen bg-slate-50 dark:bg-slate-950 py-10 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-5xl mx-auto space-y-8">
-        {/* Header */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-50 dark:bg-cyan-950/60 border border-cyan-200 dark:border-cyan-800 text-xs font-bold text-cyan-700 dark:text-cyan-300 mb-2">
-              <ScanLine className="w-3.5 h-3.5" /> Instant KYC OCR &amp; Customer Receipt Slip
-            </div>
-            <h1 className="text-3xl font-extrabold text-slate-900 dark:text-white">
-              Smart KYC OCR &amp; Application Receipt Slip
-            </h1>
-            <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
-              Drop customer Aadhaar, PAN, or Voter ID to auto-read all details. 1-click copy into portal forms and generate a branded customer receipt slip.
-            </p>
-          </div>
-        </div>
-
+    <ToolWorkspaceShell
+      title="Smart KYC OCR & Application Receipt Slip"
+      subtitle="Drop customer Aadhaar, PAN, or Voter ID to auto-read all details. 1-click copy into portal forms and generate a branded customer receipt slip."
+      categoryLabel="Instant KYC OCR & Customer Receipt Slip"
+      icon={ScanLine}
+      microVariant="ocr"
+      tone="sky"
+      trustNote="Local Tesseract OCR engine · Citizen ID cards stay on your device"
+    >
+      <div className="space-y-8">
         {/* Upload State */}
         {!imagePreview && (
-          <div
-            onClick={() => fileInputRef.current?.click()}
-            className="border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-3xl p-12 text-center bg-white dark:bg-slate-900 hover:border-cyan-500 hover:bg-cyan-50/20 dark:hover:bg-cyan-950/20 cursor-pointer transition-all group"
+          <motion.div
+            initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="max-w-3xl mx-auto pms-glass-panel rounded-3xl p-4"
           >
-            <input
-              type="file"
-              ref={fileInputRef}
-              onChange={(e) => e.target.files?.[0] && handleFileUpload(e.target.files[0])}
-              accept="image/*,application/pdf"
-              className="hidden"
-            />
-            <div className="w-16 h-16 rounded-2xl bg-cyan-50 dark:bg-cyan-950/50 text-cyan-600 dark:text-cyan-400 flex items-center justify-center mx-auto mb-4 group-hover:scale-110 transition-transform">
-              <ScanLine className="w-8 h-8" />
+            <div
+              onClick={() => fileInputRef.current?.click()}
+              className="border-2 border-dashed border-[var(--pms-border-strong)] hover:border-sky-500 rounded-2xl p-12 text-center bg-[var(--pms-white)] cursor-pointer transition-all group"
+            >
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={(e) => e.target.files?.[0] && handleFileUpload(e.target.files[0])}
+                accept="image/*,application/pdf"
+                className="hidden"
+              />
+              <div
+                className="w-16 h-16 rounded-2xl border border-[var(--pms-border)] text-sky-600 dark:text-sky-400 flex items-center justify-center mx-auto mb-4 group-hover:scale-105 transition-transform"
+                style={{ background: 'var(--pms-soft-blue)' }}
+              >
+                <ScanLine className="w-8 h-8" />
+              </div>
+              <h3 className="text-xl font-bold text-[var(--pms-ink)] mb-2">
+                Drop Aadhaar Card, PAN Card, or Voter ID Photo
+              </h3>
+              <p className="text-sm text-[var(--pms-muted)] max-w-md mx-auto">
+                Scans customer photo ID instantly to extract Name, DOB, Father&apos;s Name, and ID number with 1-click copy buttons.
+              </p>
             </div>
-            <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-2">
-              Drop Aadhaar Card, PAN Card, or Voter ID Photo
-            </h3>
-            <p className="text-sm text-slate-500 dark:text-slate-400 max-w-md mx-auto">
-              Scans customer photo ID instantly to extract Name, DOB, Father&apos;s Name, and ID number with 1-click copy buttons.
-            </p>
-          </div>
+          </motion.div>
         )}
 
         {/* Active OCR Data & Quick Copy Dashboard */}
         {imagePreview && (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
             {/* Left: OCR Extracted Fields with 1-Click Copy */}
-            <div className="lg:col-span-7 space-y-6">
-              <div className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-5 shadow-sm">
-                <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+            <motion.div
+              initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="lg:col-span-7 space-y-6"
+            >
+              <div className="p-6 rounded-3xl pms-glass-panel space-y-5 relative overflow-hidden">
+                <PearlScanOverlay active={isExtracting} label="Scanning Aadhaar / PAN / Voter ID via OCR..." />
+
+                <div className="flex items-center justify-between border-b border-[var(--pms-border)] pb-3 gap-2 flex-wrap">
                   <div className="flex items-center gap-2">
-                    <span className="w-2.5 h-2.5 rounded-full bg-cyan-500 animate-pulse" />
-                    <h3 className="text-sm font-bold text-slate-900 dark:text-white">
-                      Extracted Customer Details (1-Click Copy for Forms)
+                    <span className="w-2.5 h-2.5 rounded-full bg-sky-500 animate-pulse shrink-0" />
+                    <h3 className="text-sm font-bold text-[var(--pms-ink)]">
+                      Extracted Customer Details (1-Click Copy)
                     </h3>
                   </div>
 
-                  <button
-                    onClick={() => {
-                      setImagePreview(null);
-                    }}
-                    className="text-xs text-slate-400 hover:text-slate-600"
-                  >
-                    Change ID Photo
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <span
+                      className="text-[11px] font-bold px-2.5 py-0.5 rounded-full text-[var(--pms-ink)] border border-[var(--pms-border)]"
+                      style={{ background: 'var(--pms-soft-mint)' }}
+                    >
+                      <AnimatedNumber value={filledFieldCount} suffix=" / 6 fields" />
+                    </span>
+                    <button
+                      onClick={() => {
+                        setImagePreview(null);
+                      }}
+                      className="text-xs text-rose-500 hover:text-rose-600 font-semibold cursor-pointer"
+                    >
+                      Change ID Photo
+                    </button>
+                  </div>
                 </div>
 
                 {isExtracting ? (
                   <div className="py-12 text-center space-y-3">
-                    <div className="w-8 h-8 rounded-full border-4 border-cyan-500 border-t-transparent animate-spin mx-auto" />
-                    <p className="text-xs font-bold text-slate-500">Reading text from ID card photo...</p>
+                    <div className="w-8 h-8 rounded-full border-4 border-sky-500 border-t-transparent animate-spin mx-auto" />
+                    <p className="text-xs font-bold text-[var(--pms-muted)]">Reading text from ID card photo...</p>
                   </div>
                 ) : (
                   <div className="space-y-3">
                     {/* Full Name */}
-                    <div className="flex items-center justify-between p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
-                      <div>
-                        <span className="text-[10px] uppercase font-bold text-slate-400 block">Full Name</span>
+                    <div className="flex items-center justify-between p-3 rounded-2xl bg-[var(--pms-white)] border border-[var(--pms-border)]">
+                      <div className="flex-1 pr-2">
+                        <span className="text-[10px] uppercase font-bold text-[var(--pms-muted)] block">Full Name</span>
                         <input
                           type="text"
                           value={kycData.fullName}
                           placeholder="Enter customer full name"
                           onChange={(e) => setKycData({ ...kycData, fullName: e.target.value })}
-                          className="font-bold text-sm bg-transparent outline-none text-slate-900 dark:text-white w-full"
+                          className="font-bold text-sm bg-transparent outline-none text-[var(--pms-ink)] w-full"
                         />
                       </div>
                       <button
                         onClick={() => handleCopy(kycData.fullName, 'name')}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-cyan-600 text-white font-bold text-xs hover:bg-cyan-700 transition-colors shadow-sm"
+                        className="pms-btn-primary inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-bold text-xs cursor-pointer shrink-0"
                       >
                         {copiedField === 'name' ? <Check className="w-3.5 h-3.5 text-emerald-300" /> : <Copy className="w-3.5 h-3.5" />}
                         {copiedField === 'name' ? 'Copied!' : 'Copy'}
@@ -365,20 +385,20 @@ export default function SmartKycSlip() {
                     </div>
 
                     {/* Father Name */}
-                    <div className="flex items-center justify-between p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
+                    <div className="flex items-center justify-between p-3 rounded-2xl bg-[var(--pms-white)] border border-[var(--pms-border)]">
                       <div className="flex-1 pr-2">
-                        <span className="text-[10px] uppercase font-bold text-slate-400 block">Father&apos;s / Husband&apos;s Name</span>
+                        <span className="text-[10px] uppercase font-bold text-[var(--pms-muted)] block">Father&apos;s / Husband&apos;s Name</span>
                         <input
                           type="text"
                           value={kycData.fatherName}
                           placeholder="Enter father or husband name"
                           onChange={(e) => setKycData({ ...kycData, fatherName: e.target.value })}
-                          className="font-bold text-sm bg-transparent outline-none text-slate-900 dark:text-white w-full"
+                          className="font-bold text-sm bg-transparent outline-none text-[var(--pms-ink)] w-full"
                         />
                       </div>
                       <button
                         onClick={() => handleCopy(kycData.fatherName, 'father')}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-cyan-600 text-white font-bold text-xs hover:bg-cyan-700 transition-colors shadow-sm"
+                        className="pms-btn-primary inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-bold text-xs cursor-pointer shrink-0"
                       >
                         {copiedField === 'father' ? <Check className="w-3.5 h-3.5 text-emerald-300" /> : <Copy className="w-3.5 h-3.5" />}
                         {copiedField === 'father' ? 'Copied!' : 'Copy'}
@@ -386,56 +406,59 @@ export default function SmartKycSlip() {
                     </div>
 
                     {/* DOB, Gender & ID Number */}
-                    <div className="grid grid-cols-3 gap-3">
-                      <div className="flex items-center justify-between p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
-                        <div>
-                          <span className="text-[10px] uppercase font-bold text-slate-400 block">Date of Birth (DOB)</span>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div className="flex items-center justify-between p-3 rounded-2xl bg-[var(--pms-white)] border border-[var(--pms-border)]">
+                        <div className="min-w-0 pr-1">
+                          <span className="text-[10px] uppercase font-bold text-[var(--pms-muted)] block">Date of Birth</span>
                           <input
                             type="text"
                             value={kycData.dob}
                             onChange={(e) => setKycData({ ...kycData, dob: e.target.value })}
-                            className="font-bold text-sm bg-transparent outline-none text-slate-900 dark:text-white w-full"
+                            className="font-bold text-sm bg-transparent outline-none text-[var(--pms-ink)] w-full"
                           />
                         </div>
                         <button
                           onClick={() => handleCopy(kycData.dob, 'dob')}
-                          className="p-2 rounded-xl bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200"
+                          className="p-2 rounded-xl border border-[var(--pms-border)] text-[var(--pms-ink)] cursor-pointer shrink-0"
+                          style={{ background: 'var(--pms-soft-lavender)' }}
                         >
                           {copiedField === 'dob' ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
                         </button>
                       </div>
 
-                      <div className="flex items-center justify-between p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
-                        <div>
-                          <span className="text-[10px] uppercase font-bold text-slate-400 block">Gender</span>
+                      <div className="flex items-center justify-between p-3 rounded-2xl bg-[var(--pms-white)] border border-[var(--pms-border)]">
+                        <div className="min-w-0 pr-1">
+                          <span className="text-[10px] uppercase font-bold text-[var(--pms-muted)] block">Gender</span>
                           <input
                             type="text"
                             value={kycData.gender}
                             onChange={(e) => setKycData({ ...kycData, gender: e.target.value })}
-                            className="font-bold text-sm bg-transparent outline-none text-slate-900 dark:text-white w-full"
+                            className="font-bold text-sm bg-transparent outline-none text-[var(--pms-ink)] w-full"
                           />
                         </div>
                         <button
                           onClick={() => handleCopy(kycData.gender, 'gender')}
-                          className="p-2 rounded-xl bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200"
+                          className="p-2 rounded-xl border border-[var(--pms-border)] text-[var(--pms-ink)] cursor-pointer shrink-0"
+                          style={{ background: 'var(--pms-soft-lavender)' }}
                         >
                           {copiedField === 'gender' ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
                         </button>
                       </div>
 
-                      <div className="flex items-center justify-between p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
-                        <div>
-                          <span className="text-[10px] uppercase font-bold text-slate-400 block">ID Number</span>
+                      <div className="flex items-center justify-between p-3 rounded-2xl bg-[var(--pms-white)] border border-[var(--pms-border)]">
+                        <div className="min-w-0 pr-1">
+                          <span className="text-[10px] uppercase font-bold text-[var(--pms-muted)] block">ID Number</span>
                           <input
                             type="text"
                             value={kycData.idNumber}
                             onChange={(e) => setKycData({ ...kycData, idNumber: e.target.value })}
-                            className="font-bold text-sm bg-transparent outline-none text-slate-900 dark:text-white w-full"
+                            className="font-bold text-sm bg-transparent outline-none text-[var(--pms-ink)] w-full"
                           />
                         </div>
                         <button
                           onClick={() => handleCopy(kycData.idNumber, 'id')}
-                          className="p-2 rounded-xl bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200"
+                          className="p-2 rounded-xl border border-[var(--pms-border)] text-[var(--pms-ink)] cursor-pointer shrink-0"
+                          style={{ background: 'var(--pms-soft-lavender)' }}
                         >
                           {copiedField === 'id' ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
                         </button>
@@ -443,19 +466,19 @@ export default function SmartKycSlip() {
                     </div>
 
                     {/* Address */}
-                    <div className="flex items-center justify-between p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
+                    <div className="flex items-center justify-between p-3 rounded-2xl bg-[var(--pms-white)] border border-[var(--pms-border)]">
                       <div className="flex-1 pr-2">
-                        <span className="text-[10px] uppercase font-bold text-slate-400 block">Full Address</span>
+                        <span className="text-[10px] uppercase font-bold text-[var(--pms-muted)] block">Full Address</span>
                         <input
                           type="text"
                           value={kycData.address}
                           onChange={(e) => setKycData({ ...kycData, address: e.target.value })}
-                          className="font-bold text-xs bg-transparent outline-none text-slate-900 dark:text-white w-full"
+                          className="font-bold text-xs bg-transparent outline-none text-[var(--pms-ink)] w-full"
                         />
                       </div>
                       <button
                         onClick={() => handleCopy(kycData.address, 'addr')}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-cyan-600 text-white font-bold text-xs hover:bg-cyan-700 transition-colors shadow-sm"
+                        className="pms-btn-primary inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-bold text-xs cursor-pointer shrink-0"
                       >
                         {copiedField === 'addr' ? <Check className="w-3.5 h-3.5 text-emerald-300" /> : <Copy className="w-3.5 h-3.5" />}
                         {copiedField === 'addr' ? 'Copied!' : 'Copy'}
@@ -463,74 +486,104 @@ export default function SmartKycSlip() {
                     </div>
                   </div>
                 )}
+
+                <AnimatePresence>
+                  {copiedField && (
+                    <motion.div
+                      initial={prefersReduced ? false : { opacity: 0, y: 4 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={prefersReduced ? undefined : { opacity: 0 }}
+                      className="text-xs font-semibold text-emerald-700 dark:text-emerald-300 px-3 py-1.5 rounded-xl border border-[var(--pms-border)] inline-block"
+                      style={{ background: 'var(--pms-soft-mint)' }}
+                    >
+                      Copied to clipboard — ready to paste into portal form!
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </div>
-            </div>
+            </motion.div>
 
             {/* Right: Printable Customer Acknowledgement Receipt Slip */}
-            <div className="lg:col-span-5 space-y-4">
-              <div className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xl space-y-4">
-                <div className="flex items-center justify-between border-b pb-3">
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">
+            <motion.div
+              initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.06 }}
+              className="lg:col-span-5 space-y-4"
+            >
+              <div className="p-6 rounded-3xl pms-glass-panel space-y-4">
+                <div className="flex items-center justify-between border-b border-[var(--pms-border)] pb-3 gap-2">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-[var(--pms-muted)]">
                     Customer Receipt Slip Preview
                   </h4>
                   <button
                     onClick={handlePrintSlip}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-900 text-white dark:bg-white dark:text-slate-900 shadow-sm hover:opacity-90 transition-opacity"
+                    className="pms-btn-primary inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold cursor-pointer"
                   >
                     <Printer className="w-3.5 h-3.5" /> Print Slip
                   </button>
                 </div>
 
-                {/* Printable Slip Card */}
-                <div className="p-5 rounded-2xl bg-slate-50 dark:bg-slate-800 border-2 border-dashed border-slate-300 dark:border-slate-700 space-y-3 text-xs">
-                  <div className="text-center border-b border-slate-200 dark:border-slate-700 pb-2">
+                {/* Printable Slip Card (Crisp paper preview for thermal/laser accuracy) */}
+                <div className="p-5 rounded-2xl bg-white text-slate-900 border-2 border-dashed border-slate-300 space-y-3 text-xs shadow-sm">
+                  <div className="text-center border-b border-slate-200 pb-2">
                     <input
                       type="text"
                       value={shopName}
                       onChange={(e) => setShopName(e.target.value)}
-                      className="font-black text-sm text-center bg-transparent w-full text-slate-900 dark:text-white outline-none"
+                      className="font-black text-sm text-center bg-transparent w-full text-slate-900 outline-none"
                     />
-                    <div className="text-[10px] text-slate-400">CUSTOMER APPLICATION ACKNOWLEDGEMENT SLIP</div>
+                    <div className="text-[10px] text-slate-500">CUSTOMER APPLICATION ACKNOWLEDGEMENT SLIP</div>
                   </div>
 
                   <div className="space-y-1.5 text-[11px]">
                     <div className="flex justify-between">
-                      <span className="text-slate-400">Token / Receipt No:</span>
-                      <span className="font-bold">{tokenNo}</span>
+                      <span className="text-slate-500">Token / Receipt No:</span>
+                      <span className="font-bold text-slate-900">{tokenNo}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-slate-400">Date &amp; Time:</span>
+                      <span className="text-slate-500">Date &amp; Time:</span>
                       <span>{new Date().toLocaleDateString('en-IN')}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-slate-400">Applicant Name:</span>
-                      <span className="font-bold text-slate-900 dark:text-white">{kycData.fullName}</span>
+                      <span className="text-slate-500">Applicant Name:</span>
+                      <span className="font-bold text-slate-900">{kycData.fullName}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-slate-400">Father&apos;s Name:</span>
+                      <span className="text-slate-500">Father&apos;s Name:</span>
                       <span>{kycData.fatherName}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-slate-400">ID Ref:</span>
+                      <span className="text-slate-500">ID Ref:</span>
                       <span>{kycData.idType} ({kycData.idNumber.slice(-4) ? `Ending in ${kycData.idNumber.slice(-4)}` : 'Verified'})</span>
                     </div>
-                    <div className="flex justify-between pt-1 border-t border-slate-200 dark:border-slate-700 font-bold">
-                      <span>Service / Scheme:</span>
-                      <span className="text-cyan-600 dark:text-cyan-400">{serviceName}</span>
+                    <div className="flex justify-between items-center pt-1 border-t border-slate-200 font-bold gap-2">
+                      <span className="text-slate-600 shrink-0">Service / Scheme:</span>
+                      <input
+                        type="text"
+                        value={serviceName}
+                        onChange={(e) => setServiceName(e.target.value)}
+                        className="text-right font-bold text-sky-700 bg-transparent outline-none w-full min-w-0"
+                      />
                     </div>
-                    <div className="flex justify-between">
-                      <span>Portal Fees Received:</span>
-                      <span className="font-black text-emerald-600">₹{feesCharged}</span>
+                    <div className="flex justify-between items-center gap-2">
+                      <span className="text-slate-600">Portal Fees Received (₹):</span>
+                      <input
+                        type="number"
+                        min={0}
+                        value={feesCharged}
+                        onChange={(e) => setFeesCharged(Number(e.target.value) || 0)}
+                        className="text-right font-black text-emerald-700 bg-transparent outline-none w-20"
+                      />
                     </div>
                   </div>
 
-                  <div className="pt-4 flex justify-between items-end text-[10px] text-slate-400 border-t border-slate-200 dark:border-slate-700">
+                  <div className="pt-4 flex justify-between items-end text-[10px] text-slate-500 border-t border-slate-200">
                     <div>Applicant Signature</div>
                     <div className="text-right">Authorized Center Seal</div>
                   </div>
                 </div>
               </div>
-            </div>
+            </motion.div>
           </div>
         )}
 
@@ -541,7 +594,7 @@ export default function SmartKycSlip() {
           description="Built for E-Mitra operators, CSC kiosk owners, and cyber cafes. Scans customer identity cards (Aadhaar, PAN, Voter ID) to extract names, DOB, father's names, and ID numbers with 1-click clipboard copy buttons, preventing data-entry errors in government job applications and welfare forms. Generates professional, printable application receipt slips."
         />
       </div>
-    </div>
+    </ToolWorkspaceShell>
   );
 }
 

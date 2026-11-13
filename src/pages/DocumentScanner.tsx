@@ -1,10 +1,14 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { ScanLine, Download, Loader2, RotateCw, Crop, Activity, Plus, Trash2, CheckCircle2, FileImage, Sparkles, Maximize2, Archive } from 'lucide-react';
 import { wrapPerspective, detectDocumentCorners, type Point } from '../lib/perspectiveWarp';
 import { PDFDocument } from 'pdf-lib';
 import JSZip from 'jszip';
 import { useSEO } from '../hooks/useSEO';
 import { dataUrlToBytes } from '../lib/utils';
+import { toArrayBufferBytes, triggerBlobDownload } from '../lib/blobUrl';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { AnimatedNumber, PearlScanOverlay } from '../components/pearl/PearlMotion';
 
 type EnhanceMode = 'magic_color' | 'document' | 'bw' | 'screen' | 'photo';
 
@@ -436,11 +440,8 @@ export default function DocumentScanner() {
       }
       
       const pdfBytes = await pdfDoc.save();
-      const blob = new Blob([pdfBytes as any], { type: 'application/pdf' });
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = `Scanned_Document_${Date.now()}.pdf`;
-      a.click();
+      const blob = new Blob([toArrayBufferBytes(pdfBytes)], { type: 'application/pdf' });
+      triggerBlobDownload(blob, `Scanned_Document_${Date.now()}.pdf`);
     } catch {
       alert('Error creating PDF');
     } finally {
@@ -463,10 +464,7 @@ export default function DocumentScanner() {
         zip.file(`Page_${i + 1}_scanned.jpg`, bytes);
       }
       const zipBlob = await zip.generateAsync({ type: 'blob' });
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(zipBlob);
-      a.download = `Scanned_Pages_${Date.now()}.zip`;
-      a.click();
+      triggerBlobDownload(zipBlob, `Scanned_Pages_${Date.now()}.zip`);
     } catch {
       alert('Error creating ZIP archive');
     } finally {
@@ -482,82 +480,132 @@ export default function DocumentScanner() {
     a.click();
   };
 
-  return (
-    <div className="flex-1 flex flex-col p-4 sm:p-8 bg-slate-50 min-h-screen">
-      <div className="text-center mb-6">
-        <h1 className="text-3xl font-bold text-slate-800 mb-2">Document Scanner Pro</h1>
-        <p className="text-slate-500">Scan, crop, and automatically correct multi-page documents.</p>
-      </div>
+  const prefersReduced = useReducedMotion();
 
-      <div className="w-full max-w-5xl mx-auto flex gap-6 flex-col xl:flex-row items-start">
-        <div className="w-full xl:w-64 bg-white rounded-2xl shadow-sm border border-slate-200 p-4 flex flex-col gap-4 sticky top-8">
-          <h3 className="font-bold text-slate-800 text-sm uppercase tracking-wider">Pages ({pages.length})</h3>
+  return (
+    <ToolWorkspaceShell
+      title="Document Scanner Pro"
+      subtitle="Scan, auto-detect 4-corner perspective, and automatically enhance multi-page documents directly in your browser."
+      categoryLabel="Camera & Perspective Scanner"
+      icon={ScanLine}
+      microVariant="ocr"
+      tone="indigo"
+      trustNote="Live camera capture · 4-corner perspective warp · Multi-page PDF & ZIP export"
+    >
+      <motion.div
+        initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.28 }}
+        className="w-full max-w-5xl mx-auto flex gap-6 flex-col xl:flex-row items-start"
+      >
+        <div className="w-full xl:w-64 pms-glass-panel rounded-3xl p-4 flex flex-col gap-4 sticky top-8">
+          <h3 className="font-bold text-sm uppercase tracking-wider flex items-center justify-between" style={{ color: 'var(--pms-ink)' }}>
+            <span>Pages</span>
+            <span
+              className="text-xs px-2.5 py-0.5 rounded-full font-extrabold"
+              style={{ backgroundColor: 'var(--pms-soft-lavender)', color: 'var(--pms-violet)' }}
+            >
+              <AnimatedNumber value={pages.length} />
+            </span>
+          </h3>
           <div className="flex xl:flex-col gap-3 overflow-x-auto xl:overflow-y-auto max-h-[60vh] pb-2 xl:pb-0 scrollbar-hide">
             {pages.map((p, i) => (
-              <div 
-                key={p.id} 
+              <div
+                key={p.id}
                 onClick={() => switchPage(p.id)}
-                className={`flex-shrink-0 relative w-24 xl:w-full aspect-[3/4] rounded-xl overflow-hidden cursor-pointer border-2 transition-all ${activePageId === p.id ? 'border-indigo-500 shadow-md scale-105 xl:scale-100' : 'border-slate-200 hover:border-indigo-300'}`}
+                className={`group flex-shrink-0 relative w-24 xl:w-full aspect-[3/4] rounded-2xl overflow-hidden cursor-pointer border-2 transition-all ${
+                  activePageId === p.id
+                    ? 'border-[var(--pms-violet)] shadow-md scale-105 xl:scale-100'
+                    : 'border-[var(--pms-border)] hover:border-violet-300 dark:hover:border-violet-700'
+                }`}
               >
                 <img src={p.resultUrl || p.originalUrl} className="w-full h-full object-cover" />
-                <div className="absolute top-1 left-1 bg-black/50 text-white text-[10px] font-bold px-1.5 rounded">{i + 1}</div>
-                {p.resultUrl && <div className="absolute bottom-1 right-1 bg-green-500 text-white p-0.5 rounded-full"><CheckCircle2 className="w-3 h-3" /></div>}
-                
-                <button 
+                <div className="absolute top-1.5 left-1.5 bg-black/60 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-md">{i + 1}</div>
+                {p.resultUrl && <div className="absolute bottom-1.5 right-1.5 bg-emerald-500 text-white p-0.5 rounded-full"><CheckCircle2 className="w-3 h-3" /></div>}
+
+                <button
                   onClick={(e) => { e.stopPropagation(); deletePage(p.id); }}
-                  className="absolute top-1 right-1 bg-red-500/80 hover:bg-red-500 text-white p-1 rounded opacity-0 hover:opacity-100 transition-opacity xl:group-hover:opacity-100"
+                  className="absolute top-1.5 right-1.5 bg-rose-500/85 hover:bg-rose-600 text-white p-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
                 >
                   <Trash2 className="w-3 h-3" />
                 </button>
               </div>
             ))}
-            
-            <label className="flex-shrink-0 flex flex-col items-center justify-center w-24 xl:w-full aspect-[3/4] border-2 border-dashed border-indigo-200 rounded-xl bg-indigo-50/50 cursor-pointer hover:bg-indigo-50 text-indigo-500 transition-colors">
+
+            <label
+              className="flex-shrink-0 flex flex-col items-center justify-center w-24 xl:w-full aspect-[3/4] border-2 border-dashed border-[var(--pms-border-strong)] rounded-2xl cursor-pointer transition-colors hover:border-[var(--pms-violet)]"
+              style={{ backgroundColor: 'var(--pms-soft-lavender)', color: 'var(--pms-violet)' }}
+            >
               <Plus className="w-6 h-6 mb-1" />
               <span className="text-[10px] font-bold uppercase tracking-wider">Add Page</span>
               <input type="file" multiple accept="image/*" className="hidden" onChange={handleFiles} />
             </label>
           </div>
-          
+
           {pages.length > 0 && (
             <div className="space-y-2 mt-2">
-              <button onClick={downloadAllAsPdf} disabled={busy} className="w-full py-2.5 bg-slate-800 text-white rounded-xl font-bold shadow hover:bg-slate-900 flex items-center justify-center gap-2 text-sm">
+              <button onClick={downloadAllAsPdf} disabled={busy} className="w-full py-2.5 pms-btn-primary rounded-xl font-bold flex items-center justify-center gap-2 text-sm cursor-pointer disabled:opacity-50">
                 <Download className="w-4 h-4"/> Save All as PDF
               </button>
-              <button onClick={downloadAllAsZip} disabled={busy} className="w-full py-2.5 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-xl font-bold hover:bg-indigo-100 flex items-center justify-center gap-2 text-sm">
+              <button
+                onClick={downloadAllAsZip}
+                disabled={busy}
+                className="w-full py-2.5 bg-[var(--pms-soft-lavender)] text-[var(--pms-violet)] border border-[var(--pms-border)] rounded-xl font-bold hover:opacity-90 flex items-center justify-center gap-2 text-sm cursor-pointer disabled:opacity-50"
+              >
                 <Archive className="w-4 h-4"/> Download All (ZIP)
               </button>
             </div>
           )}
         </div>
 
-        <div className="flex-1 bg-white rounded-2xl shadow-xl overflow-hidden border border-slate-200 w-full min-h-[500px]">
+        <div className="relative flex-1 pms-glass-panel rounded-3xl overflow-hidden w-full min-h-[500px]">
+          <PearlScanOverlay active={busy} label="Warping perspective & enhancing document…" />
+
           {pages.length === 0 && step === 'upload' ? (
             <div className="p-8 sm:p-12 flex flex-col items-center justify-center min-h-[500px]">
               {useCamera ? (
                 <div className="space-y-4 max-w-2xl mx-auto w-full">
-                  <div className="relative rounded-2xl overflow-hidden bg-black shadow-inner">
+                  <div className="relative rounded-2xl overflow-hidden bg-black shadow-inner border border-[var(--pms-border)]">
                     <video ref={videoRef} autoPlay playsInline className="w-full max-h-[500px]" />
                     <div className="absolute inset-0 border-4 border-dashed border-white/30 m-6 rounded-xl pointer-events-none" />
                   </div>
                   <div className="flex gap-3">
-                    <button onClick={capturePhoto} className="flex-1 py-3 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 shadow-md">📸 Capture Fast</button>
-                    <button onClick={() => { stream?.getTracks().forEach(t => t.stop()); setUseCamera(false); }} className="px-6 py-3 bg-slate-200 text-slate-700 rounded-xl font-semibold hover:bg-slate-300">Cancel</button>
+                    <button onClick={capturePhoto} className="flex-1 py-3 pms-btn-primary rounded-2xl font-bold cursor-pointer">📸 Capture Fast</button>
+                    <button
+                      onClick={() => { stream?.getTracks().forEach(t => t.stop()); setUseCamera(false); }}
+                      className="px-6 py-3 border border-[var(--pms-border)] rounded-2xl font-semibold cursor-pointer"
+                      style={{ backgroundColor: 'var(--pms-white)', color: 'var(--pms-ink)' }}
+                    >
+                      Cancel
+                    </button>
                   </div>
                 </div>
               ) : (
                 <div className="space-y-6 max-w-lg mx-auto w-full">
-                  <label className="flex flex-col items-center justify-center w-full h-72 border-2 border-dashed border-indigo-300 rounded-2xl bg-indigo-50/50 cursor-pointer hover:bg-indigo-50 transition-colors">
-                    <ScanLine className="w-16 h-16 text-indigo-400 mb-4" />
-                    <span className="text-indigo-900 font-bold text-xl">Upload multi-page documents</span>
-                    <span className="text-sm text-indigo-400 mt-2">Select multiple JPG, PNG files</span>
+                  <label
+                    className="flex flex-col items-center justify-center w-full h-72 border-2 border-dashed border-[var(--pms-border-strong)] rounded-3xl cursor-pointer transition-colors hover:border-[var(--pms-violet)]"
+                    style={{ backgroundColor: 'var(--pms-white)' }}
+                  >
+                    <div
+                      className="w-16 h-16 rounded-2xl flex items-center justify-center mb-4"
+                      style={{ backgroundColor: 'var(--pms-soft-lavender)', color: 'var(--pms-violet)' }}
+                    >
+                      <ScanLine className="w-8 h-8" />
+                    </div>
+                    <span className="font-bold text-xl" style={{ color: 'var(--pms-ink)' }}>Upload multi-page documents</span>
+                    <span className="text-sm mt-2" style={{ color: 'var(--pms-muted)' }}>Select multiple JPG, PNG files</span>
                     <input type="file" multiple accept="image/*" className="hidden" onChange={handleFiles} />
                   </label>
                   <div className="relative flex items-center justify-center my-4">
-                     <div className="absolute border-b border-slate-200 w-full top-1/2"></div>
-                     <span className="relative bg-white px-4 text-xs font-bold text-slate-400 uppercase tracking-widest">OR</span>
+                    <div className="absolute border-b border-[var(--pms-border)] w-full top-1/2"></div>
+                    <span
+                      className="relative px-4 text-xs font-bold uppercase tracking-widest rounded-full"
+                      style={{ backgroundColor: 'var(--pms-white)', color: 'var(--pms-subtle-text)' }}
+                    >
+                      OR
+                    </span>
                   </div>
-                  <button onClick={startCamera} className="w-full py-4 bg-slate-800 text-white rounded-xl font-bold hover:bg-slate-900 flex items-center justify-center gap-2 shadow-md text-lg">
+                  <button onClick={startCamera} className="w-full py-4 pms-btn-primary rounded-2xl font-bold flex items-center justify-center gap-2 text-lg cursor-pointer">
                     📷 Open Camera
                   </button>
                 </div>
@@ -565,109 +613,158 @@ export default function DocumentScanner() {
             </div>
           ) : activePage ? (
             <div className="flex flex-col h-full">
-              <div className="flex bg-slate-100 border-b border-slate-200 p-3 sm:p-4 gap-2">
-                 <button onClick={() => switchPage(activePage.id, 'crop')} className={`flex-1 text-center py-2 rounded-lg text-sm font-bold transition-colors ${step==='crop' ? 'bg-indigo-500 text-white shadow' : 'text-slate-500 hover:bg-slate-200 cursor-pointer'}`}>1. Accurate Crop</button>
-                 <button onClick={() => { if(activePage.croppedUrl) switchPage(activePage.id, 'filter') }} className={`flex-1 text-center py-2 rounded-lg text-sm font-bold transition-colors ${step==='filter' ? 'bg-indigo-500 text-white shadow' : 'text-slate-500 hover:bg-slate-200 font-medium'}`} disabled={!activePage.croppedUrl}>2. Enhance & Filter</button>
+              <div className="flex border-b border-[var(--pms-border)] p-3 sm:p-4 gap-2" style={{ backgroundColor: 'var(--pms-pearl)' }}>
+                <button
+                  onClick={() => switchPage(activePage.id, 'crop')}
+                  className={`flex-1 text-center py-2.5 rounded-xl text-sm font-bold transition-all cursor-pointer ${
+                    step === 'crop'
+                      ? 'pms-btn-primary shadow'
+                      : 'hover:bg-white/60 dark:hover:bg-slate-800/60'
+                  }`}
+                  style={step === 'crop' ? undefined : { color: 'var(--pms-muted)' }}
+                >
+                  1. Accurate Crop
+                </button>
+                <button
+                  onClick={() => { if (activePage.croppedUrl) switchPage(activePage.id, 'filter'); }}
+                  className={`flex-1 text-center py-2.5 rounded-xl text-sm font-bold transition-all cursor-pointer disabled:opacity-40 ${
+                    step === 'filter'
+                      ? 'pms-btn-primary shadow'
+                      : 'hover:bg-white/60 dark:hover:bg-slate-800/60'
+                  }`}
+                  style={step === 'filter' ? undefined : { color: 'var(--pms-muted)' }}
+                  disabled={!activePage.croppedUrl}
+                >
+                  2. Enhance &amp; Filter
+                </button>
               </div>
-              
-              <div className="p-4 flex-1 flex flex-col justify-center">
+
+              <div className="p-4 sm:p-6 flex-1 flex flex-col justify-center">
                 {step === 'crop' && (
                   <div className="flex flex-col items-center space-y-6">
-                    <p className="text-slate-600 font-medium">Drag the 4 corners to fit the document bounds exactly.</p>
-                    
-                    <div 
+                    <p className="font-medium text-sm" style={{ color: 'var(--pms-muted)' }}>Drag the 4 corners to fit the document bounds exactly.</p>
+
+                    <div
                       ref={imgContainerRef}
-                      className="relative inline-block border border-slate-300 shadow-md touch-none select-none max-w-full"
+                      className="relative inline-block border border-[var(--pms-border)] rounded-xl overflow-visible shadow-md touch-none select-none max-w-full"
                       onPointerMove={handleMove}
                       onPointerUp={() => setActivePt(null)}
                       onPointerLeave={() => setActivePt(null)}
                     >
-                      <img src={activePage.originalUrl} alt="Crop Source" className="max-h-[60vh] w-auto h-auto block" draggable={false} onDragStart={e => e.preventDefault()} />
-                      
-                      <svg className="absolute inset-0 w-full h-full pointer-events-none" style={{overflow: 'visible'}}>
-                         <polygon 
-                           points={`${activePage.corners[0].x}%,${activePage.corners[0].y}% ${activePage.corners[1].x}%,${activePage.corners[1].y}% ${activePage.corners[2].x}%,${activePage.corners[2].y}% ${activePage.corners[3].x}%,${activePage.corners[3].y}%`} 
-                           fill="rgba(99, 102, 241, 0.2)" 
-                           stroke="rgba(99, 102, 241, 0.8)" 
-                           strokeWidth="2" 
-                         />
+                      <img src={activePage.originalUrl} alt="Crop Source" className="max-h-[60vh] w-auto h-auto block rounded-xl" draggable={false} onDragStart={e => e.preventDefault()} />
+
+                      <svg className="absolute inset-0 w-full h-full pointer-events-none" style={{ overflow: 'visible' }}>
+                        <polygon
+                          points={`${activePage.corners[0].x}%,${activePage.corners[0].y}% ${activePage.corners[1].x}%,${activePage.corners[1].y}% ${activePage.corners[2].x}%,${activePage.corners[2].y}% ${activePage.corners[3].x}%,${activePage.corners[3].y}%`}
+                          fill="rgba(124, 58, 237, 0.2)"
+                          stroke="rgba(124, 58, 237, 0.85)"
+                          strokeWidth="2"
+                        />
                       </svg>
 
                       {activePage.corners.map((pt, i) => (
                         <div
                           key={i}
-                          onPointerDown={(e) => setActivePt(i)}
-                          className="absolute w-8 h-8 -ml-4 -mt-4 bg-indigo-600 border-2 border-white rounded-full shadow-lg z-10 cursor-grab active:cursor-grabbing hover:scale-110 transition-transform flex items-center justify-center"
+                          onPointerDown={() => setActivePt(i)}
+                          className="absolute w-8 h-8 -ml-4 -mt-4 bg-[var(--pms-violet)] border-2 border-white rounded-full shadow-lg z-10 cursor-grab active:cursor-grabbing hover:scale-110 transition-transform flex items-center justify-center"
                           style={{ left: `${pt.x}%`, top: `${pt.y}%` }}
                         >
-                          <div className="w-2 h-2 bg-white rounded-full opacity-50 pointer-events-none"></div>
+                          <div className="w-2 h-2 bg-white rounded-full opacity-60 pointer-events-none"></div>
                         </div>
                       ))}
                     </div>
 
                     <div className="flex flex-wrap items-center justify-center gap-3">
-                      <button onClick={handleAutoDetect} className="px-4 py-2.5 bg-amber-500/10 border border-amber-300 text-amber-800 font-bold rounded-xl hover:bg-amber-500/20 flex items-center gap-2 text-sm shadow-sm">
-                        <Sparkles className="w-4 h-4 text-amber-600" />
-                        <span>✨ Auto Detect Edges</span>
+                      <button onClick={handleAutoDetect} className="px-4 py-2.5 bg-[var(--pms-soft-rose)] border border-[var(--pms-border)] text-amber-800 dark:text-amber-300 font-bold rounded-xl hover:opacity-90 flex items-center gap-2 text-sm shadow-sm cursor-pointer">
+                        <Sparkles className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                        <span>Auto Detect Edges</span>
                       </button>
-                      <button onClick={handleResetCorners} className="px-4 py-2.5 bg-slate-100 border border-slate-300 text-slate-700 font-bold rounded-xl hover:bg-slate-200 flex items-center gap-2 text-sm shadow-sm">
-                        <Maximize2 className="w-4 h-4 text-slate-600" />
+                      <button
+                        onClick={handleResetCorners}
+                        className="px-4 py-2.5 border border-[var(--pms-border)] font-bold rounded-xl hover:border-violet-300 flex items-center gap-2 text-sm shadow-sm cursor-pointer"
+                        style={{ backgroundColor: 'var(--pms-white)', color: 'var(--pms-ink)' }}
+                      >
+                        <Maximize2 className="w-4 h-4" style={{ color: 'var(--pms-muted)' }} />
                         <span>Full Image</span>
                       </button>
-                      <button onClick={applyCrop} disabled={busy} className="px-6 py-2.5 bg-indigo-600 text-white font-bold rounded-xl shadow-md hover:bg-indigo-700 flex gap-2 items-center notranslate text-sm" translate="no">
-                         {busy ? <Loader2 className="w-4 h-4 animate-spin"/> : <Crop className="w-4 h-4"/>}
-                         <span>Align &amp; Process</span>
+                      <button onClick={applyCrop} disabled={busy} className="px-6 py-2.5 pms-btn-primary font-bold rounded-xl flex gap-2 items-center notranslate text-sm cursor-pointer disabled:opacity-50" translate="no">
+                        {busy ? <Loader2 className="w-4 h-4 animate-spin"/> : <Crop className="w-4 h-4"/>}
+                        <span>Align &amp; Process</span>
                       </button>
                     </div>
                   </div>
                 )}
-                
+
                 {step === 'filter' && activePage.resultUrl && (
                   <div className="flex flex-col lg:flex-row gap-8 items-start w-full">
-                    <div className="flex-1 bg-slate-100 p-4 rounded-xl flex justify-center items-center w-full shadow-inner relative min-h-[50vh]">
+                    <div className="flex-1 bg-slate-100 dark:bg-slate-950 p-4 rounded-2xl flex justify-center items-center w-full shadow-inner relative min-h-[50vh] border border-[var(--pms-border)]">
                       {busy && (
-                        <div className="absolute inset-0 z-10 bg-white/50 flex items-center justify-center backdrop-blur-sm rounded-xl">
-                          <Loader2 className="w-10 h-10 text-indigo-600 animate-spin" />
+                        <div className="absolute inset-0 z-10 bg-white/50 dark:bg-slate-900/60 flex items-center justify-center backdrop-blur-sm rounded-2xl">
+                          <Loader2 className="w-10 h-10 text-[var(--pms-violet)] animate-spin" />
                         </div>
                       )}
-                      <img src={activePage.resultUrl} alt="Filtered" className="max-h-[65vh] object-contain shadow-md rounded border border-slate-200" />
+                      <img src={activePage.resultUrl} alt="Filtered" className="max-h-[65vh] object-contain shadow-md rounded border border-slate-200 dark:border-slate-700 bg-white" />
                     </div>
-                    
-                    <div className="w-full lg:w-80 space-y-6">
-                      <div className="bg-slate-50 p-5 rounded-xl border border-slate-200 shadow-sm space-y-5">
-                         <h3 className="font-bold text-slate-800 uppercase text-sm tracking-wider">Enhancement</h3>
-                         <div className="grid grid-cols-2 gap-2.5">
-                           {[
-                             { id: 'magic_color', label: 'Magic Color', icon: '✨', desc: 'CamScanner Pro' },
-                             { id: 'document', label: 'Magic Clean', icon: '📄', desc: 'Whitened' },
-                             { id: 'bw', label: 'B&W Text', icon: '⬛', desc: 'High Contrast' },
-                             { id: 'screen', label: 'Screen/Monitor', icon: '💻', desc: 'Anti-Moiré' },
-                             { id: 'photo', label: 'Original Photo', icon: '🖼️', desc: 'Untouched' },
-                           ].map(f => (
-                             <button key={f.id} onClick={() => changeFilter(f.id as EnhanceMode)}
-                               className={`p-2.5 rounded-lg flex flex-col items-center gap-0.5 text-xs font-semibold transition-all ${activePage.enhanceMode === f.id ? 'bg-indigo-600 text-white shadow border-transparent' : 'bg-white text-slate-600 border border-slate-200 hover:border-indigo-300'}`}>
-                               <span className="text-lg">{f.icon}</span>
-                               <span className="font-bold">{f.label}</span>
-                               <span className={`text-[10px] ${activePage.enhanceMode === f.id ? 'text-indigo-200' : 'text-slate-400'}`}>{f.desc}</span>
-                             </button>
-                           ))}
-                         </div>
-                         {activePage.enhanceMode === 'screen' && (
-                           <p className="text-xs text-indigo-600 bg-indigo-50 p-2 rounded block">
+
+                    <div className="w-full lg:w-80 space-y-5">
+                      <div className="p-5 rounded-2xl border border-[var(--pms-border)] shadow-sm space-y-4" style={{ backgroundColor: 'var(--pms-pearl)' }}>
+                        <h3 className="font-bold uppercase text-sm tracking-wider" style={{ color: 'var(--pms-ink)' }}>Enhancement</h3>
+                        <div className="grid grid-cols-2 gap-2.5">
+                          {[
+                            { id: 'magic_color', label: 'Magic Color', icon: '✨', desc: 'CamScanner Pro' },
+                            { id: 'document', label: 'Magic Clean', icon: '📄', desc: 'Whitened' },
+                            { id: 'bw', label: 'B&W Text', icon: '⬛', desc: 'High Contrast' },
+                            { id: 'screen', label: 'Screen/Monitor', icon: '💻', desc: 'Anti-Moiré' },
+                            { id: 'photo', label: 'Original Photo', icon: '🖼️', desc: 'Untouched' },
+                          ].map(f => (
+                            <button
+                              key={f.id}
+                              onClick={() => changeFilter(f.id as EnhanceMode)}
+                              className={`p-2.5 rounded-xl flex flex-col items-center gap-0.5 text-xs font-semibold transition-all cursor-pointer border ${
+                                activePage.enhanceMode === f.id
+                                  ? 'pms-btn-primary border-transparent shadow'
+                                  : 'border-[var(--pms-border)] hover:border-violet-300 dark:hover:border-violet-700'
+                              }`}
+                              style={activePage.enhanceMode === f.id ? undefined : { backgroundColor: 'var(--pms-white)', color: 'var(--pms-ink)' }}
+                            >
+                              <span className="text-lg">{f.icon}</span>
+                              <span className="font-bold">{f.label}</span>
+                              <span
+                                className="text-[10px]"
+                                style={{ color: activePage.enhanceMode === f.id ? 'rgba(255,255,255,0.82)' : 'var(--pms-subtle-text)' }}
+                              >
+                                {f.desc}
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                        <AnimatePresence>
+                          {activePage.enhanceMode === 'screen' && (
+                            <motion.p
+                              initial={prefersReduced ? false : { opacity: 0, y: -4 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              exit={prefersReduced ? undefined : { opacity: 0 }}
+                              className="text-xs text-[var(--pms-violet)] bg-[var(--pms-soft-lavender)] p-2.5 rounded-xl block"
+                            >
                               <Activity className="w-3 h-3 inline mr-1 -mt-0.5" />
                               Removes Moiré patterns and push pixels to pure white.
-                           </p>
-                         )}
+                            </motion.p>
+                          )}
+                        </AnimatePresence>
                       </div>
 
                       <div className="flex gap-2">
-                        <button onClick={changeRotation} className="flex-1 py-3 bg-white border border-slate-200 text-slate-700 font-bold rounded-xl hover:bg-slate-50 flex items-center justify-center gap-2">
-                           <RotateCw className="w-4 h-4"/> Rotate 90°
+                        <button
+                          onClick={changeRotation}
+                          className="flex-1 py-3 border border-[var(--pms-border)] font-bold rounded-xl hover:border-violet-300 flex items-center justify-center gap-2 cursor-pointer"
+                          style={{ backgroundColor: 'var(--pms-white)', color: 'var(--pms-ink)' }}
+                        >
+                          <RotateCw className="w-4 h-4"/> Rotate 90°
                         </button>
                       </div>
-                      
-                      <button onClick={downloadCurrentAsJpg} className="w-full py-4 bg-emerald-500 text-white font-bold rounded-xl hover:bg-emerald-600 shadow flex justify-center items-center gap-2">
-                         <FileImage className="w-5 h-5"/> Download JPG
+
+                      <button onClick={downloadCurrentAsJpg} className="w-full py-4 bg-emerald-600 text-white font-bold rounded-2xl hover:bg-emerald-700 shadow-lg shadow-emerald-600/20 flex justify-center items-center gap-2 cursor-pointer transition-colors">
+                        <FileImage className="w-5 h-5"/> Download JPG
                       </button>
                     </div>
                   </div>
@@ -676,7 +773,7 @@ export default function DocumentScanner() {
             </div>
           ) : null}
         </div>
-      </div>
-    </div>
+      </motion.div>
+    </ToolWorkspaceShell>
   );
 }

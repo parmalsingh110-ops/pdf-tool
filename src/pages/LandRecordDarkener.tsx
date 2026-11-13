@@ -1,28 +1,29 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Upload,
   Download,
   Printer,
-  Sparkles,
-  Sliders,
   MapPin,
-  CheckCircle2,
-  RefreshCw,
+  SlidersHorizontal,
   Eye,
-  Layers,
-  FileCheck2,
 } from 'lucide-react';
+import { motion, AnimatePresence, useReducedMotion } from 'motion/react';
 import { PDFDocument } from 'pdf-lib';
 import * as pdfjsLib from 'pdfjs-dist';
 import '../lib/pdfWorker';
 import { useSEO } from '../hooks/useSEO';
 import { usePageSEO } from '../lib/usePageSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { AnimatedNumber, PearlScanOverlay } from '../components/pearl/PearlMotion';
+import { toArrayBufferBytes } from '../lib/blobUrl';
 import { dataUrlToBytes, downloadBlob } from '../lib/utils';
 
 type DarkenPreset = 'map_lines' | 'jamabandi_text' | 'deep_xerox' | 'extreme';
 
 export default function LandRecordDarkener() {
+  const prefersReduced = useReducedMotion();
+
   useSEO(
     'Faint Land Record & Bhu-Naksha Darkener Online — Apna Khata & Bhulekh',
     'Enhance faint blue/grey land records, Jamabandi, Khasra-Khatauni, and Bhu-Naksha maps to deep pitch black lines for crisp xerox printing. 100% free.'
@@ -36,6 +37,7 @@ export default function LandRecordDarkener() {
   );
 
   const [file, setFile] = useState<File | null>(null);
+  const [pageCount, setPageCount] = useState<number>(0);
   const [sourceCanvas, setSourceCanvas] = useState<HTMLCanvasElement | null>(null);
   const [processedDataUrl, setProcessedDataUrl] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -46,8 +48,6 @@ export default function LandRecordDarkener() {
   const [blackThreshold, setBlackThreshold] = useState<number>(190); // 0 - 255
   const [removeBackgroundTint, setRemoveBackgroundTint] = useState<boolean>(true);
   const [lineThicknessBoost, setLineThicknessBoost] = useState<boolean>(true);
-
-  const previewCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   // Load document (PDF or Image)
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -60,6 +60,7 @@ export default function LandRecordDarkener() {
       if (selected.type === 'application/pdf') {
         const arrayBuffer = await selected.arrayBuffer();
         const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+        setPageCount(pdf.numPages);
         const page = await pdf.getPage(1);
         const viewport = page.getViewport({ scale: 2.5 }); // High-DPI for fine land map lines
 
@@ -72,6 +73,7 @@ export default function LandRecordDarkener() {
           setSourceCanvas(canvas);
         }
       } else {
+        setPageCount(1);
         const reader = new FileReader();
         reader.onload = (ev) => {
           const img = new Image();
@@ -270,7 +272,7 @@ export default function LandRecordDarkener() {
       }
 
       const pdfBytes = await pdfDoc.save();
-      const blob = new Blob([pdfBytes as any], { type: 'application/pdf' });
+      const blob = new Blob([toArrayBufferBytes(pdfBytes)], { type: 'application/pdf' });
       downloadBlob(blob, 'darkened_land_record_print.pdf');
     } catch (err) {
       alert('Error creating PDF.');
@@ -295,51 +297,78 @@ export default function LandRecordDarkener() {
   };
 
   return (
-    <div className="w-full min-h-screen bg-slate-50 dark:bg-slate-950 py-8 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-7xl mx-auto space-y-8">
-        {/* Header */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-50 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-900 text-amber-700 dark:text-amber-300 text-xs font-bold mb-2">
-              <MapPin className="w-3.5 h-3.5 text-amber-600" /> Revenue &amp; E-Mitra Favorite
-            </div>
-            <h1 className="text-3xl sm:text-4xl font-extrabold text-slate-900 dark:text-white">
-              Faint Land Record &amp; Bhu-Naksha Darkener
-            </h1>
-            <p className="text-sm text-slate-600 dark:text-slate-400 mt-1 max-w-2xl">
-              Darken faint blue/grey revenue maps (Bhu-Naksha), Jamabandi, Khasra-Khatauni, and land registries so survey numbers print jet black on any laser printer.
-            </p>
+    <ToolWorkspaceShell
+      title="Faint Land Record & Bhu-Naksha Darkener"
+      subtitle="Darken faint blue and grey revenue maps (Bhu-Naksha), Jamabandi, Khasra-Khatauni, and land registries so survey numbers print jet black on any laser printer."
+      categoryLabel="Revenue & E-Mitra Favorite"
+      icon={MapPin}
+      microVariant="ocr"
+      tone="amber"
+      trustNote="100% browser pixel processing · Multi-page PDF & map support"
+    >
+      <div className="space-y-6">
+        {/* Top Action Strip */}
+        <motion.div
+          initial={prefersReduced ? false : { opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="pms-glass-panel rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3"
+        >
+          <div className="flex flex-wrap items-center gap-2 text-xs font-semibold text-[var(--pms-muted)]">
+            <span
+              className="px-2.5 py-1 rounded-full font-bold text-[var(--pms-ink)] border border-[var(--pms-border)]"
+              style={{ background: 'var(--pms-soft-lavender)' }}
+            >
+              Apna Khata / Bhulekh Ready
+            </span>
+            {file && (
+              <span
+                className="px-2.5 py-1 rounded-full font-bold text-[var(--pms-ink)] border border-[var(--pms-border)]"
+                style={{ background: 'var(--pms-soft-mint)' }}
+              >
+                <AnimatedNumber value={pageCount || 1} suffix={pageCount === 1 ? ' page loaded' : ' pages loaded'} />
+              </span>
+            )}
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2.5">
             <button
               onClick={handlePrint}
               disabled={!processedDataUrl}
-              className="px-4 py-2.5 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 font-bold text-xs shadow-md disabled:opacity-40 flex items-center gap-2 hover:opacity-90"
+              className="px-4 py-2 rounded-xl bg-[var(--pms-white)] border border-[var(--pms-border-strong)] text-[var(--pms-ink)] font-bold text-xs shadow-sm disabled:opacity-40 flex items-center gap-2 hover:opacity-90 transition cursor-pointer"
             >
               <Printer className="w-4 h-4" /> 1-Click Print
             </button>
             <button
               onClick={handleDownloadPdf}
               disabled={!processedDataUrl || isProcessing}
-              className="px-5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs shadow-md disabled:opacity-40 flex items-center gap-2 transition-all"
+              className="pms-btn-primary px-5 py-2.5 rounded-xl font-bold text-xs disabled:opacity-40 flex items-center gap-2 cursor-pointer"
             >
               <Download className="w-4 h-4" /> Download Darkened PDF
             </button>
           </div>
-        </div>
+        </motion.div>
 
         {/* Workspace */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-          {/* Controls (4 Cols) */}
-          <div className="lg:col-span-5 space-y-6">
-            <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200/90 dark:border-slate-800 p-6 shadow-sm space-y-5">
-              <label className="border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-2xl p-6 text-center block cursor-pointer hover:border-amber-500 transition-colors">
-                <Upload className="w-8 h-8 mx-auto text-amber-600 mb-2" />
-                <span className="font-bold text-sm text-slate-700 dark:text-slate-200 block">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+          {/* Controls (5 Cols) */}
+          <motion.div
+            initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.04 }}
+            className="lg:col-span-5 space-y-5"
+          >
+            <div className="pms-glass-panel rounded-3xl p-6 space-y-5">
+              <label className="border-2 border-dashed border-[var(--pms-border-strong)] hover:border-[var(--pms-violet)] rounded-2xl p-6 text-center block cursor-pointer bg-[var(--pms-white)] transition-colors">
+                <div
+                  className="w-12 h-12 rounded-2xl mx-auto mb-3 flex items-center justify-center border border-[var(--pms-border)]"
+                  style={{ background: 'var(--pms-soft-rose)' }}
+                >
+                  <Upload className="w-6 h-6 text-amber-600 dark:text-amber-400" />
+                </div>
+                <span className="font-bold text-sm text-[var(--pms-ink)] block truncate">
                   {file ? file.name : 'Upload Land Record / Bhu-Naksha'}
                 </span>
-                <span className="text-xs text-slate-400 mt-1 block">
+                <span className="text-xs text-[var(--pms-muted)] mt-1 block">
                   Supports PDF, Jamabandi, Khasra, JPG, PNG
                 </span>
                 <input
@@ -352,7 +381,8 @@ export default function LandRecordDarkener() {
 
               {/* Presets */}
               <div className="space-y-2">
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider block">
+                <label className="text-xs font-bold text-[var(--pms-muted)] uppercase tracking-wider flex items-center gap-1.5">
+                  <SlidersHorizontal className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
                   Darkening Presets
                 </label>
                 <div className="grid grid-cols-2 gap-2">
@@ -365,10 +395,10 @@ export default function LandRecordDarkener() {
                     <button
                       key={preset.id}
                       onClick={() => handlePresetChange(preset.id as DarkenPreset)}
-                      className={`p-2.5 rounded-xl border text-xs font-bold text-left transition-all ${
+                      className={`p-2.5 rounded-xl border text-xs font-bold text-left transition-all cursor-pointer ${
                         activePreset === preset.id
-                          ? 'bg-amber-50 dark:bg-amber-950/60 border-amber-500 text-amber-800 dark:text-amber-200'
-                          : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400'
+                          ? 'bg-[var(--pms-soft-rose)] border-amber-500 text-[var(--pms-ink)] shadow-sm'
+                          : 'bg-[var(--pms-white)] border-[var(--pms-border)] text-[var(--pms-muted)] hover:text-[var(--pms-ink)]'
                       }`}
                     >
                       {preset.label}
@@ -378,11 +408,11 @@ export default function LandRecordDarkener() {
               </div>
 
               {/* Fine Tuning Sliders */}
-              <div className="space-y-4 pt-3 border-t border-slate-100 dark:border-slate-800">
+              <div className="space-y-4 pt-4 border-t border-[var(--pms-border)]">
                 <div>
-                  <div className="flex justify-between text-xs font-bold text-slate-600 dark:text-slate-300 mb-1">
+                  <div className="flex justify-between text-xs font-bold text-[var(--pms-ink)] mb-1">
                     <span>Black Line Threshold</span>
-                    <span>{blackThreshold}</span>
+                    <span className="font-mono text-amber-600 dark:text-amber-400">{blackThreshold}</span>
                   </div>
                   <input
                     type="range"
@@ -395,9 +425,9 @@ export default function LandRecordDarkener() {
                 </div>
 
                 <div>
-                  <div className="flex justify-between text-xs font-bold text-slate-600 dark:text-slate-300 mb-1">
+                  <div className="flex justify-between text-xs font-bold text-[var(--pms-ink)] mb-1">
                     <span>Contrast Intensity</span>
-                    <span>{contrastLevel}%</span>
+                    <span className="font-mono text-amber-600 dark:text-amber-400">{contrastLevel}%</span>
                   </div>
                   <input
                     type="range"
@@ -409,61 +439,76 @@ export default function LandRecordDarkener() {
                   />
                 </div>
 
-                <div className="space-y-2 pt-2">
-                  <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-slate-700 dark:text-slate-300">
+                <div className="space-y-2.5 pt-2">
+                  <label className="flex items-center gap-2.5 cursor-pointer text-xs font-semibold text-[var(--pms-ink)]">
                     <input
                       type="checkbox"
                       checked={removeBackgroundTint}
                       onChange={(e) => setRemoveBackgroundTint(e.target.checked)}
-                      className="rounded text-amber-600 focus:ring-amber-500"
+                      className="rounded accent-amber-600"
                     />
                     Whiten Faint Yellow/Grey Background Paper
                   </label>
 
-                  <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  <label className="flex items-center gap-2.5 cursor-pointer text-xs font-semibold text-[var(--pms-ink)]">
                     <input
                       type="checkbox"
                       checked={lineThicknessBoost}
                       onChange={(e) => setLineThicknessBoost(e.target.checked)}
-                      className="rounded text-amber-600 focus:ring-amber-500"
+                      className="rounded accent-amber-600"
                     />
                     Thicken Thin Survey Lines (+1px Laser Boost)
                   </label>
                 </div>
               </div>
             </div>
-          </div>
+          </motion.div>
 
           {/* Real-Time Preview (7 Cols) */}
-          <div className="lg:col-span-7 bg-white dark:bg-slate-900 rounded-3xl border border-slate-200/90 dark:border-slate-800 p-6 shadow-sm space-y-4">
-            <div className="flex items-center justify-between">
-              <h2 className="text-sm font-bold uppercase tracking-wider text-slate-500">
-                Enhanced Print Preview
+          <motion.div
+            initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.08 }}
+            className="lg:col-span-7 pms-glass-panel rounded-3xl p-6 space-y-4 relative overflow-hidden"
+          >
+            <PearlScanOverlay active={isProcessing} label="Darkening survey lines & building A4 PDF..." />
+
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <h2 className="text-xs font-bold uppercase tracking-wider text-[var(--pms-muted)] flex items-center gap-1.5">
+                <Eye className="w-4 h-4 text-amber-600 dark:text-amber-400" /> Enhanced Print Preview
               </h2>
-              {processedDataUrl && (
-                <span className="text-xs font-bold text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/60 px-3 py-1 rounded-full border border-amber-200">
-                  Survey Numbers Sharpened
-                </span>
-              )}
+              <AnimatePresence>
+                {processedDataUrl && (
+                  <motion.span
+                    initial={prefersReduced ? false : { opacity: 0, scale: 0.94 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={prefersReduced ? undefined : { opacity: 0, scale: 0.94 }}
+                    className="text-xs font-bold text-[var(--pms-ink)] px-3 py-1 rounded-full border border-[var(--pms-border)]"
+                    style={{ background: 'var(--pms-soft-mint)' }}
+                  >
+                    Survey Numbers Sharpened
+                  </motion.span>
+                )}
+              </AnimatePresence>
             </div>
 
-            <div className="w-full bg-slate-100 dark:bg-slate-950/80 rounded-2xl p-4 flex items-center justify-center min-h-[460px] border border-slate-200/70 dark:border-slate-800 overflow-auto">
+            <div className="w-full pms-paper-grid rounded-2xl p-4 flex items-center justify-center min-h-[460px] border border-[var(--pms-border)] overflow-auto">
               {processedDataUrl ? (
                 <img
                   src={processedDataUrl}
                   alt="Enhanced Land Record Preview"
-                  className="max-h-[580px] w-auto shadow-2xl rounded-sm border border-slate-300 dark:border-slate-700"
+                  className="max-h-[580px] w-auto bg-white shadow-2xl rounded-sm border border-[var(--pms-border-strong)]"
                 />
               ) : (
-                <div className="text-center space-y-3 text-slate-400">
-                  <MapPin className="w-12 h-12 mx-auto opacity-30 text-amber-500" />
+                <div className="text-center space-y-3 text-[var(--pms-muted)] max-w-sm">
+                  <MapPin className="w-12 h-12 mx-auto opacity-35 text-amber-500" />
                   <p className="text-xs font-semibold">
                     Upload your Apna Khata / Bhulekh / Jamabandi PDF to preview high-contrast darkened print output.
                   </p>
                 </div>
               )}
             </div>
-          </div>
+          </motion.div>
         </div>
 
         {/* SEO Guide Section */}
@@ -491,6 +536,6 @@ export default function LandRecordDarkener() {
           ]}
         />
       </div>
-    </div>
+    </ToolWorkspaceShell>
   );
 }

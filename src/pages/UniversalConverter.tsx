@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { FileCog, Download, FileText, BarChart2, Layers, RefreshCw } from 'lucide-react';
+import { motion, useReducedMotion } from 'motion/react';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
@@ -18,6 +19,8 @@ import { useSEO } from '../hooks/useSEO';
 import { dataUrlToBytes } from '../lib/utils';
 import { apiFetch } from '../lib/api';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { toArrayBufferBytes } from '../lib/blobUrl';
+import { PearlScanOverlay, PearlStageSwitch } from '../components/pearl/PearlMotion';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
@@ -304,7 +307,7 @@ async function pdfFromParagraphs(paragraphs: string[], title?: string): Promise<
     if (!safe) continue;
     drawWrapped(safe);
   }
-  return new Blob([await doc.save() as unknown as Uint8Array<ArrayBuffer>], { type: 'application/pdf' });
+  return new Blob([toArrayBufferBytes(await doc.save())], { type: 'application/pdf' });
 }
 
 /**
@@ -596,7 +599,7 @@ async function pdfFromDocxContent(
     }
   }
 
-  return new Blob([await doc.save() as unknown as Uint8Array<ArrayBuffer>], { type: 'application/pdf' });
+  return new Blob([toArrayBufferBytes(await doc.save())], { type: 'application/pdf' });
 }
 
 // ─── Advanced XLSX → PDF (merge-aware, style-aware) ─────────────────
@@ -804,7 +807,7 @@ async function xlsxFileToPdf(file: File): Promise<Blob> {
     page.drawLine({ start: { x: MARGIN, y }, end: { x: MARGIN + AW, y }, thickness: 0.3, color: rgb(0.68, 0.70, 0.82) });
   }
 
-  return new Blob([await pdfDoc.save() as unknown as Uint8Array<ArrayBuffer>], { type: 'application/pdf' });
+  return new Blob([toArrayBufferBytes(await pdfDoc.save())], { type: 'application/pdf' });
 }
 
 /** Render a single row onto a page */
@@ -950,7 +953,7 @@ async function pdfFromXlsxSheets(sheets: XlsxSheet[]): Promise<Blob> {
       y -= rowH;
     }
   }
-  return new Blob([await doc.save() as unknown as Uint8Array<ArrayBuffer>], { type: 'application/pdf' });
+  return new Blob([toArrayBufferBytes(await doc.save())], { type: 'application/pdf' });
 }
 
 async function pdfFromSlides(slides: string[], title?: string): Promise<Blob> {
@@ -1009,7 +1012,7 @@ async function pdfFromSlides(slides: string[], title?: string): Promise<Blob> {
     const footer = `${i + 1} / ${slides.length}`;
     try { page.drawText(footer, { x: W - 50, y: 14, size: 9, font, color: rgb(0.5, 0.5, 0.6) }); } catch {}
   }
-  return new Blob([await doc.save() as unknown as Uint8Array<ArrayBuffer>], { type: 'application/pdf' });
+  return new Blob([toArrayBufferBytes(await doc.save())], { type: 'application/pdf' });
 }
 
 // ─── DOCX builders ──────────────────────────────────────────────────
@@ -1545,7 +1548,7 @@ async function convertTiffToPdf(file: File): Promise<Blob> {
     canvas.height = 0;
   }
 
-  return new Blob([await pdf.save() as unknown as Uint8Array<ArrayBuffer>], { type: 'application/pdf' });
+  return new Blob([toArrayBufferBytes(await pdf.save())], { type: 'application/pdf' });
 }
 
 /**
@@ -1594,7 +1597,7 @@ async function convertImageFile(f: File, outType: Target, quality: number): Prom
     const emb = await pdf.embedJpg(jpgBytes);
     const p = pdf.addPage([emb.width, emb.height]);
     p.drawImage(emb, { x: 0, y: 0, width: emb.width, height: emb.height });
-    return new Blob([await pdf.save() as unknown as Uint8Array<ArrayBuffer>], { type: 'application/pdf' });
+    return new Blob([toArrayBufferBytes(await pdf.save())], { type: 'application/pdf' });
   }
   const mime = outType === 'png' ? 'image/png' : outType === 'webp' ? 'image/webp' : 'image/jpeg';
   const out = await new Promise<Blob | null>(res => canvas.toBlob(res, mime, quality));
@@ -1761,7 +1764,7 @@ async function convertTextFile(f: File): Promise<Blob> {
     page.drawText(line.slice(0, 120), { x: 36, y, size: 11, font });
     y -= 14;
   }
-  return new Blob([await pdf.save() as unknown as Uint8Array<ArrayBuffer>], { type: 'application/pdf' });
+  return new Blob([toArrayBufferBytes(await pdf.save())], { type: 'application/pdf' });
 }
 
 // ─── AI text extractor for non-PDF files ─────────────────────────────────────
@@ -1814,6 +1817,7 @@ function formatBytes(n: number): string {
 
 export default function UniversalConverter() {
   useSEO('Universal Converter Online Free | PDF Media Suite', 'Free online Universal Converter tool. No signup or installation required.');
+  const prefersReduced = useReducedMotion();
 
   const [file, setFile]           = useState<File | null>(null);
   const [target, setTarget]       = useState<Target>('pdf');
@@ -2149,163 +2153,209 @@ export default function UniversalConverter() {
       {/* Supported format badges */}
       <div className="flex flex-wrap justify-center gap-2 mb-8">
         {(['PDF', 'Word', 'Excel', 'PowerPoint', 'Image', 'Text'] as const).map(f => (
-          <span key={f} className="px-3 py-1 text-xs font-semibold rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+          <span
+            key={f}
+            className="px-3 py-1 text-xs font-semibold rounded-full bg-white/75 dark:bg-slate-900/75 border border-[var(--pms-border)] text-slate-700 dark:text-slate-300 shadow-xs"
+          >
             {f}
           </span>
         ))}
       </div>
 
-      {!file ? (
-        <div className="w-full max-w-2xl">
-          <FileDropzone
-            onDrop={handleDrop}
-            multiple={false}
-            title="Drop any document here"
-            subtitle="PDF · Word (.docx) · Excel (.xlsx) · PowerPoint (.pptx) · Images · Text"
-            accept={{
-              'application/pdf': ['.pdf'],
-              'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],
-              'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
-              'application/vnd.openxmlformats-officedocument.presentationml.presentation': ['.pptx'],
-              'image/*': ['.jpg', '.jpeg', '.png', '.webp', '.bmp', '.gif'],
-              'text/plain': ['.txt'],
-            }}
-          />
-          {/* Format conversion grid */}
-          <div className="mt-8 grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">
-            {[
-              ['Word → PDF, Excel, PPT', 'text-blue-600'],
-              ['Excel → PDF, Word, PPT', 'text-emerald-600'],
-              ['PPT → PDF, Word, Excel', 'text-orange-600'],
-              ['PDF → Word, Excel, PPT', 'text-indigo-600'],
-              ['Image → PDF, PNG, JPG', 'text-pink-600'],
-              ['PDF → Images (ZIP)', 'text-violet-600'],
-            ].map(([label, color]) => (
-              <div key={label as string} className="flex items-center gap-2 p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700">
-                <RefreshCw className={`w-3.5 h-3.5 shrink-0 ${color}`} />
-                <span className="text-slate-700 dark:text-slate-300 text-xs font-medium">{label}</span>
+      <PearlStageSwitch stageKey={!file ? 'upload' : resultUrl ? 'done' : 'configure'} className="w-full max-w-2xl">
+        {!file ? (
+          <div className="w-full">
+            <div className="pms-glass-panel rounded-3xl p-4 sm:p-6">
+              <FileDropzone
+                onDrop={handleDrop}
+                multiple={false}
+                title="Drop any document here"
+                subtitle="PDF · Word (.docx) · Excel (.xlsx) · PowerPoint (.pptx) · Images · Text"
+                accept={{
+                  'application/pdf': ['.pdf'],
+                  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],
+                  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
+                  'application/vnd.openxmlformats-officedocument.presentationml.presentation': ['.pptx'],
+                  'image/*': ['.jpg', '.jpeg', '.png', '.webp', '.bmp', '.gif'],
+                  'text/plain': ['.txt'],
+                }}
+              />
+            </div>
+            {/* Format conversion grid */}
+            <div className="mt-6 grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">
+              {[
+                ['Word → PDF, Excel, PPT', 'text-blue-600 dark:text-blue-400'],
+                ['Excel → PDF, Word, PPT', 'text-emerald-600 dark:text-emerald-400'],
+                ['PPT → PDF, Word, Excel', 'text-orange-600 dark:text-orange-400'],
+                ['PDF → Word, Excel, PPT', 'text-indigo-600 dark:text-indigo-400'],
+                ['Image → PDF, PNG, JPG', 'text-pink-600 dark:text-pink-400'],
+                ['PDF → Images (ZIP)', 'text-violet-600 dark:text-violet-400'],
+              ].map(([label, color]) => (
+                <div
+                  key={label as string}
+                  className="flex items-center gap-2 p-3.5 bg-white/75 dark:bg-slate-900/75 rounded-2xl border border-[var(--pms-border)] shadow-xs"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 shrink-0 ${color}`} />
+                  <span className="text-slate-700 dark:text-slate-300 text-xs font-semibold">{label}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div className="relative overflow-hidden w-full pms-glass-panel rounded-3xl p-6 sm:p-8">
+            <PearlScanOverlay active={isProcessing} label={progress || 'Converting document…'} />
+
+            {/* File info */}
+            <div className="flex items-center gap-4 p-4 sm:p-5 bg-white/75 dark:bg-slate-900/75 rounded-2xl border border-[var(--pms-border)] mb-6">
+              <div
+                className="w-12 h-12 rounded-xl flex items-center justify-center shrink-0"
+                style={{ backgroundColor: 'var(--pms-soft-lavender)', color: 'var(--pms-violet)' }}
+              >
+                <KindIcon className="w-6 h-6" />
               </div>
-            ))}
-          </div>
-        </div>
-      ) : (
-        <div className="w-full max-w-2xl bg-white dark:bg-slate-900 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 p-8">
-
-          {/* File info */}
-          <div className="flex items-center gap-4 p-5 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 mb-6">
-            <div className="w-12 h-12 bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 rounded-xl flex items-center justify-center shrink-0">
-              <KindIcon className="w-6 h-6" />
+              <div className="flex-1 min-w-0">
+                <p className="text-base font-bold text-slate-900 dark:text-white truncate">{file.name}</p>
+                <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-0.5">
+                  {KIND_LABELS[kind]} · {(file.size / 1024).toFixed(1)} KB
+                </p>
+              </div>
             </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-base font-semibold text-slate-900 dark:text-white truncate">{file.name}</p>
-              <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">
-                {KIND_LABELS[kind]} · {(file.size / 1024).toFixed(1)} KB
-              </p>
-            </div>
-          </div>
 
-          {!resultUrl ? (
-            <div className="space-y-5">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {!resultUrl ? (
+              <div className="space-y-5">
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
-                    Convert to
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2.5">
+                    Convert to Target Format
                   </label>
-                  <select
-                    value={target}
-                    onChange={e => setTarget(e.target.value as Target)}
-                    className="w-full px-3 py-2.5 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-indigo-300 outline-none"
-                  >
-                    {targets.map(t => (
-                      <option key={t} value={t}>{TARGET_LABELS[t]}</option>
-                    ))}
-                  </select>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                    {targets.map(t => {
+                      const active = target === t;
+                      return (
+                        <button
+                          key={t}
+                          type="button"
+                          onClick={() => setTarget(t)}
+                          className={`relative px-3.5 py-2.5 rounded-xl border text-xs sm:text-sm font-semibold text-left transition-colors ${
+                            active
+                              ? 'border-[var(--pms-violet)] text-slate-900 dark:text-white'
+                              : 'bg-white/75 dark:bg-slate-900/75 border-[var(--pms-border)] text-slate-600 dark:text-slate-300 hover:border-slate-300 dark:hover:border-slate-600'
+                          }`}
+                        >
+                          {active && (
+                            <motion.span
+                              layoutId="universal-target-pill"
+                              transition={prefersReduced ? { duration: 0 } : { type: 'spring', stiffness: 420, damping: 32 }}
+                              className="absolute inset-0 rounded-xl -z-0"
+                              style={{ backgroundColor: 'var(--pms-soft-lavender)' }}
+                            />
+                          )}
+                          <span className="relative z-10 block truncate">{TARGET_LABELS[t]}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
 
-                {((kind === 'image' || kind === 'tiff') || (kind === 'pdf' && ['png','jpg','jpeg'].includes(target))) && (
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
-                      Quality — {Math.round(quality * 100)}%
-                    </label>
+                {((kind === 'image' || kind === 'tiff') || (kind === 'pdf' && ['png', 'jpg', 'jpeg'].includes(target))) && (
+                  <div className="p-4 rounded-2xl bg-white/75 dark:bg-slate-900/75 border border-[var(--pms-border)]">
+                    <div className="flex items-center justify-between text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
+                      <span>Output Quality</span>
+                      <span className="tabular-nums text-[var(--pms-violet)]">{Math.round(quality * 100)}%</span>
+                    </div>
                     <input
                       type="range" min={0.4} max={1} step={0.05}
                       value={quality}
                       onChange={e => setQuality(Number(e.target.value))}
-                      className="w-full mt-2"
+                      className="w-full accent-violet-600"
                     />
                   </div>
                 )}
+
+                {/* Strict 100% Offline Browser Toggle */}
+                <label className="flex items-start gap-3 p-4 rounded-2xl bg-white/75 dark:bg-slate-900/75 border border-emerald-300/70 dark:border-emerald-800/60 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={offlineOnly}
+                    onChange={(e) => setOfflineOnly(e.target.checked)}
+                    className="mt-0.5 h-4 w-4 rounded border-emerald-400 text-emerald-600 focus:ring-emerald-500"
+                  />
+                  <div className="text-xs text-slate-700 dark:text-slate-300 leading-relaxed">
+                    <span className="font-bold text-emerald-700 dark:text-emerald-400 block">
+                      Strict 100% Offline Browser Mode (Confidential Documents)
+                    </span>
+                    <span className="text-slate-500 dark:text-slate-400">
+                      Never upload this file to the backend conversion API — runs purely in your browser (basic layout for Office/PDF conversions).
+                    </span>
+                  </div>
+                </label>
+
+                {error && (
+                  <div className="p-4 bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-800 rounded-2xl text-rose-700 dark:text-rose-400 text-sm">
+                    {error}
+                  </div>
+                )}
+
+                {progress && (
+                  <div
+                    className="p-3.5 rounded-2xl border border-[var(--pms-border)] text-sm flex items-center gap-2.5 font-medium text-slate-700 dark:text-slate-200"
+                    style={{ backgroundColor: 'var(--pms-soft-lavender)' }}
+                  >
+                    <RefreshCw className="w-4 h-4 animate-spin text-[var(--pms-violet)] shrink-0" />
+                    <span>{progress}</span>
+                  </div>
+                )}
+
+                <div className="flex gap-3 pt-1">
+                  <motion.button
+                    type="button"
+                    whileTap={prefersReduced ? undefined : { scale: 0.98 }}
+                    onClick={handleConvert}
+                    disabled={isProcessing || !targets.length}
+                    className="pms-btn-primary flex-1 py-3.5 rounded-xl text-base font-bold disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {isProcessing ? 'Converting…' : `Convert to ${TARGET_LABELS[target] ?? target.toUpperCase()}`}
+                  </motion.button>
+                  <button
+                    type="button"
+                    onClick={() => { setFile(null); setError(null); setResultUrlSafe(null); }}
+                    className="px-5 py-3.5 bg-white/75 dark:bg-slate-900/75 border border-[var(--pms-border)] text-slate-700 dark:text-slate-300 font-semibold rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
               </div>
-
-              {/* Strict 100% Offline Browser Toggle */}
-              <label className="flex items-start gap-3 p-3.5 rounded-xl bg-emerald-50/70 dark:bg-emerald-950/25 border border-emerald-200 dark:border-emerald-800/60 cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={offlineOnly}
-                  onChange={(e) => setOfflineOnly(e.target.checked)}
-                  className="mt-0.5 h-4 w-4 rounded border-emerald-400 text-emerald-600 focus:ring-emerald-500"
-                />
-                <div className="text-xs text-emerald-900 dark:text-emerald-200 leading-relaxed">
-                  <span className="font-bold block">Strict 100% Offline Browser Mode (Confidential Documents)</span>
-                  <span className="text-emerald-700 dark:text-emerald-400">
-                    Never upload this file to the backend conversion API — runs purely in your browser (basic layout for Office/PDF conversions).
-                  </span>
+            ) : (
+              <div className="space-y-5 text-center">
+                <div
+                  className="p-8 rounded-2xl border border-[var(--pms-border)]"
+                  style={{ backgroundColor: 'var(--pms-soft-mint)' }}
+                >
+                  <div className="w-12 h-12 bg-white/90 dark:bg-slate-900/90 rounded-full flex items-center justify-center mx-auto mb-4 shadow-xs">
+                    <Download className="w-6 h-6 text-emerald-600 dark:text-emerald-400" />
+                  </div>
+                  <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-4">Conversion complete!</h3>
+                  <motion.a
+                    whileTap={prefersReduced ? undefined : { scale: 0.98 }}
+                    href={resultUrl}
+                    download={`${baseName(file.name)}${resultExt}`}
+                    className="pms-btn-primary inline-flex items-center justify-center gap-2 px-8 py-3.5 text-base font-bold rounded-xl shadow-md"
+                  >
+                    <Download className="w-5 h-5" />
+                    Download {resultExt.toUpperCase().slice(1)} File
+                  </motion.a>
                 </div>
-              </label>
-
-              {error && (
-                <div className="p-4 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-xl text-red-700 dark:text-red-400 text-sm">{error}</div>
-              )}
-
-              {progress && (
-                <div className="p-3 bg-indigo-50 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800 rounded-xl text-indigo-700 dark:text-indigo-400 text-sm flex items-center gap-2">
-                  <RefreshCw className="w-4 h-4 animate-spin" />
-                  {progress}
-                </div>
-              )}
-
-              <div className="flex gap-3">
                 <button
-                  onClick={handleConvert}
-                  disabled={isProcessing || !targets.length}
-                  className="flex-1 py-3.5 bg-indigo-600 hover:bg-indigo-700 text-white text-base font-bold rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  type="button"
+                  onClick={() => { setFile(null); setResultUrlSafe(null); setError(null); }}
+                  className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white font-semibold text-sm transition-colors"
                 >
-                  {isProcessing ? 'Converting…' : `Convert to ${TARGET_LABELS[target] ?? target.toUpperCase()}`}
-                </button>
-                <button
-                  onClick={() => { setFile(null); setError(null); setResultUrlSafe(null); }}
-                  className="px-5 py-3.5 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold rounded-xl hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
-                >
-                  Cancel
+                  ← Convert another file
                 </button>
               </div>
-            </div>
-          ) : (
-            <div className="space-y-5 text-center">
-              <div className="p-8 bg-emerald-50 dark:bg-emerald-950/30 rounded-xl border border-emerald-200 dark:border-emerald-800">
-                <div className="w-12 h-12 bg-emerald-100 dark:bg-emerald-900 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <Download className="w-6 h-6 text-emerald-600 dark:text-emerald-400" />
-                </div>
-                <h3 className="text-xl font-bold text-emerald-800 dark:text-emerald-300 mb-4">Conversion complete!</h3>
-                <a
-                  href={resultUrl}
-                  download={`${baseName(file.name)}${resultExt}`}
-                  className="inline-flex items-center justify-center gap-2 px-8 py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white text-base font-bold rounded-xl transition-colors shadow-md"
-                >
-                  <Download className="w-5 h-5" />
-                  Download {resultExt.toUpperCase().slice(1)} File
-                </a>
-              </div>
-              <button
-                onClick={() => { setFile(null); setResultUrlSafe(null); setError(null); }}
-                className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white font-medium transition-colors"
-              >
-                ← Convert another file
-              </button>
-            </div>
-          )}
-        </div>
-      )}
+            )}
+          </div>
+        )}
+      </PearlStageSwitch>
       </div>
     </ToolWorkspaceShell>
   );

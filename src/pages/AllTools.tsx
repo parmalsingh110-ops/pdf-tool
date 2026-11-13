@@ -1,4 +1,5 @@
 import { useMemo, useState, useCallback, useEffect } from 'react';
+import { motion } from 'motion/react';
 import { usePageSEO } from '../lib/usePageSEO';
 import { Link } from 'react-router-dom';
 import { 
@@ -22,6 +23,7 @@ import { useSEO } from '../hooks/useSEO';
 import { VERIFIED_TOOL_COUNT } from '../components/GlobalSearch';
 import PearlAuroraBackground from '../components/pearl/PearlAuroraBackground';
 import ToolMicroPreview, { inferToolMicroVariant } from '../components/pearl/ToolMicroPreview';
+import { PearlStageSwitch } from '../components/pearl/PearlMotion';
 
 function categoryAnchor(title: string): string {
   if (title.includes('Deep-Tech')) return 'cat-deep-tech';
@@ -597,24 +599,31 @@ export default function AllTools() {
                 className="inline-flex items-center border rounded-full p-1 text-xs font-bold"
                 style={{ backgroundColor: 'var(--pms-white)', borderColor: 'var(--pms-border)' }}
               >
-                <button
-                  onClick={() => setSortMode('most-used')}
-                  className={`px-5 py-2 rounded-full ${sortMode === 'most-used' ? 'bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900' : 'text-[var(--pms-muted)] hover:text-[var(--pms-ink)]'}`}
-                >
-                  Most Used
-                </button>
-                <button
-                  onClick={() => setSortMode('newest')}
-                  className={`px-5 py-2 rounded-full ${sortMode === 'newest' ? 'bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900' : 'text-[var(--pms-muted)] hover:text-[var(--pms-ink)]'}`}
-                >
-                  Newest
-                </button>
-                <button
-                  onClick={() => setSortMode('a-z')}
-                  className={`px-5 py-2 rounded-full ${sortMode === 'a-z' ? 'bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900' : 'text-[var(--pms-muted)] hover:text-[var(--pms-ink)]'}`}
-                >
-                  A-Z
-                </button>
+                {([
+                  ['most-used', 'Most Used'],
+                  ['newest', 'Newest'],
+                  ['a-z', 'A-Z'],
+                ] as const).map(([mode, label]) => {
+                  const isActive = sortMode === mode;
+                  return (
+                    <button
+                      key={mode}
+                      onClick={() => setSortMode(mode)}
+                      className={`relative px-5 py-2 rounded-full transition-colors cursor-pointer ${
+                        isActive ? 'text-white dark:text-slate-900' : 'text-[var(--pms-muted)] hover:text-[var(--pms-ink)]'
+                      }`}
+                    >
+                      {isActive && (
+                        <motion.span
+                          layoutId="alltools-sort-pill"
+                          transition={{ type: 'spring', stiffness: 420, damping: 32 }}
+                          className="absolute inset-0 rounded-full bg-slate-900 dark:bg-slate-100"
+                        />
+                      )}
+                      <span className="relative z-10">{label}</span>
+                    </button>
+                  );
+                })}
               </div>
               <div className="relative flex-1 max-w-md">
                 <Search className="w-4 h-4 absolute left-4 top-1/2 -translate-y-1/2" style={{ color: 'var(--pms-muted)' }} />
@@ -653,9 +662,9 @@ export default function AllTools() {
                       setActiveCategory(tab.id);
                       if (selectedRole !== 'all') setSelectedRole('all');
                     }}
-                    className={`inline-flex items-center gap-2 px-4 py-2 rounded-full text-xs font-bold whitespace-nowrap transition-all border cursor-pointer ${
+                    className={`relative inline-flex items-center gap-2 px-4 py-2 rounded-full text-xs font-bold whitespace-nowrap transition-colors border cursor-pointer ${
                       selected
-                        ? 'pms-btn-primary border-transparent'
+                        ? 'text-white border-transparent'
                         : 'hover:border-rose-300 dark:hover:border-rose-700 hover:text-[var(--pms-rose)]'
                     }`}
                     style={
@@ -668,8 +677,17 @@ export default function AllTools() {
                           }
                     }
                   >
-                    <tab.icon className="w-3.5 h-3.5" />
-                    {tab.label}
+                    {selected && (
+                      <motion.span
+                        layoutId="alltools-cat-pill"
+                        transition={{ type: 'spring', stiffness: 420, damping: 32 }}
+                        className="pms-btn-primary absolute inset-0 rounded-full"
+                      />
+                    )}
+                    <span className="relative z-10 inline-flex items-center gap-2">
+                      <tab.icon className="w-3.5 h-3.5" />
+                      {tab.label}
+                    </span>
                   </button>
                 );
               })}
@@ -725,7 +743,8 @@ export default function AllTools() {
             </div>
           </header>
 
-          {activeRoleProfile ? (
+          <PearlStageSwitch stageKey={activeRoleProfile ? `role-${activeRoleProfile.id}` : `cat-${activeCategory}`}>
+            {activeRoleProfile ? (
             <div className="space-y-6">
               {/* Profile Workspace Banner */}
               <div className={`p-6 md:p-8 rounded-3xl border ${activeRoleProfile.bannerBg}`}>
@@ -958,6 +977,7 @@ export default function AllTools() {
               </div>
             </>
           )}
+          </PearlStageSwitch>
         </div>
       </div>
 

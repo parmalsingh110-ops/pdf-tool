@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
-import { Contrast, Download, Settings2, Sparkles, CheckCircle2, Eye, RefreshCw, AlertCircle, Printer, FileText } from 'lucide-react';
+import { Contrast, Download, Sparkles, CheckCircle2, Eye, RefreshCw, Printer } from 'lucide-react';
+import { motion, useReducedMotion } from 'motion/react';
 import { PDFDocument } from 'pdf-lib';
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
@@ -7,6 +8,8 @@ import FileDropzone from '../components/FileDropzone';
 import { useSEO } from '../hooks/useSEO';
 import { dataUrlToBytes } from '../lib/utils';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { toArrayBufferBytes, useAutoRevokeUrl } from '../lib/blobUrl';
+import { AnimatedNumber, PearlScanOverlay, PearlStageSwitch } from '../components/pearl/PearlMotion';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
@@ -30,6 +33,8 @@ function colorDistance(
 }
 
 export default function InkSaverPDF() {
+  const prefersReduced = useReducedMotion();
+
   useSEO(
     'Ink Saver PDF Online Free — Reduce Printer Toner & Ink Usage | PDF Media Suite',
     'Save up to 60% printer ink and toner. Convert heavy dark slide backgrounds into clean white paper, remove murky scanned tints, and optimize documents for printing.'
@@ -51,6 +56,8 @@ export default function InkSaverPDF() {
   const [estimatedSavings, setEstimatedSavings] = useState<number>(0);
   const [previewTab, setPreviewTab] = useState<'after' | 'before'>('after');
   const abortControllerRef = useRef<boolean>(false);
+
+  useAutoRevokeUrl(resultUrl);
 
   const handleDrop = async (acceptedFiles: File[]) => {
     if (!acceptedFiles.length) return;
@@ -306,7 +313,7 @@ export default function InkSaverPDF() {
 
       setProgressMsg('Finalizing print-optimized document...');
       const bytes = await outputPdf.save();
-      const blob = new Blob([bytes as any], { type: 'application/pdf' });
+      const blob = new Blob([toArrayBufferBytes(bytes)], { type: 'application/pdf' });
       const url = URL.createObjectURL(blob);
       setResultUrl(url);
       setEstimatedSavings(Math.round(totalSavingsSum / totalPages));
@@ -330,313 +337,44 @@ export default function InkSaverPDF() {
       microVariant="compress"
       tone="emerald"
     >
-      <div className="w-full max-w-7xl mx-auto text-slate-800 dark:text-slate-200">
+      <div className="w-full max-w-7xl mx-auto text-[var(--pms-ink)]">
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
         <div className="lg:col-span-8 space-y-6">
-          {!file ? (
-            <section className="bg-white dark:bg-slate-900 rounded-3xl border-2 border-dashed border-slate-300 dark:border-slate-700 p-8 sm:p-12 shadow-sm hover:border-rose-400 dark:hover:border-rose-500 transition-colors">
-              <FileDropzone
-                onDrop={handleDrop}
-                multiple={false}
-                accept={{ 'application/pdf': ['.pdf'] }}
-                title="Select PDF file to save ink"
-                subtitle="Perfect for lecture slides, study notes, forms, and scanned papers"
-                className="!border-none !p-0 !max-w-none !shadow-none !bg-transparent"
-              />
-            </section>
-          ) : (
-            <section className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-6 sm:p-8 shadow-sm">
-              {/* File Info Bar */}
-              <div className="flex items-center justify-between gap-4 p-4 sm:p-5 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200 dark:border-slate-700 mb-6">
-                <div className="flex items-center gap-3.5 min-w-0">
-                  <div className="w-12 h-12 bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 rounded-2xl flex items-center justify-center shrink-0">
-                    <Printer className="w-6 h-6" />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-base font-bold text-slate-900 dark:text-white truncate">{file.name}</p>
-                    <p className="text-xs text-slate-500 dark:text-slate-400">
-                      {(file.size / 1024 / 1024).toFixed(2)} MB • Ready for Ink Saver
-                    </p>
-                  </div>
-                </div>
+          <PearlStageSwitch stageKey={!file ? 'upload' : resultUrl ? 'done' : 'configure'}>
+            {!file ? (
+              <section className="pms-glass-panel rounded-3xl border-2 border-dashed border-[var(--pms-border)] p-8 sm:p-12 hover:border-[var(--pms-rose)] transition-colors">
+                <FileDropzone
+                  onDrop={handleDrop}
+                  multiple={false}
+                  accept={{ 'application/pdf': ['.pdf'] }}
+                  title="Select PDF file to save ink"
+                  subtitle="Perfect for lecture slides, study notes, forms, and scanned papers"
+                  className="!border-none !p-0 !max-w-none !shadow-none !bg-transparent"
+                />
+              </section>
+            ) : (
+              <section className="pms-glass-panel rounded-3xl p-6 sm:p-8 relative overflow-hidden">
+                <PearlScanOverlay
+                  active={isProcessing}
+                  label={progressMsg || 'Optimizing toner density across pages...'}
+                />
 
-                <button
-                  onClick={() => {
-                    setFile(null);
-                    setResultUrl(null);
-                  }}
-                  className="text-xs font-semibold text-slate-500 hover:text-rose-600 dark:hover:text-rose-400 shrink-0 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:border-rose-300"
-                >
-                  Change File
-                </button>
-              </div>
-
-              {!resultUrl ? (
-                <div className="space-y-6">
-                  {/* Mode Selector Presets */}
-                  <div>
-                    <label className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 block mb-2">
-                      Choose Optimization Preset
-                    </label>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <button
-                        type="button"
-                        onClick={() => setMode('smart_auto')}
-                        className={`p-4 rounded-2xl border text-left transition-all ${
-                          mode === 'smart_auto'
-                            ? 'border-rose-600 bg-rose-50/60 dark:bg-rose-950/30 text-rose-900 dark:text-rose-200 shadow-sm ring-1 ring-rose-500'
-                            : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="font-bold text-sm">Smart Auto (Recommended)</span>
-                          {mode === 'smart_auto' && <CheckCircle2 className="w-4 h-4 text-rose-600" />}
-                        </div>
-                        <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-                          Auto-detects page type. Inverts dark slides to white paper; saves toner on normal docs.
-                        </p>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => setMode('invert_dark')}
-                        className={`p-4 rounded-2xl border text-left transition-all ${
-                          mode === 'invert_dark'
-                            ? 'border-rose-600 bg-rose-50/60 dark:bg-rose-950/30 text-rose-900 dark:text-rose-200 shadow-sm ring-1 ring-rose-500'
-                            : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="font-bold text-sm">Invert Dark Slides</span>
-                          {mode === 'invert_dark' && <CheckCircle2 className="w-4 h-4 text-rose-600" />}
-                        </div>
-                        <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-                          For black/navy slides. Turns heavy backgrounds into clean white paper & white text into dark.
-                        </p>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => setMode('eco_toner')}
-                        className={`p-4 rounded-2xl border text-left transition-all ${
-                          mode === 'eco_toner'
-                            ? 'border-rose-600 bg-rose-50/60 dark:bg-rose-950/30 text-rose-900 dark:text-rose-200 shadow-sm ring-1 ring-rose-500'
-                            : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="font-bold text-sm">Eco Toner Saver</span>
-                          {mode === 'eco_toner' && <CheckCircle2 className="w-4 h-4 text-rose-600" />}
-                        </div>
-                        <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-                          For normal documents. Lightens heavy blacks and graphics to save 30-50% cartridge ink.
-                        </p>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => setMode('clean_scanned')}
-                        className={`p-4 rounded-2xl border text-left transition-all ${
-                          mode === 'clean_scanned'
-                            ? 'border-rose-600 bg-rose-50/60 dark:bg-rose-950/30 text-rose-900 dark:text-rose-200 shadow-sm ring-1 ring-rose-500'
-                            : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="font-bold text-sm">Whiten Scanned Pages</span>
-                          {mode === 'clean_scanned' && <CheckCircle2 className="w-4 h-4 text-rose-600" />}
-                        </div>
-                        <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-                          Removes yellow, grey, or dirty shadows from phone scans, leaving pure white paper.
-                        </p>
-                      </button>
+                {/* File Info Bar */}
+                <div className="flex items-center justify-between gap-4 p-4 sm:p-5 bg-white/75 dark:bg-slate-900/75 rounded-2xl border border-[var(--pms-border)] mb-6">
+                  <div className="flex items-center gap-3.5 min-w-0">
+                    <div
+                      className="w-12 h-12 rounded-2xl flex items-center justify-center shrink-0"
+                      style={{ backgroundColor: 'var(--pms-soft-rose)', color: 'var(--pms-rose)' }}
+                    >
+                      <Printer className="w-6 h-6" />
                     </div>
-                  </div>
-
-                  {/* Eco Strength Slider (for eco_toner or smart_auto) */}
-                  {(mode === 'eco_toner' || mode === 'smart_auto') && (
-                    <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700">
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
-                          Toner Saving Intensity
-                        </span>
-                        <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/50 px-2.5 py-0.5 rounded-full border border-emerald-200 dark:border-emerald-800">
-                          ~{ecoStrength}% Ink Saved
-                        </span>
-                      </div>
-                      <input
-                        type="range"
-                        min={15}
-                        max={60}
-                        value={ecoStrength}
-                        onChange={(e) => setEcoStrength(Number(e.target.value))}
-                        className="w-full accent-rose-600"
-                      />
-                      <div className="flex justify-between text-[11px] text-slate-400 mt-1">
-                        <span>Light (15%)</span>
-                        <span>Balanced (35%)</span>
-                        <span>Maximum (60%)</span>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Dark Slide Threshold Slider (for invert_dark or smart_auto) */}
-                  {(mode === 'invert_dark' || mode === 'smart_auto') && (
-                    <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700">
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
-                          Dark Background Detection Cutoff
-                        </span>
-                        <span className="text-xs font-bold text-slate-600 dark:text-slate-300">
-                          {lumaThreshold}
-                        </span>
-                      </div>
-                      <input
-                        type="range"
-                        min={60}
-                        max={200}
-                        value={lumaThreshold}
-                        onChange={(e) => setLumaThreshold(Number(e.target.value))}
-                        className="w-full accent-rose-600"
-                      />
-                      <p className="text-[11px] text-slate-400 mt-1">
-                        Higher values catch navy and charcoal slides; lower values catch pure black only.
+                    <div className="min-w-0">
+                      <p className="text-base font-bold text-[var(--pms-ink)] truncate">{file.name}</p>
+                      <p className="text-xs text-[var(--pms-muted)]">
+                        {(file.size / 1024 / 1024).toFixed(2)} MB • Ready for Ink Saver
                       </p>
                     </div>
-                  )}
-
-                  {/* Live Interactive Preview Box */}
-                  {(previewOriginal || previewProcessed) && (
-                    <div className="rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden bg-slate-50 dark:bg-slate-900 p-4">
-                      <div className="flex items-center justify-between mb-3">
-                        <div className="flex items-center gap-2">
-                          <Eye className="w-4 h-4 text-rose-500" />
-                          <span className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
-                            Page 1 Live Preview
-                          </span>
-                        </div>
-
-                        <div className="flex items-center gap-1 bg-white dark:bg-slate-800 p-1 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-semibold">
-                          <button
-                            type="button"
-                            onClick={() => setPreviewTab('after')}
-                            className={`px-3 py-1 rounded-lg transition-colors ${
-                              previewTab === 'after'
-                                ? 'bg-rose-600 text-white shadow-sm'
-                                : 'text-slate-600 dark:text-slate-400'
-                            }`}
-                          >
-                            Optimized (Ink Saver)
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setPreviewTab('before')}
-                            className={`px-3 py-1 rounded-lg transition-colors ${
-                              previewTab === 'before'
-                                ? 'bg-rose-600 text-white shadow-sm'
-                                : 'text-slate-600 dark:text-slate-400'
-                            }`}
-                          >
-                            Original
-                          </button>
-                        </div>
-                      </div>
-
-                      <div className="relative w-full max-h-[380px] rounded-xl overflow-hidden bg-white dark:bg-slate-950 flex items-center justify-center border border-slate-200 dark:border-slate-800 shadow-inner">
-                        {previewTab === 'after' && previewProcessed && (
-                          <img
-                            src={previewProcessed}
-                            alt="Optimized preview"
-                            className="max-h-[360px] object-contain p-2"
-                          />
-                        )}
-                        {previewTab === 'before' && previewOriginal && (
-                          <img
-                            src={previewOriginal}
-                            alt="Original preview"
-                            className="max-h-[360px] object-contain p-2"
-                          />
-                        )}
-                        {estimatedSavings > 0 && (
-                          <div className="absolute bottom-3 right-3 bg-emerald-600 text-white text-xs font-bold px-3 py-1.5 rounded-xl shadow-md flex items-center gap-1.5">
-                            <Sparkles className="w-3.5 h-3.5" />
-                            ~{estimatedSavings}% Estimated Ink Saved
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Processing Status / Progress */}
-                  {isProcessing && (
-                    <div className="p-4 rounded-2xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-center space-y-2">
-                      <div className="flex items-center justify-center gap-2 text-rose-700 dark:text-rose-300 font-bold text-sm">
-                        <RefreshCw className="w-4 h-4 animate-spin text-rose-600" />
-                        <span>{progressMsg || 'Processing PDF...'}</span>
-                      </div>
-                      <p className="text-xs text-rose-600/80 dark:text-rose-400">
-                        Please keep this tab open while high-resolution pages are processed.
-                      </p>
-                    </div>
-                  )}
-
-                  {/* Action Buttons */}
-                  <div className="flex gap-4 pt-2">
-                    <button
-                      type="button"
-                      onClick={handleConvert}
-                      disabled={isProcessing}
-                      className="flex-1 py-4 bg-gradient-to-r from-rose-600 to-rose-700 hover:from-rose-500 hover:to-rose-600 text-white text-base font-bold rounded-2xl transition-all shadow-lg shadow-rose-600/20 disabled:opacity-50 flex items-center justify-center gap-2"
-                    >
-                      {isProcessing ? (
-                        <>
-                          <RefreshCw className="w-5 h-5 animate-spin" />
-                          Processing Document...
-                        </>
-                      ) : (
-                        <>
-                          <Printer className="w-5 h-5" />
-                          Generate Ink-Saver PDF
-                        </>
-                      )}
-                    </button>
-                    {isProcessing && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          abortControllerRef.current = true;
-                          setIsProcessing(false);
-                        }}
-                        className="px-6 py-4 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-sm font-semibold rounded-2xl hover:bg-slate-200"
-                      >
-                        Cancel
-                      </button>
-                    )}
-                  </div>
-                </div>
-              ) : (
-                /* Success & Download Screen */
-                <div className="space-y-6 text-center py-6">
-                  <div className="p-8 bg-emerald-50 dark:bg-emerald-950/40 rounded-3xl border border-emerald-200 dark:border-emerald-800">
-                    <div className="w-16 h-16 rounded-full bg-emerald-100 dark:bg-emerald-900/60 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mx-auto mb-4">
-                      <CheckCircle2 className="w-8 h-8" />
-                    </div>
-                    <h3 className="text-2xl font-black text-emerald-900 dark:text-emerald-200 mb-2">
-                      Print-Ready PDF Created!
-                    </h3>
-                    <p className="text-sm text-emerald-700 dark:text-emerald-300 mb-6 max-w-md mx-auto">
-                      Heavy backgrounds and excessive dark toner have been optimized. You saved approximately{' '}
-                      <strong>{estimatedSavings}%</strong> of ink/toner for this print job.
-                    </p>
-                    <a
-                      href={resultUrl}
-                      download={`ink_saver_${file.name}`}
-                      className="inline-flex items-center justify-center gap-2.5 px-8 py-4 bg-emerald-600 hover:bg-emerald-700 text-white text-base font-bold rounded-2xl transition-all shadow-lg shadow-emerald-600/30"
-                    >
-                      <Download className="w-5 h-5" />
-                      Download Ink-Saver PDF
-                    </a>
                   </div>
 
                   <button
@@ -645,39 +383,330 @@ export default function InkSaverPDF() {
                       setFile(null);
                       setResultUrl(null);
                     }}
-                    className="text-xs font-bold text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 underline"
+                    className="text-xs font-semibold text-[var(--pms-muted)] hover:text-[var(--pms-ink)] shrink-0 px-3 py-1.5 rounded-xl bg-white/75 dark:bg-slate-900/75 border border-[var(--pms-border)] transition-colors"
                   >
-                    Process another document
+                    Change File
                   </button>
                 </div>
-              )}
-            </section>
-          )}
+
+                {!resultUrl ? (
+                  <div className="space-y-6">
+                    {/* Mode Selector Presets */}
+                    <div>
+                      <label className="text-xs font-bold uppercase tracking-wider text-[var(--pms-muted)] block mb-2.5">
+                        Choose Optimization Preset
+                      </label>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        {([
+                          {
+                            id: 'smart_auto',
+                            title: 'Smart Auto (Recommended)',
+                            desc: 'Auto-detects page type. Inverts dark slides to white paper; saves toner on normal docs.',
+                          },
+                          {
+                            id: 'invert_dark',
+                            title: 'Invert Dark Slides',
+                            desc: 'For black/navy slides. Turns heavy backgrounds into clean white paper & white text into dark.',
+                          },
+                          {
+                            id: 'eco_toner',
+                            title: 'Eco Toner Saver',
+                            desc: 'For normal documents. Lightens heavy blacks and graphics to save 30-50% cartridge ink.',
+                          },
+                          {
+                            id: 'clean_scanned',
+                            title: 'Whiten Scanned Pages',
+                            desc: 'Removes yellow, grey, or dirty shadows from phone scans, leaving pure white paper.',
+                          },
+                        ] as const).map((preset) => {
+                          const active = mode === preset.id;
+                          return (
+                            <motion.button
+                              key={preset.id}
+                              type="button"
+                              whileHover={prefersReduced ? undefined : { y: -2 }}
+                              whileTap={prefersReduced ? undefined : { scale: 0.99 }}
+                              onClick={() => setMode(preset.id)}
+                              style={{
+                                backgroundColor: active ? 'var(--pms-soft-rose)' : undefined,
+                                borderColor: active ? 'var(--pms-rose)' : 'var(--pms-border)',
+                              }}
+                              className={`relative p-4 rounded-2xl border text-left transition-all ${
+                                active
+                                  ? 'shadow-sm ring-1 ring-[var(--pms-rose)]'
+                                  : 'bg-white/75 dark:bg-slate-900/75 hover:bg-white dark:hover:bg-slate-900'
+                              }`}
+                            >
+                              {active && (
+                                <motion.span
+                                  layoutId="inksaver-mode-pill"
+                                  transition={prefersReduced ? { duration: 0 } : { type: 'spring', stiffness: 380, damping: 30 }}
+                                  className="absolute top-3 right-3 px-2 py-0.5 rounded-full text-[10px] font-bold text-white"
+                                  style={{ backgroundColor: 'var(--pms-rose)' }}
+                                >
+                                  Active
+                                </motion.span>
+                              )}
+                              <div className="flex items-center justify-between mb-1 pr-14">
+                                <span className="font-bold text-sm text-[var(--pms-ink)]">{preset.title}</span>
+                              </div>
+                              <p className="text-xs text-[var(--pms-muted)] leading-relaxed">
+                                {preset.desc}
+                              </p>
+                            </motion.button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Eco Strength Slider (for eco_toner or smart_auto) */}
+                    {(mode === 'eco_toner' || mode === 'smart_auto') && (
+                      <div className="p-4 rounded-2xl bg-white/75 dark:bg-slate-900/75 border border-[var(--pms-border)]">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-xs font-bold text-[var(--pms-ink)]">
+                            Toner Saving Intensity
+                          </span>
+                          <span
+                            className="text-xs font-bold px-2.5 py-0.5 rounded-full border border-[var(--pms-border)]"
+                            style={{ backgroundColor: 'var(--pms-soft-mint)', color: 'var(--pms-ink)' }}
+                          >
+                            ~<AnimatedNumber value={ecoStrength} suffix="% Ink Saved" />
+                          </span>
+                        </div>
+                        <input
+                          type="range"
+                          min={15}
+                          max={60}
+                          value={ecoStrength}
+                          onChange={(e) => setEcoStrength(Number(e.target.value))}
+                          className="w-full accent-[var(--pms-rose)]"
+                        />
+                        <div className="flex justify-between text-[11px] text-[var(--pms-muted)] mt-1">
+                          <span>Light (15%)</span>
+                          <span>Balanced (35%)</span>
+                          <span>Maximum (60%)</span>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Dark Slide Threshold Slider (for invert_dark or smart_auto) */}
+                    {(mode === 'invert_dark' || mode === 'smart_auto') && (
+                      <div className="p-4 rounded-2xl bg-white/75 dark:bg-slate-900/75 border border-[var(--pms-border)]">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-xs font-bold text-[var(--pms-ink)]">
+                            Dark Background Detection Cutoff
+                          </span>
+                          <span className="text-xs font-mono font-bold text-[var(--pms-ink)]">
+                            <AnimatedNumber value={lumaThreshold} />
+                          </span>
+                        </div>
+                        <input
+                          type="range"
+                          min={60}
+                          max={200}
+                          value={lumaThreshold}
+                          onChange={(e) => setLumaThreshold(Number(e.target.value))}
+                          className="w-full accent-[var(--pms-rose)]"
+                        />
+                        <p className="text-[11px] text-[var(--pms-muted)] mt-1">
+                          Higher values catch navy and charcoal slides; lower values catch pure black only.
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Live Interactive Preview Box */}
+                    {(previewOriginal || previewProcessed) && (
+                      <div className="rounded-2xl border border-[var(--pms-border)] overflow-hidden bg-white/75 dark:bg-slate-900/75 p-4">
+                        <div className="flex items-center justify-between gap-2 mb-3">
+                          <div className="flex items-center gap-2">
+                            <Eye className="w-4 h-4" style={{ color: 'var(--pms-rose)' }} />
+                            <span className="text-xs font-bold text-[var(--pms-ink)] uppercase tracking-wider">
+                              Page 1 Live Preview
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-1 bg-white/80 dark:bg-slate-950/70 p-1 rounded-xl border border-[var(--pms-border)] text-xs font-semibold">
+                            {([
+                              { id: 'after', label: 'Optimized (Ink Saver)' },
+                              { id: 'before', label: 'Original' },
+                            ] as const).map((tab) => {
+                              const active = previewTab === tab.id;
+                              return (
+                                <button
+                                  key={tab.id}
+                                  type="button"
+                                  onClick={() => setPreviewTab(tab.id)}
+                                  className={`relative px-3 py-1 rounded-lg transition-colors ${
+                                    active ? 'text-[var(--pms-ink)]' : 'text-[var(--pms-muted)] hover:text-[var(--pms-ink)]'
+                                  }`}
+                                >
+                                  {active && (
+                                    <motion.span
+                                      layoutId="inksaver-preview-tab"
+                                      transition={prefersReduced ? { duration: 0 } : { type: 'spring', stiffness: 420, damping: 32 }}
+                                      className="absolute inset-0 rounded-lg border"
+                                      style={{
+                                        backgroundColor: 'var(--pms-soft-rose)',
+                                        borderColor: 'var(--pms-rose)',
+                                      }}
+                                    />
+                                  )}
+                                  <span className="relative z-10">{tab.label}</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        <div className="relative w-full max-h-[380px] rounded-xl overflow-hidden bg-white flex items-center justify-center border border-[var(--pms-border)] shadow-inner">
+                          {previewTab === 'after' && previewProcessed && (
+                            <img
+                              src={previewProcessed}
+                              alt="Optimized preview"
+                              className="max-h-[360px] object-contain p-2"
+                            />
+                          )}
+                          {previewTab === 'before' && previewOriginal && (
+                            <img
+                              src={previewOriginal}
+                              alt="Original preview"
+                              className="max-h-[360px] object-contain p-2"
+                            />
+                          )}
+                          {estimatedSavings > 0 && (
+                            <div className="absolute bottom-3 right-3 bg-emerald-600 text-white text-xs font-bold px-3 py-1.5 rounded-xl shadow-md flex items-center gap-1.5">
+                              <Sparkles className="w-3.5 h-3.5" />
+                              ~<AnimatedNumber value={estimatedSavings} suffix="% Estimated Ink Saved" />
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Processing Status / Progress */}
+                    {isProcessing && (
+                      <div
+                        className="p-4 rounded-2xl border border-[var(--pms-border)] text-center space-y-1.5"
+                        style={{ backgroundColor: 'var(--pms-soft-rose)' }}
+                      >
+                        <div className="flex items-center justify-center gap-2 text-[var(--pms-ink)] font-bold text-sm">
+                          <RefreshCw className="w-4 h-4 animate-spin" style={{ color: 'var(--pms-rose)' }} />
+                          <span>{progressMsg || 'Processing PDF...'}</span>
+                        </div>
+                        <p className="text-xs text-[var(--pms-muted)]">
+                          Please keep this tab open while high-resolution pages are processed.
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Action Buttons */}
+                    <div className="flex gap-3 pt-2">
+                      <motion.button
+                        type="button"
+                        whileHover={prefersReduced ? undefined : { scale: 1.01 }}
+                        whileTap={prefersReduced ? undefined : { scale: 0.98 }}
+                        onClick={handleConvert}
+                        disabled={isProcessing}
+                        className="pms-btn-primary flex-1 py-4 text-base font-bold rounded-2xl disabled:opacity-50 flex items-center justify-center gap-2"
+                      >
+                        {isProcessing ? (
+                          <>
+                            <RefreshCw className="w-5 h-5 animate-spin" />
+                            Processing Document...
+                          </>
+                        ) : (
+                          <>
+                            <Printer className="w-5 h-5" />
+                            Generate Ink-Saver PDF
+                          </>
+                        )}
+                      </motion.button>
+                      {isProcessing && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            abortControllerRef.current = true;
+                            setIsProcessing(false);
+                          }}
+                          className="px-6 py-4 bg-white/75 dark:bg-slate-900/75 border border-[var(--pms-border)] text-[var(--pms-ink)] text-sm font-semibold rounded-2xl hover:bg-white dark:hover:bg-slate-800 transition-colors"
+                        >
+                          Cancel
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  /* Success & Download Screen */
+                  <div className="space-y-6 text-center py-4">
+                    <div
+                      className="p-8 rounded-3xl border border-[var(--pms-border)]"
+                      style={{ backgroundColor: 'var(--pms-soft-mint)' }}
+                    >
+                      <div className="w-16 h-16 rounded-2xl bg-white/80 dark:bg-slate-900/80 border border-[var(--pms-border)] text-emerald-600 dark:text-emerald-400 flex items-center justify-center mx-auto mb-4 shadow-sm">
+                        <CheckCircle2 className="w-8 h-8" />
+                      </div>
+                      <h3 className="text-2xl font-black text-[var(--pms-ink)] mb-2">
+                        Print-Ready PDF Created!
+                      </h3>
+                      <p className="text-sm text-[var(--pms-muted)] mb-6 max-w-md mx-auto">
+                        Heavy backgrounds and excessive dark toner have been optimized. You saved approximately{' '}
+                        <strong className="text-[var(--pms-ink)]">
+                          <AnimatedNumber value={estimatedSavings} suffix="%" />
+                        </strong>{' '}
+                        of ink/toner for this print job.
+                      </p>
+                      <motion.a
+                        whileHover={prefersReduced ? undefined : { scale: 1.02 }}
+                        whileTap={prefersReduced ? undefined : { scale: 0.98 }}
+                        href={resultUrl}
+                        download={`ink_saver_${file.name}`}
+                        className="pms-btn-primary inline-flex items-center justify-center gap-2.5 px-8 py-4 text-base font-bold rounded-2xl"
+                      >
+                        <Download className="w-5 h-5" />
+                        Download Ink-Saver PDF
+                      </motion.a>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFile(null);
+                        setResultUrl(null);
+                      }}
+                      className="text-xs font-bold text-[var(--pms-muted)] hover:text-[var(--pms-ink)] underline transition-colors"
+                    >
+                      Process another document
+                    </button>
+                  </div>
+                )}
+              </section>
+            )}
+          </PearlStageSwitch>
         </div>
 
         {/* Informational Sidebar */}
         <aside className="lg:col-span-4 space-y-6">
-          <div className="bg-white dark:bg-slate-900 p-6 sm:p-8 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm">
-            <h3 className="text-base font-bold mb-4 text-slate-900 dark:text-white flex items-center gap-2">
-              <Printer className="w-4 h-4 text-rose-600" />
+          <div className="pms-glass-panel p-6 sm:p-8 rounded-3xl">
+            <h3 className="text-base font-bold mb-4 text-[var(--pms-ink)] flex items-center gap-2">
+              <Printer className="w-4 h-4" style={{ color: 'var(--pms-rose)' }} />
               Why use Ink Saver?
             </h3>
-            <ul className="space-y-3.5 text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+            <ul className="space-y-3.5 text-xs text-[var(--pms-muted)] leading-relaxed">
               <li className="flex items-start gap-2">
-                <span className="font-bold text-rose-600">•</span>
-                <span><strong>Lecture Slides:</strong> Inverts solid black/navy PowerPoint slide backgrounds to white paper so printing doesn't drain your cartridge.</span>
+                <span className="font-bold" style={{ color: 'var(--pms-rose)' }}>•</span>
+                <span><strong className="text-[var(--pms-ink)]">Lecture Slides:</strong> Inverts solid black/navy PowerPoint slide backgrounds to white paper so printing doesn't drain your cartridge.</span>
               </li>
               <li className="flex items-start gap-2">
-                <span className="font-bold text-rose-600">•</span>
-                <span><strong>Crisp Text:</strong> Unlike simple grayscale tools, Ink Saver keeps text high-contrast and sharp so it remains effortless to read.</span>
+                <span className="font-bold" style={{ color: 'var(--pms-rose)' }}>•</span>
+                <span><strong className="text-[var(--pms-ink)]">Crisp Text:</strong> Unlike simple grayscale tools, Ink Saver keeps text high-contrast and sharp so it remains effortless to read.</span>
               </li>
               <li className="flex items-start gap-2">
-                <span className="font-bold text-rose-600">•</span>
-                <span><strong>Cleaner Scans:</strong> Removes yellow, grey, and shadowed paper backgrounds from mobile photo scans.</span>
+                <span className="font-bold" style={{ color: 'var(--pms-rose)' }}>•</span>
+                <span><strong className="text-[var(--pms-ink)]">Cleaner Scans:</strong> Removes yellow, grey, and shadowed paper backgrounds from mobile photo scans.</span>
               </li>
               <li className="flex items-start gap-2">
-                <span className="font-bold text-rose-600">•</span>
-                <span><strong>Zero Upload:</strong> Runs locally in your browser memory for 100% data privacy.</span>
+                <span className="font-bold" style={{ color: 'var(--pms-rose)' }}>•</span>
+                <span><strong className="text-[var(--pms-ink)]">Zero Upload:</strong> Runs locally in your browser memory for 100% data privacy.</span>
               </li>
             </ul>
           </div>

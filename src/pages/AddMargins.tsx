@@ -1,12 +1,15 @@
 import { useState, useRef, useEffect } from 'react';
-import { Download, FileText, Maximize, Sparkles, CheckCircle2, Eye, Sliders, BookOpen, Scissors } from 'lucide-react';
+import { Download, Loader2, Maximize, CheckCircle2, Eye } from 'lucide-react';
 import { PDFDocument } from 'pdf-lib';
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+import { motion, useReducedMotion } from 'motion/react';
 import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { PearlScanOverlay } from '../components/pearl/PearlMotion';
+import { toArrayBufferBytes, useAutoRevokeUrl } from '../lib/blobUrl';
 
 // Initialize pdf.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
@@ -42,6 +45,8 @@ export default function AddMargins() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [marginedUrl, setMarginedUrl] = useState<string | null>(null);
 
+  useAutoRevokeUrl(marginedUrl);
+
   // Margins in points (72 points = 1 inch)
   const [topMargin, setTopMargin] = useState<number>(36);
   const [bottomMargin, setBottomMargin] = useState<number>(36);
@@ -55,6 +60,7 @@ export default function AddMargins() {
   const [origH, setOrigH] = useState(550);
   const [loadingPreview, setLoadingPreview] = useState(false);
   const previewCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const prefersReduced = useReducedMotion();
 
   const handleDrop = async (acceptedFiles: File[]) => {
     if (acceptedFiles.length > 0) {
@@ -178,7 +184,7 @@ export default function AddMargins() {
       }
 
       const pdfBytes = await pdfDoc.save();
-      const blob = new Blob([pdfBytes as any], { type: 'application/pdf' });
+      const blob = new Blob([toArrayBufferBytes(pdfBytes)], { type: 'application/pdf' });
       const url = URL.createObjectURL(blob);
       setMarginedUrl(url);
     } catch (error) {
@@ -201,7 +207,12 @@ export default function AddMargins() {
       <div className="flex flex-col items-center justify-center max-w-7xl mx-auto w-full">
 
       {!file ? (
-        <div className="w-full max-w-4xl">
+        <motion.div
+          initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+          className="w-full max-w-4xl pms-glass-panel rounded-3xl p-4 sm:p-6"
+        >
           <FileDropzone
             onDrop={handleDrop}
             multiple={false}
@@ -209,65 +220,86 @@ export default function AddMargins() {
             title="Select PDF file"
             subtitle="or drop document here to add margins"
           />
-        </div>
+        </motion.div>
       ) : marginedUrl ? (
         /* Results View */
-        <div className="w-full max-w-2xl bg-white dark:bg-slate-900 rounded-2xl shadow-sm border border-gray-200 dark:border-slate-800 p-8 text-center space-y-6">
-          <div className="p-8 bg-emerald-50 dark:bg-emerald-950/30 rounded-2xl border border-emerald-200 dark:border-emerald-800">
-            <div className="w-16 h-16 bg-emerald-100 dark:bg-emerald-900/50 text-emerald-600 dark:text-emerald-400 rounded-2xl flex items-center justify-center mx-auto mb-4">
+        <motion.div
+          initial={prefersReduced ? false : { opacity: 0, scale: 0.98, y: 12 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+          className="w-full max-w-2xl pms-glass-panel rounded-3xl border border-emerald-200/80 dark:border-emerald-800/70 p-8 text-center space-y-6"
+        >
+          <div className="p-7 bg-[var(--pms-soft-mint)]/65 dark:bg-emerald-950/35 rounded-2xl border border-emerald-200/70 dark:border-emerald-800/60">
+            <motion.div
+              initial={prefersReduced ? false : { scale: 0.45, rotate: -10 }}
+              animate={{ scale: 1, rotate: 0 }}
+              transition={{ type: 'spring', stiffness: 420, damping: 20 }}
+              className="w-16 h-16 bg-emerald-100 dark:bg-emerald-900/60 text-emerald-600 dark:text-emerald-400 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-emerald-200 dark:border-emerald-800"
+            >
               <CheckCircle2 className="w-8 h-8" />
-            </div>
-            <h3 className="text-2xl font-bold text-emerald-900 dark:text-emerald-200 mb-2">
+            </motion.div>
+            <h3 className="text-2xl font-bold text-[var(--pms-ink)] mb-2">
               Margins Added Successfully!
             </h3>
-            <p className="text-sm text-emerald-700 dark:text-emerald-400 mb-6">
+            <p className="text-sm text-emerald-700 dark:text-emerald-400 mb-6 tabular-nums">
               New dimensions expanded with Top: {topMargin}pt • Bottom: {bottomMargin}pt • Left: {leftMargin}pt • Right: {rightMargin}pt.
             </p>
-            <a
+            <motion.a
+              whileHover={prefersReduced ? undefined : { scale: 1.015 }}
+              whileTap={prefersReduced ? undefined : { scale: 0.985 }}
               href={marginedUrl}
               download={`margined_${file.name}`}
-              className="inline-flex items-center justify-center gap-2 px-8 py-4 bg-emerald-600 hover:bg-emerald-700 text-white text-lg font-bold rounded-xl shadow-lg transition-all"
+              className="pms-btn-primary inline-flex items-center justify-center gap-2 px-8 py-4 text-base font-bold rounded-2xl"
             >
               <Download className="w-5 h-5" /> Download Margined PDF
-            </a>
+            </motion.a>
           </div>
 
-          <div className="flex justify-center gap-4">
-            <button
+          <div className="flex flex-wrap justify-center gap-3">
+            <motion.button
+              whileHover={prefersReduced ? undefined : { scale: 1.015 }}
+              whileTap={prefersReduced ? undefined : { scale: 0.985 }}
               onClick={() => setMarginedUrl(null)}
-              className="px-6 py-3 bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700 text-gray-700 dark:text-slate-300 font-semibold rounded-xl transition-all"
+              className="px-6 py-3 bg-[var(--pms-pearl)] dark:bg-slate-800/90 hover:bg-[var(--pms-soft-lavender)] dark:hover:bg-slate-700 text-[var(--pms-ink)] font-semibold rounded-2xl border border-[var(--pms-border)] transition-colors text-sm"
             >
               Adjust Margin Sizes
-            </button>
-            <button
+            </motion.button>
+            <motion.button
+              whileHover={prefersReduced ? undefined : { scale: 1.015 }}
+              whileTap={prefersReduced ? undefined : { scale: 0.985 }}
               onClick={() => {
                 setFile(null);
                 setMarginedUrl(null);
               }}
-              className="px-6 py-3 bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700 text-gray-700 dark:text-slate-300 font-semibold rounded-xl transition-all"
+              className="px-6 py-3 bg-[var(--pms-pearl)] dark:bg-slate-800/90 hover:bg-[var(--pms-soft-lavender)] dark:hover:bg-slate-700 text-[var(--pms-ink)] font-semibold rounded-2xl border border-[var(--pms-border)] transition-colors text-sm"
             >
               Process Another PDF
-            </button>
+            </motion.button>
           </div>
-        </div>
+        </motion.div>
       ) : (
         /* Workspace */
-        <div className="w-full max-w-6xl grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+        <motion.div
+          initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+          className="w-full max-w-6xl grid grid-cols-1 lg:grid-cols-12 gap-8 items-start"
+        >
           {/* Controls Panel (7 Cols) */}
-          <div className="lg:col-span-7 bg-white dark:bg-slate-900 rounded-2xl border border-gray-200 dark:border-slate-800 p-6 shadow-sm space-y-6">
-            <div className="flex items-center justify-between pb-4 border-b border-gray-100 dark:border-slate-800">
+          <div className="lg:col-span-7 pms-glass-panel rounded-3xl p-6 sm:p-7 space-y-6">
+            <div className="flex items-center justify-between pb-4 border-b border-[var(--pms-border)]">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-sky-100 dark:bg-sky-950/60 text-sky-600 dark:text-sky-400 rounded-xl flex items-center justify-center shrink-0">
+                <div className="w-10 h-10 bg-[var(--pms-soft-blue)] text-[var(--pms-blue)] rounded-xl flex items-center justify-center shrink-0">
                   <Maximize className="w-5 h-5" />
                 </div>
-                <div>
-                  <h3 className="font-bold text-gray-900 dark:text-white truncate max-w-xs">{file.name}</h3>
-                  <p className="text-xs text-gray-500">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
+                <div className="min-w-0">
+                  <h3 className="font-bold text-[var(--pms-ink)] truncate max-w-xs">{file.name}</h3>
+                  <p className="text-xs text-[var(--pms-muted)]">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
                 </div>
               </div>
               <button
                 onClick={() => setFile(null)}
-                className="text-xs font-semibold text-gray-500 hover:text-gray-700 dark:hover:text-slate-300"
+                className="text-xs font-semibold text-[var(--pms-muted)] hover:text-[var(--pms-ink)] transition-colors"
               >
                 Change File
               </button>
@@ -276,10 +308,10 @@ export default function AddMargins() {
             {/* Paper Size / Resize Conversion */}
             <div>
               <div className="flex justify-between items-center mb-2">
-                <label className="block text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-slate-400">
+                <label className="block text-xs font-bold uppercase tracking-wider text-[var(--pms-subtle-text)]">
                   Resize Page Paper Size (Optional)
                 </label>
-                <span className="text-[11px] text-slate-400 font-mono">
+                <span className="text-[11px] text-[var(--pms-muted)] font-mono">
                   Original: {Math.round(origW)}×{Math.round(origH)} pt
                 </span>
               </div>
@@ -306,20 +338,20 @@ export default function AddMargins() {
                         setLinkAll(false);
                       }
                     }}
-                    className="py-1.5 px-2 text-xs font-bold rounded-lg border border-slate-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-800 hover:border-sky-500 text-slate-700 dark:text-slate-300 transition-colors"
+                    className="py-1.5 px-2 text-xs font-bold rounded-xl border border-[var(--pms-border)] bg-[var(--pms-pearl)]/70 dark:bg-slate-800/70 hover:border-[var(--pms-blue)] text-[var(--pms-ink)] transition-colors"
                   >
                     {paper.label}
                   </button>
                 ))}
               </div>
-              <p className="text-[11px] text-slate-400 mt-1">
+              <p className="text-[11px] text-[var(--pms-subtle-text)] mt-1.5">
                 Click a standard size to automatically center content on A4, Letter, Legal, or A3.
               </p>
             </div>
 
             {/* Presets */}
             <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-slate-400 mb-2">
+              <label className="block text-xs font-bold uppercase tracking-wider text-[var(--pms-subtle-text)] mb-2">
                 Standard Layout Presets
               </label>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -327,10 +359,10 @@ export default function AddMargins() {
                   <button
                     key={p.label}
                     onClick={() => applyPreset(p)}
-                    className="p-2.5 text-xs rounded-xl border border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-800 hover:border-sky-400 text-left transition-all"
+                    className="p-3 text-xs rounded-2xl border border-[var(--pms-border)] bg-[var(--pms-pearl)]/60 dark:bg-slate-800/70 hover:border-[var(--pms-blue)] text-left transition-all"
                   >
-                    <div className="font-bold text-gray-900 dark:text-white mb-0.5">{p.label}</div>
-                    <div className="text-[11px] text-gray-500 dark:text-slate-400">{p.desc}</div>
+                    <div className="font-bold text-[var(--pms-ink)] mb-0.5">{p.label}</div>
+                    <div className="text-[11px] text-[var(--pms-muted)]">{p.desc}</div>
                   </button>
                 ))}
               </div>
@@ -338,10 +370,10 @@ export default function AddMargins() {
 
             {/* Link Margins Switch */}
             <div className="flex items-center justify-between pt-2">
-              <span className="text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-slate-400">
+              <span className="text-xs font-bold uppercase tracking-wider text-[var(--pms-subtle-text)]">
                 Directional Margins
               </span>
-              <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-sky-600 dark:text-sky-400">
+              <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-[var(--pms-blue)]">
                 <input
                   type="checkbox"
                   checked={linkAll}
@@ -355,7 +387,7 @@ export default function AddMargins() {
             {/* 4 Direction Inputs */}
             {linkAll ? (
               <div>
-                <div className="flex justify-between text-xs font-bold text-gray-700 dark:text-slate-300 mb-1.5">
+                <div className="flex justify-between text-xs font-bold text-[var(--pms-ink)] mb-1.5 tabular-nums">
                   <span>Equal Margin Size</span>
                   <span>{topMargin} points ({(topMargin / 72).toFixed(2)} inches)</span>
                 </div>
@@ -371,7 +403,7 @@ export default function AddMargins() {
             ) : (
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-bold text-gray-600 dark:text-slate-400 mb-1">
+                  <label className="block text-xs font-bold text-[var(--pms-muted)] mb-1 tabular-nums">
                     Top Margin: {topMargin}pt
                   </label>
                   <input
@@ -384,7 +416,7 @@ export default function AddMargins() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-gray-600 dark:text-slate-400 mb-1">
+                  <label className="block text-xs font-bold text-[var(--pms-muted)] mb-1 tabular-nums">
                     Bottom Margin: {bottomMargin}pt
                   </label>
                   <input
@@ -397,7 +429,7 @@ export default function AddMargins() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-gray-600 dark:text-slate-400 mb-1">
+                  <label className="block text-xs font-bold text-[var(--pms-muted)] mb-1 tabular-nums">
                     Left Margin (Gutter): {leftMargin}pt
                   </label>
                   <input
@@ -410,7 +442,7 @@ export default function AddMargins() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-gray-600 dark:text-slate-400 mb-1">
+                  <label className="block text-xs font-bold text-[var(--pms-muted)] mb-1 tabular-nums">
                     Right Margin: {rightMargin}pt
                   </label>
                   <input
@@ -425,49 +457,57 @@ export default function AddMargins() {
               </div>
             )}
 
-            <p className="text-[11px] text-gray-400 dark:text-slate-500">
+            <p className="text-[11px] text-[var(--pms-subtle-text)]">
               Note: 72 points equals 1.0 inch (25.4 mm). 36 points equals 0.5 inch.
             </p>
 
             {/* Action Button */}
-            <button
+            <motion.button
+              whileHover={prefersReduced ? undefined : { scale: 1.01 }}
+              whileTap={prefersReduced ? undefined : { scale: 0.99 }}
               onClick={addMargins}
               disabled={isProcessing}
-              className="w-full py-4 bg-sky-600 hover:bg-sky-700 text-white font-bold rounded-xl shadow-md transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+              className="pms-btn-primary w-full py-4 font-bold rounded-2xl flex items-center justify-center gap-2 disabled:opacity-50"
             >
-              <Maximize className="w-5 h-5" />
-              {isProcessing ? 'Processing Margins...' : 'Add Margins & Save PDF'}
-            </button>
+              {isProcessing ? <Loader2 className="w-5 h-5 animate-spin" /> : <Maximize className="w-5 h-5" />}
+              {isProcessing ? 'Processing Margins…' : 'Add Margins & Save PDF'}
+            </motion.button>
           </div>
 
           {/* Live Canvas Preview (5 Cols) */}
-          <div className="lg:col-span-5 bg-white dark:bg-slate-900 rounded-2xl border border-gray-200 dark:border-slate-800 p-6 shadow-sm flex flex-col items-center">
+          <div className="lg:col-span-5 pms-glass-panel rounded-3xl p-6 flex flex-col items-center">
             <div className="flex items-center justify-between w-full mb-4">
-              <span className="text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-slate-400 flex items-center gap-1.5">
+              <span className="text-xs font-bold uppercase tracking-wider text-[var(--pms-muted)] flex items-center gap-1.5">
                 <Eye className="w-4 h-4" /> Live Margin Preview (Page 1)
               </span>
-              <span className="text-[10px] text-sky-600 dark:text-sky-400 font-bold px-2 py-0.5 rounded-full bg-sky-50 dark:bg-sky-950/40 border border-sky-200 dark:border-sky-800">
+              <span className="text-[10px] text-[var(--pms-blue)] font-bold px-2.5 py-0.5 rounded-full bg-[var(--pms-soft-blue)] border border-[var(--pms-border)]">
                 Interactive
               </span>
             </div>
 
-            <div className="relative bg-gray-100 dark:bg-slate-950 p-4 rounded-xl shadow-inner border border-gray-200 dark:border-slate-800 flex items-center justify-center overflow-hidden min-h-[350px] w-full">
+            <div className="relative bg-[var(--pms-pearl)]/80 dark:bg-slate-950/75 p-4 rounded-2xl shadow-inner border border-[var(--pms-border)] flex items-center justify-center overflow-hidden min-h-[350px] w-full">
+              <PearlScanOverlay
+                active={isProcessing || loadingPreview}
+                label={loadingPreview ? 'Rendering preview…' : 'Adding PDF margins…'}
+              />
+
               {loadingPreview ? (
-                <div className="flex flex-col items-center gap-2 text-gray-500">
-                  <span className="text-xs">Rendering preview...</span>
+                <div className="flex flex-col items-center gap-2 text-[var(--pms-muted)]">
+                  <Loader2 className="w-8 h-8 animate-spin text-[var(--pms-blue)]" />
+                  <span className="text-xs font-medium">Rendering preview…</span>
                 </div>
               ) : (
                 <canvas
                   ref={previewCanvasRef}
-                  className="max-w-full max-h-[500px] object-contain shadow-md rounded"
+                  className="max-w-full max-h-[500px] object-contain shadow-md rounded bg-white"
                 />
               )}
             </div>
-            <p className="text-[11px] text-gray-400 dark:text-slate-500 mt-3 text-center">
+            <p className="text-[11px] text-[var(--pms-subtle-text)] mt-3 text-center">
               The blue dashed line represents the expanded page canvas boundary with extra margins.
             </p>
           </div>
-        </div>
+        </motion.div>
       )}
       </div>
     </ToolWorkspaceShell>

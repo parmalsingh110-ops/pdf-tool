@@ -2,25 +2,25 @@ import React, { useState } from 'react';
 import {
   Upload,
   Download,
-  Printer,
   Sparkles,
   BookOpen,
   Scissors,
-  Layers,
-  CheckCircle2,
-  FileText,
-  FileCheck2,
 } from 'lucide-react';
+import { motion, AnimatePresence, useReducedMotion } from 'motion/react';
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 import { useSEO } from '../hooks/useSEO';
 import { usePageSEO } from '../lib/usePageSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { AnimatedNumber, PearlScanOverlay } from '../components/pearl/PearlMotion';
 import { downloadBlob } from '../lib/utils';
+import { toArrayBufferBytes, useAutoRevokeUrl } from '../lib/blobUrl';
 
 type LayoutMode = '4_up' | '8_up' | '16_up';
-type ImpositionOrder = 'sequential_cut' | 'standard_grid';
 
 export default function MicroPocketNotes() {
+  const prefersReduced = useReducedMotion();
+
   useSEO(
     'Micro-Pocket Notes Maker Online — 4-in-1 & 8-in-1 Revision Booklet',
     'Convert multi-page PDF notes into 4-in-1, 8-in-1, or 16-in-1 pocket revision booklets with cut marks. Save 75% paper. Perfect for students and xerox shops.'
@@ -36,12 +36,13 @@ export default function MicroPocketNotes() {
   const [file, setFile] = useState<File | null>(null);
   const [totalPages, setTotalPages] = useState<number>(0);
   const [layoutMode, setLayoutMode] = useState<LayoutMode>('4_up');
-  const [impositionOrder, setImpositionOrder] = useState<ImpositionOrder>('sequential_cut');
   const [includeCutMarks, setIncludeCutMarks] = useState<boolean>(true);
   const [includeCornerNumbers, setIncludeCornerNumbers] = useState<boolean>(true);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [processedPdfBlob, setProcessedPdfBlob] = useState<Blob | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+
+  useAutoRevokeUrl(previewUrl);
 
   // Load PDF and count pages
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -185,7 +186,7 @@ export default function MicroPocketNotes() {
       }
 
       const pdfBytes = await outDoc.save();
-      const blob = new Blob([pdfBytes as any], { type: 'application/pdf' });
+      const blob = new Blob([toArrayBufferBytes(pdfBytes)], { type: 'application/pdf' });
       setProcessedPdfBlob(blob);
       setPreviewUrl(URL.createObjectURL(blob));
     } catch (err) {
@@ -201,45 +202,73 @@ export default function MicroPocketNotes() {
     downloadBlob(processedPdfBlob, `micro_notes_${layoutMode}_${file?.name || 'document.pdf'}`);
   };
 
+  const sheetCount = Math.ceil(totalPages / (layoutMode === '4_up' ? 4 : layoutMode === '8_up' ? 8 : 16));
+
   return (
-    <div className="w-full min-h-screen bg-slate-50 dark:bg-slate-950 py-8 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-7xl mx-auto space-y-8">
-        {/* Header */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-violet-50 dark:bg-violet-950/60 border border-violet-200 dark:border-violet-900 text-violet-700 dark:text-violet-300 text-xs font-bold mb-2">
-              <Sparkles className="w-3.5 h-3.5" /> Exam Revision &amp; Paper Saver
-            </div>
-            <h1 className="text-3xl sm:text-4xl font-extrabold text-slate-900 dark:text-white">
-              Micro-Pocket Notes Maker
-            </h1>
-            <p className="text-sm text-slate-600 dark:text-slate-400 mt-1 max-w-2xl">
-              Convert bulky 100-page revision notes into 4-in-1 or 8-in-1 pocket booklets with scissor cut marks. Save 75% paper and xerox cost!
-            </p>
+    <ToolWorkspaceShell
+      title="Micro-Pocket Notes Maker"
+      subtitle="Convert bulky 100-page revision notes into 4-in-1 or 8-in-1 pocket booklets with scissor cut marks. Save 75% paper and xerox cost!"
+      categoryLabel="Exam Revision & Paper Saver"
+      icon={Sparkles}
+      microVariant="split"
+      tone="violet"
+      trustNote="Vector N-up PDF imposition · 75% paper & toner savings"
+    >
+      <div className="space-y-6">
+        {/* Top Action Strip */}
+        <motion.div
+          initial={prefersReduced ? false : { opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="pms-glass-panel rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3"
+        >
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <span
+              className="px-3 py-1 rounded-full font-bold text-[var(--pms-ink)] border border-[var(--pms-border)]"
+              style={{ background: 'var(--pms-soft-lavender)' }}
+            >
+              A4 Duplex Micro-Booklet
+            </span>
+            {totalPages > 0 && (
+              <span
+                className="px-3 py-1 rounded-full font-bold text-[var(--pms-ink)] border border-[var(--pms-border)]"
+                style={{ background: 'var(--pms-soft-mint)' }}
+              >
+                <AnimatedNumber value={totalPages} suffix=" pages → " />
+                <AnimatedNumber value={sheetCount} suffix={sheetCount === 1 ? ' sheet' : ' sheets'} />
+              </span>
+            )}
           </div>
 
-          <div className="flex items-center gap-3">
-            <button
-              onClick={handleDownload}
-              disabled={!processedPdfBlob}
-              className="px-5 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-700 text-white font-bold text-xs shadow-md disabled:opacity-40 flex items-center gap-2 transition-all"
-            >
-              <Download className="w-4 h-4" /> Download Pocket PDF
-            </button>
-          </div>
-        </div>
+          <button
+            onClick={handleDownload}
+            disabled={!processedPdfBlob}
+            className="pms-btn-primary px-5 py-2.5 rounded-xl font-bold text-xs disabled:opacity-40 flex items-center gap-2 transition-all cursor-pointer"
+          >
+            <Download className="w-4 h-4" /> Download Pocket PDF
+          </button>
+        </motion.div>
 
         {/* Workspace */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
           {/* Controls (5 Cols) */}
-          <div className="lg:col-span-5 space-y-6">
-            <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200/90 dark:border-slate-800 p-6 shadow-sm space-y-5">
-              <label className="border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-2xl p-6 text-center block cursor-pointer hover:border-violet-500 transition-colors">
-                <Upload className="w-8 h-8 mx-auto text-violet-600 mb-2" />
-                <span className="font-bold text-sm text-slate-700 dark:text-slate-200 block">
+          <motion.div
+            initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.04 }}
+            className="lg:col-span-5 space-y-6"
+          >
+            <div className="pms-glass-panel rounded-3xl p-6 space-y-5">
+              <label className="border-2 border-dashed border-[var(--pms-border-strong)] hover:border-violet-500 rounded-2xl p-6 text-center block cursor-pointer bg-[var(--pms-white)] transition-colors">
+                <div
+                  className="w-12 h-12 rounded-2xl mx-auto mb-3 flex items-center justify-center border border-[var(--pms-border)]"
+                  style={{ background: 'var(--pms-soft-lavender)' }}
+                >
+                  <Upload className="w-6 h-6 text-[var(--pms-violet)]" />
+                </div>
+                <span className="font-bold text-sm text-[var(--pms-ink)] block truncate">
                   {file ? file.name : 'Upload PDF Notes / Handouts'}
                 </span>
-                <span className="text-xs text-slate-400 mt-1 block">
+                <span className="text-xs text-[var(--pms-muted)] mt-1 block">
                   {totalPages > 0 ? `Loaded ${totalPages} Total Pages` : 'Multi-page lecture notes or question banks'}
                 </span>
                 <input
@@ -252,7 +281,7 @@ export default function MicroPocketNotes() {
 
               {/* Layout Mode */}
               <div className="space-y-2">
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider block">
+                <label className="text-xs font-bold text-[var(--pms-muted)] uppercase tracking-wider block">
                   Imposition Layout (Pages per Sheet)
                 </label>
                 <div className="grid grid-cols-3 gap-2">
@@ -264,37 +293,37 @@ export default function MicroPocketNotes() {
                     <button
                       key={item.id}
                       onClick={() => setLayoutMode(item.id as LayoutMode)}
-                      className={`p-3 rounded-2xl border text-left transition-all ${
+                      className={`p-3 rounded-2xl border text-left transition-all cursor-pointer ${
                         layoutMode === item.id
-                          ? 'bg-violet-50 dark:bg-violet-950/60 border-violet-500 text-violet-900 dark:text-violet-100 font-bold'
-                          : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400'
+                          ? 'bg-[var(--pms-soft-lavender)] border-violet-500 text-[var(--pms-ink)] font-bold shadow-sm'
+                          : 'bg-[var(--pms-white)] border-[var(--pms-border)] text-[var(--pms-muted)] hover:text-[var(--pms-ink)]'
                       }`}
                     >
                       <p className="text-xs font-bold">{item.label}</p>
-                      <p className="text-[10px] text-slate-400 mt-0.5">{item.desc}</p>
+                      <p className="text-[10px] opacity-75 mt-0.5">{item.desc}</p>
                     </button>
                   ))}
                 </div>
               </div>
 
               {/* Toggles */}
-              <div className="space-y-3 pt-3 border-t border-slate-100 dark:border-slate-800">
-                <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-slate-700 dark:text-slate-300">
+              <div className="space-y-3 pt-3 border-t border-[var(--pms-border)]">
+                <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-[var(--pms-ink)]">
                   <input
                     type="checkbox"
                     checked={includeCutMarks}
                     onChange={(e) => setIncludeCutMarks(e.target.checked)}
-                    className="rounded text-violet-600 focus:ring-violet-500"
+                    className="rounded accent-violet-600"
                   />
                   Draw Scissor Cutting Guidelines on Sheets
                 </label>
 
-                <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-slate-700 dark:text-slate-300">
+                <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-[var(--pms-ink)]">
                   <input
                     type="checkbox"
                     checked={includeCornerNumbers}
                     onChange={(e) => setIncludeCornerNumbers(e.target.checked)}
-                    className="rounded text-violet-600 focus:ring-violet-500"
+                    className="rounded accent-violet-600"
                   />
                   Draw High-Visibility Corner Page Numbers
                 </label>
@@ -304,7 +333,7 @@ export default function MicroPocketNotes() {
               <button
                 onClick={handleGenerate}
                 disabled={!file || isProcessing}
-                className="w-full py-3.5 rounded-2xl bg-violet-600 hover:bg-violet-700 text-white font-bold text-sm shadow-md transition-all flex items-center justify-center gap-2 disabled:opacity-40"
+                className="pms-btn-primary w-full py-3.5 rounded-2xl font-bold text-sm transition-all flex items-center justify-center gap-2 disabled:opacity-40 cursor-pointer"
               >
                 {isProcessing ? (
                   <span>Imposing Pages...</span>
@@ -315,38 +344,53 @@ export default function MicroPocketNotes() {
                 )}
               </button>
             </div>
-          </div>
+          </motion.div>
 
           {/* Preview Area (7 Cols) */}
-          <div className="lg:col-span-7 bg-white dark:bg-slate-900 rounded-3xl border border-slate-200/90 dark:border-slate-800 p-6 shadow-sm space-y-4">
-            <div className="flex items-center justify-between">
-              <h2 className="text-sm font-bold uppercase tracking-wider text-slate-500">
+          <motion.div
+            initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.08 }}
+            className="lg:col-span-7 pms-glass-panel rounded-3xl p-6 space-y-4 relative overflow-hidden"
+          >
+            <PearlScanOverlay active={isProcessing} label="Imposing N-up pocket revision sheets..." />
+
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <h2 className="text-xs font-bold uppercase tracking-wider text-[var(--pms-muted)]">
                 Imposed Sheet Preview
               </h2>
-              {processedPdfBlob && (
-                <span className="text-xs font-bold text-violet-700 dark:text-violet-300 bg-violet-50 dark:bg-violet-950/60 px-3 py-1 rounded-full border border-violet-200">
-                  {Math.ceil(totalPages / (layoutMode === '4_up' ? 4 : layoutMode === '8_up' ? 8 : 16))} Sheets Ready
-                </span>
-              )}
+              <AnimatePresence>
+                {processedPdfBlob && (
+                  <motion.span
+                    initial={prefersReduced ? false : { opacity: 0, scale: 0.94 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={prefersReduced ? undefined : { opacity: 0, scale: 0.94 }}
+                    className="text-xs font-bold text-[var(--pms-ink)] px-3 py-1 rounded-full border border-[var(--pms-border)]"
+                    style={{ background: 'var(--pms-soft-mint)' }}
+                  >
+                    <AnimatedNumber value={sheetCount} suffix=" Sheets Ready" />
+                  </motion.span>
+                )}
+              </AnimatePresence>
             </div>
 
-            <div className="w-full bg-slate-100 dark:bg-slate-950/80 rounded-2xl p-4 flex items-center justify-center min-h-[460px] border border-slate-200/70 dark:border-slate-800">
+            <div className="w-full pms-paper-grid rounded-2xl p-4 flex items-center justify-center min-h-[460px] border border-[var(--pms-border)]">
               {previewUrl ? (
                 <iframe
                   src={previewUrl}
                   title="PDF Preview"
-                  className="w-full h-[560px] rounded-xl border border-slate-300 dark:border-slate-700"
+                  className="w-full h-[560px] rounded-xl bg-white border border-[var(--pms-border-strong)] shadow-sm"
                 />
               ) : (
-                <div className="text-center space-y-3 text-slate-400">
-                  <BookOpen className="w-12 h-12 mx-auto opacity-30 text-violet-500" />
+                <div className="text-center space-y-3 text-[var(--pms-muted)] max-w-sm">
+                  <BookOpen className="w-12 h-12 mx-auto opacity-35 text-[var(--pms-violet)]" />
                   <p className="text-xs font-semibold">
-                    Upload your PDF and click "Generate Pocket Layout" to view duplex sheet previews.
+                    Upload your PDF and click &quot;Generate Pocket Layout&quot; to view duplex sheet previews.
                   </p>
                 </div>
               )}
             </div>
-          </div>
+          </motion.div>
         </div>
 
         {/* SEO Guide Section */}
@@ -374,6 +418,6 @@ export default function MicroPocketNotes() {
           ]}
         />
       </div>
-    </div>
+    </ToolWorkspaceShell>
   );
 }

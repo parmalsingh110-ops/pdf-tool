@@ -1,5 +1,6 @@
-import { useState, useRef, useEffect } from 'react';
-import { Download, FileText, Image as ImageIcon, CheckCircle2, Sliders, Archive, Check, Sparkles, RefreshCw, Layers } from 'lucide-react';
+import { useState, useRef } from 'react';
+import { Download, FileText, Image as ImageIcon, CheckCircle2, Archive, Check, RefreshCw } from 'lucide-react';
+import { motion, useReducedMotion } from 'motion/react';
 import FileDropzone from '../components/FileDropzone';
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
@@ -9,6 +10,8 @@ import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { dataUrlToBytes } from '../lib/utils';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { toArrayBufferBytes } from '../lib/blobUrl';
+import { AnimatedNumber, PearlScanOverlay, PearlStageSwitch } from '../components/pearl/PearlMotion';
 
 // Initialize pdf.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
@@ -41,6 +44,8 @@ interface ConvertedImage {
 }
 
 export default function PDFToJPG() {
+  const prefersReduced = useReducedMotion();
+
   useSEO(
     'PDF to JPG Converter Online Free — High Quality 300 DPI | PDF Media Suite',
     'Convert PDF pages to JPG, PNG, or WebP images online free. Choose DPI resolution (72, 150, 300 DPI), select specific pages, and download single images or a ZIP bundle.'
@@ -190,7 +195,7 @@ export default function PDFToJPG() {
         } else {
           dataUrl = canvas.toDataURL(mime, format === 'png' ? undefined : quality);
           const bytes = dataUrlToBytes(dataUrl);
-          blob = new Blob([bytes as any], { type: mime });
+          blob = new Blob([toArrayBufferBytes(bytes)], { type: mime });
         }
 
         outputList.push({
@@ -251,341 +256,407 @@ export default function PDFToJPG() {
       tone="amber"
     >
       <div className="flex flex-col items-center w-full">
-
-      {!file ? (
-        <div className="w-full max-w-4xl">
-          <FileDropzone
-            onDrop={handleDrop}
-            multiple={false}
-            accept={{ 'application/pdf': ['.pdf'] }}
-            title="Select PDF file"
-            subtitle="or drop PDF document here"
-          />
-        </div>
-      ) : isLoadingPages ? (
-        <div className="w-full max-w-2xl bg-white dark:bg-slate-900 rounded-2xl shadow-sm border border-gray-200 dark:border-slate-800 p-12 text-center">
-          <div className="w-14 h-14 border-4 border-amber-500 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-          <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Analyzing PDF Pages...</h3>
-          <p className="text-sm text-gray-500 dark:text-slate-400">Rendering visual thumbnails for interactive page selection</p>
-        </div>
-      ) : convertedImages.length > 0 ? (
-        /* Results View */
-        <div className="w-full max-w-6xl space-y-6">
-          <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-gray-200 dark:border-slate-800 shadow-sm flex flex-col sm:flex-row items-center justify-between gap-4">
-            <div className="flex items-center gap-4">
-              <div className="w-12 h-12 rounded-xl bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
-                <CheckCircle2 className="w-6 h-6" />
-              </div>
-              <div>
-                <h3 className="text-xl font-bold text-gray-900 dark:text-white">
-                  Successfully converted {convertedImages.length} page(s)
-                </h3>
-                <p className="text-sm text-gray-500 dark:text-slate-400">
-                  Format: {format.toUpperCase()} • Resolution: {DPI_PRESETS[dpiKey].label}
-                </p>
-              </div>
+        <PearlStageSwitch
+          stageKey={!file ? 'upload' : isLoadingPages ? 'loading' : convertedImages.length > 0 ? 'results' : 'configure'}
+          className="w-full flex flex-col items-center"
+        >
+          {!file ? (
+            <div className="w-full max-w-4xl">
+              <FileDropzone
+                onDrop={handleDrop}
+                multiple={false}
+                accept={{ 'application/pdf': ['.pdf'] }}
+                title="Select PDF file"
+                subtitle="or drop PDF document here"
+              />
             </div>
-
-            <div className="flex items-center gap-3 w-full sm:w-auto">
-              <button
-                onClick={downloadAllAsZip}
-                disabled={isZipping}
-                className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 px-6 py-3 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-xl shadow-md transition-all disabled:opacity-50"
-              >
-                {isZipping ? <RefreshCw className="w-5 h-5 animate-spin" /> : <Archive className="w-5 h-5" />}
-                Download All (ZIP)
-              </button>
-              <button
-                onClick={() => {
-                  setConvertedImages([]);
-                }}
-                className="px-4 py-3 bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700 text-gray-700 dark:text-slate-300 font-semibold rounded-xl transition-all"
-              >
-                Adjust Options
-              </button>
-              <button
-                onClick={() => {
-                  setFile(null);
-                  setPages([]);
-                  setConvertedImages([]);
-                }}
-                className="px-4 py-3 bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700 text-gray-700 dark:text-slate-300 font-semibold rounded-xl transition-all"
-              >
-                New File
-              </button>
-            </div>
-          </div>
-
-          {/* Grid of Converted Images */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
-            {convertedImages.map((img) => (
+          ) : isLoadingPages ? (
+            <div className="w-full max-w-2xl pms-glass-panel rounded-3xl p-12 text-center relative overflow-hidden">
+              <PearlScanOverlay
+                active={true}
+                label="Rendering visual thumbnails for interactive page selection..."
+              />
               <div
-                key={img.pageNum}
-                className="bg-white dark:bg-slate-900 rounded-2xl border border-gray-200 dark:border-slate-800 overflow-hidden shadow-sm flex flex-col group hover:shadow-md transition-all"
-              >
-                <div className="relative aspect-[1/1.3] bg-gray-50 dark:bg-slate-950 p-2 flex items-center justify-center overflow-hidden border-b border-gray-100 dark:border-slate-800">
-                  <img
-                    src={img.dataUrl}
-                    alt={img.name}
-                    className="max-w-full max-h-full object-contain drop-shadow"
-                  />
-                  <div className="absolute top-2 left-2 bg-black/70 backdrop-blur-sm text-white text-xs font-bold px-2 py-0.5 rounded-md">
-                    Page {img.pageNum}
+                className="w-14 h-14 border-4 border-t-transparent rounded-full animate-spin mx-auto mb-4"
+                style={{ borderColor: 'var(--pms-rose)', borderTopColor: 'transparent' }}
+              />
+              <h3 className="text-xl font-bold text-[var(--pms-ink)] mb-2">Analyzing PDF Pages...</h3>
+              <p className="text-sm text-[var(--pms-muted)]">Rendering visual thumbnails for interactive page selection</p>
+            </div>
+          ) : convertedImages.length > 0 ? (
+            /* Results View */
+            <div className="w-full max-w-6xl space-y-6">
+              <div className="pms-glass-panel p-6 rounded-3xl flex flex-col sm:flex-row items-center justify-between gap-4 relative overflow-hidden">
+                <PearlScanOverlay
+                  active={isZipping}
+                  label="Packaging converted images into ZIP..."
+                />
+                <div className="flex items-center gap-4">
+                  <div
+                    className="w-12 h-12 rounded-xl flex items-center justify-center shrink-0"
+                    style={{ backgroundColor: 'var(--pms-soft-mint)', color: 'var(--pms-ink)' }}
+                  >
+                    <CheckCircle2 className="w-6 h-6 text-emerald-600 dark:text-emerald-400" />
                   </div>
-                  <div className="absolute bottom-2 right-2 bg-black/70 backdrop-blur-sm text-white text-[10px] font-mono px-1.5 py-0.5 rounded">
-                    {img.width}×{img.height} • {img.sizeKb} KB
+                  <div>
+                    <h3 className="text-xl font-bold text-[var(--pms-ink)]">
+                      Successfully converted <AnimatedNumber value={convertedImages.length} /> page(s)
+                    </h3>
+                    <p className="text-sm text-[var(--pms-muted)]">
+                      Format: {format.toUpperCase()} • Resolution: {DPI_PRESETS[dpiKey].label}
+                    </p>
                   </div>
                 </div>
 
-                <div className="p-3 flex items-center justify-between gap-2">
-                  <span className="text-xs font-semibold text-gray-700 dark:text-slate-300 truncate" title={img.name}>
-                    {img.name}
-                  </span>
-                  <button
-                    onClick={() => {
-                      const dlUrl = URL.createObjectURL(img.blob);
-                      const a = document.createElement('a');
-                      a.href = dlUrl;
-                      a.download = img.name;
-                      a.click();
-                      URL.revokeObjectURL(dlUrl);
-                    }}
-                    className="inline-flex items-center gap-1 px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold rounded-lg transition-colors shrink-0 shadow-sm cursor-pointer"
+                <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto">
+                  <motion.button
+                    type="button"
+                    whileHover={prefersReduced ? undefined : { scale: 1.02 }}
+                    whileTap={prefersReduced ? undefined : { scale: 0.98 }}
+                    onClick={downloadAllAsZip}
+                    disabled={isZipping}
+                    className="pms-btn-primary flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 px-6 py-3 font-bold rounded-xl disabled:opacity-50"
                   >
-                    <Download className="w-3.5 h-3.5" /> Save
+                    {isZipping ? <RefreshCw className="w-5 h-5 animate-spin" /> : <Archive className="w-5 h-5" />}
+                    Download All (ZIP)
+                  </motion.button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setConvertedImages([]);
+                    }}
+                    className="px-4 py-3 bg-white/75 dark:bg-slate-900/75 hover:bg-white dark:hover:bg-slate-900 border border-[var(--pms-border)] text-[var(--pms-ink)] font-semibold rounded-xl transition-all"
+                  >
+                    Adjust Options
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFile(null);
+                      setPages([]);
+                      setConvertedImages([]);
+                    }}
+                    className="px-4 py-3 bg-white/75 dark:bg-slate-900/75 hover:bg-white dark:hover:bg-slate-900 border border-[var(--pms-border)] text-[var(--pms-ink)] font-semibold rounded-xl transition-all"
+                  >
+                    New File
                   </button>
                 </div>
               </div>
-            ))}
-          </div>
-        </div>
-      ) : (
-        /* Configuration & Selection View */
-        <div className="w-full max-w-6xl space-y-6">
-          {/* File Card & Settings Top Bar */}
-          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-gray-200 dark:border-slate-800 p-6 shadow-sm">
-            <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6 pb-6 border-b border-gray-100 dark:border-slate-800">
-              <div className="flex items-center gap-4">
-                <div className="w-12 h-12 bg-amber-100 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 rounded-xl flex items-center justify-center shrink-0">
-                  <FileText className="w-6 h-6" />
-                </div>
-                <div>
-                  <h3 className="text-lg font-bold text-gray-900 dark:text-white truncate max-w-md">
-                    {file.name}
-                  </h3>
-                  <p className="text-sm text-gray-500 dark:text-slate-400">
-                    {(file.size / 1024 / 1024).toFixed(2)} MB • {pages.length} total pages
-                  </p>
-                </div>
-              </div>
 
-              <div className="flex items-center gap-3 w-full lg:w-auto">
-                <button
-                  onClick={() => {
-                    setFile(null);
-                    setPages([]);
-                  }}
-                  className="px-4 py-2.5 text-sm font-semibold text-gray-600 dark:text-slate-400 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-xl transition-all"
-                >
-                  Change File
-                </button>
-                <button
-                  onClick={convertToImages}
-                  disabled={isProcessing || selectedPages.length === 0}
-                  className="flex-1 lg:flex-initial inline-flex items-center justify-center gap-2 px-8 py-3 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-xl shadow-md transition-all disabled:opacity-50"
-                >
-                  {isProcessing ? (
-                    <>
-                      <RefreshCw className="w-5 h-5 animate-spin" />
-                      Converting ({processProgress.current}/{processProgress.total})...
-                    </>
-                  ) : (
-                    <>
-                      <ImageIcon className="w-5 h-5" />
-                      Convert {selectedPages.length} Page{selectedPages.length !== 1 ? 's' : ''} to {format.toUpperCase()}
-                    </>
-                  )}
-                </button>
+              {/* Grid of Converted Images */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+                {convertedImages.map((img, idx) => (
+                  <motion.div
+                    key={img.pageNum}
+                    initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={prefersReduced ? { duration: 0 } : { duration: 0.22, delay: Math.min(idx * 0.03, 0.24) }}
+                    className="pms-glass-panel rounded-2xl overflow-hidden flex flex-col group hover:shadow-md transition-shadow"
+                  >
+                    <div className="relative aspect-[1/1.3] bg-white p-2 flex items-center justify-center overflow-hidden border-b border-[var(--pms-border)]">
+                      <img
+                        src={img.dataUrl}
+                        alt={img.name}
+                        className="max-w-full max-h-full object-contain drop-shadow"
+                      />
+                      <div className="absolute top-2 left-2 bg-black/70 backdrop-blur-sm text-white text-xs font-bold px-2 py-0.5 rounded-md">
+                        Page {img.pageNum}
+                      </div>
+                      <div className="absolute bottom-2 right-2 bg-black/70 backdrop-blur-sm text-white text-[10px] font-mono px-1.5 py-0.5 rounded">
+                        {img.width}×{img.height} • {img.sizeKb} KB
+                      </div>
+                    </div>
+
+                    <div className="p-3 flex items-center justify-between gap-2 bg-white/75 dark:bg-slate-900/75">
+                      <span className="text-xs font-semibold text-[var(--pms-ink)] truncate" title={img.name}>
+                        {img.name}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const dlUrl = URL.createObjectURL(img.blob);
+                          const a = document.createElement('a');
+                          a.href = dlUrl;
+                          a.download = img.name;
+                          a.click();
+                          URL.revokeObjectURL(dlUrl);
+                        }}
+                        className="pms-btn-primary inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold rounded-lg shrink-0 cursor-pointer"
+                      >
+                        <Download className="w-3.5 h-3.5" /> Save
+                      </button>
+                    </div>
+                  </motion.div>
+                ))}
               </div>
             </div>
-
-            {/* Conversion Controls */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-6">
-              {/* Output Format */}
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-slate-400 mb-2">
-                  Image Format
-                </label>
-                <div className="grid grid-cols-4 gap-2">
-                  {(['jpg', 'png', 'webp', 'tiff'] as ImageFormat[]).map((fmt) => (
-                    <button
-                      key={fmt}
-                      onClick={() => setFormat(fmt)}
-                      className={`py-2 text-xs font-bold rounded-xl uppercase border transition-all ${
-                        format === fmt
-                          ? 'bg-amber-500 border-amber-500 text-white shadow-sm'
-                          : 'border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-800 text-gray-700 dark:text-slate-300 hover:border-amber-400'
-                      }`}
-                    >
-                      {fmt}
-                    </button>
-                  ))}
-                </div>
-                <p className="text-[11px] text-gray-400 dark:text-slate-500 mt-1.5">
-                  {format === 'jpg'
-                    ? 'Standard photo format, small file size'
-                    : format === 'png'
-                    ? 'Lossless quality, sharpest text'
-                    : format === 'tiff'
-                    ? 'Lossless high-depth print archival standard'
-                    : 'Next-gen compact web format'}
-                </p>
-              </div>
-
-              {/* Resolution / DPI */}
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-slate-400 mb-2">
-                  Resolution / DPI
-                </label>
-                <div className="grid grid-cols-3 gap-2">
-                  {Object.entries(DPI_PRESETS).map(([key, item]) => (
-                    <button
-                      key={key}
-                      onClick={() => setDpiKey(key)}
-                      className={`py-2 px-1 text-xs font-bold rounded-xl border transition-all ${
-                        dpiKey === key
-                          ? 'bg-amber-500 border-amber-500 text-white shadow-sm'
-                          : 'border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-800 text-gray-700 dark:text-slate-300 hover:border-amber-400'
-                      }`}
-                    >
-                      {item.label}
-                    </button>
-                  ))}
-                </div>
-                <p className="text-[11px] text-gray-400 dark:text-slate-500 mt-1.5">
-                  {DPI_PRESETS[dpiKey].desc}
-                </p>
-              </div>
-
-              {/* Quality Slider (JPG/WebP) */}
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <label className="text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-slate-400">
-                    Quality
-                  </label>
-                  <span className="text-xs font-bold text-amber-600 dark:text-amber-400">
-                    {Math.round(quality * 100)}%
-                  </span>
-                </div>
-                <input
-                  type="range"
-                  min="0.5"
-                  max="1.0"
-                  step="0.02"
-                  value={quality}
-                  onChange={(e) => setQuality(parseFloat(e.target.value))}
-                  disabled={format === 'png'}
-                  className="w-full h-2 bg-gray-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer accent-amber-500 disabled:opacity-40"
+          ) : (
+            /* Configuration & Selection View */
+            <div className="w-full max-w-6xl space-y-6">
+              {/* File Card & Settings Top Bar */}
+              <div className="pms-glass-panel rounded-3xl p-6 relative overflow-hidden">
+                <PearlScanOverlay
+                  active={isProcessing}
+                  label={`Converting page ${processProgress.current} of ${processProgress.total} to ${format.toUpperCase()}...`}
                 />
-                <p className="text-[11px] text-gray-400 dark:text-slate-500 mt-1.5">
-                  {format === 'png' ? 'PNG is lossless (quality fixed at 100%)' : 'Higher quality results in slightly larger file size'}
-                </p>
+
+                <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6 pb-6 border-b border-[var(--pms-border)]">
+                  <div className="flex items-center gap-4">
+                    <div
+                      className="w-12 h-12 rounded-xl flex items-center justify-center shrink-0"
+                      style={{ backgroundColor: 'var(--pms-soft-rose)', color: 'var(--pms-rose)' }}
+                    >
+                      <FileText className="w-6 h-6" />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-bold text-[var(--pms-ink)] truncate max-w-md">
+                        {file.name}
+                      </h3>
+                      <p className="text-sm text-[var(--pms-muted)]">
+                        {(file.size / 1024 / 1024).toFixed(2)} MB • <AnimatedNumber value={pages.length} /> total pages
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-3 w-full lg:w-auto">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFile(null);
+                        setPages([]);
+                      }}
+                      className="px-4 py-2.5 text-sm font-semibold text-[var(--pms-ink)] bg-white/75 dark:bg-slate-900/75 hover:bg-white dark:hover:bg-slate-900 border border-[var(--pms-border)] rounded-xl transition-all"
+                    >
+                      Change File
+                    </button>
+                    <motion.button
+                      type="button"
+                      whileHover={prefersReduced ? undefined : { scale: 1.01 }}
+                      whileTap={prefersReduced ? undefined : { scale: 0.98 }}
+                      onClick={convertToImages}
+                      disabled={isProcessing || selectedPages.length === 0}
+                      className="pms-btn-primary flex-1 lg:flex-initial inline-flex items-center justify-center gap-2 px-8 py-3 font-bold rounded-xl disabled:opacity-50"
+                    >
+                      {isProcessing ? (
+                        <>
+                          <RefreshCw className="w-5 h-5 animate-spin" />
+                          Converting ({processProgress.current}/{processProgress.total})...
+                        </>
+                      ) : (
+                        <>
+                          <ImageIcon className="w-5 h-5" />
+                          Convert {selectedPages.length} Page{selectedPages.length !== 1 ? 's' : ''} to {format.toUpperCase()}
+                        </>
+                      )}
+                    </motion.button>
+                  </div>
+                </div>
+
+                {/* Conversion Controls */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-6">
+                  {/* Output Format */}
+                  <div>
+                    <label className="block text-xs font-bold uppercase tracking-wider text-[var(--pms-muted)] mb-2">
+                      Image Format
+                    </label>
+                    <div className="grid grid-cols-4 gap-2">
+                      {(['jpg', 'png', 'webp', 'tiff'] as ImageFormat[]).map((fmt) => {
+                        const active = format === fmt;
+                        return (
+                          <button
+                            key={fmt}
+                            type="button"
+                            onClick={() => setFormat(fmt)}
+                            style={{
+                              borderColor: active ? 'var(--pms-rose)' : 'var(--pms-border)',
+                            }}
+                            className={`relative py-2 text-xs font-bold rounded-xl uppercase border transition-colors ${
+                              active
+                                ? 'text-[var(--pms-ink)]'
+                                : 'bg-white/75 dark:bg-slate-900/75 text-[var(--pms-muted)] hover:text-[var(--pms-ink)]'
+                            }`}
+                          >
+                            {active && (
+                              <motion.span
+                                layoutId="pdftojpg-format-pill"
+                                transition={prefersReduced ? { duration: 0 } : { type: 'spring', stiffness: 420, damping: 32 }}
+                                className="absolute inset-0 rounded-[11px]"
+                                style={{ backgroundColor: 'var(--pms-soft-rose)' }}
+                              />
+                            )}
+                            <span className="relative z-10">{fmt}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <p className="text-[11px] text-[var(--pms-muted)] mt-1.5">
+                      {format === 'jpg'
+                        ? 'Standard photo format, small file size'
+                        : format === 'png'
+                        ? 'Lossless quality, sharpest text'
+                        : format === 'tiff'
+                        ? 'Lossless high-depth print archival standard'
+                        : 'Next-gen compact web format'}
+                    </p>
+                  </div>
+
+                  {/* Resolution / DPI */}
+                  <div>
+                    <label className="block text-xs font-bold uppercase tracking-wider text-[var(--pms-muted)] mb-2">
+                      Resolution / DPI
+                    </label>
+                    <div className="grid grid-cols-3 gap-2">
+                      {Object.entries(DPI_PRESETS).map(([key, item]) => {
+                        const active = dpiKey === key;
+                        return (
+                          <button
+                            key={key}
+                            type="button"
+                            onClick={() => setDpiKey(key)}
+                            style={{
+                              borderColor: active ? 'var(--pms-blue)' : 'var(--pms-border)',
+                            }}
+                            className={`relative py-2 px-1 text-xs font-bold rounded-xl border transition-colors ${
+                              active
+                                ? 'text-[var(--pms-ink)]'
+                                : 'bg-white/75 dark:bg-slate-900/75 text-[var(--pms-muted)] hover:text-[var(--pms-ink)]'
+                            }`}
+                          >
+                            {active && (
+                              <motion.span
+                                layoutId="pdftojpg-dpi-pill"
+                                transition={prefersReduced ? { duration: 0 } : { type: 'spring', stiffness: 420, damping: 32 }}
+                                className="absolute inset-0 rounded-[11px]"
+                                style={{ backgroundColor: 'var(--pms-soft-blue)' }}
+                              />
+                            )}
+                            <span className="relative z-10">{item.label}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <p className="text-[11px] text-[var(--pms-muted)] mt-1.5">
+                      {DPI_PRESETS[dpiKey].desc}
+                    </p>
+                  </div>
+
+                  {/* Quality Slider (JPG/WebP) */}
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <label className="text-xs font-bold uppercase tracking-wider text-[var(--pms-muted)]">
+                        Quality
+                      </label>
+                      <span className="text-xs font-bold" style={{ color: 'var(--pms-rose)' }}>
+                        <AnimatedNumber value={Math.round(quality * 100)} suffix="%" />
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0.5"
+                      max="1.0"
+                      step="0.02"
+                      value={quality}
+                      onChange={(e) => setQuality(parseFloat(e.target.value))}
+                      disabled={format === 'png'}
+                      className="w-full h-2 bg-slate-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer accent-[var(--pms-rose)] disabled:opacity-40"
+                    />
+                    <p className="text-[11px] text-[var(--pms-muted)] mt-1.5">
+                      {format === 'png' ? 'PNG is lossless (quality fixed at 100%)' : 'Higher quality results in slightly larger file size'}
+                    </p>
+                  </div>
+                </div>
               </div>
-            </div>
-          </div>
 
-          {/* Page Selection Bar */}
-          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-gray-200 dark:border-slate-800 p-4 shadow-sm flex flex-wrap items-center justify-between gap-4">
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-bold text-gray-900 dark:text-white">
-                Selected: <span className="text-amber-600 dark:text-amber-400">{selectedPages.length}</span> of {pages.length}
-              </span>
-              <div className="h-4 w-px bg-gray-200 dark:bg-slate-700 mx-2" />
-              <button
-                onClick={selectAll}
-                className="px-2.5 py-1 text-xs font-semibold bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700 text-gray-700 dark:text-slate-300 rounded-lg transition-colors"
-              >
-                All
-              </button>
-              <button
-                onClick={deselectAll}
-                className="px-2.5 py-1 text-xs font-semibold bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700 text-gray-700 dark:text-slate-300 rounded-lg transition-colors"
-              >
-                None
-              </button>
-              <button
-                onClick={selectOdd}
-                className="px-2.5 py-1 text-xs font-semibold bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700 text-gray-700 dark:text-slate-300 rounded-lg transition-colors"
-              >
-                Odd
-              </button>
-              <button
-                onClick={selectEven}
-                className="px-2.5 py-1 text-xs font-semibold bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700 text-gray-700 dark:text-slate-300 rounded-lg transition-colors"
-              >
-                Even
-              </button>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <input
-                type="text"
-                placeholder="e.g. 1-3, 5, 8"
-                value={rangeInput}
-                onChange={(e) => setRangeInput(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && applyRange()}
-                className="px-3 py-1.5 text-xs rounded-lg border border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-800 text-gray-900 dark:text-white w-32 focus:outline-none focus:border-amber-500"
-              />
-              <button
-                onClick={applyRange}
-                className="px-3 py-1.5 text-xs font-bold bg-amber-500 hover:bg-amber-600 text-white rounded-lg transition-colors"
-              >
-                Apply Range
-              </button>
-            </div>
-          </div>
-
-          {/* Thumbnail Selection Grid */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
-            {pages.map((item) => (
-              <div
-                key={item.pageNum}
-                onClick={() => togglePage(item.pageNum)}
-                className={`relative group bg-white dark:bg-slate-900 rounded-xl p-2 border-2 cursor-pointer transition-all select-none ${
-                  item.selected
-                    ? 'border-amber-500 shadow-md shadow-amber-500/10'
-                    : 'border-transparent hover:border-gray-300 dark:hover:border-slate-700 opacity-60'
-                }`}
-              >
-                {/* Selection Checkmark */}
-                <div
-                  className={`absolute top-3 right-3 w-6 h-6 rounded-full flex items-center justify-center transition-all z-10 ${
-                    item.selected
-                      ? 'bg-amber-500 text-white shadow-sm'
-                      : 'bg-black/40 text-white group-hover:bg-black/60'
-                  }`}
-                >
-                  <Check className="w-3.5 h-3.5 stroke-[3]" />
+              {/* Page Selection Bar */}
+              <div className="pms-glass-panel rounded-2xl p-4 flex flex-wrap items-center justify-between gap-4">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-sm font-bold text-[var(--pms-ink)]">
+                    Selected: <span style={{ color: 'var(--pms-rose)' }}><AnimatedNumber value={selectedPages.length} /></span> of <AnimatedNumber value={pages.length} />
+                  </span>
+                  <div className="h-4 w-px bg-[var(--pms-border)] mx-2" />
+                  {[
+                    { label: 'All', action: selectAll },
+                    { label: 'None', action: deselectAll },
+                    { label: 'Odd', action: selectOdd },
+                    { label: 'Even', action: selectEven },
+                  ].map((btn) => (
+                    <button
+                      key={btn.label}
+                      type="button"
+                      onClick={btn.action}
+                      className="px-2.5 py-1 text-xs font-semibold bg-white/75 dark:bg-slate-900/75 hover:bg-white dark:hover:bg-slate-900 border border-[var(--pms-border)] text-[var(--pms-ink)] rounded-lg transition-colors"
+                    >
+                      {btn.label}
+                    </button>
+                  ))}
                 </div>
 
-                {/* Page Number Badge */}
-                <div className="absolute top-3 left-3 bg-black/60 backdrop-blur-sm text-white text-[10px] font-bold px-1.5 py-0.5 rounded z-10">
-                  #{item.pageNum}
-                </div>
-
-                {/* Thumbnail Image */}
-                <div className="aspect-[1/1.35] bg-gray-100 dark:bg-slate-950 rounded-lg overflow-hidden flex items-center justify-center p-1">
-                  <img
-                    src={item.thumbUrl}
-                    alt={`Page ${item.pageNum}`}
-                    className="max-w-full max-h-full object-contain"
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    placeholder="e.g. 1-3, 5, 8"
+                    value={rangeInput}
+                    onChange={(e) => setRangeInput(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && applyRange()}
+                    className="px-3 py-1.5 text-xs rounded-lg border border-[var(--pms-border)] bg-white/75 dark:bg-slate-900/75 text-[var(--pms-ink)] w-32 focus:outline-none focus:border-[var(--pms-rose)]"
                   />
+                  <button
+                    type="button"
+                    onClick={applyRange}
+                    className="pms-btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition-colors"
+                  >
+                    Apply Range
+                  </button>
                 </div>
               </div>
-            ))}
-          </div>
-        </div>
-      )}
+
+              {/* Thumbnail Selection Grid */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+                {pages.map((item) => (
+                  <motion.div
+                    key={item.pageNum}
+                    whileHover={prefersReduced ? undefined : { y: -2 }}
+                    onClick={() => togglePage(item.pageNum)}
+                    style={{
+                      borderColor: item.selected ? 'var(--pms-rose)' : 'transparent',
+                    }}
+                    className={`relative group pms-glass-panel rounded-xl p-2 border-2 cursor-pointer transition-all select-none ${
+                      item.selected
+                        ? 'shadow-md'
+                        : 'hover:border-[var(--pms-border)] opacity-60'
+                    }`}
+                  >
+                    {/* Selection Checkmark */}
+                    <div
+                      className={`absolute top-3 right-3 w-6 h-6 rounded-full flex items-center justify-center transition-all z-10 ${
+                        item.selected
+                          ? 'text-white shadow-sm'
+                          : 'bg-black/45 text-white group-hover:bg-black/65'
+                      }`}
+                      style={item.selected ? { backgroundColor: 'var(--pms-rose)' } : undefined}
+                    >
+                      <Check className="w-3.5 h-3.5 stroke-[3]" />
+                    </div>
+
+                    {/* Page Number Badge */}
+                    <div className="absolute top-3 left-3 bg-black/65 backdrop-blur-sm text-white text-[10px] font-bold px-1.5 py-0.5 rounded z-10">
+                      #{item.pageNum}
+                    </div>
+
+                    {/* Thumbnail Image */}
+                    <div className="aspect-[1/1.35] bg-white rounded-lg overflow-hidden flex items-center justify-center p-1 border border-[var(--pms-border)]">
+                      <img
+                        src={item.thumbUrl}
+                        alt={`Page ${item.pageNum}`}
+                        className="max-w-full max-h-full object-contain"
+                      />
+                    </div>
+                  </motion.div>
+                ))}
+              </div>
+            </div>
+          )}
+        </PearlStageSwitch>
       </div>
     </ToolWorkspaceShell>
   );

@@ -1,6 +1,11 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Sparkles, Download, Loader2 } from 'lucide-react';
+import React, { useState, useRef, useCallback } from 'react';
+import { motion, AnimatePresence, useReducedMotion } from 'motion/react';
+import { Sparkles, Download, Loader2, CheckCircle2 } from 'lucide-react';
+import FileDropzone from '../components/FileDropzone';
 import { useSEO } from '../hooks/useSEO';
+import { useAutoRevokeUrl } from '../lib/blobUrl';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { AnimatedNumber, PearlScanOverlay } from '../components/pearl/PearlMotion';
 
 export default function ImageNoiseReduction() {
   useSEO('Image Noise Reduction Online Free | PDF Media Suite', 'Free online Image Noise Reduction tool. No signup or installation required.');
@@ -15,14 +20,22 @@ export default function ImageNoiseReduction() {
   const [splitPos, setSplitPos] = useState(50);
   const containerRef = useRef<HTMLDivElement>(null);
 
+  const prefersReduced = useReducedMotion();
+
+  useAutoRevokeUrl(imgUrl);
+  useAutoRevokeUrl(resultUrl);
+
+  const loadFile = (f: File) => {
+    setFile(f);
+    setImgUrl(URL.createObjectURL(f));
+    setResultUrl(null);
+  };
+
   const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
     if (!f) return;
-    setFile(f);
-    if (imgUrl) URL.revokeObjectURL(imgUrl);
-    if (resultUrl) URL.revokeObjectURL(resultUrl);
-    setImgUrl(URL.createObjectURL(f));
-    setResultUrl(null);
+    loadFile(f);
+    e.target.value = '';
   };
 
   const processImage = useCallback(async () => {
@@ -32,7 +45,9 @@ export default function ImageNoiseReduction() {
       const img = new Image();
       img.crossOrigin = 'anonymous';
       img.src = imgUrl;
-      await new Promise<void>((res) => { img.onload = () => res(); });
+      await new Promise<void>((res) => {
+        img.onload = () => res();
+      });
 
       const canvas = document.createElement('canvas');
       canvas.width = img.naturalWidth;
@@ -55,11 +70,15 @@ export default function ImageNoiseReduction() {
         for (let y = 0; y < height; y++) {
           for (let x = 0; x < width; x++) {
             const idx = (y * width + x) * 4;
-            let sumR = 0, sumG = 0, sumB = 0, sumW = 0;
+            let sumR = 0,
+              sumG = 0,
+              sumB = 0,
+              sumW = 0;
 
             for (let dy = -radius; dy <= radius; dy++) {
               for (let dx = -radius; dx <= radius; dx++) {
-                const ny = y + dy, nx = x + dx;
+                const ny = y + dy,
+                  nx = x + dx;
                 if (ny < 0 || ny >= height || nx < 0 || nx >= width) continue;
                 const nIdx = (ny * width + nx) * 4;
 
@@ -88,7 +107,9 @@ export default function ImageNoiseReduction() {
         for (let y = 0; y < height; y++) {
           for (let x = 0; x < width; x++) {
             const idx = (y * width + x) * 4;
-            const rArr: number[] = [], gArr: number[] = [], bArr: number[] = [];
+            const rArr: number[] = [],
+              gArr: number[] = [],
+              bArr: number[] = [];
 
             for (let dy = -radius; dy <= radius; dy++) {
               for (let dx = -radius; dx <= radius; dx++) {
@@ -120,13 +141,15 @@ export default function ImageNoiseReduction() {
           kernel.push(val);
           kernelSum += val;
         }
-        kernel.forEach((_, i) => kernel[i] /= kernelSum);
+        kernel.forEach((_, i) => (kernel[i] /= kernelSum));
 
         // Horizontal pass
         const temp = new Uint8ClampedArray(data);
         for (let y = 0; y < height; y++) {
           for (let x = 0; x < width; x++) {
-            let r = 0, g = 0, b = 0;
+            let r = 0,
+              g = 0,
+              b = 0;
             for (let k = -radius; k <= radius; k++) {
               const nx = Math.min(width - 1, Math.max(0, x + k));
               const nIdx = (y * width + nx) * 4;
@@ -136,14 +159,18 @@ export default function ImageNoiseReduction() {
               b += data[nIdx + 2] * w;
             }
             const idx = (y * width + x) * 4;
-            temp[idx] = r; temp[idx + 1] = g; temp[idx + 2] = b;
+            temp[idx] = r;
+            temp[idx + 1] = g;
+            temp[idx + 2] = b;
           }
         }
 
         // Vertical pass
         for (let y = 0; y < height; y++) {
           for (let x = 0; x < width; x++) {
-            let r = 0, g = 0, b = 0;
+            let r = 0,
+              g = 0,
+              b = 0;
             for (let k = -radius; k <= radius; k++) {
               const ny = Math.min(height - 1, Math.max(0, y + k));
               const nIdx = (ny * width + x) * 4;
@@ -153,7 +180,9 @@ export default function ImageNoiseReduction() {
               b += temp[nIdx + 2] * w;
             }
             const idx = (y * width + x) * 4;
-            output[idx] = r; output[idx + 1] = g; output[idx + 2] = b;
+            output[idx] = r;
+            output[idx + 1] = g;
+            output[idx + 2] = b;
             output[idx + 3] = data[idx + 3];
           }
         }
@@ -162,9 +191,8 @@ export default function ImageNoiseReduction() {
       const outData = new ImageData(output, width, height);
       ctx.putImageData(outData, 0, 0);
 
-      const blob = await new Promise<Blob | null>(res => canvas.toBlob(b => res(b), 'image/jpeg', 0.95));
+      const blob = await new Promise<Blob | null>((res) => canvas.toBlob((b) => res(b), 'image/jpeg', 0.95));
       if (blob) {
-        if (resultUrl) URL.revokeObjectURL(resultUrl);
         setResultUrl(URL.createObjectURL(blob));
       }
     } catch (e: any) {
@@ -181,95 +209,172 @@ export default function ImageNoiseReduction() {
   };
 
   return (
-    <div className="flex-1 flex flex-col items-center p-8">
-      <div className="text-center mb-8">
-        <h1 className="text-4xl font-bold text-gray-900 mb-4">Image Noise Reduction</h1>
-        <p className="text-xl text-gray-600">Remove noise from photos using advanced filtering algorithms.</p>
-      </div>
-
+    <ToolWorkspaceShell
+      title="Image Noise Reduction"
+      subtitle="Remove grain and sensor noise from photos using Bilateral, Median, and Gaussian filters."
+      categoryLabel="Pixel Denoise Lab"
+      icon={Sparkles}
+      microVariant="remove-bg"
+      tone="violet"
+      trustNote="Edge-preserving bilateral smoothing · 100% browser-only"
+    >
       {!file ? (
-        <label className="flex flex-col items-center justify-center w-full max-w-xl h-64 border-2 border-dashed border-gray-300 rounded-2xl bg-gray-50 cursor-pointer hover:bg-gray-100">
-          <Sparkles className="w-12 h-12 text-gray-400 mb-3" />
-          <span className="text-gray-600 font-semibold">Select a noisy image</span>
-          <span className="text-xs text-gray-400 mt-1">JPG, PNG, WEBP</span>
-          <input type="file" accept="image/*" className="hidden" onChange={handleFile} />
-        </label>
+        <motion.div
+          initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.25 }}
+          className="max-w-2xl mx-auto"
+        >
+          <FileDropzone
+            onDrop={(files) => {
+              if (files[0]) loadFile(files[0]);
+            }}
+            multiple={false}
+            accept={{ 'image/*': ['.jpg', '.jpeg', '.png', '.webp'] }}
+            title="Select a noisy image"
+            subtitle="Drop JPG, PNG, or WebP photo here"
+          />
+        </motion.div>
       ) : (
-        <div className="w-full max-w-4xl space-y-6">
-          {/* Compare view */}
-          <div ref={containerRef} className="relative bg-gray-100 rounded-2xl border border-gray-200 overflow-hidden cursor-col-resize"
-            style={{ minHeight: 350 }} onMouseMove={handleMouseMove}>
-            {/* Original (full width) */}
-            <img src={imgUrl!} alt="Original" className="w-full max-h-[450px] object-contain" />
-            
-            {/* Result overlay (clipped) */}
-            {resultUrl && compareView && (
-              <div className="absolute inset-0 overflow-hidden" style={{ clipPath: `inset(0 ${100 - splitPos}% 0 0)` }}>
-                <img src={resultUrl} alt="Denoised" className="w-full max-h-[450px] object-contain" />
-              </div>
-            )}
+        <motion.div
+          initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.26 }}
+          className="w-full max-w-4xl mx-auto space-y-6"
+        >
+          {/* Compare Viewport */}
+          <div className="relative pms-glass-panel rounded-3xl p-4 sm:p-5 overflow-hidden">
+            <PearlScanOverlay active={busy} label={`Running ${mode} filter (strength ${strength})…`} />
+            <div
+              ref={containerRef}
+              className="relative pms-checkerboard bg-white dark:bg-slate-950 rounded-2xl border border-[var(--pms-border)] overflow-hidden cursor-col-resize"
+              style={{ minHeight: 350 }}
+              onMouseMove={handleMouseMove}
+            >
+              {/* Original */}
+              <img src={imgUrl!} alt="Original" className="w-full max-h-[450px] object-contain" />
 
-            {/* Split line */}
-            {resultUrl && compareView && (
-              <div className="absolute top-0 bottom-0 w-0.5 bg-white shadow-lg pointer-events-none" style={{ left: `${splitPos}%` }}>
-                <div className="absolute top-2 left-1/2 -translate-x-1/2 bg-black/70 text-white text-[10px] px-2 py-0.5 rounded-full whitespace-nowrap">
-                  ← Original | Denoised →
+              {/* Result overlay (clipped) */}
+              {resultUrl && compareView && (
+                <div
+                  className="absolute inset-0 overflow-hidden"
+                  style={{ clipPath: `inset(0 ${100 - splitPos}% 0 0)` }}
+                >
+                  <img src={resultUrl} alt="Denoised" className="w-full max-h-[450px] object-contain" />
                 </div>
-              </div>
-            )}
+              )}
 
-            {!resultUrl && (
-              <div className="absolute inset-0 flex items-center justify-center">
-                <span className="text-gray-400 font-semibold bg-white/80 px-4 py-2 rounded-xl">Adjust settings and click "Denoise"</span>
-              </div>
-            )}
+              {/* Split line */}
+              {resultUrl && compareView && (
+                <div
+                  className="absolute top-0 bottom-0 w-0.5 bg-white shadow-lg pointer-events-none"
+                  style={{ left: `${splitPos}%` }}
+                >
+                  <div className="absolute top-2 left-1/2 -translate-x-1/2 bg-black/75 text-white text-[10px] font-bold px-2.5 py-1 rounded-full whitespace-nowrap shadow">
+                    ← Original | Denoised →
+                  </div>
+                </div>
+              )}
+
+              {!resultUrl && (
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                  <span className="text-gray-600 dark:text-slate-200 font-semibold text-sm bg-white/90 dark:bg-slate-900/90 px-4 py-2 rounded-xl border border-[var(--pms-border)] shadow-sm backdrop-blur-sm">
+                    Adjust settings below and click &ldquo;Denoise Image&rdquo;
+                  </span>
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Controls */}
-          <div className="bg-white rounded-2xl border border-gray-200 p-6 space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="pms-glass-panel rounded-3xl p-6 space-y-5">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Algorithm</label>
-                <select value={mode} onChange={e => setMode(e.target.value as any)} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
+                <label className="block text-xs font-bold uppercase tracking-wider text-gray-600 dark:text-slate-400 mb-1.5">
+                  Algorithm
+                </label>
+                <select
+                  value={mode}
+                  onChange={(e) => setMode(e.target.value as any)}
+                  className="w-full px-3.5 py-2.5 border border-[var(--pms-border)] bg-white/85 dark:bg-slate-900/70 text-gray-900 dark:text-white rounded-xl text-sm font-semibold"
+                >
                   <option value="bilateral">Bilateral (edge-preserving) ★</option>
-                  <option value="median">Median (salt & pepper)</option>
+                  <option value="median">Median (salt &amp; pepper)</option>
                   <option value="gaussian">Gaussian (general smooth)</option>
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Strength: {strength}</label>
-                <input type="range" min={1} max={15} value={strength} onChange={e => setStrength(Number(e.target.value))} className="w-full mt-1" />
-                <div className="flex justify-between text-[10px] text-gray-400">
-                  <span>Subtle</span><span>Strong</span>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-xs font-bold uppercase tracking-wider text-gray-600 dark:text-slate-400">
+                    Strength
+                  </label>
+                  <span className="text-xs font-extrabold text-[var(--pms-violet)]">
+                    <AnimatedNumber value={strength} />
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min={1}
+                  max={15}
+                  value={strength}
+                  onChange={(e) => setStrength(Number(e.target.value))}
+                  className="w-full mt-1 accent-violet-600 cursor-pointer"
+                />
+                <div className="flex justify-between text-[10px] text-gray-400 dark:text-slate-500 font-medium">
+                  <span>Subtle</span>
+                  <span>Strong</span>
                 </div>
               </div>
-              <div className="flex items-end gap-2">
-                <label className="flex items-center gap-2 text-sm font-medium text-gray-700 cursor-pointer">
-                  <input type="checkbox" checked={compareView} onChange={e => setCompareView(e.target.checked)} className="rounded" />
+              <div className="flex items-center md:justify-end">
+                <label className="flex items-center gap-2.5 text-sm font-semibold text-gray-700 dark:text-slate-300 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={compareView}
+                    onChange={(e) => setCompareView(e.target.checked)}
+                    className="w-4 h-4 accent-violet-600 rounded"
+                  />
                   Split compare
                 </label>
               </div>
             </div>
 
-            <div className="flex gap-3">
-              <button onClick={processImage} disabled={busy}
-                className="flex-1 py-3 bg-purple-600 text-white rounded-xl font-bold hover:bg-purple-700 disabled:opacity-50 flex items-center justify-center gap-2">
+            <div className="flex flex-wrap gap-3 items-center">
+              <motion.button
+                whileHover={prefersReduced || busy ? undefined : { scale: 1.01 }}
+                whileTap={prefersReduced || busy ? undefined : { scale: 0.985 }}
+                onClick={processImage}
+                disabled={busy}
+                className="flex-1 min-w-[200px] pms-btn-primary py-3.5 rounded-2xl font-bold disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer"
+              >
                 {busy ? <Loader2 className="w-5 h-5 animate-spin" /> : <Sparkles className="w-5 h-5" />}
                 {busy ? 'Processing…' : 'Denoise Image'}
-              </button>
-              {resultUrl && (
-                <a href={resultUrl} download={`denoised_${file.name}`}
-                  className="px-6 py-3 bg-green-600 text-white rounded-xl font-bold hover:bg-green-700 flex items-center gap-2">
-                  <Download className="w-5 h-5" /> Save
-                </a>
-              )}
-              <label className="px-4 py-3 bg-gray-100 text-gray-700 rounded-xl font-semibold text-sm cursor-pointer hover:bg-gray-200 flex items-center">
+              </motion.button>
+
+              <AnimatePresence>
+                {resultUrl && (
+                  <motion.a
+                    initial={prefersReduced ? false : { opacity: 0, scale: 0.92 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={prefersReduced ? undefined : { opacity: 0 }}
+                    transition={{ type: 'spring', stiffness: 360, damping: 20 }}
+                    href={resultUrl}
+                    download={`denoised_${file.name}`}
+                    className="px-6 py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl font-bold flex items-center gap-2 shadow-lg shadow-emerald-600/20 transition-colors"
+                  >
+                    <CheckCircle2 className="w-4 h-4" />
+                    <Download className="w-4 h-4" />
+                    Save
+                  </motion.a>
+                )}
+              </AnimatePresence>
+
+              <label className="px-5 py-3.5 bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-slate-300 rounded-2xl font-semibold text-sm cursor-pointer hover:bg-gray-200 dark:hover:bg-slate-700 transition-colors flex items-center">
                 New <input type="file" accept="image/*" className="hidden" onChange={handleFile} />
               </label>
             </div>
           </div>
-        </div>
+        </motion.div>
       )}
-    </div>
+    </ToolWorkspaceShell>
   );
 }

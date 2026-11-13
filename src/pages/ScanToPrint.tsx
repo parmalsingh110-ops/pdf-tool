@@ -12,19 +12,15 @@ import {
   Volume2,
   VolumeX,
   FileText,
-  Image as ImageIcon,
   Sparkles,
   ShieldCheck,
   Zap,
   RefreshCw,
   Clock,
-  Layers,
   RotateCcw,
   Check,
   Plus,
   Minus,
-  Wifi,
-  WifiOff,
   AlertCircle,
   Radio,
   Send,
@@ -33,18 +29,20 @@ import {
   Edit3,
   Users,
   List,
-  LayoutGrid,
   X,
   Store,
   Camera,
   Share2,
 } from 'lucide-react';
+import { motion, useReducedMotion } from 'motion/react';
 import { Peer } from 'peerjs';
 import QRCode from 'qrcode';
 import * as pdfjsLib from 'pdfjs-dist';
 import '../lib/pdfWorker';
 import { useSEO } from '../hooks/useSEO';
 import { usePageSEO } from '../lib/usePageSEO';
+import PearlAuroraBackground from '../components/pearl/PearlAuroraBackground';
+import { AnimatedNumber } from '../components/pearl/PearlMotion';
 import ToolSEOSection from '../components/ToolSEOSection';
 import { apiFetch, API_BASE } from '../lib/api';
 import { escapeHtml } from '../lib/utils';
@@ -252,6 +250,8 @@ export default function ScanToPrint() {
     'scan to print qr, whatsapp print alternative, cyber cafe print station, mobile to pc print qr, instant document print queue, emitra print drop',
     '/scan-to-print'
   );
+
+  const prefersReduced = useReducedMotion();
 
   // ── URL / mode detection ─────────────────────────────────────────────────
   const [sessionCode, setSessionCode] = useState<string>('');
@@ -1361,6 +1361,12 @@ export default function ScanToPrint() {
       }
     };
 
+    // Immediately register counter station room before the first poll cycle
+    void registerRoomWithBase(API_BASE);
+    if (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
+      void registerRoomWithBase('');
+    }
+
     pollTimerRef.current = setTimeout(poll, 200);
 
     return () => {
@@ -2307,606 +2313,630 @@ export default function ScanToPrint() {
   // ════════════════════════════════════════════════════════════════════════
   if (isSenderMode) {
     return (
-      <div className="min-h-screen bg-gradient-to-b from-slate-50 to-white dark:from-slate-950 dark:to-slate-900 p-4 sm:p-6 flex flex-col items-center justify-center">
-        {/* Top Mode Switcher Bar */}
-        <div className="flex items-center justify-center mb-6 w-full max-w-lg">
-          <div className="inline-flex p-1.5 rounded-2xl bg-slate-200/80 dark:bg-slate-800 border border-slate-300/60 dark:border-slate-700 shadow-sm max-w-full overflow-x-auto">
-            <button
-              onClick={() => {
-                setIsSenderMode(false);
-                setPeerReconnectKey((k) => k + 1);
-              }}
-              className="flex items-center gap-2 px-4 sm:px-5 py-2 rounded-xl text-xs sm:text-sm font-bold text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white transition"
-            >
-              <Printer className="w-4 h-4 text-rose-600" />
-              <span>📥 Counter Station (Print Queue)</span>
-            </button>
-            <button
-              onClick={() => {
-                setIsSenderMode(true);
-                setPeerReconnectKey((k) => k + 1);
-              }}
-              className="flex items-center gap-2 px-4 sm:px-5 py-2 rounded-xl text-xs sm:text-sm font-extrabold bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-sm transition"
-            >
-              <Zap className="w-4 h-4 text-rose-600" />
-              <span>📤 Beam Files</span>
-            </button>
-          </div>
-        </div>
+      <div
+        className="relative min-h-screen overflow-x-clip p-4 sm:p-6 flex flex-col items-center justify-center"
+        style={{ backgroundColor: 'var(--pms-pearl)', color: 'var(--pms-ink)' }}
+      >
+        <PearlAuroraBackground mode="workspace" />
 
-        <div className="w-full max-w-lg bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-6 sm:p-8 shadow-xl space-y-5">
-          {!targetCounterPin || targetCounterPin.length < 3 ? (
-            /* ── STEP 1: ENTER COUNTER PIN OR SCAN SHOP QR ──────────────── */
-            <div className="space-y-5 text-center py-1">
-              <div className="w-16 h-16 rounded-3xl bg-rose-50 dark:bg-rose-950/60 text-rose-600 mx-auto flex items-center justify-center shadow-inner">
-                <Radio className="w-8 h-8 animate-pulse" />
-              </div>
-
-              <div>
-                <h2 className="text-2xl font-black text-slate-900 dark:text-white">
-                  Beam Files to Counter PC
-                </h2>
-                <p className="text-xs sm:text-sm text-slate-500 mt-1 max-w-sm mx-auto">
-                  Scan the shop QR code or type the Counter PIN shown on the shop screen (e.g. <span className="font-mono font-black text-rose-600">K9X2M7</span>).
-                </p>
-              </div>
-
-              {/* Shared / Pre-selected Document Banner */}
-              {senderFiles.length > 0 && (
-                <div className="p-4 rounded-2xl bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-950/60 dark:to-teal-950/40 border border-emerald-200 dark:border-emerald-800 text-left space-y-2 shadow-sm">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2 text-emerald-800 dark:text-emerald-300 font-extrabold text-xs">
-                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                      <span>{isSharedFromExternal ? '📥 Document Shared from WhatsApp / Device' : '📄 Document Ready to Beam'}</span>
-                    </div>
-                    <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/80 text-emerald-800 dark:text-emerald-200">
-                      {senderFiles.length} file{senderFiles.length > 1 ? 's' : ''}
-                    </span>
-                  </div>
-
-                  <div className="space-y-1 max-h-28 overflow-y-auto pl-6 pr-1">
-                    {senderFiles.map((f, idx) => (
-                      <div key={idx} className="flex items-center justify-between text-xs bg-white/70 dark:bg-slate-900/60 px-2.5 py-1.5 rounded-xl border border-emerald-200/60 dark:border-emerald-800/60">
-                        <span className="font-bold text-slate-800 dark:text-slate-200 truncate max-w-[200px]">{f.name}</span>
-                        <div className="flex items-center gap-2 shrink-0">
-                          <span className="text-[10px] font-mono text-slate-500">{formatFileSize(f.size)}</span>
-                          <button
-                            type="button"
-                            onClick={() => removeSenderFile(idx)}
-                            className="text-slate-400 hover:text-rose-600 p-0.5 rounded"
-                            title="Remove file"
-                          >
-                            <X className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-
-                  {recentPins.length > 0 ? (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const lastPin = recentPins[0];
-                        const chars = lastPin.slice(0, 6).split('');
-                        while (chars.length < 6) chars.push('');
-                        setPinDigits(chars);
-                        handleConnectWithPin(lastPin);
-                      }}
-                      className="w-full mt-1 py-2.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-extrabold text-xs flex items-center justify-center gap-1.5 shadow-sm transition cursor-pointer"
-                    >
-                      <Zap className="w-3.5 h-3.5" /> 1-Tap Connect to Recent Shop (#{recentPins[0]})
-                    </button>
-                  ) : (
-                    <p className="text-[11px] text-emerald-700 dark:text-emerald-400 font-medium pl-6">
-                      Shopkeeper ka QR scan karein ya niche Counter PIN dalein.
-                    </p>
-                  )}
-                </div>
-              )}
-
-              {/* Built-In Live Camera QR Scanner Modal / Viewfinder */}
-              {showQrScanner ? (
-                <div className="p-4 rounded-2xl bg-slate-900 text-white space-y-3 border-2 border-rose-500 shadow-lg">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-extrabold flex items-center gap-1.5 text-rose-400">
-                      <QrCode className="w-4 h-4" /> Point Camera at Counter QR Standee
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => setShowQrScanner(false)}
-                      className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-300 flex items-center gap-1"
-                    >
-                      <X className="w-3.5 h-3.5" /> Close
-                    </button>
-                  </div>
-                  <div className="relative rounded-xl overflow-hidden bg-black aspect-video flex items-center justify-center border border-slate-700">
-                    <video
-                      ref={qrVideoRef}
-                      playsInline
-                      muted
-                      className="w-full h-full object-cover"
-                    />
-                    <div className="absolute inset-0 pointer-events-none border-2 border-dashed border-rose-500/70 m-6 rounded-xl" />
-                  </div>
-                  {qrScanError && (
-                    <p className="text-[11px] text-amber-300 font-medium">{qrScanError}</p>
-                  )}
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => setShowQrScanner(true)}
-                  className="w-full py-3.5 px-4 rounded-2xl bg-slate-900 dark:bg-white hover:opacity-95 active:scale-98 text-white dark:text-slate-900 font-extrabold text-xs sm:text-sm shadow-md flex items-center justify-center gap-2 transition cursor-pointer"
-                >
-                  <QrCode className="w-4 h-4 text-rose-500" />
-                  <span>📷 Scan Shop Counter QR Code</span>
-                </button>
-              )}
-
-              <div className="flex items-center gap-3 text-[10px] font-bold uppercase tracking-widest text-slate-400">
-                <div className="flex-1 h-px bg-slate-200 dark:bg-slate-800" />
-                <span>OR ENTER COUNTER PIN</span>
-                <div className="flex-1 h-px bg-slate-200 dark:bg-slate-800" />
-              </div>
-
-              {/* 6-Digit PIN input boxes */}
-              <div className="flex items-center justify-center gap-1.5 sm:gap-3">
-                {[0, 1, 2, 3, 4, 5].map((idx) => (
-                  <input
-                    key={idx}
-                    ref={(el) => { pinInputRefs.current[idx] = el; }}
-                    type="text"
-                    maxLength={1}
-                    value={pinDigits[idx] || ''}
-                    onChange={(e) => handlePinDigitChange(idx, e.target.value)}
-                    onKeyDown={(e) => handlePinKeyDown(idx, e)}
-                    onPaste={idx === 0 ? handlePinPaste : undefined}
-                    className="w-11 h-14 sm:w-14 sm:h-16 text-center text-xl sm:text-2xl font-black uppercase rounded-2xl border-2 border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/80 text-slate-900 dark:text-white focus:border-rose-500 focus:bg-white dark:focus:bg-slate-900 focus:ring-4 focus:ring-rose-500/10 outline-none transition-all shadow-sm"
-                  />
-                ))}
-              </div>
-
-              {/* Connect Button (Supports 3 to 10 char custom shop codes too) */}
+        <div className="relative z-10 w-full flex flex-col items-center">
+          {/* Top Mode Switcher Bar */}
+          <div className="flex items-center justify-center mb-6 w-full max-w-lg">
+            <div className="inline-flex p-1.5 rounded-2xl pms-glass-header shadow-sm max-w-full overflow-x-auto">
               <button
                 onClick={() => {
-                  const fullPin = pinDigits.join('').trim().toUpperCase();
-                  if (fullPin.length >= 3) handleConnectWithPin(fullPin);
+                  setIsSenderMode(false);
+                  setPeerReconnectKey((k) => k + 1);
                 }}
-                disabled={pinDigits.join('').trim().length < 3}
-                className="w-full py-4 rounded-2xl bg-rose-600 hover:bg-rose-700 active:scale-95 text-white font-bold text-sm shadow-md transition-all flex items-center justify-center gap-2 disabled:opacity-40 cursor-pointer"
+                className="flex items-center gap-2 px-4 sm:px-5 py-2 rounded-xl text-xs sm:text-sm font-bold hover:opacity-80 transition cursor-pointer"
+                style={{ color: 'var(--pms-muted)' }}
               >
-                <Zap className="w-4 h-4" /> Connect to Counter PIN
+                <Printer className="w-4 h-4 text-rose-600" />
+                <span>📥 Counter Station (Print Queue)</span>
               </button>
-
-              {/* Recent Counters */}
-              {recentPins.length > 0 && (
-                <div className="pt-1 space-y-2">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
-                    Recently Connected Counters
-                  </span>
-                  <div className="flex items-center justify-center gap-2 flex-wrap">
-                    {recentPins.slice(0, 4).map((pin) => (
-                      <button
-                        key={pin}
-                        type="button"
-                        onClick={() => {
-                          const chars = pin.slice(0, 6).split('');
-                          while (chars.length < 6) chars.push('');
-                          setPinDigits(chars);
-                          handleConnectWithPin(pin);
-                        }}
-                        className="px-3.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 hover:border-rose-400 bg-white dark:bg-slate-800 text-xs font-mono font-bold text-slate-700 dark:text-slate-200 flex items-center gap-1.5 transition active:scale-95 shadow-sm"
-                      >
-                        <Clock className="w-3.5 h-3.5 text-slate-400" /> #{pin}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* PWA 1-Tap WhatsApp Share Banner */}
-              {canInstallPWA && (
-                <div className="pt-1">
-                  <button
-                    type="button"
-                    onClick={promptPWAInstall}
-                    className="w-full p-3 rounded-2xl bg-gradient-to-r from-rose-500/10 via-purple-500/10 to-indigo-500/10 border border-rose-200 dark:border-rose-900/60 hover:border-rose-400 flex items-center justify-between gap-3 text-left transition active:scale-98 shadow-sm cursor-pointer"
-                  >
-                    <div className="flex items-center gap-2.5">
-                      <div className="w-8 h-8 rounded-xl bg-rose-600 text-white flex items-center justify-center shrink-0 shadow">
-                        <Share2 className="w-4 h-4" />
-                      </div>
-                      <div>
-                        <div className="text-xs font-black text-slate-900 dark:text-white flex items-center gap-1.5">
-                          <span>Enable 1-Tap WhatsApp Share</span>
-                          <span className="text-[9px] bg-rose-600 text-white px-1.5 py-0.2 rounded-full font-bold">New</span>
-                        </div>
-                        <div className="text-[10.5px] text-slate-500 dark:text-slate-400">
-                          Add to phone to share PDFs directly from WhatsApp share menu!
-                        </div>
-                      </div>
-                    </div>
-                    <span className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shrink-0 shadow">
-                      Add
-                    </span>
-                  </button>
-                </div>
-              )}
-
-              {/* Supported devices badge */}
-              <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-center gap-3 text-xs text-slate-400 flex-wrap">
-                <span className="flex items-center gap-1"><Monitor className="w-3.5 h-3.5" /> PC to PC</span>
-                <span>•</span>
-                <span className="flex items-center gap-1"><Smartphone className="w-3.5 h-3.5" /> Phone to PC</span>
-                <span>•</span>
-                <span className="flex items-center gap-1"><Laptop className="w-3.5 h-3.5" /> Laptop to PC</span>
-              </div>
+              <button
+                onClick={() => {
+                  setIsSenderMode(true);
+                  setPeerReconnectKey((k) => k + 1);
+                }}
+                className="flex items-center gap-2 px-4 sm:px-5 py-2 rounded-xl text-xs sm:text-sm font-extrabold bg-white dark:bg-slate-900 shadow-sm transition cursor-pointer"
+                style={{ color: 'var(--pms-ink)' }}
+              >
+                <Zap className="w-4 h-4 text-rose-600" />
+                <span>📤 Beam Files</span>
+              </button>
             </div>
-          ) : (
-            /* ── STEP 2: CONNECTED FILE DROP & BEAM ───────────────────────── */
-            <>
-              {/* Connected Header */}
-              <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
-                <div className="flex items-center gap-3">
-                  <div className="w-11 h-11 rounded-2xl bg-rose-50 dark:bg-rose-950/60 text-rose-600 flex items-center justify-center">
-                    <Printer className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h1 className="text-base font-extrabold text-slate-900 dark:text-white">Target Counter PC</h1>
-                    <div className="flex items-center gap-2 mt-0.5">
-                      <span className="font-mono font-black text-rose-600 tracking-widest text-sm">#{targetCounterPin}</span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setTargetCounterPin('');
-                          setPinDigits(['', '', '', '', '', '']);
-                          setMobileConnectionStatus('connecting');
-                          try { peerRef.current?.destroy(); } catch {}
-                        }}
-                        className="text-[11px] font-bold text-slate-400 hover:text-rose-600 underline"
-                      >
-                        Change
-                      </button>
-                    </div>
-                  </div>
+          </div>
+
+          <motion.div
+            initial={prefersReduced ? false : { opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.25 }}
+            className="w-full max-w-lg pms-glass-panel rounded-3xl p-6 sm:p-8 shadow-xl space-y-5"
+          >
+            {!targetCounterPin || targetCounterPin.length < 3 ? (
+              /* ── STEP 1: ENTER COUNTER PIN OR SCAN SHOP QR ──────────────── */
+              <div className="space-y-5 text-center py-1">
+                <div className="w-16 h-16 rounded-3xl bg-rose-500/15 border border-rose-500/25 text-rose-600 dark:text-rose-400 mx-auto flex items-center justify-center shadow-inner">
+                  <Radio className="w-8 h-8 animate-pulse" />
                 </div>
 
-                {/* Connection Badge */}
-                <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold border ${
-                  mobileConnectionStatus === 'connected'
-                    ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800'
-                    : mobileConnectionStatus === 'connecting'
-                    ? 'bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border-amber-200'
-                    : 'bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border-blue-200'
-                }`}>
-                  {mobileConnectionStatus === 'connected' ? (
-                    <><span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />Connected</>
-                  ) : mobileConnectionStatus === 'connecting' ? (
-                    <><RefreshCw className="w-3 h-3 animate-spin" />Connecting...</>
-                  ) : (
-                    <><span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />☁️ Cloud Active</>
-                  )}
+                <div>
+                  <h2 className="text-2xl font-black" style={{ color: 'var(--pms-ink)' }}>
+                    Beam Files to Counter PC
+                  </h2>
+                  <p className="text-xs sm:text-sm mt-1 max-w-sm mx-auto" style={{ color: 'var(--pms-muted)' }}>
+                    Scan the shop QR code or type the Counter PIN shown on the shop screen (e.g. <span className="font-mono font-black text-rose-600 dark:text-rose-400">K9X2M7</span>).
+                  </p>
                 </div>
-              </div>
 
-              {senderSuccess ? (
-                /* Success Screen with Customer Token & Bundle Info */
-                <div className="py-6 text-center space-y-4">
-                  <div className="w-16 h-16 rounded-full bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 mx-auto flex items-center justify-center">
-                    <CheckCircle2 className="w-9 h-9" />
-                  </div>
-                  <div className="space-y-1">
-                    <span className="text-xs font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 px-3 py-1 rounded-full border border-emerald-200 dark:border-emerald-800">
-                      ✅ Delivered to Counter PC
-                    </span>
-                    <h2 className="text-3xl font-black text-slate-900 dark:text-white pt-3">
-                      Token <span className="text-rose-600 font-mono">#{customerToken ?? 1}</span>
-                    </h2>
-                    <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-300 max-w-xs mx-auto pt-1 font-medium">
-                      Counter operator ko apna Token <strong className="text-rose-600 font-black">#{customerToken ?? 1}</strong> batayein apna printout lene ke liye.
-                    </p>
-                  </div>
-
-                  {/* Delivered documents list */}
-                  {deliveredBatch.length > 0 && (
-                    <div className="text-left bg-slate-50 dark:bg-slate-800/80 rounded-2xl p-3 border border-slate-200 dark:border-slate-700 space-y-1.5 max-h-40 overflow-y-auto">
-                      <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider block">
-                        Delivered in Token #{customerToken ?? 1} ({deliveredBatch.length} file{deliveredBatch.length > 1 ? 's' : ''}):
+                {/* Shared / Pre-selected Document Banner */}
+                {senderFiles.length > 0 && (
+                  <div className="p-4 rounded-2xl bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-950/60 dark:to-teal-950/40 border border-emerald-200 dark:border-emerald-800 text-left space-y-2 shadow-sm">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-emerald-800 dark:text-emerald-300 font-extrabold text-xs">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <span>{isSharedFromExternal ? '📥 Document Shared from WhatsApp / Device' : '📄 Document Ready to Beam'}</span>
+                      </div>
+                      <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/80 text-emerald-800 dark:text-emerald-200">
+                        {senderFiles.length} file{senderFiles.length > 1 ? 's' : ''}
                       </span>
-                      {deliveredBatch.map((f, idx) => (
-                        <div key={idx} className="flex items-center justify-between text-xs py-1 border-b border-slate-100 dark:border-slate-700/50 last:border-0">
-                          <span className="font-semibold text-slate-700 dark:text-slate-200 truncate max-w-[200px]">{f.name}</span>
-                          <span className="font-mono text-[11px] text-rose-600 font-bold shrink-0 ml-2">
-                            {f.copies} {f.copies > 1 ? 'copies' : 'copy'} · {f.colorMode === 'bw' ? 'B&W' : 'Color'}
-                          </span>
+                    </div>
+
+                    <div className="space-y-1 max-h-28 overflow-y-auto pl-6 pr-1">
+                      {senderFiles.map((f, idx) => (
+                        <div key={idx} className="flex items-center justify-between text-xs bg-white/75 dark:bg-slate-900/60 px-2.5 py-1.5 rounded-xl border border-emerald-200/60 dark:border-emerald-800/60">
+                          <span className="font-bold text-slate-800 dark:text-slate-200 truncate max-w-[200px]">{f.name}</span>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <span className="text-[10px] font-mono text-slate-500">{formatFileSize(f.size)}</span>
+                            <button
+                              type="button"
+                              onClick={() => removeSenderFile(idx)}
+                              className="text-slate-400 hover:text-rose-600 p-0.5 rounded"
+                              title="Remove file"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
                         </div>
                       ))}
                     </div>
-                  )}
 
-                  <div className="space-y-2 pt-2">
-                    <button
-                      onClick={() => {
-                        setSenderSuccess(false);
-                        setSenderFiles([]);
-                        setSenderCopies(1);
-                        setSenderColorMode('bw');
-                      }}
-                      className="w-full py-3.5 rounded-2xl bg-rose-600 hover:bg-rose-700 active:scale-95 text-white text-sm font-bold shadow-md transition"
-                    >
-                      ➕ Send More Files (Same Token #{customerToken ?? 1})
-                    </button>
+                    {recentPins.length > 0 ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const lastPin = recentPins[0];
+                          const chars = lastPin.slice(0, 6).split('');
+                          while (chars.length < 6) chars.push('');
+                          setPinDigits(chars);
+                          handleConnectWithPin(lastPin);
+                        }}
+                        className="w-full mt-1 py-2.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-extrabold text-xs flex items-center justify-center gap-1.5 shadow-sm transition cursor-pointer"
+                      >
+                        <Zap className="w-3.5 h-3.5" /> 1-Tap Connect to Recent Shop (#{recentPins[0]})
+                      </button>
+                    ) : (
+                      <p className="text-[11px] text-emerald-700 dark:text-emerald-400 font-medium pl-6">
+                        Shopkeeper ka QR scan karein ya niche Counter PIN dalein.
+                      </p>
+                    )}
+                  </div>
+                )}
 
+                {/* Built-In Live Camera QR Scanner Modal / Viewfinder */}
+                {showQrScanner ? (
+                  <div className="p-4 rounded-2xl bg-slate-900 text-white space-y-3 border-2 border-rose-500 shadow-lg">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-extrabold flex items-center gap-1.5 text-rose-400">
+                        <QrCode className="w-4 h-4" /> Point Camera at Counter QR Standee
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setShowQrScanner(false)}
+                        className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-300 flex items-center gap-1"
+                      >
+                        <X className="w-3.5 h-3.5" /> Close
+                      </button>
+                    </div>
+                    <div className="relative rounded-xl overflow-hidden bg-black aspect-video flex items-center justify-center border border-slate-700">
+                      <video
+                        ref={qrVideoRef}
+                        playsInline
+                        muted
+                        className="w-full h-full object-cover"
+                      />
+                      <div className="absolute inset-0 pointer-events-none border-2 border-dashed border-rose-500/70 m-6 rounded-xl" />
+                    </div>
+                    {qrScanError && (
+                      <p className="text-[11px] text-amber-300 font-medium">{qrScanError}</p>
+                    )}
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setShowQrScanner(true)}
+                    className="w-full py-3.5 px-4 rounded-2xl bg-slate-900 dark:bg-white hover:opacity-95 active:scale-98 text-white dark:text-slate-900 font-extrabold text-xs sm:text-sm shadow-md flex items-center justify-center gap-2 transition cursor-pointer"
+                  >
+                    <QrCode className="w-4 h-4 text-rose-500" />
+                    <span>📷 Scan Shop Counter QR Code</span>
+                  </button>
+                )}
+
+                <div className="flex items-center gap-3 text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--pms-muted)' }}>
+                  <div className="flex-1 h-px bg-slate-200 dark:bg-slate-800" />
+                  <span>OR ENTER COUNTER PIN</span>
+                  <div className="flex-1 h-px bg-slate-200 dark:bg-slate-800" />
+                </div>
+
+                {/* 6-Digit PIN input boxes */}
+                <div className="flex items-center justify-center gap-1.5 sm:gap-3">
+                  {[0, 1, 2, 3, 4, 5].map((idx) => (
+                    <input
+                      key={idx}
+                      ref={(el) => { pinInputRefs.current[idx] = el; }}
+                      type="text"
+                      maxLength={1}
+                      value={pinDigits[idx] || ''}
+                      onChange={(e) => handlePinDigitChange(idx, e.target.value)}
+                      onKeyDown={(e) => handlePinKeyDown(idx, e)}
+                      onPaste={idx === 0 ? handlePinPaste : undefined}
+                      className="w-11 h-14 sm:w-14 sm:h-16 text-center text-xl sm:text-2xl font-black uppercase rounded-2xl border-2 border-slate-200 dark:border-slate-700 bg-white/80 dark:bg-slate-800/80 text-slate-900 dark:text-white focus:border-rose-500 focus:bg-white dark:focus:bg-slate-900 focus:ring-4 focus:ring-rose-500/10 outline-none transition-all shadow-sm"
+                    />
+                  ))}
+                </div>
+
+                {/* Connect Button (Supports 3 to 10 char custom shop codes too) */}
+                <button
+                  onClick={() => {
+                    const fullPin = pinDigits.join('').trim().toUpperCase();
+                    if (fullPin.length >= 3) handleConnectWithPin(fullPin);
+                  }}
+                  disabled={pinDigits.join('').trim().length < 3}
+                  className="pms-btn-primary w-full py-4 rounded-2xl font-bold text-sm shadow-md transition-all flex items-center justify-center gap-2 disabled:opacity-40 cursor-pointer"
+                >
+                  <Zap className="w-4 h-4" /> Connect to Counter PIN
+                </button>
+
+                {/* Recent Counters */}
+                {recentPins.length > 0 && (
+                  <div className="pt-1 space-y-2">
+                    <span className="text-[10px] font-bold uppercase tracking-wider block" style={{ color: 'var(--pms-muted)' }}>
+                      Recently Connected Counters
+                    </span>
+                    <div className="flex items-center justify-center gap-2 flex-wrap">
+                      {recentPins.slice(0, 4).map((pin) => (
+                        <button
+                          key={pin}
+                          type="button"
+                          onClick={() => {
+                            const chars = pin.slice(0, 6).split('');
+                            while (chars.length < 6) chars.push('');
+                            setPinDigits(chars);
+                            handleConnectWithPin(pin);
+                          }}
+                          className="px-3.5 py-1.5 rounded-xl pms-glass-panel hover:border-rose-400 text-xs font-mono font-bold flex items-center gap-1.5 transition active:scale-95 shadow-sm cursor-pointer"
+                          style={{ color: 'var(--pms-ink)' }}
+                        >
+                          <Clock className="w-3.5 h-3.5 text-slate-400" /> #{pin}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* PWA 1-Tap WhatsApp Share Banner */}
+                {canInstallPWA && (
+                  <div className="pt-1">
                     <button
-                      onClick={() => {
-                        // Allocate fresh device ID so user can send for another person
-                        try {
-                          const newDevId = 'dev_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 7);
-                          localStorage.setItem(PMS_SENDER_DEVICE_ID_KEY, newDevId);
-                        } catch {}
-                        setCustomerToken(null);
-                        setDeliveredBatch([]);
-                        setSenderSuccess(false);
-                        setSenderFiles([]);
-                        setSenderCopies(1);
-                        setSenderColorMode('bw');
-                      }}
-                      className="w-full py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 hover:border-slate-400 text-xs font-semibold text-slate-600 dark:text-slate-300 transition"
+                      type="button"
+                      onClick={promptPWAInstall}
+                      className="w-full p-3 rounded-2xl bg-gradient-to-r from-rose-500/10 via-purple-500/10 to-indigo-500/10 border border-rose-200 dark:border-rose-900/60 hover:border-rose-400 flex items-center justify-between gap-3 text-left transition active:scale-98 shadow-sm cursor-pointer"
                     >
-                      🔄 New Customer (Get Fresh Token)
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-8 h-8 rounded-xl bg-rose-600 text-white flex items-center justify-center shrink-0 shadow">
+                          <Share2 className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <div className="text-xs font-black flex items-center gap-1.5" style={{ color: 'var(--pms-ink)' }}>
+                            <span>Enable 1-Tap WhatsApp Share</span>
+                            <span className="text-[9px] bg-rose-600 text-white px-1.5 py-0.2 rounded-full font-bold">New</span>
+                          </div>
+                          <div className="text-[10.5px]" style={{ color: 'var(--pms-muted)' }}>
+                            Add to phone to share PDFs directly from WhatsApp share menu!
+                          </div>
+                        </div>
+                      </div>
+                      <span className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shrink-0 shadow">
+                        Add
+                      </span>
                     </button>
+                  </div>
+                )}
+
+                {/* Supported devices badge */}
+                <div className="pt-3 border-t border-slate-200/70 dark:border-slate-800 flex items-center justify-center gap-3 text-xs flex-wrap" style={{ color: 'var(--pms-muted)' }}>
+                  <span className="flex items-center gap-1"><Monitor className="w-3.5 h-3.5" /> PC to PC</span>
+                  <span>•</span>
+                  <span className="flex items-center gap-1"><Smartphone className="w-3.5 h-3.5" /> Phone to PC</span>
+                  <span>•</span>
+                  <span className="flex items-center gap-1"><Laptop className="w-3.5 h-3.5" /> Laptop to PC</span>
+                </div>
+              </div>
+            ) : (
+              /* ── STEP 2: CONNECTED FILE DROP & BEAM ───────────────────────── */
+              <>
+                {/* Connected Header */}
+                <div className="flex items-center justify-between pb-3 border-b border-slate-200/70 dark:border-slate-800">
+                  <div className="flex items-center gap-3">
+                    <div className="w-11 h-11 rounded-2xl bg-rose-500/15 border border-rose-500/25 text-rose-600 dark:text-rose-400 flex items-center justify-center">
+                      <Printer className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h1 className="text-base font-extrabold" style={{ color: 'var(--pms-ink)' }}>
+                        Target Counter PC
+                      </h1>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <span className="font-mono font-black text-rose-600 dark:text-rose-400 tracking-widest text-sm">#{targetCounterPin}</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setTargetCounterPin('');
+                            setPinDigits(['', '', '', '', '', '']);
+                            setMobileConnectionStatus('connecting');
+                            try { peerRef.current?.destroy(); } catch {}
+                          }}
+                          className="text-[11px] font-bold hover:text-rose-600 underline cursor-pointer"
+                          style={{ color: 'var(--pms-muted)' }}
+                        >
+                          Change
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Connection Badge */}
+                  <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold border ${
+                    mobileConnectionStatus === 'connected'
+                      ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800'
+                      : mobileConnectionStatus === 'connecting'
+                      ? 'bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800'
+                      : 'bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'
+                  }`}>
+                    {mobileConnectionStatus === 'connected' ? (
+                      <><span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />Connected</>
+                    ) : mobileConnectionStatus === 'connecting' ? (
+                      <><RefreshCw className="w-3 h-3 animate-spin" />Connecting...</>
+                    ) : (
+                      <><span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />☁️ Cloud Active</>
+                    )}
                   </div>
                 </div>
-              ) : (
-                <div className="space-y-4">
-                  {/* Shared from WhatsApp Banner */}
-                  {isSharedFromExternal && (
-                    <div className="p-3.5 rounded-2xl bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-950/60 dark:to-teal-950/40 border border-emerald-300 dark:border-emerald-800 flex items-center justify-between text-xs text-emerald-900 dark:text-emerald-200 shadow-sm animate-in fade-in">
-                      <div className="flex items-center gap-2">
-                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                        <span className="font-bold">Loaded directly from WhatsApp / System Share!</span>
-                      </div>
-                      <span className="text-[10px] font-mono font-bold bg-emerald-200 dark:bg-emerald-900/80 text-emerald-900 dark:text-emerald-100 px-2 py-0.5 rounded-full">
-                        Ready to Send
-                      </span>
+
+                {senderSuccess ? (
+                  /* Success Screen with Customer Token & Bundle Info */
+                  <motion.div
+                    initial={prefersReduced ? false : { opacity: 0, scale: 0.96 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    transition={{ duration: 0.25 }}
+                    className="py-6 text-center space-y-4"
+                  >
+                    <div className="w-16 h-16 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 mx-auto flex items-center justify-center">
+                      <CheckCircle2 className="w-9 h-9" />
                     </div>
-                  )}
+                    <div className="space-y-1">
+                      <span className="text-xs font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 px-3 py-1 rounded-full border border-emerald-200 dark:border-emerald-800">
+                        ✅ Delivered to Counter PC
+                      </span>
+                      <h2 className="text-3xl font-black pt-3" style={{ color: 'var(--pms-ink)' }}>
+                        Token <span className="text-rose-600 dark:text-rose-400 font-mono">#<AnimatedNumber value={customerToken ?? 1} /></span>
+                      </h2>
+                      <p className="text-xs sm:text-sm max-w-xs mx-auto pt-1 font-medium" style={{ color: 'var(--pms-muted)' }}>
+                        Counter operator ko apna Token <strong className="text-rose-600 dark:text-rose-400 font-black">#{customerToken ?? 1}</strong> batayein apna printout lene ke liye.
+                      </p>
+                    </div>
 
-                  {/* Privacy Notice */}
-                  <div className="p-3 rounded-2xl bg-rose-50/60 dark:bg-rose-950/30 border border-rose-100 dark:border-rose-900 text-xs text-rose-700 dark:text-rose-300">
-                    🔒 <strong>100% Private &amp; Direct:</strong> Files beam straight to counter #{targetCounterPin}. No WhatsApp, no contact sharing.
-                  </div>
-
-                  {/* If files are already loaded (e.g. from Mobile/PC Share), show Selected Files & Beam Button FIRST at the top! */}
-                  {senderFiles.length > 0 && (
-                    <div className="space-y-3 p-4 rounded-2xl bg-slate-50/70 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700">
-                      <div className="flex items-center justify-between px-1">
-                        <span className="text-xs font-extrabold text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
-                          <FileText className="w-4 h-4 text-rose-600" />
-                          <span>Ready to Print ({senderFiles.length} {senderFiles.length > 1 ? 'files' : 'file'})</span>
+                    {/* Delivered documents list */}
+                    {deliveredBatch.length > 0 && (
+                      <div className="text-left bg-slate-100/80 dark:bg-slate-800/80 rounded-2xl p-3 border border-slate-200/80 dark:border-slate-700 space-y-1.5 max-h-40 overflow-y-auto">
+                        <span className="text-[10px] font-black uppercase tracking-wider block" style={{ color: 'var(--pms-muted)' }}>
+                          Delivered in Token #{customerToken ?? 1} ({deliveredBatch.length} file{deliveredBatch.length > 1 ? 's' : ''}):
                         </span>
-                        {senderFiles.length > 1 && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setSenderFiles([]);
-                              setIsSharedFromExternal(false);
-                              void clearSharedFilesCache();
-                            }}
-                            className="text-[11px] font-bold text-rose-600 hover:underline"
-                          >
-                            Clear all
-                          </button>
-                        )}
-                      </div>
-
-                      {/* Selected file list */}
-                      <div className="max-h-36 overflow-y-auto space-y-1.5">
-                        {senderFiles.map((f, i) => (
-                          <div key={i} className="flex items-center justify-between p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-700 text-xs shadow-xs">
-                            <span className="truncate max-w-[200px] font-bold text-slate-800 dark:text-slate-200">{f.name}</span>
-                            <div className="flex items-center gap-2 shrink-0 ml-2">
-                              <span className="text-slate-400 font-mono text-[11px]">{formatFileSize(f.size)}</span>
-                              <button
-                                type="button"
-                                onClick={() => removeSenderFile(i)}
-                                className="p-1 rounded-lg hover:bg-rose-100 dark:hover:bg-rose-950 text-slate-400 hover:text-rose-600 transition"
-                                title="Remove file"
-                              >
-                                <X className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
+                        {deliveredBatch.map((f, idx) => (
+                          <div key={idx} className="flex items-center justify-between text-xs py-1 border-b border-slate-200/70 dark:border-slate-700/50 last:border-0">
+                            <span className="font-semibold truncate max-w-[200px]" style={{ color: 'var(--pms-ink)' }}>{f.name}</span>
+                            <span className="font-mono text-[11px] text-rose-600 dark:text-rose-400 font-bold shrink-0 ml-2">
+                              {f.copies} {f.copies > 1 ? 'copies' : 'copy'} · {f.colorMode === 'bw' ? 'B&W' : 'Color'}
+                            </span>
                           </div>
                         ))}
                       </div>
+                    )}
 
-                      {/* Large File notice badge */}
-                      {senderFiles.some((f) => f.size > 25 * 1024 * 1024) && (
-                        <div className="flex items-center gap-1.5 p-2 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 text-amber-700 dark:text-amber-300 text-[11px] font-semibold">
-                          <Zap className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                          <span>Large file detected — Multi-stream fast transfer enabled</span>
-                        </div>
-                      )}
+                    <div className="space-y-2 pt-2">
+                      <button
+                        onClick={() => {
+                          setSenderSuccess(false);
+                          setSenderFiles([]);
+                          setSenderCopies(1);
+                          setSenderColorMode('bw');
+                        }}
+                        className="pms-btn-primary w-full py-3.5 rounded-2xl text-sm font-bold shadow-md transition cursor-pointer"
+                      >
+                        ➕ Send More Files (Same Token #{customerToken ?? 1})
+                      </button>
 
-                      {/* Print options */}
-                      <div className="grid grid-cols-2 gap-2 pt-1">
-                        {/* Copies selector */}
-                        <div className="flex flex-col gap-1">
-                          <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Copies</span>
-                          <div className="flex items-center gap-2 bg-white dark:bg-slate-900 rounded-xl px-2 py-2 border border-slate-200 dark:border-slate-700">
-                            <button
-                              onClick={() => setSenderCopies((n) => Math.max(1, n - 1))}
-                              className="w-6 h-6 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-600 flex items-center justify-center hover:bg-rose-50 transition"
-                            >
-                              <Minus className="w-3 h-3" />
-                            </button>
-                            <span className="text-sm font-black text-slate-900 dark:text-white flex-1 text-center">{senderCopies}</span>
-                            <button
-                              onClick={() => setSenderCopies((n) => Math.min(20, n + 1))}
-                              className="w-6 h-6 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-600 flex items-center justify-center hover:bg-rose-50 transition"
-                            >
-                              <Plus className="w-3 h-3" />
-                            </button>
-                          </div>
+                      <button
+                        onClick={() => {
+                          // Allocate fresh device ID so user can send for another person
+                          try {
+                            const newDevId = 'dev_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 7);
+                            localStorage.setItem(PMS_SENDER_DEVICE_ID_KEY, newDevId);
+                          } catch {}
+                          setCustomerToken(null);
+                          setDeliveredBatch([]);
+                          setSenderSuccess(false);
+                          setSenderFiles([]);
+                          setSenderCopies(1);
+                          setSenderColorMode('bw');
+                        }}
+                        className="w-full py-2.5 rounded-xl pms-glass-panel hover:border-slate-400 text-xs font-semibold transition cursor-pointer"
+                        style={{ color: 'var(--pms-ink)' }}
+                      >
+                        🔄 New Customer (Get Fresh Token)
+                      </button>
+                    </div>
+                  </motion.div>
+                ) : (
+                  <div className="space-y-4">
+                    {/* Shared from WhatsApp Banner */}
+                    {isSharedFromExternal && (
+                      <div className="p-3.5 rounded-2xl bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-950/60 dark:to-teal-950/40 border border-emerald-300 dark:border-emerald-800 flex items-center justify-between text-xs text-emerald-900 dark:text-emerald-200 shadow-sm">
+                        <div className="flex items-center gap-2">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                          <span className="font-bold">Loaded directly from WhatsApp / System Share!</span>
                         </div>
-
-                        {/* Color mode selector */}
-                        <div className="flex flex-col gap-1">
-                          <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Print Mode</span>
-                          <div className="flex rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700">
-                            <button
-                              onClick={() => setSenderColorMode('bw')}
-                              className={`flex-1 py-2 text-xs font-bold transition ${
-                                senderColorMode === 'bw'
-                                  ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900'
-                                  : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300'
-                              }`}
-                            >
-                              B&amp;W
-                            </button>
-                            <button
-                              onClick={() => setSenderColorMode('color')}
-                              className={`flex-1 py-2 text-xs font-bold transition ${
-                                senderColorMode === 'color'
-                                  ? 'bg-rose-600 text-white'
-                                  : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300'
-                              }`}
-                            >
-                              Color
-                            </button>
-                          </div>
-                        </div>
+                        <span className="text-[10px] font-mono font-bold bg-emerald-200 dark:bg-emerald-900/80 text-emerald-900 dark:text-emerald-100 px-2 py-0.5 rounded-full">
+                          Ready to Send
+                        </span>
                       </div>
+                    )}
 
-                      {/* Upload progress */}
-                      {senderUploading && (
-                        <div className="space-y-2">
-                          <div className="flex justify-between items-center text-xs font-bold text-rose-600">
-                            <span className="truncate max-w-[220px]">{senderStatusText}</span>
-                            <div className="flex items-center gap-2 shrink-0">
-                              <span className="font-mono">{senderProgress}%</span>
+                    {/* Privacy Notice */}
+                    <div className="p-3 rounded-2xl bg-rose-50/75 dark:bg-rose-950/30 border border-rose-200/70 dark:border-rose-900 text-xs text-rose-700 dark:text-rose-300">
+                      🔒 <strong>100% Private &amp; Direct:</strong> Files beam straight to counter #{targetCounterPin}. No WhatsApp, no contact sharing.
+                    </div>
+
+                    {/* If files are already loaded (e.g. from Mobile/PC Share), show Selected Files & Beam Button FIRST at the top! */}
+                    {senderFiles.length > 0 && (
+                      <div className="space-y-3 p-4 rounded-2xl bg-slate-100/75 dark:bg-slate-800/50 border border-slate-200/80 dark:border-slate-700">
+                        <div className="flex items-center justify-between px-1">
+                          <span className="text-xs font-extrabold flex items-center gap-1.5" style={{ color: 'var(--pms-ink)' }}>
+                            <FileText className="w-4 h-4 text-rose-600" />
+                            <span>Ready to Print ({senderFiles.length} {senderFiles.length > 1 ? 'files' : 'file'})</span>
+                          </span>
+                          {senderFiles.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSenderFiles([]);
+                                setIsSharedFromExternal(false);
+                                void clearSharedFilesCache();
+                              }}
+                              className="text-[11px] font-bold text-rose-600 hover:underline cursor-pointer"
+                            >
+                              Clear all
+                            </button>
+                          )}
+                        </div>
+
+                        {/* Selected file list */}
+                        <div className="max-h-36 overflow-y-auto space-y-1.5">
+                          {senderFiles.map((f, i) => (
+                            <div key={i} className="flex items-center justify-between p-2.5 rounded-xl bg-white/85 dark:bg-slate-900 border border-slate-200/80 dark:border-slate-700 text-xs shadow-xs">
+                              <span className="truncate max-w-[200px] font-bold" style={{ color: 'var(--pms-ink)' }}>{f.name}</span>
+                              <div className="flex items-center gap-2 shrink-0 ml-2">
+                                <span className="font-mono text-[11px]" style={{ color: 'var(--pms-muted)' }}>{formatFileSize(f.size)}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => removeSenderFile(i)}
+                                  className="p-1 rounded-lg hover:bg-rose-100 dark:hover:bg-rose-950 text-slate-400 hover:text-rose-600 transition cursor-pointer"
+                                  title="Remove file"
+                                >
+                                  <X className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* Large File notice badge */}
+                        {senderFiles.some((f) => f.size > 25 * 1024 * 1024) && (
+                          <div className="flex items-center gap-1.5 p-2 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 text-amber-700 dark:text-amber-300 text-[11px] font-semibold">
+                            <Zap className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                            <span>Large file detected — Multi-stream fast transfer enabled</span>
+                          </div>
+                        )}
+
+                        {/* Print options */}
+                        <div className="grid grid-cols-2 gap-2 pt-1">
+                          {/* Copies selector */}
+                          <div className="flex flex-col gap-1">
+                            <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--pms-muted)' }}>Copies</span>
+                            <div className="flex items-center gap-2 bg-white/90 dark:bg-slate-900 rounded-xl px-2 py-2 border border-slate-200 dark:border-slate-700">
                               <button
-                                type="button"
-                                onClick={() => {
-                                  senderAbortRef.current = true;
-                                  setSenderUploading(false);
-                                  setSenderStatusText('Cancelled');
-                                  setSenderProgress(0);
-                                }}
-                                className="px-2 py-0.5 rounded bg-rose-100 dark:bg-rose-950 text-rose-700 dark:text-rose-300 text-[10px] font-bold hover:bg-rose-200 transition"
+                                onClick={() => setSenderCopies((n) => Math.max(1, n - 1))}
+                                className="w-6 h-6 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-600 flex items-center justify-center hover:bg-rose-50 transition cursor-pointer"
                               >
-                                Cancel
+                                <Minus className="w-3 h-3" />
+                              </button>
+                              <span className="text-sm font-black flex-1 text-center" style={{ color: 'var(--pms-ink)' }}>{senderCopies}</span>
+                              <button
+                                onClick={() => setSenderCopies((n) => Math.min(20, n + 1))}
+                                className="w-6 h-6 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-600 flex items-center justify-center hover:bg-rose-50 transition cursor-pointer"
+                              >
+                                <Plus className="w-3 h-3" />
                               </button>
                             </div>
                           </div>
-                          {/* Animated gradient progress bar */}
-                          <div className="w-full bg-slate-100 dark:bg-slate-800 rounded-full h-3 overflow-hidden">
-                            <div
-                              className="h-3 rounded-full transition-all duration-100"
-                              style={{
-                                width: `${senderProgress}%`,
-                                background: 'linear-gradient(90deg, #e11d48, #f97316, #e11d48)',
-                                backgroundSize: '200% 100%',
-                                animation: 'gradientMove 1.2s linear infinite',
-                              }}
-                            />
+
+                          {/* Color mode selector */}
+                          <div className="flex flex-col gap-1">
+                            <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--pms-muted)' }}>Print Mode</span>
+                            <div className="flex rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700">
+                              <button
+                                onClick={() => setSenderColorMode('bw')}
+                                className={`flex-1 py-2 text-xs font-bold transition cursor-pointer ${
+                                  senderColorMode === 'bw'
+                                    ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900'
+                                    : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300'
+                                }`}
+                              >
+                                B&amp;W
+                              </button>
+                              <button
+                                onClick={() => setSenderColorMode('color')}
+                                className={`flex-1 py-2 text-xs font-bold transition cursor-pointer ${
+                                  senderColorMode === 'color'
+                                    ? 'bg-rose-600 text-white'
+                                    : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300'
+                                }`}
+                              >
+                                Color
+                              </button>
+                            </div>
                           </div>
-                          <style>{`
-                            @keyframes gradientMove {
-                              0% { background-position: 0% 50%; }
-                              100% { background-position: 200% 50%; }
-                            }
-                          `}</style>
                         </div>
-                      )}
 
-                      {/* Send button */}
-                      <button
-                        onClick={handleCustomerUpload}
-                        disabled={senderUploading}
-                        className="w-full py-4 rounded-2xl bg-rose-600 hover:bg-rose-700 active:scale-95 text-white font-bold text-sm shadow-md transition-all flex items-center justify-center gap-2 disabled:opacity-60 cursor-pointer"
-                      >
-                        {senderUploading ? (
-                          <><RefreshCw className="w-4 h-4 animate-spin" /> Beaming Document...</>
-                        ) : (
-                          <><Zap className="w-4 h-4" /> Beam to Counter #{targetCounterPin} ({senderCopies} cop{senderCopies > 1 ? 'ies' : 'y'} · {senderColorMode === 'bw' ? 'B&W' : 'Color'})</>
+                        {/* Upload progress */}
+                        {senderUploading && (
+                          <div className="space-y-2">
+                            <div className="flex justify-between items-center text-xs font-bold text-rose-600 dark:text-rose-400">
+                              <span className="truncate max-w-[220px]">{senderStatusText}</span>
+                              <div className="flex items-center gap-2 shrink-0">
+                                <span className="font-mono">{senderProgress}%</span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    senderAbortRef.current = true;
+                                    setSenderUploading(false);
+                                    setSenderStatusText('Cancelled');
+                                    setSenderProgress(0);
+                                  }}
+                                  className="px-2 py-0.5 rounded bg-rose-100 dark:bg-rose-950 text-rose-700 dark:text-rose-300 text-[10px] font-bold hover:bg-rose-200 transition cursor-pointer"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            </div>
+                            {/* Animated gradient progress bar */}
+                            <div className="w-full bg-slate-200/80 dark:bg-slate-800 rounded-full h-3 overflow-hidden">
+                              <div
+                                className="h-3 rounded-full transition-all duration-100"
+                                style={{
+                                  width: `${senderProgress}%`,
+                                  background: 'linear-gradient(90deg, #e11d48, #f97316, #e11d48)',
+                                  backgroundSize: '200% 100%',
+                                  animation: 'gradientMove 1.2s linear infinite',
+                                }}
+                              />
+                            </div>
+                            <style>{`
+                              @keyframes gradientMove {
+                                0% { background-position: 0% 50%; }
+                                100% { background-position: 200% 50%; }
+                              }
+                            `}</style>
+                          </div>
                         )}
-                      </button>
-                    </div>
-                  )}
 
-                  {/* Drag & Drop File picker (Compact if files already loaded, Large if empty) */}
-                  <label
-                    onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
-                    onDragLeave={() => setIsDragOver(false)}
-                    onDragEnd={() => setIsDragOver(false)}
-                    onDrop={(e) => {
-                      e.preventDefault();
-                      setIsDragOver(false);
-                      const dropped = Array.from(e.dataTransfer.files || []);
-                      if (dropped.length) handleFilesSelected(dropped, false);
-                    }}
-                    className={`block border-2 border-dashed rounded-3xl text-center cursor-pointer transition-all active:scale-95 ${
-                      senderFiles.length > 0 ? 'p-3.5' : 'p-7'
-                    } ${
-                      isDragOver
-                        ? 'border-rose-600 bg-rose-50 dark:bg-rose-950/40'
-                        : 'border-slate-300 dark:border-slate-700 hover:border-rose-500 bg-slate-50/40 dark:bg-slate-800/40'
-                    }`}
-                  >
-                    {senderFiles.length === 0 && <Upload className="w-10 h-10 mx-auto text-slate-400 mb-2" />}
-                    <span className="font-extrabold text-xs sm:text-sm text-slate-800 dark:text-slate-200 block">
-                      {isDragOver ? 'Drop files here!' : senderFiles.length > 0 ? '➕ Tap to Add More Documents' : 'Tap or Drag & Drop Documents here'}
-                    </span>
-                    {senderFiles.length === 0 && (
-                      <span className="text-xs text-slate-400 mt-1 block">PDF, Aadhaar, Photos, Docs — Up to 100 MB</span>
+                        {/* Send button */}
+                        <button
+                          onClick={handleCustomerUpload}
+                          disabled={senderUploading}
+                          className="pms-btn-primary w-full py-4 rounded-2xl font-bold text-sm shadow-md transition-all flex items-center justify-center gap-2 disabled:opacity-60 cursor-pointer"
+                        >
+                          {senderUploading ? (
+                            <><RefreshCw className="w-4 h-4 animate-spin" /> Beaming Document...</>
+                          ) : (
+                            <><Zap className="w-4 h-4" /> Beam to Counter #{targetCounterPin} ({senderCopies} cop{senderCopies > 1 ? 'ies' : 'y'} · {senderColorMode === 'bw' ? 'B&W' : 'Color'})</>
+                          )}
+                        </button>
+                      </div>
                     )}
-                    <input
-                      type="file"
-                      multiple
-                      accept="application/pdf,image/*,.pdf,.jpg,.jpeg,.png,.webp,.doc,.docx"
-                      className="hidden"
-                      onChange={(e) => {
-                        handleFilesSelected(Array.from(e.target.files || []), false);
-                        e.target.value = '';
-                      }}
-                    />
-                  </label>
 
-                  {/* Quick Action Helpers: Camera Scan & WhatsApp PWA Installer */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    <label className="flex items-center justify-center gap-2 py-2.5 px-3 rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 hover:border-rose-500 bg-white dark:bg-slate-800 text-xs font-bold text-slate-700 dark:text-slate-200 cursor-pointer transition active:scale-95 shadow-sm">
-                      <Camera className="w-4 h-4 text-rose-600 shrink-0" />
-                      <span>Take Photo / Camera Scan</span>
+                    {/* Drag & Drop File picker (Compact if files already loaded, Large if empty) */}
+                    <label
+                      onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
+                      onDragLeave={() => setIsDragOver(false)}
+                      onDragEnd={() => setIsDragOver(false)}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        setIsDragOver(false);
+                        const dropped = Array.from(e.dataTransfer.files || []);
+                        if (dropped.length) handleFilesSelected(dropped, false);
+                      }}
+                      className={`block border-2 border-dashed rounded-3xl text-center cursor-pointer transition-all active:scale-95 ${
+                        senderFiles.length > 0 ? 'p-3.5' : 'p-7'
+                      } ${
+                        isDragOver
+                          ? 'border-rose-600 bg-rose-50 dark:bg-rose-950/40'
+                          : 'border-slate-300 dark:border-slate-700 hover:border-rose-500 bg-white/50 dark:bg-slate-800/40'
+                      }`}
+                    >
+                      {senderFiles.length === 0 && <Upload className="w-10 h-10 mx-auto text-slate-400 mb-2" />}
+                      <span className="font-extrabold text-xs sm:text-sm block" style={{ color: 'var(--pms-ink)' }}>
+                        {isDragOver ? 'Drop files here!' : senderFiles.length > 0 ? '➕ Tap to Add More Documents' : 'Tap or Drag & Drop Documents here'}
+                      </span>
+                      {senderFiles.length === 0 && (
+                        <span className="text-xs mt-1 block" style={{ color: 'var(--pms-muted)' }}>PDF, Aadhaar, Photos, Docs — Up to 100 MB</span>
+                      )}
                       <input
                         type="file"
-                        accept="image/*"
-                        capture="environment"
+                        multiple
+                        accept="application/pdf,image/*,.pdf,.jpg,.jpeg,.png,.webp,.doc,.docx"
                         className="hidden"
                         onChange={(e) => {
-                          const files = Array.from(e.target.files || []);
-                          if (files.length) handleFilesSelected(files, true);
+                          handleFilesSelected(Array.from(e.target.files || []), false);
                           e.target.value = '';
                         }}
                       />
                     </label>
 
-                    {canInstallPWA && (
-                      <button
-                        type="button"
-                        onClick={promptPWAInstall}
-                        className="flex items-center justify-center gap-2 py-2.5 px-3 rounded-2xl bg-gradient-to-r from-rose-500/10 to-indigo-500/10 border border-rose-200 dark:border-rose-900/60 hover:border-rose-400 text-xs font-bold text-rose-700 dark:text-rose-300 transition active:scale-95 shadow-sm cursor-pointer"
-                      >
-                        <Share2 className="w-4 h-4 text-rose-600 shrink-0" />
-                        <span>Enable WhatsApp Share (1-Tap)</span>
-                      </button>
-                    )}
+                    {/* Quick Action Helpers: Camera Scan & WhatsApp PWA Installer */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <label className="flex items-center justify-center gap-2 py-2.5 px-3 rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 hover:border-rose-500 pms-glass-panel text-xs font-bold cursor-pointer transition active:scale-95 shadow-sm" style={{ color: 'var(--pms-ink)' }}>
+                        <Camera className="w-4 h-4 text-rose-600 shrink-0" />
+                        <span>Take Photo / Camera Scan</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          capture="environment"
+                          className="hidden"
+                          onChange={(e) => {
+                            const files = Array.from(e.target.files || []);
+                            if (files.length) handleFilesSelected(files, true);
+                            e.target.value = '';
+                          }}
+                        />
+                      </label>
+
+                      {canInstallPWA && (
+                        <button
+                          type="button"
+                          onClick={promptPWAInstall}
+                          className="flex items-center justify-center gap-2 py-2.5 px-3 rounded-2xl bg-gradient-to-r from-rose-500/10 to-indigo-500/10 border border-rose-200 dark:border-rose-900/60 hover:border-rose-400 text-xs font-bold text-rose-700 dark:text-rose-300 transition active:scale-95 shadow-sm cursor-pointer"
+                        >
+                          <Share2 className="w-4 h-4 text-rose-600 shrink-0" />
+                          <span>Enable WhatsApp Share (1-Tap)</span>
+                        </button>
+                      )}
+                    </div>
                   </div>
-                </div>
-              )}
-            </>
-          )}
+                )}
+              </>
+            )}
+          </motion.div>
         </div>
       </div>
     );
@@ -3085,7 +3115,9 @@ export default function ScanToPrint() {
               try {
                 if (job.dataUrl.startsWith('blob:')) { window.open(job.dataUrl, '_blank'); return; }
                 const { buffer, type } = await urlToArrayBuffer(job.dataUrl);
-                window.open(URL.createObjectURL(arrayBufferToBlob(buffer, type)), '_blank');
+                const tempUrl = URL.createObjectURL(arrayBufferToBlob(buffer, type));
+                window.open(tempUrl, '_blank');
+                setTimeout(() => { try { URL.revokeObjectURL(tempUrl); } catch {} }, 60000);
               } catch {
                 window.open(job.dataUrl, '_blank');
               }

@@ -14,7 +14,7 @@
     "start": "vite preview --host 0.0.0.0 --port ${PORT:-4173}",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
-    "build:extension": "rm -f pdf-media-suite-extension.zip && cd extension && zip -r ../pdf-media-suite-extension.zip . -x '*.DS_Store*' -x 'README.md' -x 'store-assets*'"
+    "build:extension": "rm -f pdf-media-suite-extension.zip public/pdf-media-suite-extension.zip && cd extension && zip -r ../pdf-media-suite-extension.zip . -x '*.DS_Store*' -x 'README.md' -x 'store-assets*' && cp ../pdf-media-suite-extension.zip ../public/pdf-media-suite-extension.zip"
   },
   "dependencies": {
     "@imgly/background-removal": "^1.7.0",

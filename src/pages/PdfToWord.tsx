@@ -1,9 +1,9 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import {
-  FileText, Scan, Zap, CheckCircle2, Download, RotateCcw,
-  AlertTriangle, Cpu, Globe, ChevronRight, Eye, Sparkles,
-  Layers, Table as TableIcon, Layout, ShieldCheck
+  FileText, Zap, CheckCircle2, Download, RotateCcw,
+  AlertTriangle, Sparkles, Table as TableIcon, Layout, ShieldCheck
 } from 'lucide-react';
+import { motion, useReducedMotion } from 'motion/react';
 import * as pdfjsLib from 'pdfjs-dist';
 import {
   Document, Packer, Paragraph, TextRun, AlignmentType,
@@ -16,6 +16,7 @@ import { useSEO } from '../hooks/useSEO';
 import { apiFetch } from '../lib/api';
 import '../lib/pdfWorker';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { AnimatedNumber, PearlScanOverlay, PearlStageSwitch } from '../components/pearl/PearlMotion';
 
 type Stage = 'idle' | 'analyzing' | 'converting' | 'backend' | 'done' | 'error';
 type EngineMode = 'precision' | 'frontend' | 'ocr';
@@ -359,6 +360,8 @@ async function convertBackend(file: File, forceOcr: boolean): Promise<Blob> {
 
 // ─── Main Component ──────────────────────────────────────────────────────────
 export default function PdfToWord() {
+  const prefersReduced = useReducedMotion();
+
   useSEO(
     'PDF to Word Converter Online Free — Exact DOCX Formatting',
     'Convert PDF to editable Word document (.docx) online for free. Preserves tables, columns, exact font weights, and layout geometry. 100% private, no signup.'
@@ -481,248 +484,297 @@ export default function PdfToWord() {
             { icon: Sparkles, t: 'Exact Fonts & Colors', color: 'text-amber-500' },
             { icon: ShieldCheck, t: '100% Secure & Private', color: 'text-emerald-500' },
           ].map(({ icon: Icon, t, color }) => (
-            <span key={t} className="inline-flex items-center gap-1.5 px-3 py-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/80 rounded-full text-xs font-semibold text-slate-700 dark:text-slate-300 shadow-sm">
+            <span
+              key={t}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white/75 dark:bg-slate-900/75 border border-[var(--pms-border)] rounded-full text-xs font-semibold text-[var(--pms-ink)] shadow-2xs"
+            >
               <Icon className={`w-3.5 h-3.5 ${color}`} />
               {t}
             </span>
           ))}
         </div>
 
-        {/* Options & Upload */}
-        {stage === 'idle' && (
-          <div className="space-y-6">
-            {/* Mode selection card */}
-            <div className="bg-white dark:bg-slate-800/90 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm p-6 space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-sm font-bold text-slate-900 dark:text-white">Conversion Engine</h3>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">Choose the reconstruction method tailored for your PDF type</p>
-                </div>
-                <span className="text-[11px] font-semibold px-2 py-0.5 bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-300 rounded-md">
-                  Active Mode
-                </span>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                {[
-                  {
-                    id: 'precision' as EngineMode,
-                    badge: 'Recommended',
-                    title: '⭐ Ultra-Precision AI Engine',
-                    desc: 'Preserves tables, complex columns, images, fonts, and exact alignments via pdf2docx.',
-                    tagColor: 'bg-blue-500 text-white',
-                  },
-                  {
-                    id: 'frontend' as EngineMode,
-                    badge: '100% Client-Side',
-                    title: '⚡ Instant Browser Engine',
-                    desc: 'Converts in milliseconds right on your device. Zero server upload, maximum privacy.',
-                    tagColor: 'bg-emerald-500 text-white',
-                  },
-                  {
-                    id: 'ocr' as EngineMode,
-                    badge: 'Scanned & Photos',
-                    title: '🔍 Deep OCR Scanned Engine',
-                    desc: 'Optical Character Recognition for image-only PDFs, camera scans, and receipts.',
-                    tagColor: 'bg-purple-500 text-white',
-                  },
-                ].map(m => (
-                  <button
-                    key={m.id}
-                    type="button"
-                    onClick={() => setEngineMode(m.id)}
-                    className={`relative p-4 rounded-xl border text-left transition-all duration-200 flex flex-col justify-between ${
-                      engineMode === m.id
-                        ? 'border-blue-500 bg-blue-50/50 dark:bg-blue-950/40 shadow-md ring-2 ring-blue-500/20'
-                        : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600 bg-slate-50/50 dark:bg-slate-900/40'
-                    }`}
+        <PearlStageSwitch stageKey={stage}>
+          {/* Options & Upload */}
+          {stage === 'idle' && (
+            <div className="space-y-6">
+              {/* Mode selection card */}
+              <div className="pms-glass-panel rounded-3xl p-6 space-y-4">
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <h3 className="text-sm font-bold text-[var(--pms-ink)]">Conversion Engine</h3>
+                    <p className="text-xs text-[var(--pms-muted)]">Choose the reconstruction method tailored for your PDF type</p>
+                  </div>
+                  <span
+                    className="text-[11px] font-semibold px-2.5 py-1 rounded-full border border-[var(--pms-border)]"
+                    style={{ backgroundColor: 'var(--pms-soft-blue)', color: 'var(--pms-ink)' }}
                   >
-                    <div>
-                      <div className="flex items-center justify-between mb-2">
-                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${m.tagColor}`}>
-                          {m.badge}
-                        </span>
-                        {engineMode === m.id && (
-                          <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
+                    Active Mode
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  {[
+                    {
+                      id: 'precision' as EngineMode,
+                      badge: 'Recommended',
+                      title: '⭐ Ultra-Precision AI Engine',
+                      desc: 'Preserves tables, complex columns, images, fonts, and exact alignments via pdf2docx.',
+                      tagColor: 'bg-blue-600 text-white',
+                    },
+                    {
+                      id: 'frontend' as EngineMode,
+                      badge: '100% Client-Side',
+                      title: '⚡ Instant Browser Engine',
+                      desc: 'Converts in milliseconds right on your device. Zero server upload, maximum privacy.',
+                      tagColor: 'bg-emerald-600 text-white',
+                    },
+                    {
+                      id: 'ocr' as EngineMode,
+                      badge: 'Scanned & Photos',
+                      title: '🔍 Deep OCR Scanned Engine',
+                      desc: 'Optical Character Recognition for image-only PDFs, camera scans, and receipts.',
+                      tagColor: 'bg-purple-600 text-white',
+                    },
+                  ].map(m => {
+                    const active = engineMode === m.id;
+                    return (
+                      <motion.button
+                        key={m.id}
+                        type="button"
+                        whileHover={prefersReduced ? undefined : { y: -2 }}
+                        whileTap={prefersReduced ? undefined : { scale: 0.99 }}
+                        onClick={() => setEngineMode(m.id)}
+                        style={{
+                          borderColor: active ? 'var(--pms-blue)' : 'var(--pms-border)',
+                        }}
+                        className={`relative p-4 rounded-2xl border text-left transition-all duration-200 flex flex-col justify-between ${
+                          active
+                            ? 'shadow-sm ring-1 ring-[var(--pms-blue)]'
+                            : 'bg-white/75 dark:bg-slate-900/75 hover:bg-white dark:hover:bg-slate-900'
+                        }`}
+                      >
+                        {active && (
+                          <motion.span
+                            layoutId="pdftoword-engine-pill"
+                            transition={prefersReduced ? { duration: 0 } : { type: 'spring', stiffness: 400, damping: 32 }}
+                            className="absolute inset-0 rounded-[15px]"
+                            style={{ backgroundColor: 'var(--pms-soft-blue)' }}
+                          />
                         )}
-                      </div>
-                      <p className="text-sm font-bold text-slate-900 dark:text-white leading-snug">{m.title}</p>
-                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-1.5 leading-relaxed">{m.desc}</p>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Dropzone */}
-            <FileDropzone
-              onDrop={handleDrop}
-              multiple={false}
-              title="Drag & Drop PDF to Convert to Word"
-              subtitle="Supports single & multi-page PDFs • Tables, columns & formatting guaranteed"
-            />
-
-            {/* Feature highlights */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
-              <div className="bg-white/80 dark:bg-slate-800/60 p-4 rounded-xl border border-slate-200/80 dark:border-slate-700/60 flex items-start gap-3">
-                <div className="p-2 bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 rounded-lg shrink-0">
-                  <TableIcon className="w-5 h-5" />
-                </div>
-                <div>
-                  <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200">Table & Grid Retention</h4>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">Cell borders, alignments, and tabular numbers convert into native editable Word tables.</p>
+                        <div className="relative z-10">
+                          <div className="flex items-center justify-between mb-2">
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${m.tagColor}`}>
+                              {m.badge}
+                            </span>
+                            {active && (
+                              <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
+                            )}
+                          </div>
+                          <p className="text-sm font-bold text-[var(--pms-ink)] leading-snug">{m.title}</p>
+                          <p className="text-xs text-[var(--pms-muted)] mt-1.5 leading-relaxed">{m.desc}</p>
+                        </div>
+                      </motion.button>
+                    );
+                  })}
                 </div>
               </div>
 
-              <div className="bg-white/80 dark:bg-slate-800/60 p-4 rounded-xl border border-slate-200/80 dark:border-slate-700/60 flex items-start gap-3">
-                <div className="p-2 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 rounded-lg shrink-0">
-                  <Layout className="w-5 h-5" />
+              {/* Dropzone */}
+              <FileDropzone
+                onDrop={handleDrop}
+                multiple={false}
+                title="Drag & Drop PDF to Convert to Word"
+                subtitle="Supports single & multi-page PDFs • Tables, columns & formatting guaranteed"
+              />
+
+              {/* Feature highlights */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
+                <div className="bg-white/75 dark:bg-slate-900/75 p-4 rounded-2xl border border-[var(--pms-border)] flex items-start gap-3">
+                  <div
+                    className="p-2 rounded-xl shrink-0"
+                    style={{ backgroundColor: 'var(--pms-soft-blue)', color: 'var(--pms-blue)' }}
+                  >
+                    <TableIcon className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold text-[var(--pms-ink)]">Table & Grid Retention</h4>
+                    <p className="text-[11px] text-[var(--pms-muted)] mt-0.5">Cell borders, alignments, and tabular numbers convert into native editable Word tables.</p>
+                  </div>
                 </div>
-                <div>
-                  <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200">Multi-Column Flow</h4>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">Two-column articles and magazines are parsed left-to-right without jumbled text lines.</p>
+
+                <div className="bg-white/75 dark:bg-slate-900/75 p-4 rounded-2xl border border-[var(--pms-border)] flex items-start gap-3">
+                  <div
+                    className="p-2 rounded-xl shrink-0"
+                    style={{ backgroundColor: 'var(--pms-soft-lavender)', color: 'var(--pms-violet)' }}
+                  >
+                    <Layout className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold text-[var(--pms-ink)]">Multi-Column Flow</h4>
+                    <p className="text-[11px] text-[var(--pms-muted)] mt-0.5">Two-column articles and magazines are parsed left-to-right without jumbled text lines.</p>
+                  </div>
+                </div>
+
+                <div className="bg-white/75 dark:bg-slate-900/75 p-4 rounded-2xl border border-[var(--pms-border)] flex items-start gap-3">
+                  <div
+                    className="p-2 rounded-xl shrink-0"
+                    style={{ backgroundColor: 'var(--pms-soft-rose)', color: 'var(--pms-rose)' }}
+                  >
+                    <Sparkles className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold text-[var(--pms-ink)]">Font & Style Matching</h4>
+                    <p className="text-[11px] text-[var(--pms-muted)] mt-0.5">Preserves exact font sizes, bold, italic, and RGB colors mapped to matching Word styles.</p>
+                  </div>
                 </div>
               </div>
+            </div>
+          )}
 
-              <div className="bg-white/80 dark:bg-slate-800/60 p-4 rounded-xl border border-slate-200/80 dark:border-slate-700/60 flex items-start gap-3">
-                <div className="p-2 bg-purple-50 dark:bg-purple-950/40 text-purple-600 dark:text-purple-400 rounded-lg shrink-0">
-                  <Sparkles className="w-5 h-5" />
-                </div>
-                <div>
-                  <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200">Font & Style Matching</h4>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">Preserves exact font sizes, bold, italic, and RGB colors mapped to matching Word styles.</p>
-                </div>
+          {/* Analyzing stage */}
+          {stage === 'analyzing' && (
+            <div className="pms-glass-panel rounded-3xl p-10 text-center space-y-4 relative overflow-hidden">
+              <PearlScanOverlay active={true} label={progress || 'Analyzing document geometry...'} />
+              <div
+                className="w-14 h-14 rounded-full border-4 border-t-transparent animate-spin mx-auto"
+                style={{ borderColor: 'var(--pms-blue)', borderTopColor: 'transparent' }}
+              />
+              <div>
+                <p className="text-lg font-bold text-[var(--pms-ink)]">Analyzing Document Geometry</p>
+                <p className="text-sm text-[var(--pms-muted)] mt-1">{progress}</p>
               </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {/* Analyzing stage */}
-        {stage === 'analyzing' && (
-          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-xl p-10 text-center space-y-4">
-            <div className="w-14 h-14 rounded-full border-4 border-blue-200 border-t-blue-600 animate-spin mx-auto" />
-            <div>
-              <p className="text-lg font-bold text-slate-800 dark:text-slate-200">Analyzing Document Geometry</p>
-              <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">{progress}</p>
-            </div>
-          </div>
-        )}
-
-        {/* Frontend converting stage */}
-        {stage === 'converting' && (
-          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-blue-200 dark:border-blue-800 shadow-xl p-10 text-center space-y-4">
-            <div className="w-16 h-16 rounded-full border-4 border-emerald-100 border-t-emerald-600 animate-spin mx-auto" />
-            <div className="inline-flex items-center gap-2 px-3 py-1 bg-emerald-100 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 rounded-full text-xs font-bold">
-              <Zap className="w-3.5 h-3.5" /> High-Fidelity Client-Side Engine
-            </div>
-            <div>
-              <p className="text-lg font-bold text-slate-800 dark:text-slate-200">{progress || 'Reconstructing document layout...'}</p>
-              <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">Zero data leaves your browser • Pure local conversion</p>
-            </div>
-          </div>
-        )}
-
-        {/* Backend stage */}
-        {stage === 'backend' && (
-          <BackendLoader
-            title="Ultra-Precision Word Reconstruction in Progress…"
-            accentColor="blue"
-            steps={[
-              { icon: '📐', label: 'Layout Analysis', detail: 'Deconstructing bounding boxes, margins & paragraph hierarchy...' },
-              { icon: '📊', label: 'Table & Grid Snapping', detail: 'Detecting cell grids, border coordinates & column splits...' },
-              { icon: '🎨', label: 'Typography Mapping', detail: 'Matching exact font sizes, weights, colors & styles...' },
-              { icon: '📄', label: 'DOCX Generation', detail: 'Packaging native Microsoft Word (.docx) document...' },
-            ]}
-            tips={[
-              '⭐ Ultra-Precision engine preserves tables, columns, and graphics.',
-              '🔒 Files are processed securely in memory and deleted immediately.',
-              '⚡ Text formatting is mapped to native Word styles for effortless editing.',
-            ]}
-          />
-        )}
-
-        {/* Done stage */}
-        {stage === 'done' && resultUrl && file && (
-          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-emerald-200 dark:border-emerald-800/60 shadow-xl overflow-hidden">
-            <div className="bg-gradient-to-r from-emerald-500/10 via-teal-500/10 to-blue-500/10 dark:from-emerald-950/40 dark:to-slate-900 px-6 py-6 border-b border-emerald-200/60 dark:border-emerald-800/60 flex items-center gap-4">
-              <div className="p-2.5 bg-emerald-500 text-white rounded-xl shadow-md">
-                <CheckCircle2 className="w-7 h-7" />
+          {/* Frontend converting stage */}
+          {stage === 'converting' && (
+            <div className="pms-glass-panel rounded-3xl p-10 text-center space-y-4 relative overflow-hidden">
+              <PearlScanOverlay active={true} label={progress || 'Reconstructing Word document layout...'} />
+              <div className="w-16 h-16 rounded-full border-4 border-emerald-200 border-t-emerald-600 animate-spin mx-auto" />
+              <div
+                className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold border border-[var(--pms-border)]"
+                style={{ backgroundColor: 'var(--pms-soft-mint)', color: 'var(--pms-ink)' }}
+              >
+                <Zap className="w-3.5 h-3.5 text-emerald-600" /> High-Fidelity Client-Side Engine
               </div>
               <div>
-                <h3 className="text-2xl font-extrabold text-slate-900 dark:text-white">Conversion Successful!</h3>
-                <p className="text-sm text-emerald-700 dark:text-emerald-400 font-medium">Your fully editable Word document (.docx) is ready.</p>
+                <p className="text-lg font-bold text-[var(--pms-ink)]">{progress || 'Reconstructing document layout...'}</p>
+                <p className="text-sm text-[var(--pms-muted)] mt-1">Zero data leaves your browser • Pure local conversion</p>
               </div>
             </div>
+          )}
 
-            {fallbackNotice && (
-              <div className="mx-6 mt-4 p-3 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-xl flex items-center gap-2 text-xs text-amber-800 dark:text-amber-200 font-medium">
-                <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" />
-                {fallbackNotice}
-              </div>
-            )}
+          {/* Backend stage */}
+          {stage === 'backend' && (
+            <BackendLoader
+              title="Ultra-Precision Word Reconstruction in Progress…"
+              accentColor="blue"
+              steps={[
+                { icon: '📐', label: 'Layout Analysis', detail: 'Deconstructing bounding boxes, margins & paragraph hierarchy...' },
+                { icon: '📊', label: 'Table & Grid Snapping', detail: 'Detecting cell grids, border coordinates & column splits...' },
+                { icon: '🎨', label: 'Typography Mapping', detail: 'Matching exact font sizes, weights, colors & styles...' },
+                { icon: '📄', label: 'DOCX Generation', detail: 'Packaging native Microsoft Word (.docx) document...' },
+              ]}
+              tips={[
+                '⭐ Ultra-Precision engine preserves tables, columns, and graphics.',
+                '🔒 Files are processed securely in memory and deleted immediately.',
+                '⚡ Text formatting is mapped to native Word styles for effortless editing.',
+              ]}
+            />
+          )}
 
-            {stats && (
-              <div className="p-6 grid grid-cols-2 md:grid-cols-4 gap-3">
-                <div className="bg-slate-50 dark:bg-slate-800/60 rounded-xl p-3.5 border border-slate-100 dark:border-slate-700/60 text-center">
-                  <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">Total Pages</p>
-                  <p className="text-base font-bold text-slate-900 dark:text-white mt-0.5">{stats.pages}</p>
-                </div>
-                <div className="bg-slate-50 dark:bg-slate-800/60 rounded-xl p-3.5 border border-slate-100 dark:border-slate-700/60 text-center">
-                  <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">Engine Used</p>
-                  <p className="text-base font-bold text-slate-900 dark:text-white mt-0.5">
-                    {stats.method === 'backend_precision' ? '⭐ AI Precision' : stats.method === 'backend_ocr' ? '🔍 OCR Engine' : '⚡ Browser'}
-                  </p>
-                </div>
-                <div className="bg-slate-50 dark:bg-slate-800/60 rounded-xl p-3.5 border border-slate-100 dark:border-slate-700/60 text-center">
-                  <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">Processing Time</p>
-                  <p className="text-base font-bold text-slate-900 dark:text-white mt-0.5">{(stats.timeMs / 1000).toFixed(1)}s</p>
-                </div>
-                <div className="bg-slate-50 dark:bg-slate-800/60 rounded-xl p-3.5 border border-slate-100 dark:border-slate-700/60 text-center">
-                  <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">Output Size</p>
-                  <p className="text-base font-bold text-slate-900 dark:text-white mt-0.5">
-                    {stats.fileSizeBytes ? `${(stats.fileSizeBytes / 1024).toFixed(0)} KB` : 'Ready'}
-                  </p>
-                </div>
-              </div>
-            )}
-
-            <div className="p-6 pt-2 space-y-3">
-              <a
-                href={resultUrl}
-                download={file.name.replace(/\.pdf$/i, '') + '_converted.docx'}
-                className="flex items-center justify-center gap-2.5 w-full px-6 py-4 bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600 hover:from-blue-700 hover:to-violet-700 text-white font-bold text-base rounded-xl shadow-lg shadow-blue-500/25 transition-all hover:scale-[1.01]"
+          {/* Done stage */}
+          {stage === 'done' && resultUrl && file && (
+            <div className="pms-glass-panel rounded-3xl overflow-hidden">
+              <div
+                className="px-6 py-6 border-b border-[var(--pms-border)] flex items-center gap-4"
+                style={{ backgroundColor: 'var(--pms-soft-mint)' }}
               >
-                <Download className="w-5 h-5" /> Download Editable Word Document (.docx)
-              </a>
+                <div className="p-2.5 bg-white/80 dark:bg-slate-900/80 border border-[var(--pms-border)] text-emerald-600 dark:text-emerald-400 rounded-2xl shadow-sm">
+                  <CheckCircle2 className="w-7 h-7" />
+                </div>
+                <div>
+                  <h3 className="text-2xl font-extrabold text-[var(--pms-ink)]">Conversion Successful!</h3>
+                  <p className="text-sm text-[var(--pms-muted)] font-medium">Your fully editable Word document (.docx) is ready.</p>
+                </div>
+              </div>
+
+              {fallbackNotice && (
+                <div className="mx-6 mt-4 p-3 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-xl flex items-center gap-2 text-xs text-amber-800 dark:text-amber-200 font-medium">
+                  <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" />
+                  {fallbackNotice}
+                </div>
+              )}
+
+              {stats && (
+                <div className="p-6 grid grid-cols-2 md:grid-cols-4 gap-3">
+                  <div className="bg-white/75 dark:bg-slate-900/75 rounded-xl p-3.5 border border-[var(--pms-border)] text-center">
+                    <p className="text-[11px] font-semibold text-[var(--pms-muted)]">Total Pages</p>
+                    <p className="text-base font-bold text-[var(--pms-ink)] mt-0.5"><AnimatedNumber value={stats.pages} /></p>
+                  </div>
+                  <div className="bg-white/75 dark:bg-slate-900/75 rounded-xl p-3.5 border border-[var(--pms-border)] text-center">
+                    <p className="text-[11px] font-semibold text-[var(--pms-muted)]">Engine Used</p>
+                    <p className="text-base font-bold text-[var(--pms-ink)] mt-0.5">
+                      {stats.method === 'backend_precision' ? '⭐ AI Precision' : stats.method === 'backend_ocr' ? '🔍 OCR Engine' : '⚡ Browser'}
+                    </p>
+                  </div>
+                  <div className="bg-white/75 dark:bg-slate-900/75 rounded-xl p-3.5 border border-[var(--pms-border)] text-center">
+                    <p className="text-[11px] font-semibold text-[var(--pms-muted)]">Processing Time</p>
+                    <p className="text-base font-bold text-[var(--pms-ink)] mt-0.5">
+                      <AnimatedNumber value={stats.timeMs / 1000} decimals={1} suffix="s" />
+                    </p>
+                  </div>
+                  <div className="bg-white/75 dark:bg-slate-900/75 rounded-xl p-3.5 border border-[var(--pms-border)] text-center">
+                    <p className="text-[11px] font-semibold text-[var(--pms-muted)]">Output Size</p>
+                    <p className="text-base font-bold text-[var(--pms-ink)] mt-0.5">
+                      {stats.fileSizeBytes ? <AnimatedNumber value={Math.round(stats.fileSizeBytes / 1024)} suffix=" KB" /> : 'Ready'}
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              <div className="p-6 pt-2 space-y-3">
+                <motion.a
+                  whileHover={prefersReduced ? undefined : { scale: 1.01 }}
+                  whileTap={prefersReduced ? undefined : { scale: 0.98 }}
+                  href={resultUrl}
+                  download={file.name.replace(/\.pdf$/i, '') + '_converted.docx'}
+                  className="pms-btn-primary flex items-center justify-center gap-2.5 w-full px-6 py-4 font-bold text-base rounded-2xl"
+                >
+                  <Download className="w-5 h-5" /> Download Editable Word Document (.docx)
+                </motion.a>
+                <button
+                  type="button"
+                  onClick={reset}
+                  className="flex items-center justify-center gap-2 w-full px-6 py-3 bg-white/75 dark:bg-slate-900/75 hover:bg-white dark:hover:bg-slate-900 text-[var(--pms-ink)] font-semibold rounded-2xl border border-[var(--pms-border)] transition-colors text-sm"
+                >
+                  <RotateCcw className="w-4 h-4" /> Convert Another Document
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Error stage */}
+          {stage === 'error' && (
+            <div className="pms-glass-panel rounded-3xl border-red-200 dark:border-red-800 p-6">
+              <div className="flex items-start gap-3 mb-4">
+                <AlertTriangle className="w-6 h-6 text-red-500 shrink-0 mt-0.5" />
+                <div>
+                  <h3 className="font-bold text-red-700 dark:text-red-300">Conversion Encountered an Error</h3>
+                  <p className="text-sm text-red-600 dark:text-red-400 mt-1">{errorMsg}</p>
+                </div>
+              </div>
               <button
+                type="button"
                 onClick={reset}
-                className="flex items-center justify-center gap-2 w-full px-6 py-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-semibold rounded-xl border border-slate-200 dark:border-slate-700 transition-colors text-sm"
+                className="flex items-center gap-2 text-sm text-[var(--pms-ink)] hover:underline font-semibold"
               >
-                <RotateCcw className="w-4 h-4" /> Convert Another Document
+                <RotateCcw className="w-4 h-4" /> Try another file
               </button>
             </div>
-          </div>
-        )}
-
-        {/* Error stage */}
-        {stage === 'error' && (
-          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-red-200 dark:border-red-800 p-6 shadow-sm">
-            <div className="flex items-start gap-3 mb-4">
-              <AlertTriangle className="w-6 h-6 text-red-500 shrink-0 mt-0.5" />
-              <div>
-                <h3 className="font-bold text-red-800 dark:text-red-200">Conversion Encountered an Error</h3>
-                <p className="text-sm text-red-700 dark:text-red-300 mt-1">{errorMsg}</p>
-              </div>
-            </div>
-            <button
-              onClick={reset}
-              className="flex items-center gap-2 text-sm text-blue-600 dark:text-blue-400 hover:underline font-semibold"
-            >
-              <RotateCcw className="w-4 h-4" /> Try another file
-            </button>
-          </div>
-        )}
-
+          )}
+        </PearlStageSwitch>
       </div>
 
       {/* SEO Content & FAQs for Google Indexing */}

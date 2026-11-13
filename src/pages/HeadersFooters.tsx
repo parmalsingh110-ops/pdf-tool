@@ -1,13 +1,16 @@
 import { useState, useRef, useEffect } from 'react';
-import { Layers, Download, Loader2, Sparkles, CheckCircle2, Eye, Calendar, FileText, Settings, Sliders } from 'lucide-react';
+import { Layers, Download, Loader2, CheckCircle2, Eye } from 'lucide-react';
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+import { motion, useReducedMotion } from 'motion/react';
 import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { embedSmartFont } from '../lib/pdfFontHelper';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { PearlScanOverlay } from '../components/pearl/PearlMotion';
+import { toArrayBufferBytes, useAutoRevokeUrl } from '../lib/blobUrl';
 
 // Initialize pdf.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
@@ -26,6 +29,9 @@ export default function HeadersFooters() {
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [resultUrl, setResultUrl] = useState<string | null>(null);
+
+  useAutoRevokeUrl(resultUrl);
+  const prefersReduced = useReducedMotion();
 
   // 6 Slots
   const [headerLeft, setHeaderLeft] = useState('CONFIDENTIAL');
@@ -233,7 +239,7 @@ export default function HeadersFooters() {
       });
 
       const pdfBytes = await pdfDoc.save();
-      const blob = new Blob([pdfBytes as any], { type: 'application/pdf' });
+      const blob = new Blob([toArrayBufferBytes(pdfBytes)], { type: 'application/pdf' });
       setResultUrl(URL.createObjectURL(blob));
     } catch (e: any) {
       console.error(e);
@@ -259,7 +265,12 @@ export default function HeadersFooters() {
       <div className="flex flex-col items-center justify-center max-w-7xl mx-auto w-full">
 
       {!file ? (
-        <div className="w-full max-w-4xl">
+        <motion.div
+          initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+          className="w-full max-w-4xl pms-glass-panel rounded-3xl p-4 sm:p-6"
+        >
           <FileDropzone
             onDrop={handleDrop}
             multiple={false}
@@ -267,65 +278,86 @@ export default function HeadersFooters() {
             title="Select PDF file"
             subtitle="or drop document here to add headers & footers"
           />
-        </div>
+        </motion.div>
       ) : resultUrl ? (
         /* Results Screen */
-        <div className="w-full max-w-2xl bg-white dark:bg-slate-900 rounded-2xl shadow-sm border border-gray-200 dark:border-slate-800 p-8 text-center space-y-6">
-          <div className="p-8 bg-emerald-50 dark:bg-emerald-950/30 rounded-2xl border border-emerald-200 dark:border-emerald-800">
-            <div className="w-16 h-16 bg-emerald-100 dark:bg-emerald-900/50 text-emerald-600 dark:text-emerald-400 rounded-2xl flex items-center justify-center mx-auto mb-4">
+        <motion.div
+          initial={prefersReduced ? false : { opacity: 0, scale: 0.98, y: 12 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+          className="w-full max-w-2xl pms-glass-panel rounded-3xl border border-emerald-200/80 dark:border-emerald-800/70 p-8 text-center space-y-6"
+        >
+          <div className="p-7 bg-[var(--pms-soft-mint)]/65 dark:bg-emerald-950/35 rounded-2xl border border-emerald-200/70 dark:border-emerald-800/60">
+            <motion.div
+              initial={prefersReduced ? false : { scale: 0.45, rotate: -10 }}
+              animate={{ scale: 1, rotate: 0 }}
+              transition={{ type: 'spring', stiffness: 420, damping: 20 }}
+              className="w-16 h-16 bg-emerald-100 dark:bg-emerald-900/60 text-emerald-600 dark:text-emerald-400 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-emerald-200 dark:border-emerald-800"
+            >
               <CheckCircle2 className="w-8 h-8" />
-            </div>
-            <h3 className="text-2xl font-bold text-emerald-900 dark:text-emerald-200 mb-2">
-              Headers & Footers Applied!
+            </motion.div>
+            <h3 className="text-2xl font-bold text-[var(--pms-ink)] mb-2">
+              Headers &amp; Footers Applied!
             </h3>
             <p className="text-sm text-emerald-700 dark:text-emerald-400 mb-6">
               Your document has been compiled with running headers and page numbers.
             </p>
-            <a
+            <motion.a
+              whileHover={prefersReduced ? undefined : { scale: 1.015 }}
+              whileTap={prefersReduced ? undefined : { scale: 0.985 }}
               href={resultUrl}
               download={`headers_${file.name}`}
-              className="inline-flex items-center justify-center gap-2 px-8 py-4 bg-emerald-600 hover:bg-emerald-700 text-white text-lg font-bold rounded-xl shadow-lg transition-all"
+              className="pms-btn-primary inline-flex items-center justify-center gap-2 px-8 py-4 text-base font-bold rounded-2xl"
             >
               <Download className="w-5 h-5" /> Download PDF Document
-            </a>
+            </motion.a>
           </div>
 
-          <div className="flex justify-center gap-4">
-            <button
+          <div className="flex flex-wrap justify-center gap-3">
+            <motion.button
+              whileHover={prefersReduced ? undefined : { scale: 1.015 }}
+              whileTap={prefersReduced ? undefined : { scale: 0.985 }}
               onClick={() => setResultUrl(null)}
-              className="px-6 py-3 bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700 text-gray-700 dark:text-slate-300 font-semibold rounded-xl transition-all"
+              className="px-6 py-3 bg-[var(--pms-pearl)] dark:bg-slate-800/90 hover:bg-[var(--pms-soft-lavender)] dark:hover:bg-slate-700 text-[var(--pms-ink)] font-semibold rounded-2xl border border-[var(--pms-border)] transition-colors text-sm"
             >
               Adjust Headers/Footers
-            </button>
-            <button
+            </motion.button>
+            <motion.button
+              whileHover={prefersReduced ? undefined : { scale: 1.015 }}
+              whileTap={prefersReduced ? undefined : { scale: 0.985 }}
               onClick={() => {
                 setFile(null);
                 setResultUrl(null);
               }}
-              className="px-6 py-3 bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700 text-gray-700 dark:text-slate-300 font-semibold rounded-xl transition-all"
+              className="px-6 py-3 bg-[var(--pms-pearl)] dark:bg-slate-800/90 hover:bg-[var(--pms-soft-lavender)] dark:hover:bg-slate-700 text-[var(--pms-ink)] font-semibold rounded-2xl border border-[var(--pms-border)] transition-colors text-sm"
             >
               Process Another PDF
-            </button>
+            </motion.button>
           </div>
-        </div>
+        </motion.div>
       ) : (
         /* Workspace */
-        <div className="w-full max-w-6xl grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+        <motion.div
+          initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+          className="w-full max-w-6xl grid grid-cols-1 lg:grid-cols-12 gap-8 items-start"
+        >
           {/* Controls Panel (7 Cols) */}
-          <div className="lg:col-span-7 bg-white dark:bg-slate-900 rounded-2xl border border-gray-200 dark:border-slate-800 p-6 shadow-sm space-y-6">
-            <div className="flex items-center justify-between pb-4 border-b border-gray-100 dark:border-slate-800">
+          <div className="lg:col-span-7 pms-glass-panel rounded-3xl p-6 sm:p-7 space-y-6">
+            <div className="flex items-center justify-between pb-4 border-b border-[var(--pms-border)]">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-teal-100 dark:bg-teal-950/60 text-teal-600 dark:text-teal-400 rounded-xl flex items-center justify-center shrink-0">
+                <div className="w-10 h-10 bg-[var(--pms-soft-mint)] text-emerald-600 dark:text-emerald-400 rounded-xl flex items-center justify-center shrink-0">
                   <Layers className="w-5 h-5" />
                 </div>
-                <div>
-                  <h3 className="font-bold text-gray-900 dark:text-white truncate max-w-xs">{file.name}</h3>
-                  <p className="text-xs text-gray-500">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
+                <div className="min-w-0">
+                  <h3 className="font-bold text-[var(--pms-ink)] truncate max-w-xs">{file.name}</h3>
+                  <p className="text-xs text-[var(--pms-muted)]">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
                 </div>
               </div>
               <button
                 onClick={() => setFile(null)}
-                className="text-xs font-semibold text-gray-500 hover:text-gray-700 dark:hover:text-slate-300"
+                className="text-xs font-semibold text-[var(--pms-muted)] hover:text-[var(--pms-ink)] transition-colors"
               >
                 Change File
               </button>
@@ -333,20 +365,20 @@ export default function HeadersFooters() {
 
             {/* Quick Variable Chips */}
             <div>
-              <span className="text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-slate-400 block mb-2">
-                Dynamic Variables (Click to copy text into slot)
+              <span className="text-xs font-bold uppercase tracking-wider text-[var(--pms-subtle-text)] block mb-2">
+                Dynamic Variables (Use in any slot)
               </span>
               <div className="flex flex-wrap gap-1.5 text-xs">
-                <span className="px-2.5 py-1 bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-slate-300 rounded-lg font-mono">
+                <span className="px-2.5 py-1 bg-[var(--pms-pearl)] dark:bg-slate-800/80 border border-[var(--pms-border)] text-[var(--pms-ink)] rounded-lg font-mono">
                   {'{page}'} = Page No
                 </span>
-                <span className="px-2.5 py-1 bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-slate-300 rounded-lg font-mono">
+                <span className="px-2.5 py-1 bg-[var(--pms-pearl)] dark:bg-slate-800/80 border border-[var(--pms-border)] text-[var(--pms-ink)] rounded-lg font-mono">
                   {'{total}'} = Total Pages
                 </span>
-                <span className="px-2.5 py-1 bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-slate-300 rounded-lg font-mono">
+                <span className="px-2.5 py-1 bg-[var(--pms-pearl)] dark:bg-slate-800/80 border border-[var(--pms-border)] text-[var(--pms-ink)] rounded-lg font-mono">
                   {'{date}'} = Today&apos;s Date
                 </span>
-                <span className="px-2.5 py-1 bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-slate-300 rounded-lg font-mono">
+                <span className="px-2.5 py-1 bg-[var(--pms-pearl)] dark:bg-slate-800/80 border border-[var(--pms-border)] text-[var(--pms-ink)] rounded-lg font-mono">
                   {'{title}'} = File Name
                 </span>
               </div>
@@ -354,7 +386,7 @@ export default function HeadersFooters() {
 
             {/* Header Slots (Top 3) */}
             <div className="space-y-2">
-              <label className="text-xs font-bold uppercase tracking-wider text-teal-600 dark:text-teal-400 block">
+              <label className="text-xs font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 block">
                 Top Running Header (Left • Center • Right)
               </label>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
@@ -363,28 +395,28 @@ export default function HeadersFooters() {
                   value={headerLeft}
                   onChange={(e) => setHeaderLeft(e.target.value)}
                   placeholder="Header Left"
-                  className="px-3 py-2 text-xs rounded-xl border border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-800 text-gray-900 dark:text-white focus:outline-none focus:border-teal-500"
+                  className="px-3 py-2 text-xs rounded-xl border border-[var(--pms-border-strong)] bg-[var(--pms-white)] dark:bg-slate-900 text-[var(--pms-ink)] focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
                 />
                 <input
                   type="text"
                   value={headerCenter}
                   onChange={(e) => setHeaderCenter(e.target.value)}
                   placeholder="Header Center"
-                  className="px-3 py-2 text-xs rounded-xl border border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-800 text-gray-900 dark:text-white focus:outline-none focus:border-teal-500 text-center"
+                  className="px-3 py-2 text-xs rounded-xl border border-[var(--pms-border-strong)] bg-[var(--pms-white)] dark:bg-slate-900 text-[var(--pms-ink)] focus:outline-none focus:ring-2 focus:ring-emerald-500/30 text-center"
                 />
                 <input
                   type="text"
                   value={headerRight}
                   onChange={(e) => setHeaderRight(e.target.value)}
                   placeholder="Header Right"
-                  className="px-3 py-2 text-xs rounded-xl border border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-800 text-gray-900 dark:text-white focus:outline-none focus:border-teal-500 text-right"
+                  className="px-3 py-2 text-xs rounded-xl border border-[var(--pms-border-strong)] bg-[var(--pms-white)] dark:bg-slate-900 text-[var(--pms-ink)] focus:outline-none focus:ring-2 focus:ring-emerald-500/30 text-right"
                 />
               </div>
             </div>
 
             {/* Footer Slots (Bottom 3) */}
             <div className="space-y-2">
-              <label className="text-xs font-bold uppercase tracking-wider text-teal-600 dark:text-teal-400 block">
+              <label className="text-xs font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 block">
                 Bottom Running Footer (Left • Center • Right)
               </label>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
@@ -393,21 +425,21 @@ export default function HeadersFooters() {
                   value={footerLeft}
                   onChange={(e) => setFooterLeft(e.target.value)}
                   placeholder="Footer Left"
-                  className="px-3 py-2 text-xs rounded-xl border border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-800 text-gray-900 dark:text-white focus:outline-none focus:border-teal-500"
+                  className="px-3 py-2 text-xs rounded-xl border border-[var(--pms-border-strong)] bg-[var(--pms-white)] dark:bg-slate-900 text-[var(--pms-ink)] focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
                 />
                 <input
                   type="text"
                   value={footerCenter}
                   onChange={(e) => setFooterCenter(e.target.value)}
                   placeholder="Footer Center"
-                  className="px-3 py-2 text-xs rounded-xl border border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-800 text-gray-900 dark:text-white focus:outline-none focus:border-teal-500 text-center"
+                  className="px-3 py-2 text-xs rounded-xl border border-[var(--pms-border-strong)] bg-[var(--pms-white)] dark:bg-slate-900 text-[var(--pms-ink)] focus:outline-none focus:ring-2 focus:ring-emerald-500/30 text-center"
                 />
                 <input
                   type="text"
                   value={footerRight}
                   onChange={(e) => setFooterRight(e.target.value)}
                   placeholder="Footer Right"
-                  className="px-3 py-2 text-xs rounded-xl border border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-800 text-gray-900 dark:text-white focus:outline-none focus:border-teal-500 text-right"
+                  className="px-3 py-2 text-xs rounded-xl border border-[var(--pms-border-strong)] bg-[var(--pms-white)] dark:bg-slate-900 text-[var(--pms-ink)] focus:outline-none focus:ring-2 focus:ring-emerald-500/30 text-right"
                 />
               </div>
             </div>
@@ -415,7 +447,7 @@ export default function HeadersFooters() {
             {/* Typography & Position Controls */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
               <div>
-                <label className="block text-xs font-bold text-gray-600 dark:text-slate-400 mb-1">
+                <label className="block text-xs font-bold text-[var(--pms-muted)] mb-1">
                   Font Size ({fontSize}pt)
                 </label>
                 <input
@@ -429,7 +461,7 @@ export default function HeadersFooters() {
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-gray-600 dark:text-slate-400 mb-1">
+                <label className="block text-xs font-bold text-[var(--pms-muted)] mb-1">
                   Margin Offset ({marginOffset}pt)
                 </label>
                 <input
@@ -443,17 +475,17 @@ export default function HeadersFooters() {
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-gray-600 dark:text-slate-400 mb-1">
+                <label className="block text-xs font-bold text-[var(--pms-muted)] mb-1">
                   Text Color
                 </label>
-                <div className="flex items-center gap-2 p-1 rounded-xl border border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-800">
+                <div className="flex items-center gap-2 p-1 rounded-xl border border-[var(--pms-border-strong)] bg-[var(--pms-white)] dark:bg-slate-900">
                   <input
                     type="color"
                     value={fontColor}
                     onChange={(e) => setFontColor(e.target.value)}
                     className="w-7 h-7 rounded-lg cursor-pointer border-0 p-0 bg-transparent"
                   />
-                  <span className="text-xs font-mono font-bold text-gray-700 dark:text-slate-300 uppercase">
+                  <span className="text-xs font-mono font-bold text-[var(--pms-ink)] uppercase">
                     {fontColor}
                   </span>
                 </div>
@@ -461,8 +493,8 @@ export default function HeadersFooters() {
             </div>
 
             {/* Checkbox Options */}
-            <div className="flex flex-wrap items-center gap-6 pt-2 border-t border-gray-100 dark:border-slate-800 text-xs font-semibold">
-              <label className="flex items-center gap-2 cursor-pointer text-gray-700 dark:text-slate-300">
+            <div className="flex flex-wrap items-center gap-6 pt-3 border-t border-[var(--pms-border)] text-xs font-semibold">
+              <label className="flex items-center gap-2 cursor-pointer text-[var(--pms-ink)]">
                 <input
                   type="checkbox"
                   checked={skipFirstPage}
@@ -472,58 +504,65 @@ export default function HeadersFooters() {
                 Exclude First Page (Cover / Title Page)
               </label>
 
-              <div className="flex items-center gap-2 text-gray-700 dark:text-slate-300">
+              <div className="flex items-center gap-2 text-[var(--pms-ink)]">
                 <span>Start Page #:</span>
                 <input
                   type="number"
                   min="1"
                   value={startNumber}
                   onChange={(e) => setStartNumber(parseInt(e.target.value, 10) || 1)}
-                  className="w-14 px-2 py-1 rounded-lg border border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-800 text-center font-bold"
+                  className="w-16 px-2 py-1 rounded-xl border border-[var(--pms-border-strong)] bg-[var(--pms-white)] dark:bg-slate-900 text-center font-bold text-[var(--pms-ink)]"
                 />
               </div>
             </div>
 
             {/* Action Button */}
-            <button
+            <motion.button
+              whileHover={prefersReduced ? undefined : { scale: 1.01 }}
+              whileTap={prefersReduced ? undefined : { scale: 0.99 }}
               onClick={handleProcess}
               disabled={busy}
-              className="w-full py-4 bg-teal-600 hover:bg-teal-700 text-white font-bold rounded-xl shadow-md transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+              className="pms-btn-primary w-full py-4 font-bold rounded-2xl flex items-center justify-center gap-2 disabled:opacity-50"
             >
               {busy ? <Loader2 className="w-5 h-5 animate-spin" /> : <Layers className="w-5 h-5" />}
-              {busy ? 'Applying Headers & Footers...' : 'Apply Headers & Footers to PDF'}
-            </button>
+              {busy ? 'Applying Headers & Footers…' : 'Apply Headers & Footers to PDF'}
+            </motion.button>
           </div>
 
           {/* Live Document Canvas Preview (5 Cols) */}
-          <div className="lg:col-span-5 bg-white dark:bg-slate-900 rounded-2xl border border-gray-200 dark:border-slate-800 p-6 shadow-sm flex flex-col items-center">
+          <div className="lg:col-span-5 pms-glass-panel rounded-3xl p-6 flex flex-col items-center">
             <div className="flex items-center justify-between w-full mb-4">
-              <span className="text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-slate-400 flex items-center gap-1.5">
+              <span className="text-xs font-bold uppercase tracking-wider text-[var(--pms-muted)] flex items-center gap-1.5">
                 <Eye className="w-4 h-4" /> Live Document Preview (Page 1)
               </span>
-              <span className="text-[10px] text-teal-600 dark:text-teal-400 font-bold px-2 py-0.5 rounded-full bg-teal-50 dark:bg-teal-950/40 border border-teal-200 dark:border-teal-800">
+              <span className="text-[10px] text-emerald-700 dark:text-emerald-300 font-bold px-2.5 py-0.5 rounded-full bg-[var(--pms-soft-mint)] border border-emerald-200/70 dark:border-emerald-800">
                 Real-Time
               </span>
             </div>
 
-            <div className="relative bg-gray-100 dark:bg-slate-950 p-2 rounded-xl shadow-inner border border-gray-200 dark:border-slate-800 flex items-center justify-center overflow-hidden min-h-[350px] w-full">
+            <div className="relative bg-[var(--pms-pearl)]/80 dark:bg-slate-950/75 p-3 rounded-2xl shadow-inner border border-[var(--pms-border)] flex items-center justify-center overflow-hidden min-h-[350px] w-full">
+              <PearlScanOverlay
+                active={busy || loadingPreview}
+                label={loadingPreview ? 'Generating page preview…' : 'Applying headers & footers…'}
+              />
+
               {loadingPreview ? (
-                <div className="flex flex-col items-center gap-2 text-gray-500">
-                  <Loader2 className="w-8 h-8 animate-spin" />
-                  <span className="text-xs">Generating preview...</span>
+                <div className="flex flex-col items-center gap-2 text-[var(--pms-muted)]">
+                  <Loader2 className="w-8 h-8 animate-spin text-[var(--pms-blue)]" />
+                  <span className="text-xs font-medium">Generating preview…</span>
                 </div>
               ) : (
                 <canvas
                   ref={previewCanvasRef}
-                  className="max-w-full max-h-[500px] object-contain shadow-lg rounded"
+                  className="max-w-full max-h-[500px] object-contain shadow-lg rounded bg-white"
                 />
               )}
             </div>
-            <p className="text-[11px] text-gray-400 dark:text-slate-500 mt-3 text-center">
+            <p className="text-[11px] text-[var(--pms-subtle-text)] mt-3 text-center">
               Headers and footers will appear at these exact coordinates on your PDF.
             </p>
           </div>
-        </div>
+        </motion.div>
       )}
       </div>
     </ToolWorkspaceShell>

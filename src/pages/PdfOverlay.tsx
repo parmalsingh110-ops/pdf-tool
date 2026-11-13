@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { motion, AnimatePresence, useReducedMotion } from 'motion/react';
 import { Layers, Download, CheckCircle2, Sliders, ExternalLink, Eye, Loader2, ArrowLeftRight, Sparkles, FileText } from 'lucide-react';
 import FileDropzone from '../components/FileDropzone';
 import * as pdfjsLib from 'pdfjs-dist';
@@ -7,6 +8,9 @@ import '../lib/pdfWorker';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { dataUrlToBytes } from '../lib/utils';
+import { toArrayBufferBytes, useAutoRevokeUrl } from '../lib/blobUrl';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { AnimatedNumber, PearlScanOverlay } from '../components/pearl/PearlMotion';
 
 export default function PdfOverlay() {
   useSEO(
@@ -33,10 +37,13 @@ export default function PdfOverlay() {
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [showResultPreview, setShowResultPreview] = useState(true);
 
+  useAutoRevokeUrl(resultUrl);
+
   // Cached Page 1 canvases for fast slider updates
   const canvasARef = useRef<HTMLCanvasElement | null>(null);
   const canvasBRef = useRef<HTMLCanvasElement | null>(null);
   const previewCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const prefersReduced = useReducedMotion();
 
   // When files change, render their Page 1 into memory
   useEffect(() => {
@@ -236,8 +243,8 @@ export default function PdfOverlay() {
 
       setProgressPercent(95);
       setProgressText('Building merged PDF file...');
-      const bytes = await newDoc.save();
-      const blob = new Blob([bytes as any], { type: 'application/pdf' });
+      const bytes = toArrayBufferBytes(await newDoc.save());
+      const blob = new Blob([bytes], { type: 'application/pdf' });
       setResultUrl(URL.createObjectURL(blob));
       setProgressPercent(100);
       setProgressText('Done!');
@@ -258,34 +265,37 @@ export default function PdfOverlay() {
   };
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center p-6 md:p-8 max-w-6xl mx-auto w-full">
-      {/* Header */}
-      <div className="text-center mb-8">
-        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-50 dark:bg-cyan-950/40 text-cyan-600 dark:text-cyan-400 text-xs font-bold tracking-widest uppercase mb-3 border border-cyan-200 dark:border-cyan-800">
-          <Layers className="w-3.5 h-3.5" /> PDF Visual Stacker & Comparison
-        </div>
-        <h1 className="text-3xl md:text-5xl font-extrabold text-gray-900 dark:text-white tracking-tight mb-3">
-          PDF Overlay & Stacker Tool
-        </h1>
-        <p className="text-base md:text-lg text-gray-600 dark:text-slate-400 max-w-2xl mx-auto">
-          Stack two PDF documents with real-time transparency and difference blend modes. Perfect for architectural drawings, blueprints, and document revisions.
-        </p>
-      </div>
-
+    <ToolWorkspaceShell
+      title="PDF Overlay & Stacker Tool"
+      subtitle="Stack two PDF documents with real-time transparency and difference blend modes. Perfect for architectural drawings, blueprints, and document revisions."
+      categoryLabel="Visual Diff & Layer Stacker"
+      icon={Layers}
+      microVariant="compare"
+      tone="sky"
+      trustNote="Live pixel blend preview · 100% private client-side compositing"
+    >
       {!resultUrl ? (
-        <div className="w-full bg-white dark:bg-slate-900 rounded-3xl shadow-xl border border-gray-200 dark:border-slate-800 p-6 md:p-8 space-y-8">
+        <motion.div
+          key="overlay-workspace"
+          initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.26 }}
+          className="relative w-full pms-glass-panel rounded-3xl p-6 md:p-8 space-y-8 overflow-hidden"
+        >
+          <PearlScanOverlay active={isProcessing} label={progressText || 'Stacking & blending PDF layers…'} />
+
           {/* File Upload Grids */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 relative">
             {/* File A (Base) */}
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-gray-700 dark:text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full bg-blue-500" /> 1. Base Document (Bottom Layer)
+                <span className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-sky-500" /> 1. Base Document (Bottom Layer)
                 </span>
                 {fileA && (
                   <button
                     onClick={() => setFileA(null)}
-                    className="text-xs text-rose-500 hover:underline font-semibold"
+                    className="text-xs text-rose-500 hover:underline font-semibold cursor-pointer"
                   >
                     Change
                   </button>
@@ -294,11 +304,11 @@ export default function PdfOverlay() {
               {!fileA ? (
                 <FileDropzone onDrop={(files) => setFileA(files[0] || null)} multiple={false} title="Drop Base PDF (File A)" />
               ) : (
-                <div className="p-4 bg-blue-50/50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-900/50 rounded-2xl flex items-center gap-3">
-                  <FileText className="w-8 h-8 text-blue-600 dark:text-blue-400 shrink-0" />
+                <div className="p-4 bg-[var(--pms-soft-blue)] border border-[var(--pms-border)] rounded-2xl flex items-center gap-3">
+                  <FileText className="w-8 h-8 text-[var(--pms-blue)] shrink-0" />
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm font-bold text-gray-900 dark:text-white truncate">{fileA.name}</p>
-                    <p className="text-xs text-gray-500">{(fileA.size / 1024 / 1024).toFixed(2)} MB</p>
+                    <p className="text-sm font-bold text-slate-900 dark:text-white truncate">{fileA.name}</p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">{(fileA.size / 1024 / 1024).toFixed(2)} MB</p>
                   </div>
                 </div>
               )}
@@ -307,27 +317,30 @@ export default function PdfOverlay() {
             {/* Swap Button (Desktop Center) */}
             {fileA && fileB && (
               <div className="hidden md:flex absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-10">
-                <button
+                <motion.button
                   type="button"
+                  whileHover={prefersReduced ? undefined : { scale: 1.1, rotate: 180 }}
+                  whileTap={prefersReduced ? undefined : { scale: 0.95 }}
+                  transition={{ type: 'spring', stiffness: 320, damping: 20 }}
                   onClick={swapDocuments}
                   title="Swap Base and Overlay"
-                  className="w-10 h-10 rounded-full bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-700 shadow-md flex items-center justify-center text-gray-700 dark:text-slate-200 hover:scale-110 transition-all"
+                  className="w-10 h-10 rounded-full bg-white dark:bg-slate-800 border border-[var(--pms-border-strong)] shadow-md flex items-center justify-center text-slate-700 dark:text-slate-200 cursor-pointer"
                 >
                   <ArrowLeftRight className="w-4 h-4" />
-                </button>
+                </motion.button>
               </div>
             )}
 
             {/* File B (Overlay) */}
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-gray-700 dark:text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full bg-cyan-500" /> 2. Overlay Document (Top Layer)
+                <span className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-violet-500" /> 2. Overlay Document (Top Layer)
                 </span>
                 {fileB && (
                   <button
                     onClick={() => setFileB(null)}
-                    className="text-xs text-rose-500 hover:underline font-semibold"
+                    className="text-xs text-rose-500 hover:underline font-semibold cursor-pointer"
                   >
                     Change
                   </button>
@@ -336,48 +349,53 @@ export default function PdfOverlay() {
               {!fileB ? (
                 <FileDropzone onDrop={(files) => setFileB(files[0] || null)} multiple={false} title="Drop Overlay PDF (File B)" />
               ) : (
-                <div className="p-4 bg-cyan-50/50 dark:bg-cyan-950/20 border border-cyan-200 dark:border-cyan-900/50 rounded-2xl flex items-center gap-3">
-                  <FileText className="w-8 h-8 text-cyan-600 dark:text-cyan-400 shrink-0" />
+                <div className="p-4 bg-[var(--pms-soft-lavender)] border border-[var(--pms-border)] rounded-2xl flex items-center gap-3">
+                  <FileText className="w-8 h-8 text-[var(--pms-violet)] shrink-0" />
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm font-bold text-gray-900 dark:text-white truncate">{fileB.name}</p>
-                    <p className="text-xs text-gray-500">{(fileB.size / 1024 / 1024).toFixed(2)} MB</p>
+                    <p className="text-sm font-bold text-slate-900 dark:text-white truncate">{fileB.name}</p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">{(fileB.size / 1024 / 1024).toFixed(2)} MB</p>
                   </div>
                 </div>
               )}
             </div>
           </div>
 
-          {/* Interactive Live Preview & Controls Section */}
+          {/* Interactive Live Preview & Controls Section (synchronous mount so previewCanvasRef stays bound) */}
           {(fileA || fileB) && (
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start pt-4 border-t border-gray-200 dark:border-slate-800">
+            <motion.div
+              initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.25 }}
+              className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start pt-6 border-t border-[var(--pms-border)]"
+            >
               {/* Left Column: Live Canvas Preview */}
               <div className="lg:col-span-5 space-y-3">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-gray-700 dark:text-slate-300 uppercase tracking-wider flex items-center gap-2">
-                    <Sparkles className="w-3.5 h-3.5 text-cyan-500" /> Live Page 1 Overlay
+                  <span className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider flex items-center gap-2">
+                    <Sparkles className="w-3.5 h-3.5 text-[var(--pms-blue)]" /> Live Page 1 Overlay
                   </span>
                   {fileA && fileB && (
                     <button
                       type="button"
                       onClick={swapDocuments}
-                      className="text-xs text-cyan-600 dark:text-cyan-400 font-bold hover:underline flex items-center gap-1 md:hidden"
+                      className="text-xs text-[var(--pms-blue)] font-bold hover:underline flex items-center gap-1 md:hidden cursor-pointer"
                     >
                       <ArrowLeftRight className="w-3.5 h-3.5" /> Swap layers
                     </button>
                   )}
                 </div>
 
-                <div className="rounded-2xl border border-gray-200 dark:border-slate-800 overflow-hidden bg-gray-100 dark:bg-slate-950 flex flex-col items-center justify-center min-h-[320px] p-4 relative shadow-inner">
+                <div className="rounded-2xl border border-[var(--pms-border)] overflow-hidden bg-slate-100/80 dark:bg-slate-950/70 flex flex-col items-center justify-center min-h-[320px] p-4 relative shadow-inner">
                   {isLoadingPreview ? (
-                    <div className="flex flex-col items-center gap-2 text-gray-500">
-                      <Loader2 className="w-6 h-6 animate-spin text-cyan-500" />
+                    <div className="flex flex-col items-center gap-2 text-slate-500 dark:text-slate-400">
+                      <Loader2 className="w-6 h-6 animate-spin text-[var(--pms-blue)]" />
                       <span className="text-xs">Blending live preview...</span>
                     </div>
                   ) : null}
 
                   <canvas
                     ref={previewCanvasRef}
-                    className={`max-h-[350px] rounded-lg shadow-md border border-gray-300 dark:border-slate-700 object-contain mx-auto ${
+                    className={`max-h-[350px] rounded-lg shadow-md border border-[var(--pms-border)] bg-white object-contain mx-auto ${
                       isLoadingPreview ? 'hidden' : 'block'
                     }`}
                   />
@@ -387,19 +405,19 @@ export default function PdfOverlay() {
               {/* Right Column: Overlay Controls */}
               <div className="lg:col-span-7 space-y-6">
                 <div>
-                  <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-1">Overlay Controls</h3>
-                  <p className="text-xs text-gray-500 dark:text-slate-400">
+                  <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-1">Overlay Controls</h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
                     Adjust top layer transparency and blend mode to reveal differences.
                   </p>
                 </div>
 
                 {/* Opacity Slider */}
-                <div className="p-5 bg-gray-50 dark:bg-slate-800/60 rounded-2xl border border-gray-200 dark:border-slate-700 space-y-2">
+                <div className="p-5 bg-white/75 dark:bg-slate-800/60 rounded-2xl border border-[var(--pms-border)] space-y-2">
                   <div className="flex items-center justify-between text-xs">
-                    <span className="font-bold text-gray-700 dark:text-slate-300 flex items-center gap-1.5">
-                      <Sliders className="w-3.5 h-3.5 text-cyan-500" /> Top Layer (File B) Opacity
+                    <span className="font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                      <Sliders className="w-3.5 h-3.5 text-[var(--pms-blue)]" /> Top Layer (File B) Opacity
                     </span>
-                    <span className="font-mono font-bold text-cyan-600 dark:text-cyan-400">
+                    <span className="font-mono font-bold px-2.5 py-0.5 rounded-full bg-[var(--pms-soft-blue)] text-[var(--pms-blue)] border border-[var(--pms-border)]">
                       {Math.round(opacity * 100)}%
                     </span>
                   </div>
@@ -410,9 +428,9 @@ export default function PdfOverlay() {
                     step={0.05}
                     value={opacity}
                     onChange={(e) => setOpacity(parseFloat(e.target.value))}
-                    className="w-full h-2 bg-gray-200 dark:bg-slate-700 rounded-lg accent-cyan-600"
+                    className="w-full h-2 bg-slate-200 dark:bg-slate-700 rounded-lg accent-sky-600"
                   />
-                  <div className="flex justify-between text-[11px] text-gray-400 pt-1">
+                  <div className="flex justify-between text-[11px] text-slate-400 pt-1">
                     <span>10% (Transparent)</span>
                     <span>50% (Balanced Stack)</span>
                     <span>100% (Solid Top)</span>
@@ -421,7 +439,7 @@ export default function PdfOverlay() {
 
                 {/* Blend Mode Options */}
                 <div className="space-y-2">
-                  <label className="text-xs font-bold text-gray-700 dark:text-slate-300 uppercase tracking-wider block">
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider block">
                     Blend Mode Profile
                   </label>
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -441,46 +459,61 @@ export default function PdfOverlay() {
                         name: 'Multiply (Darken)',
                         desc: 'Transparent white, ink darkens together.',
                       },
-                    ].map((item) => (
-                      <button
-                        key={item.mode}
-                        type="button"
-                        onClick={() => setBlendMode(item.mode)}
-                        className={`text-left p-3.5 rounded-xl border-2 transition-all flex flex-col justify-between ${
-                          blendMode === item.mode
-                            ? 'border-cyan-500 bg-cyan-50/50 dark:bg-cyan-950/20 shadow-xs'
-                            : 'border-gray-200 dark:border-slate-800 hover:border-gray-300 dark:hover:border-slate-700 bg-white dark:bg-slate-800/20'
-                        }`}
-                      >
-                        <h4 className="font-bold text-xs text-gray-900 dark:text-white mb-0.5">{item.name}</h4>
-                        <p className="text-[11px] text-gray-500 dark:text-slate-400 leading-snug">{item.desc}</p>
-                      </button>
-                    ))}
+                    ].map((item) => {
+                      const active = blendMode === item.mode;
+                      return (
+                        <motion.button
+                          key={item.mode}
+                          type="button"
+                          whileTap={prefersReduced ? undefined : { scale: 0.985 }}
+                          onClick={() => setBlendMode(item.mode)}
+                          className="relative text-left p-3.5 rounded-2xl border transition-all flex flex-col justify-between cursor-pointer overflow-hidden"
+                          style={{
+                            borderColor: active ? 'var(--pms-blue)' : 'var(--pms-border)',
+                            backgroundColor: active ? 'var(--pms-soft-blue)' : 'var(--pms-white)',
+                          }}
+                        >
+                          <h4 className="font-bold text-xs text-slate-900 dark:text-white mb-0.5">{item.name}</h4>
+                          <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-snug">{item.desc}</p>
+                        </motion.button>
+                      );
+                    })}
                   </div>
                 </div>
 
                 {/* Progress bar */}
-                {isProcessing && (
-                  <div className="space-y-2 p-4 bg-cyan-50 dark:bg-cyan-950/20 rounded-2xl border border-cyan-200 dark:border-cyan-900/50">
-                    <div className="flex justify-between text-xs font-semibold text-cyan-900 dark:text-cyan-300">
-                      <span>{progressText}</span>
-                      <span>{progressPercent}%</span>
-                    </div>
-                    <div className="w-full bg-cyan-200 dark:bg-cyan-900/40 rounded-full h-2 overflow-hidden">
-                      <div
-                        className="bg-cyan-600 h-2 rounded-full transition-all duration-300"
-                        style={{ width: `${progressPercent}%` }}
-                      />
-                    </div>
-                  </div>
-                )}
+                <AnimatePresence>
+                  {isProcessing && (
+                    <motion.div
+                      initial={prefersReduced ? false : { opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={prefersReduced ? undefined : { opacity: 0, height: 0 }}
+                      className="space-y-2 p-4 bg-[var(--pms-soft-blue)] rounded-2xl border border-[var(--pms-border)]"
+                    >
+                      <div className="flex justify-between text-xs font-semibold text-slate-800 dark:text-sky-200">
+                        <span>{progressText}</span>
+                        <span>
+                          <AnimatedNumber value={progressPercent} suffix="%" />
+                        </span>
+                      </div>
+                      <div className="w-full bg-white/70 dark:bg-slate-800 rounded-full h-2 overflow-hidden">
+                        <div
+                          className="bg-gradient-to-r from-sky-500 via-violet-500 to-rose-500 h-2 rounded-full transition-all duration-300"
+                          style={{ width: `${progressPercent}%` }}
+                        />
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
 
                 {/* Action Buttons */}
                 <div className="flex flex-col sm:flex-row gap-3 pt-2">
-                  <button
+                  <motion.button
+                    whileHover={prefersReduced || !fileA || !fileB || isProcessing ? undefined : { scale: 1.01 }}
+                    whileTap={prefersReduced || !fileA || !fileB || isProcessing ? undefined : { scale: 0.985 }}
                     onClick={overlayPdfs}
                     disabled={!fileA || !fileB || isProcessing}
-                    className="flex-1 py-4 bg-cyan-600 hover:bg-cyan-700 text-white font-bold rounded-2xl transition-all shadow-md hover:shadow-lg disabled:opacity-50 flex items-center justify-center gap-2 text-base"
+                    className="flex-1 pms-btn-primary py-4 font-bold rounded-2xl disabled:opacity-50 flex items-center justify-center gap-2 text-base cursor-pointer"
                   >
                     {isProcessing ? (
                       <>
@@ -493,86 +526,110 @@ export default function PdfOverlay() {
                         Generate & Download Overlay PDF
                       </>
                     )}
-                  </button>
+                  </motion.button>
                   <button
                     onClick={resetAll}
                     disabled={isProcessing}
-                    className="px-6 py-4 bg-gray-100 hover:bg-gray-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-gray-700 dark:text-slate-300 font-semibold rounded-2xl transition-all text-sm"
+                    className="px-6 py-4 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-semibold rounded-2xl transition-colors text-sm cursor-pointer disabled:opacity-50"
                   >
                     Reset
                   </button>
                 </div>
               </div>
-            </div>
+            </motion.div>
           )}
-        </div>
+        </motion.div>
       ) : (
         /* Success Screen */
-        <div className="w-full max-w-4xl bg-white dark:bg-slate-900 rounded-3xl shadow-xl border border-gray-200 dark:border-slate-800 p-8 text-center space-y-6">
-          <div className="p-8 bg-green-50 dark:bg-green-950/30 rounded-3xl border border-green-200 dark:border-green-800">
-            <div className="w-16 h-16 bg-green-100 dark:bg-green-900/50 text-green-600 dark:text-green-400 rounded-full flex items-center justify-center mx-auto mb-4">
-              <CheckCircle2 className="w-8 h-8" />
-            </div>
-            <h3 className="text-2xl md:text-3xl font-extrabold text-green-900 dark:text-green-200 mb-2">
+        <motion.div
+          key="overlay-result"
+          initial={prefersReduced ? false : { opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.28 }}
+          className="w-full max-w-4xl mx-auto pms-glass-panel rounded-3xl border border-emerald-200/80 dark:border-emerald-800/70 p-8 text-center space-y-6"
+        >
+          <motion.div
+            initial={prefersReduced ? false : { scale: 0.45, rotate: -10, opacity: 0 }}
+            animate={{ scale: 1, rotate: 0, opacity: 1 }}
+            transition={{ type: 'spring', stiffness: 360, damping: 18 }}
+            className="w-20 h-20 bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 rounded-full flex items-center justify-center mx-auto shadow-inner"
+          >
+            <CheckCircle2 className="w-10 h-10" />
+          </motion.div>
+
+          <div>
+            <span className="inline-block px-3.5 py-1 bg-[var(--pms-soft-mint)] text-emerald-700 dark:text-emerald-300 rounded-full text-xs font-bold uppercase tracking-wider mb-2 border border-[var(--pms-border)]">
+              Overlay Compositing Complete
+            </span>
+            <h2 className="text-2xl md:text-3xl font-extrabold text-slate-900 dark:text-white mb-2">
               PDF Overlay Created Successfully!
-            </h3>
-            <p className="text-green-700 dark:text-green-400 mb-6 text-sm max-w-md mx-auto">
+            </h2>
+            <p className="text-slate-600 dark:text-slate-400 text-sm max-w-md mx-auto">
               Both documents have been blended across all pages with your selected transparency profile.
             </p>
+          </div>
 
-            <div className="flex flex-wrap items-center justify-center gap-3">
-              <a
-                href={resultUrl}
-                download="overlay_document.pdf"
-                className="inline-flex items-center justify-center gap-2 px-8 py-3.5 bg-green-600 hover:bg-green-700 text-white font-bold rounded-2xl transition-all shadow-md hover:shadow-lg text-base"
-              >
-                <Download className="w-5 h-5" />
-                Download Overlaid PDF
-              </a>
-              <a
-                href={resultUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center justify-center gap-2 px-5 py-3.5 bg-white dark:bg-slate-800 hover:bg-gray-50 dark:hover:bg-slate-700 text-gray-700 dark:text-slate-200 font-semibold rounded-2xl border border-gray-300 dark:border-slate-700 transition-all text-sm shadow-xs"
-              >
-                <ExternalLink className="w-4 h-4" />
-                Open in New Tab
-              </a>
-              <button
-                type="button"
-                onClick={() => setShowResultPreview(!showResultPreview)}
-                className="inline-flex items-center justify-center gap-2 px-5 py-3.5 bg-white dark:bg-slate-800 hover:bg-gray-50 dark:hover:bg-slate-700 text-gray-700 dark:text-slate-200 font-semibold rounded-2xl border border-gray-300 dark:border-slate-700 transition-all text-sm shadow-xs"
-              >
-                <Eye className="w-4 h-4" />
-                {showResultPreview ? 'Hide Preview' : 'Show Live Preview'}
-              </button>
-            </div>
+          <div className="flex flex-wrap items-center justify-center gap-3">
+            <motion.a
+              whileHover={prefersReduced ? undefined : { scale: 1.015 }}
+              whileTap={prefersReduced ? undefined : { scale: 0.985 }}
+              href={resultUrl}
+              download="overlay_document.pdf"
+              className="pms-btn-primary inline-flex items-center justify-center gap-2 px-8 py-3.5 font-bold rounded-2xl text-base"
+            >
+              <Download className="w-5 h-5" />
+              Download Overlaid PDF
+            </motion.a>
+            <a
+              href={resultUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center justify-center gap-2 px-5 py-3.5 bg-white/80 dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-semibold rounded-2xl border border-[var(--pms-border)] transition-all text-sm"
+            >
+              <ExternalLink className="w-4 h-4" />
+              Open in New Tab
+            </a>
+            <button
+              type="button"
+              onClick={() => setShowResultPreview(!showResultPreview)}
+              className="inline-flex items-center justify-center gap-2 px-5 py-3.5 bg-white/80 dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-semibold rounded-2xl border border-[var(--pms-border)] transition-all text-sm cursor-pointer"
+            >
+              <Eye className="w-4 h-4" />
+              {showResultPreview ? 'Hide Preview' : 'Show Live Preview'}
+            </button>
+          </div>
 
+          <AnimatePresence>
             {showResultPreview && (
-              <div className="mt-6 text-left">
-                <p className="text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wider mb-2">
+              <motion.div
+                initial={prefersReduced ? false : { opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={prefersReduced ? undefined : { opacity: 0, y: -8 }}
+                className="pt-2 text-left"
+              >
+                <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">
                   Overlay Document Output Preview
                 </p>
-                <div className="w-full h-[550px] rounded-2xl border border-gray-200 dark:border-slate-700 overflow-hidden bg-gray-100 dark:bg-slate-950 shadow-inner">
+                <div className="w-full h-[550px] rounded-2xl border border-[var(--pms-border)] overflow-hidden bg-white shadow-inner">
                   <iframe
                     src={resultUrl}
                     title="Overlay PDF Preview"
                     className="w-full h-full border-0"
                   />
                 </div>
-              </div>
+              </motion.div>
             )}
-          </div>
+          </AnimatePresence>
 
           <button
             type="button"
             onClick={resetAll}
-            className="text-sm text-gray-600 dark:text-slate-400 hover:text-gray-900 dark:hover:text-white font-semibold"
+            className="text-sm text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white font-semibold cursor-pointer"
           >
             ← Stack another pair of PDFs
           </button>
-        </div>
+        </motion.div>
       )}
-    </div>
+    </ToolWorkspaceShell>
   );
 }

@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react';
-import { Download, FileText, FileType, Copy, Check, Search, FileJson, FileCode2, Clock, AlignLeft, RefreshCw, X, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Download, FileText, FileType, Copy, Check, Search, FileJson, FileCode2, RefreshCw, X } from 'lucide-react';
+import { motion, useReducedMotion } from 'motion/react';
 import FileDropzone from '../components/FileDropzone';
 import * as pdfjsLib from 'pdfjs-dist';
 import '../lib/pdfWorker';
@@ -7,6 +8,7 @@ import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { useToast } from '../components/Toast';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { AnimatedNumber, PearlScanOverlay } from '../components/pearl/PearlMotion';
 
 interface PageTextItem {
   pageNumber: number;
@@ -29,6 +31,7 @@ export default function ExtractText() {
   const [copiedAll, setCopiedAll] = useState(false);
   const [copiedPage, setCopiedPage] = useState(false);
   const toast = useToast();
+  const prefersReduced = useReducedMotion();
 
   const handleDrop = (acceptedFiles: File[]) => {
     if (acceptedFiles.length > 0) {
@@ -196,88 +199,117 @@ export default function ExtractText() {
       <div className="flex flex-col items-center justify-start">
 
       {!file ? (
-        <FileDropzone onDrop={handleDrop} multiple={false} title="Drop PDF here or click to select" />
+        <motion.div
+          initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+          className="w-full max-w-2xl pms-glass-panel rounded-3xl p-4 sm:p-5"
+        >
+          <FileDropzone onDrop={handleDrop} multiple={false} title="Drop PDF here or click to select" />
+        </motion.div>
       ) : pages.length === 0 ? (
         /* Uploaded & Ready to Extract */
-        <div className="w-full max-w-2xl bg-white dark:bg-slate-900/90 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-800 p-8">
-          <div className="flex items-center gap-4 p-5 bg-violet-50/50 dark:bg-violet-950/30 rounded-2xl border border-violet-100 dark:border-violet-800/50 mb-8">
-            <div className="w-14 h-14 bg-violet-100 dark:bg-violet-950/60 text-violet-600 dark:text-violet-400 rounded-xl flex items-center justify-center shrink-0">
+        <motion.div
+          initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+          className="relative w-full max-w-2xl pms-glass-panel rounded-3xl p-7 sm:p-8 overflow-hidden min-h-[260px]"
+        >
+          <PearlScanOverlay active={isProcessing} label={progressStep || 'Extracting text from PDF…'} />
+
+          <div className="flex items-center gap-4 p-5 bg-[var(--pms-soft-lavender)]/70 rounded-2xl border border-[var(--pms-border)] mb-7">
+            <div className="w-14 h-14 bg-[var(--pms-white)] dark:bg-slate-900 text-[var(--pms-violet)] rounded-2xl border border-[var(--pms-border)] flex items-center justify-center shrink-0">
               <FileText className="w-7 h-7" />
             </div>
             <div className="flex-1 min-w-0">
-              <p className="font-semibold text-gray-900 dark:text-slate-100 truncate">{file.name}</p>
-              <p className="text-xs text-gray-500 dark:text-slate-400 mt-0.5">{(file.size / 1024 / 1024).toFixed(2)} MB · Ready for extraction</p>
+              <p className="font-semibold text-[var(--pms-ink)] truncate">{file.name}</p>
+              <p className="text-xs text-[var(--pms-muted)] mt-0.5">{(file.size / 1024 / 1024).toFixed(2)} MB · Ready for extraction</p>
             </div>
             <button
               onClick={() => setFile(null)}
-              className="text-xs text-gray-400 dark:text-slate-500 hover:text-red-500 dark:hover:text-red-400 px-3 py-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/40 transition-colors"
+              className="text-xs font-semibold text-[var(--pms-muted)] hover:text-[var(--pms-rose)] px-3 py-1.5 rounded-xl hover:bg-[var(--pms-soft-rose)] transition-colors"
             >
               Change
             </button>
           </div>
 
           <div className="space-y-4">
-            <button
+            <motion.button
+              whileHover={prefersReduced ? undefined : { scale: 1.01 }}
+              whileTap={prefersReduced ? undefined : { scale: 0.99 }}
               onClick={extractTextFromPdf}
               disabled={isProcessing}
-              className="w-full py-4 bg-violet-600 text-white text-base font-bold rounded-xl hover:bg-violet-700 transition-colors disabled:opacity-50 shadow-md flex items-center justify-center gap-2"
+              className="pms-btn-primary w-full py-4 text-base font-bold rounded-2xl disabled:opacity-50 flex items-center justify-center gap-2"
             >
               {isProcessing ? (
                 <>
-                  <RefreshCw className="w-5 h-5 animate-spin" /> {progressStep || 'Extracting Text...'}
+                  <RefreshCw className="w-5 h-5 animate-spin" /> {progressStep || 'Extracting Text…'}
                 </>
               ) : (
                 <>
                   <FileType className="w-5 h-5" /> Extract Text from All Pages
                 </>
               )}
-            </button>
-            <p className="text-center text-xs text-gray-400 dark:text-slate-500">
+            </motion.button>
+            <p className="text-center text-xs text-[var(--pms-subtle-text)]">
               100% private. Text extraction runs entirely locally in your browser.
             </p>
           </div>
-        </div>
+        </motion.div>
       ) : (
         /* Extracted Workspace */
-        <div className="w-full max-w-6xl space-y-6">
+        <motion.div
+          initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+          className="w-full max-w-6xl space-y-6"
+        >
 
           {/* Stats Header Bar */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-white dark:bg-slate-900/90 p-4 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-800">
-            <div className="p-3 bg-violet-50/50 dark:bg-violet-950/30 rounded-xl border border-violet-100/60 dark:border-violet-800/40 text-center">
-              <div className="text-xs font-semibold text-gray-500 dark:text-slate-400">Pages</div>
-              <div className="text-xl font-bold text-violet-700 dark:text-violet-300 mt-0.5">{stats.totalPages}</div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pms-glass-panel p-4 rounded-3xl">
+            <div className="p-3 bg-[var(--pms-soft-lavender)]/60 rounded-2xl border border-[var(--pms-border)] text-center">
+              <div className="text-xs font-semibold text-[var(--pms-muted)]">Pages</div>
+              <div className="text-xl font-bold text-[var(--pms-violet)] mt-0.5 tabular-nums">
+                <AnimatedNumber value={stats.totalPages} />
+              </div>
             </div>
-            <div className="p-3 bg-violet-50/50 dark:bg-violet-950/30 rounded-xl border border-violet-100/60 dark:border-violet-800/40 text-center">
-              <div className="text-xs font-semibold text-gray-500 dark:text-slate-400">Total Words</div>
-              <div className="text-xl font-bold text-violet-700 dark:text-violet-300 mt-0.5">{stats.totalWords.toLocaleString()}</div>
+            <div className="p-3 bg-[var(--pms-soft-lavender)]/60 rounded-2xl border border-[var(--pms-border)] text-center">
+              <div className="text-xs font-semibold text-[var(--pms-muted)]">Total Words</div>
+              <div className="text-xl font-bold text-[var(--pms-violet)] mt-0.5 tabular-nums">
+                <AnimatedNumber value={stats.totalWords} />
+              </div>
             </div>
-            <div className="p-3 bg-violet-50/50 dark:bg-violet-950/30 rounded-xl border border-violet-100/60 dark:border-violet-800/40 text-center">
-              <div className="text-xs font-semibold text-gray-500 dark:text-slate-400">Characters</div>
-              <div className="text-xl font-bold text-violet-700 dark:text-violet-300 mt-0.5">{stats.totalChars.toLocaleString()}</div>
+            <div className="p-3 bg-[var(--pms-soft-lavender)]/60 rounded-2xl border border-[var(--pms-border)] text-center">
+              <div className="text-xs font-semibold text-[var(--pms-muted)]">Characters</div>
+              <div className="text-xl font-bold text-[var(--pms-violet)] mt-0.5 tabular-nums">
+                <AnimatedNumber value={stats.totalChars} />
+              </div>
             </div>
-            <div className="p-3 bg-violet-50/50 dark:bg-violet-950/30 rounded-xl border border-violet-100/60 dark:border-violet-800/40 text-center">
-              <div className="text-xs font-semibold text-gray-500 dark:text-slate-400">Reading Time</div>
-              <div className="text-xl font-bold text-violet-700 dark:text-violet-300 mt-0.5">~{stats.readingTimeMin} min</div>
+            <div className="p-3 bg-[var(--pms-soft-lavender)]/60 rounded-2xl border border-[var(--pms-border)] text-center">
+              <div className="text-xs font-semibold text-[var(--pms-muted)]">Reading Time</div>
+              <div className="text-xl font-bold text-[var(--pms-violet)] mt-0.5 tabular-nums">
+                ~<AnimatedNumber value={stats.readingTimeMin} suffix=" min" />
+              </div>
             </div>
           </div>
 
           {/* Controls Bar: Search, Page Tabs, Font Size */}
-          <div className="bg-white dark:bg-slate-900/90 p-4 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-800 space-y-3">
+          <div className="pms-glass-panel p-4 sm:p-5 rounded-3xl space-y-3">
             <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
               {/* Search Bar */}
               <div className="relative w-full sm:w-80">
-                <Search className="w-4 h-4 text-gray-400 dark:text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                <Search className="w-4 h-4 text-[var(--pms-subtle-text)] absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
                   value={searchQuery}
                   onChange={e => setSearchQuery(e.target.value)}
                   placeholder="Search in extracted text..."
-                  className="w-full pl-9 pr-8 py-2 bg-white dark:bg-slate-800/80 border border-gray-200 dark:border-slate-700 text-gray-900 dark:text-slate-100 placeholder-gray-400 dark:placeholder-slate-500 rounded-xl text-xs focus:ring-2 focus:ring-violet-500 outline-none"
+                  className="w-full pl-9 pr-8 py-2 bg-[var(--pms-white)] dark:bg-slate-900 border border-[var(--pms-border-strong)] text-[var(--pms-ink)] placeholder:text-[var(--pms-subtle-text)] rounded-xl text-xs focus:ring-2 focus:ring-[var(--pms-violet)]/30 outline-none"
                 />
                 {searchQuery && (
                   <button
                     onClick={() => setSearchQuery('')}
-                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-slate-300"
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--pms-subtle-text)] hover:text-[var(--pms-ink)]"
                   >
                     <X className="w-3.5 h-3.5" />
                   </button>
@@ -286,22 +318,22 @@ export default function ExtractText() {
 
               {/* Search results badge */}
               {searchQuery && (
-                <span className="text-xs bg-amber-50 dark:bg-amber-950/50 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800/50 px-3 py-1.5 rounded-lg font-medium shrink-0">
+                <span className="text-xs bg-amber-50 dark:bg-amber-950/50 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800/50 px-3 py-1.5 rounded-xl font-medium shrink-0 tabular-nums">
                   {searchMatchCount} match{searchMatchCount !== 1 ? 'es' : ''} found
                 </span>
               )}
 
               {/* Font Size controls */}
-              <div className="flex items-center gap-1.5 ml-auto">
-                <span className="text-xs text-gray-400 dark:text-slate-500 mr-1">Size:</span>
+              <div className="flex items-center gap-1 bg-[var(--pms-pearl)]/80 dark:bg-slate-900/70 p-1 rounded-xl border border-[var(--pms-border)] ml-auto">
+                <span className="text-xs text-[var(--pms-muted)] px-2">Size:</span>
                 {(['sm', 'base', 'lg'] as const).map(s => (
                   <button
                     key={s}
                     onClick={() => setFontSize(s)}
                     className={`px-2.5 py-1 text-xs rounded-lg font-semibold transition-colors ${
                       fontSize === s
-                        ? 'bg-violet-600 text-white'
-                        : 'bg-gray-100 dark:bg-slate-800 text-gray-600 dark:text-slate-300 hover:bg-gray-200 dark:hover:bg-slate-700'
+                        ? 'bg-[var(--pms-violet)] text-white shadow-sm'
+                        : 'text-[var(--pms-muted)] hover:text-[var(--pms-ink)]'
                     }`}
                   >
                     {s === 'sm' ? 'S' : s === 'base' ? 'M' : 'L'}
@@ -311,13 +343,13 @@ export default function ExtractText() {
             </div>
 
             {/* Page Tabs */}
-            <div className="flex items-center gap-2 overflow-x-auto pb-1 pt-1 border-t border-gray-100 dark:border-slate-800">
+            <div className="flex items-center gap-2 overflow-x-auto pb-1 pt-2 border-t border-[var(--pms-border)]">
               <button
                 onClick={() => setSelectedTab('all')}
                 className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-colors ${
                   selectedTab === 'all'
-                    ? 'bg-violet-600 text-white shadow-xs'
-                    : 'bg-gray-50 dark:bg-slate-800/80 text-gray-600 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-700'
+                    ? 'bg-[var(--pms-violet)] text-white shadow-sm'
+                    : 'bg-[var(--pms-pearl)]/80 dark:bg-slate-800/80 text-[var(--pms-muted)] hover:text-[var(--pms-ink)]'
                 }`}
               >
                 All Pages ({pages.length})
@@ -328,8 +360,8 @@ export default function ExtractText() {
                   onClick={() => setSelectedTab(p.pageNumber)}
                   className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-colors ${
                     selectedTab === p.pageNumber
-                      ? 'bg-violet-600 text-white shadow-xs'
-                      : 'bg-gray-50 dark:bg-slate-800/80 text-gray-600 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-700'
+                      ? 'bg-[var(--pms-violet)] text-white shadow-sm'
+                      : 'bg-[var(--pms-pearl)]/80 dark:bg-slate-800/80 text-[var(--pms-muted)] hover:text-[var(--pms-ink)]'
                   }`}
                 >
                   Page {p.pageNumber} <span className="text-[10px] opacity-70">({p.wordCount}w)</span>
@@ -339,17 +371,17 @@ export default function ExtractText() {
           </div>
 
           {/* Text Content Box */}
-          <div className="bg-white dark:bg-slate-900/90 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-800 overflow-hidden">
+          <div className="pms-glass-panel rounded-3xl overflow-hidden">
             {/* Box Header */}
-            <div className="flex items-center justify-between p-3.5 bg-slate-50 dark:bg-slate-800/70 border-b border-gray-100 dark:border-slate-800 text-xs">
-              <span className="font-bold text-gray-700 dark:text-slate-200">
+            <div className="pms-glass-header flex items-center justify-between px-4 py-3 text-xs">
+              <span className="font-bold text-[var(--pms-ink)]">
                 {selectedTab === 'all' ? 'Complete Extracted Text' : `Page ${selectedTab} Content`}
               </span>
               <div className="flex items-center gap-2">
                 {selectedTab !== 'all' ? (
                   <button
                     onClick={() => copyText(currentText, false)}
-                    className="inline-flex items-center gap-1 px-3 py-1 bg-white dark:bg-slate-800 text-gray-700 dark:text-slate-200 border border-gray-200 dark:border-slate-700 rounded-lg hover:bg-gray-50 dark:hover:bg-slate-700 font-semibold"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[var(--pms-white)] dark:bg-slate-800 text-[var(--pms-ink)] border border-[var(--pms-border)] rounded-xl hover:bg-[var(--pms-soft-lavender)] font-semibold transition-colors"
                   >
                     {copiedPage ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
                     {copiedPage ? 'Copied Page!' : 'Copy This Page'}
@@ -357,7 +389,7 @@ export default function ExtractText() {
                 ) : (
                   <button
                     onClick={() => copyText(currentText, true)}
-                    className="inline-flex items-center gap-1 px-3 py-1 bg-white dark:bg-slate-800 text-gray-700 dark:text-slate-200 border border-gray-200 dark:border-slate-700 rounded-lg hover:bg-gray-50 dark:hover:bg-slate-700 font-semibold"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[var(--pms-white)] dark:bg-slate-800 text-[var(--pms-ink)] border border-[var(--pms-border)] rounded-xl hover:bg-[var(--pms-soft-lavender)] font-semibold transition-colors"
                   >
                     {copiedAll ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
                     {copiedAll ? 'Copied All!' : 'Copy All Text'}
@@ -367,48 +399,50 @@ export default function ExtractText() {
             </div>
 
             {/* Main Pre Box */}
-            <div className="p-6 max-h-[500px] overflow-y-auto bg-white dark:bg-slate-950/60 font-mono text-gray-800 dark:text-slate-200">
+            <div className="p-6 max-h-[500px] overflow-y-auto bg-white/95 dark:bg-slate-950/75 font-mono text-slate-800 dark:text-slate-200">
               {currentText ? (
                 <div className={`whitespace-pre-wrap ${fontSizeClasses[fontSize]}`}>
                   {renderHighlightedText(currentText)}
                 </div>
               ) : (
-                <p className="text-gray-400 dark:text-slate-500 italic text-sm">No text detected on this page (page may contain scanned images).</p>
+                <p className="text-[var(--pms-subtle-text)] italic text-sm">No text detected on this page (page may contain scanned images).</p>
               )}
             </div>
           </div>
 
           {/* Export Action Bar */}
-          <div className="bg-white dark:bg-slate-900/90 p-5 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-800 flex flex-wrap items-center justify-between gap-4">
+          <div className="pms-glass-panel p-5 rounded-3xl flex flex-wrap items-center justify-between gap-4">
             <div className="flex flex-wrap items-center gap-2.5">
-              <button
+              <motion.button
+                whileHover={prefersReduced ? undefined : { scale: 1.015 }}
+                whileTap={prefersReduced ? undefined : { scale: 0.985 }}
                 onClick={downloadAsTxt}
-                className="inline-flex items-center gap-2 px-5 py-3 bg-violet-600 text-white font-bold rounded-xl hover:bg-violet-700 transition-colors shadow-xs text-sm"
+                className="pms-btn-primary inline-flex items-center gap-2 px-5 py-3 font-bold rounded-2xl text-sm"
               >
                 <Download className="w-4 h-4" /> Download .TXT
-              </button>
+              </motion.button>
               <button
                 onClick={downloadAsMarkdown}
-                className="inline-flex items-center gap-2 px-4 py-3 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 font-semibold rounded-xl hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors text-sm"
+                className="inline-flex items-center gap-2 px-4 py-3 bg-[var(--pms-pearl)] dark:bg-slate-800/90 text-[var(--pms-ink)] font-semibold rounded-2xl border border-[var(--pms-border)] hover:bg-[var(--pms-soft-lavender)] transition-colors text-sm"
               >
-                <FileCode2 className="w-4 h-4 text-violet-600 dark:text-violet-400" /> Export as Markdown
+                <FileCode2 className="w-4 h-4 text-[var(--pms-violet)]" /> Export as Markdown
               </button>
               <button
                 onClick={downloadAsJson}
-                className="inline-flex items-center gap-2 px-4 py-3 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 font-semibold rounded-xl hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors text-sm"
+                className="inline-flex items-center gap-2 px-4 py-3 bg-[var(--pms-pearl)] dark:bg-slate-800/90 text-[var(--pms-ink)] font-semibold rounded-2xl border border-[var(--pms-border)] hover:bg-[var(--pms-soft-lavender)] transition-colors text-sm"
               >
-                <FileJson className="w-4 h-4 text-violet-600 dark:text-violet-400" /> Export as JSON
+                <FileJson className="w-4 h-4 text-[var(--pms-violet)]" /> Export as JSON
               </button>
             </div>
 
             <button
               onClick={() => { setFile(null); setPages([]); }}
-              className="text-xs text-gray-500 dark:text-slate-400 hover:text-gray-800 dark:hover:text-slate-200 font-medium px-4 py-2"
+              className="text-xs text-[var(--pms-muted)] hover:text-[var(--pms-ink)] font-semibold px-4 py-2 transition-colors"
             >
               Extract another PDF
             </button>
           </div>
-        </div>
+        </motion.div>
       )}
       </div>
     </ToolWorkspaceShell>

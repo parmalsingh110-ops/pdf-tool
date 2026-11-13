@@ -1,8 +1,9 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import {
   Table2, Zap, CheckCircle2, Download, RotateCcw,
   AlertTriangle, Cpu, ChevronRight, BarChart3, Filter
 } from 'lucide-react';
+import { motion, useReducedMotion } from 'motion/react';
 import * as pdfjsLib from 'pdfjs-dist';
 import * as XLSX from 'xlsx';
 import FileDropzone from '../components/FileDropzone';
@@ -12,6 +13,7 @@ import { useSEO } from '../hooks/useSEO';
 import { apiFetch } from '../lib/api';
 import '../lib/pdfWorker';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { AnimatedNumber, PearlScanOverlay, PearlStageSwitch } from '../components/pearl/PearlMotion';
 
 type Stage = 'idle' | 'analyzing' | 'converting' | 'backend' | 'done' | 'error';
 type Method = 'auto' | 'frontend' | 'backend';
@@ -210,6 +212,8 @@ async function convertBackend(file: File, method: string): Promise<Blob> {
 
 // ─── Component ───────────────────────────────────────────────────────────────
 export default function PdfToExcel() {
+  const prefersReduced = useReducedMotion();
+
   useSEO(
     'PDF to Excel Converter — Instant Online Free | PDF Media Suite',
     'Extract tables from PDF to Excel XLSX instantly in browser. No upload needed. Smart table detection with lattice and stream modes. OCR backend for scanned PDFs.'
@@ -326,187 +330,256 @@ export default function PdfToExcel() {
           ].map(({ icon: Icon, t, color }) => (
             <span
               key={t}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 border rounded-full text-xs font-semibold"
-              style={{
-                backgroundColor: 'var(--pms-white)',
-                borderColor: 'var(--pms-border)',
-                color: 'var(--pms-ink)',
-                boxShadow: 'var(--pms-shadow-sm)',
-              }}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 border rounded-full text-xs font-semibold bg-white/75 dark:bg-slate-900/75 border-[var(--pms-border)] text-[var(--pms-ink)] shadow-2xs"
             >
               <Icon className={`w-3.5 h-3.5 ${color}`} />{t}
             </span>
           ))}
         </div>
 
-        {stage === 'idle' && (
-          <div className="space-y-4">
-            <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm p-5 space-y-4">
-              {/* Method */}
-              <div>
-                <p className="text-sm font-bold text-slate-800 dark:text-slate-200 mb-2">Conversion Mode</p>
-                <div className="grid grid-cols-3 gap-2">
-                  {([
-                    { id: 'auto', label: '⚡ Smart Auto', desc: 'Detects PDF type' },
-                    { id: 'frontend', label: '🌐 Browser Only', desc: 'Instant, no upload' },
-                    { id: 'backend', label: '🧠 AI Backend', desc: 'Best for scanned' },
-                  ] as { id: Method; label: string; desc: string }[]).map(m => (
-                    <button
-                      key={m.id}
-                      onClick={() => setMethod(m.id)}
-                      className={`p-3 rounded-xl border text-left transition-all ${method === m.id
-                        ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/40 shadow-sm'
-                        : 'border-slate-200 dark:border-slate-700 hover:border-emerald-300'}`}
-                    >
-                      <p className="text-sm font-bold text-slate-800 dark:text-slate-200">{m.label}</p>
-                      <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">{m.desc}</p>
-                    </button>
-                  ))}
+        <PearlStageSwitch stageKey={stage}>
+          {stage === 'idle' && (
+            <div className="space-y-4">
+              <div className="pms-glass-panel rounded-3xl p-5 sm:p-6 space-y-5">
+                {/* Method */}
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wider text-[var(--pms-muted)] mb-2.5">Conversion Mode</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                    {([
+                      { id: 'auto', label: '⚡ Smart Auto', desc: 'Detects PDF type' },
+                      { id: 'frontend', label: '🌐 Browser Only', desc: 'Instant, no upload' },
+                      { id: 'backend', label: '🧠 AI Backend', desc: 'Best for scanned' },
+                    ] as { id: Method; label: string; desc: string }[]).map(m => {
+                      const active = method === m.id;
+                      return (
+                        <motion.button
+                          key={m.id}
+                          type="button"
+                          whileHover={prefersReduced ? undefined : { y: -1 }}
+                          whileTap={prefersReduced ? undefined : { scale: 0.99 }}
+                          onClick={() => setMethod(m.id)}
+                          style={{
+                            borderColor: active ? 'var(--pms-blue)' : 'var(--pms-border)',
+                          }}
+                          className={`relative p-3.5 rounded-2xl border text-left transition-colors ${
+                            active
+                              ? 'shadow-sm text-[var(--pms-ink)]'
+                              : 'bg-white/75 dark:bg-slate-900/75 text-[var(--pms-ink)] hover:bg-white dark:hover:bg-slate-900'
+                          }`}
+                        >
+                          {active && (
+                            <motion.span
+                              layoutId="pdftoexcel-method-pill"
+                              transition={prefersReduced ? { duration: 0 } : { type: 'spring', stiffness: 420, damping: 32 }}
+                              className="absolute inset-0 rounded-[15px]"
+                              style={{ backgroundColor: 'var(--pms-soft-blue)' }}
+                            />
+                          )}
+                          <div className="relative z-10">
+                            <p className="text-sm font-bold text-[var(--pms-ink)]">{m.label}</p>
+                            <p className="text-[11px] text-[var(--pms-muted)] mt-0.5">{m.desc}</p>
+                          </div>
+                        </motion.button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Table detection mode */}
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wider text-[var(--pms-muted)] mb-2.5">Table Detection</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    {([
+                      { id: 'lattice', label: '⬛ Lattice', desc: 'Bordered tables with lines' },
+                      { id: 'stream', label: '📄 Stream', desc: 'Borderless / text tables' },
+                    ] as { id: FrontendMode; label: string; desc: string }[]).map(m => {
+                      const active = frontendMode === m.id;
+                      return (
+                        <motion.button
+                          key={m.id}
+                          type="button"
+                          whileHover={prefersReduced ? undefined : { y: -1 }}
+                          whileTap={prefersReduced ? undefined : { scale: 0.99 }}
+                          onClick={() => setFrontendMode(m.id)}
+                          style={{
+                            borderColor: active ? 'var(--pms-violet)' : 'var(--pms-border)',
+                          }}
+                          className={`relative p-3.5 rounded-2xl border text-left transition-colors ${
+                            active
+                              ? 'shadow-sm text-[var(--pms-ink)]'
+                              : 'bg-white/75 dark:bg-slate-900/75 text-[var(--pms-ink)] hover:bg-white dark:hover:bg-slate-900'
+                          }`}
+                        >
+                          {active && (
+                            <motion.span
+                              layoutId="pdftoexcel-mode-pill"
+                              transition={prefersReduced ? { duration: 0 } : { type: 'spring', stiffness: 420, damping: 32 }}
+                              className="absolute inset-0 rounded-[15px]"
+                              style={{ backgroundColor: 'var(--pms-soft-lavender)' }}
+                            />
+                          )}
+                          <div className="relative z-10">
+                            <p className="text-sm font-bold text-[var(--pms-ink)]">{m.label}</p>
+                            <p className="text-[11px] text-[var(--pms-muted)] mt-0.5">{m.desc}</p>
+                          </div>
+                        </motion.button>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
 
-              {/* Table detection mode */}
-              <div>
-                <p className="text-sm font-bold text-slate-800 dark:text-slate-200 mb-2">Table Detection</p>
-                <div className="grid grid-cols-2 gap-2">
-                  {([
-                    { id: 'lattice', label: '⬛ Lattice', desc: 'Bordered tables with lines' },
-                    { id: 'stream', label: '📄 Stream', desc: 'Borderless / text tables' },
-                  ] as { id: FrontendMode; label: string; desc: string }[]).map(m => (
-                    <button
-                      key={m.id}
-                      onClick={() => setFrontendMode(m.id)}
-                      className={`p-3 rounded-xl border text-left transition-all ${frontendMode === m.id
-                        ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/40 shadow-sm'
-                        : 'border-slate-200 dark:border-slate-700 hover:border-emerald-300'}`}
-                    >
-                      <p className="text-sm font-bold text-slate-800 dark:text-slate-200">{m.label}</p>
-                      <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">{m.desc}</p>
-                    </button>
+              <FileDropzone
+                onDrop={handleDrop}
+                multiple={false}
+                title="Drop PDF to extract tables to Excel"
+                subtitle="Tables extracted instantly in browser • Each table becomes a separate sheet"
+              />
+
+              <div className="pms-glass-panel rounded-2xl p-4">
+                <p className="text-xs font-bold text-[var(--pms-ink)] mb-2">📊 Table Extraction Modes:</p>
+                <div className="space-y-1.5">
+                  {[
+                    'Lattice: finds tables separated by whitespace — best for grid-style tables',
+                    'Stream: extracts all page content as structured rows — best for text-heavy pages',
+                  ].map(s => (
+                    <div key={s} className="flex items-start gap-2">
+                      <ChevronRight className="w-3.5 h-3.5 text-emerald-500 mt-0.5 shrink-0" />
+                      <p className="text-xs text-[var(--pms-muted)]">{s}</p>
+                    </div>
                   ))}
                 </div>
               </div>
             </div>
+          )}
 
-            <FileDropzone
-              onDrop={handleDrop}
-              multiple={false}
-              title="Drop PDF to extract tables to Excel"
-              subtitle="Tables extracted instantly in browser • Each table becomes a separate sheet"
+          {stage === 'analyzing' && (
+            <div className="pms-glass-panel rounded-3xl p-10 text-center relative overflow-hidden">
+              <PearlScanOverlay active={true} label={progress || 'Analyzing PDF structure...'} />
+              <div
+                className="w-14 h-14 rounded-full border-4 border-t-transparent animate-spin mx-auto mb-4"
+                style={{ borderColor: 'var(--pms-blue)', borderTopColor: 'transparent' }}
+              />
+              <p className="font-bold text-[var(--pms-ink)]">Analyzing PDF...</p>
+              <p className="text-sm text-[var(--pms-muted)] mt-1">{progress}</p>
+            </div>
+          )}
+
+          {stage === 'converting' && (
+            <div className="pms-glass-panel rounded-3xl p-10 text-center relative overflow-hidden">
+              <PearlScanOverlay active={true} label={progress || 'Extracting spreadsheet tables...'} />
+              <div className="w-16 h-16 rounded-full border-4 border-emerald-200 border-t-emerald-600 animate-spin mx-auto mb-4" />
+              <div
+                className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold mb-3 border border-[var(--pms-border)]"
+                style={{ backgroundColor: 'var(--pms-soft-mint)', color: 'var(--pms-ink)' }}
+              >
+                <Zap className="w-3 h-3 text-emerald-600" /> Extracting in browser — no upload needed
+              </div>
+              <p className="font-bold text-[var(--pms-ink)]">{progress || 'Processing...'}</p>
+            </div>
+          )}
+
+          {stage === 'backend' && (
+            <BackendLoader
+              title="Camelot Table Extraction…"
+              accentColor="emerald"
+              steps={[
+                { icon: '📤', label: 'Uploading', detail: 'Sending PDF to extraction server...' },
+                { icon: '🔍', label: 'Scanning', detail: 'Detecting table borders & grids...' },
+                { icon: '📊', label: 'Extracting', detail: 'Camelot parsing all table cells...' },
+                { icon: '💾', label: 'Building', detail: 'Writing rows to Excel sheets...' },
+              ]}
+              tips={[
+                '📊 Camelot backend runs only for complex/scanned PDFs.',
+                '⚡ Text PDFs extract instantly in your browser.',
+                '🔒 Files auto-deleted from server after download.',
+                '📝 Each table gets its own Excel sheet.',
+              ]}
             />
+          )}
 
-            <div className="bg-emerald-50 dark:bg-emerald-950/20 rounded-2xl border border-emerald-100 dark:border-emerald-900 p-4">
-              <p className="text-xs font-bold text-emerald-800 dark:text-emerald-300 mb-2">📊 Table Extraction Modes:</p>
-              <div className="space-y-1">
-                {[
-                  'Lattice: finds tables separated by whitespace — best for grid-style tables',
-                  'Stream: extracts all page content as structured rows — best for text-heavy pages',
-                ].map(s => (
-                  <div key={s} className="flex items-start gap-2">
-                    <ChevronRight className="w-3 h-3 text-emerald-500 mt-0.5 shrink-0" />
-                    <p className="text-xs text-emerald-700 dark:text-emerald-400">{s}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {stage === 'analyzing' && (
-          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm p-8 text-center">
-            <div className="w-14 h-14 rounded-full border-4 border-emerald-200 border-t-emerald-600 animate-spin mx-auto mb-4" />
-            <p className="font-bold text-slate-800 dark:text-slate-200">Analyzing PDF...</p>
-            <p className="text-sm text-slate-500 mt-1">{progress}</p>
-          </div>
-        )}
-
-        {stage === 'converting' && (
-          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-emerald-200 dark:border-emerald-800 shadow-lg p-8 text-center">
-            <div className="w-16 h-16 rounded-full border-4 border-emerald-100 border-t-emerald-600 animate-spin mx-auto mb-4" />
-            <div className="inline-flex items-center gap-2 px-3 py-1 bg-emerald-100 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 rounded-full text-xs font-bold mb-3">
-              <Zap className="w-3 h-3" /> Extracting in browser — no upload needed
-            </div>
-            <p className="font-bold text-slate-800 dark:text-slate-200">{progress || 'Processing...'}</p>
-          </div>
-        )}
-
-        {stage === 'backend' && (
-          <BackendLoader
-            title="Camelot Table Extraction…"
-            accentColor="emerald"
-            steps={[
-              { icon: '📤', label: 'Uploading', detail: 'Sending PDF to extraction server...' },
-              { icon: '🔍', label: 'Scanning', detail: 'Detecting table borders & grids...' },
-              { icon: '📊', label: 'Extracting', detail: 'Camelot parsing all table cells...' },
-              { icon: '💾', label: 'Building', detail: 'Writing rows to Excel sheets...' },
-            ]}
-            tips={[
-              '📊 Camelot backend runs only for complex/scanned PDFs.',
-              '⚡ Text PDFs extract instantly in your browser.',
-              '🔒 Files auto-deleted from server after download.',
-              '📝 Each table gets its own Excel sheet.',
-            ]}
-          />
-        )}
-
-        {stage === 'done' && resultUrl && file && (
-          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-emerald-200 dark:border-emerald-800 shadow-lg overflow-hidden">
-            <div className="bg-emerald-50 dark:bg-emerald-950/40 px-6 py-5 border-b border-emerald-200 dark:border-emerald-800 flex items-center gap-3">
-              <CheckCircle2 className="w-8 h-8 text-emerald-500" />
-              <div>
-                <h3 className="text-xl font-bold text-emerald-900 dark:text-emerald-200">Extraction Complete!</h3>
-                <p className="text-sm text-emerald-700 dark:text-emerald-400">Your Excel file is ready.</p>
-              </div>
-            </div>
-
-            {stats && (
-              <div className="px-6 pt-4 grid grid-cols-4 gap-3">
-                {[
-                  { label: 'Pages', val: stats.pages },
-                  { label: 'Tables', val: stats.tables || '—' },
-                  { label: 'Method', val: stats.method === 'frontend' ? '⚡ Browser' : '🧠 Backend' },
-                  { label: 'Rows', val: stats.rows || '—' },
-                ].map(s => (
-                  <div key={s.label} className="bg-slate-50 dark:bg-slate-800 rounded-xl p-3 text-center">
-                    <p className="text-xs text-slate-500 dark:text-slate-400">{s.label}</p>
-                    <p className="text-sm font-bold text-slate-800 dark:text-slate-200 mt-0.5">{s.val}</p>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            <div className="p-6 space-y-3">
-              <a
-                href={resultUrl}
-                download={file.name.replace(/\.pdf$/i, '') + '_tables.xlsx'}
-                className="flex items-center justify-center gap-2 w-full px-6 py-4 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-bold rounded-xl shadow-md transition-all hover:scale-[1.01]"
+          {stage === 'done' && resultUrl && file && (
+            <div className="pms-glass-panel rounded-3xl overflow-hidden">
+              <div
+                className="px-6 py-5 border-b border-[var(--pms-border)] flex items-center gap-3"
+                style={{ backgroundColor: 'var(--pms-soft-mint)' }}
               >
-                <Download className="w-5 h-5" /> Download Excel File (.xlsx)
-              </a>
+                <div className="w-11 h-11 rounded-2xl bg-white/80 dark:bg-slate-900/80 border border-[var(--pms-border)] flex items-center justify-center shrink-0">
+                  <CheckCircle2 className="w-6 h-6 text-emerald-600 dark:text-emerald-400" />
+                </div>
+                <div>
+                  <h3 className="text-xl font-bold text-[var(--pms-ink)]">Extraction Complete!</h3>
+                  <p className="text-sm text-[var(--pms-muted)]">Your Excel file is ready.</p>
+                </div>
+              </div>
+
+              {stats && (
+                <div className="px-6 pt-5 grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <div className="bg-white/75 dark:bg-slate-900/75 border border-[var(--pms-border)] rounded-xl p-3 text-center">
+                    <p className="text-xs text-[var(--pms-muted)]">Pages</p>
+                    <p className="text-sm font-bold text-[var(--pms-ink)] mt-0.5"><AnimatedNumber value={stats.pages} /></p>
+                  </div>
+                  <div className="bg-white/75 dark:bg-slate-900/75 border border-[var(--pms-border)] rounded-xl p-3 text-center">
+                    <p className="text-xs text-[var(--pms-muted)]">Tables</p>
+                    <p className="text-sm font-bold text-[var(--pms-ink)] mt-0.5">
+                      {stats.tables ? <AnimatedNumber value={stats.tables} /> : '—'}
+                    </p>
+                  </div>
+                  <div className="bg-white/75 dark:bg-slate-900/75 border border-[var(--pms-border)] rounded-xl p-3 text-center">
+                    <p className="text-xs text-[var(--pms-muted)]">Method</p>
+                    <p className="text-sm font-bold text-[var(--pms-ink)] mt-0.5">
+                      {stats.method === 'frontend' ? '⚡ Browser' : '🧠 Backend'}
+                    </p>
+                  </div>
+                  <div className="bg-white/75 dark:bg-slate-900/75 border border-[var(--pms-border)] rounded-xl p-3 text-center">
+                    <p className="text-xs text-[var(--pms-muted)]">Rows</p>
+                    <p className="text-sm font-bold text-[var(--pms-ink)] mt-0.5">
+                      {stats.rows ? <AnimatedNumber value={stats.rows} /> : '—'}
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              <div className="p-6 space-y-3">
+                <motion.a
+                  whileHover={prefersReduced ? undefined : { scale: 1.01 }}
+                  whileTap={prefersReduced ? undefined : { scale: 0.98 }}
+                  href={resultUrl}
+                  download={file.name.replace(/\.pdf$/i, '') + '_tables.xlsx'}
+                  className="pms-btn-primary flex items-center justify-center gap-2 w-full px-6 py-4 font-bold rounded-2xl"
+                >
+                  <Download className="w-5 h-5" /> Download Excel File (.xlsx)
+                </motion.a>
+                <button
+                  type="button"
+                  onClick={reset}
+                  className="flex items-center justify-center gap-2 w-full px-6 py-3 bg-white/75 dark:bg-slate-900/75 hover:bg-white dark:hover:bg-slate-900 text-[var(--pms-ink)] font-semibold rounded-2xl border border-[var(--pms-border)] transition-colors"
+                >
+                  <RotateCcw className="w-4 h-4" /> Extract Another File
+                </button>
+              </div>
+            </div>
+          )}
+
+          {stage === 'error' && (
+            <div className="pms-glass-panel rounded-3xl border-red-200 dark:border-red-800 p-6">
+              <div className="flex items-start gap-3 mb-4">
+                <AlertTriangle className="w-6 h-6 text-red-500 shrink-0 mt-0.5" />
+                <div>
+                  <h3 className="font-bold text-red-700 dark:text-red-300">Extraction Failed</h3>
+                  <p className="text-sm text-red-600 dark:text-red-400 mt-1">{errorMsg}</p>
+                </div>
+              </div>
               <button
+                type="button"
                 onClick={reset}
-                className="flex items-center justify-center gap-2 w-full px-6 py-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-semibold rounded-xl border border-slate-200 dark:border-slate-700 transition-colors"
+                className="flex items-center gap-2 text-sm text-[var(--pms-ink)] hover:underline font-medium"
               >
-                <RotateCcw className="w-4 h-4" /> Extract Another File
+                <RotateCcw className="w-4 h-4" /> Try again
               </button>
             </div>
-          </div>
-        )}
-
-        {stage === 'error' && (
-          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-red-200 dark:border-red-800 p-6">
-            <div className="flex items-start gap-3 mb-4">
-              <AlertTriangle className="w-6 h-6 text-red-500 shrink-0 mt-0.5" />
-              <div>
-                <h3 className="font-bold text-red-800 dark:text-red-200">Extraction Failed</h3>
-                <p className="text-sm text-red-700 dark:text-red-300 mt-1">{errorMsg}</p>
-              </div>
-            </div>
-            <button onClick={reset} className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white font-medium">
-              <RotateCcw className="w-4 h-4" /> Try again
-            </button>
-          </div>
-        )}
+          )}
+        </PearlStageSwitch>
       </div>
     </ToolWorkspaceShell>
   );

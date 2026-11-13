@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Download, Eraser, ImageIcon, RefreshCw } from 'lucide-react';
+import { motion, useReducedMotion } from 'motion/react';
+import { CheckCircle2, Download, Eraser, ImageIcon, RefreshCw } from 'lucide-react';
 import FileDropzone from '../components/FileDropzone';
 import { useSEO } from '../hooks/useSEO';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { AnimatedNumber, PearlScanOverlay } from '../components/pearl/PearlMotion';
 
-// â”€â”€â”€ CDN fallback chain â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── CDN fallback chain ──────────────────────────────────────────────────────
 // staticimgly.com often has CORS / availability issues.
 // We try multiple CDNs in order until one works.
 const CDN_FALLBACKS = [
@@ -51,6 +53,7 @@ async function removeWithCDN(
 export default function RemoveBackground() {
   useSEO('Remove Background Online Free | PDF Media Suite', 'Free online Remove Background tool. No signup or installation required.');
 
+  const prefersReduced = useReducedMotion();
   const [file, setFile] = useState<File | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [resultUrl, setResultUrl] = useState<string | null>(null);
@@ -81,7 +84,7 @@ export default function RemoveBackground() {
       workingCdnRef.current = cdn;
       setModelReady(true);
       setLoadProgress(100);
-      setProgressText('Model ready âœ“');
+      setProgressText('Model ready ✓');
     } catch (e: any) {
       setError(e?.message || 'Failed to load AI model. Check your internet connection.');
       setProgressText('');
@@ -173,39 +176,50 @@ export default function RemoveBackground() {
         {!modelReady && (
           <div className="w-full max-w-xl mb-6">
             {loadingModel && (
-              <div className="bg-blue-50 border border-blue-200 rounded-xl p-5">
+              <motion.div
+                initial={prefersReduced ? false : { opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="pms-glass-panel bg-blue-50/80 dark:bg-blue-950/35 border border-blue-200/80 dark:border-blue-800/70 rounded-2xl p-5"
+              >
                 <div className="flex items-center justify-between mb-2">
-                  <p className="text-sm font-semibold text-blue-800">Loading AI Model…</p>
-                  <span className="text-sm font-bold text-blue-700">{loadProgress}%</span>
+                  <p className="text-sm font-bold text-blue-900 dark:text-blue-200">Loading AI Model…</p>
+                  <span className="text-sm font-extrabold text-blue-700 dark:text-blue-300 font-mono">
+                    <AnimatedNumber value={loadProgress} suffix="%" />
+                  </span>
                 </div>
-                <div className="w-full bg-blue-100 rounded-full h-2.5">
+                <div className="w-full bg-blue-100 dark:bg-blue-900/50 rounded-full h-2.5 overflow-hidden">
                   <div
-                    className="bg-blue-600 h-2.5 rounded-full transition-all duration-300"
+                    className="bg-blue-600 dark:bg-blue-400 h-2.5 rounded-full transition-all duration-300"
                     style={{ width: `${loadProgress}%` }}
                   />
                 </div>
-                <p className="text-xs text-blue-600 mt-2">{progressText}</p>
-                <p className="text-xs text-blue-500 mt-1">
+                <p className="text-xs text-blue-700 dark:text-blue-300 mt-2 font-medium">{progressText}</p>
+                <p className="text-xs text-blue-600/80 dark:text-blue-400/80 mt-1">
                   First time only (~25 MB). Cached in browser for instant future use.
                 </p>
-              </div>
+              </motion.div>
             )}
             {error && !loadingModel && (
-              <div className="bg-red-50 border border-red-200 rounded-xl p-5 space-y-3">
-                <p className="text-sm font-semibold text-red-700">⚠ Model failed to load</p>
-              <p className="text-xs text-red-600">{error}</p>
-              <button
-                type="button"
-                onClick={loadModel}
-                className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white text-sm font-semibold rounded-lg hover:bg-red-700 transition-colors"
+              <motion.div
+                initial={prefersReduced ? false : { opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="pms-glass-panel bg-rose-50/85 dark:bg-rose-950/40 border border-rose-200/80 dark:border-rose-800/70 rounded-2xl p-5 space-y-3"
               >
-                <RefreshCw className="w-4 h-4" />
-                Retry
-              </button>
-            </div>
-          )}
-        </div>
-      )}
+                <p className="text-sm font-bold text-rose-800 dark:text-rose-200">⚠ Model failed to load</p>
+                <p className="text-xs text-rose-700 dark:text-rose-300">{error}</p>
+                <motion.button
+                  whileTap={prefersReduced ? undefined : { scale: 0.97 }}
+                  type="button"
+                  onClick={loadModel}
+                  className="flex items-center gap-2 px-4 py-2 bg-rose-600 text-white text-sm font-bold rounded-xl hover:bg-rose-700 transition-colors"
+                >
+                  <RefreshCw className="w-4 h-4" />
+                  Retry
+                </motion.button>
+              </motion.div>
+            )}
+          </div>
+        )}
 
       {!file ? (
         <FileDropzone
@@ -216,57 +230,94 @@ export default function RemoveBackground() {
           accept={{ 'image/*': ['.jpg', '.jpeg', '.png', '.webp', '.bmp', '.gif'] }}
         />
       ) : (
-        <div className="w-full max-w-4xl bg-white dark:bg-slate-900 rounded-2xl shadow-sm border border-gray-200 dark:border-slate-800 p-8">
+        <motion.div
+          initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.28 }}
+          className="relative overflow-hidden min-h-[380px] w-full max-w-4xl pms-glass-panel rounded-3xl shadow-sm border border-[var(--pms-border)] p-6 sm:p-8"
+        >
+          <PearlScanOverlay active={isProcessing} label={progressText || 'Removing background with on-device AI...'} />
+
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
             <div>
-              <p className="font-semibold text-gray-800 dark:text-slate-200 mb-3">Original</p>
-              <div className="rounded-xl border border-gray-200 dark:border-slate-700 overflow-hidden bg-gray-50 dark:bg-slate-800/60">
+              <p className="font-bold text-sm text-[var(--pms-ink)] mb-3">Original</p>
+              <div className="rounded-2xl border border-[var(--pms-border)] overflow-hidden bg-white p-2 shadow-inner">
                 {filePreview && (
-                  <img src={filePreview} alt="Original" className="w-full h-auto object-contain max-h-[420px]" />
+                  <img src={filePreview} alt="Original" className="w-full h-auto object-contain max-h-[420px] rounded-xl" />
                 )}
               </div>
             </div>
 
             <div className="space-y-4">
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 bg-pink-50 dark:bg-pink-950/40 text-pink-600 dark:text-pink-400 rounded-xl flex items-center justify-center">
-                  <ImageIcon className="w-6 h-6" />
+              <div className="flex items-center gap-3 p-3 rounded-2xl bg-white/65 dark:bg-slate-800/60 border border-[var(--pms-border)]">
+                <div className="w-11 h-11 bg-rose-50 dark:bg-rose-950/45 border border-rose-200/70 dark:border-rose-800/60 text-rose-600 dark:text-rose-400 rounded-xl flex items-center justify-center shrink-0">
+                  <ImageIcon className="w-5 h-5" />
                 </div>
-                <div>
-                  <p className="font-semibold text-gray-900 dark:text-white truncate max-w-[240px]">{file.name}</p>
-                  <p className="text-xs text-gray-500 dark:text-slate-400">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
+                <div className="min-w-0">
+                  <p className="font-bold text-sm text-[var(--pms-ink)] truncate">{file.name}</p>
+                  <p className="text-xs text-[var(--pms-muted)] font-mono">
+                    <AnimatedNumber value={Number((file.size / 1024 / 1024).toFixed(2))} decimals={2} suffix=" MB" />
+                  </p>
                 </div>
               </div>
 
               {format !== 'png' && (
                 <>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-slate-300">
+                  <label className="block text-sm font-semibold text-[var(--pms-ink)]">
                     Background Color
                     <input
                       type="color"
                       value={bgColor}
                       onChange={(e) => setBgColor(e.target.value)}
-                      className="mt-2 w-full h-11 p-1 border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-800 rounded-lg"
+                      className="mt-2 w-full h-11 p-1 border border-[var(--pms-border)] bg-white/85 dark:bg-slate-800/85 rounded-xl cursor-pointer"
                     />
                   </label>
                   <div className="flex gap-2">
-                    <button type="button" onClick={() => setBgColor('#ffffff')} className="px-3 py-2 bg-gray-100 dark:bg-slate-800 text-gray-800 dark:text-slate-200 hover:bg-gray-200 dark:hover:bg-slate-700 rounded-lg text-sm font-medium transition-colors">Passport White</button>
-                    <button type="button" onClick={() => setBgColor('#d6e7ff')} className="px-3 py-2 bg-gray-100 dark:bg-slate-800 text-gray-800 dark:text-slate-200 hover:bg-gray-200 dark:hover:bg-slate-700 rounded-lg text-sm font-medium transition-colors">Light Blue</button>
+                    <motion.button
+                      whileTap={prefersReduced ? undefined : { scale: 0.96 }}
+                      type="button"
+                      onClick={() => setBgColor('#ffffff')}
+                      className="px-3 py-2 bg-white/85 dark:bg-slate-800/85 border border-[var(--pms-border)] text-[var(--pms-ink)] hover:border-rose-400 rounded-xl text-xs font-bold transition-colors"
+                    >
+                      Passport White
+                    </motion.button>
+                    <motion.button
+                      whileTap={prefersReduced ? undefined : { scale: 0.96 }}
+                      type="button"
+                      onClick={() => setBgColor('#d6e7ff')}
+                      className="px-3 py-2 bg-white/85 dark:bg-slate-800/85 border border-[var(--pms-border)] text-[var(--pms-ink)] hover:border-rose-400 rounded-xl text-xs font-bold transition-colors"
+                    >
+                      Light Blue
+                    </motion.button>
                   </div>
                 </>
               )}
 
-              <label className="block text-sm font-medium text-gray-700 dark:text-slate-300">
-                Quality ({Math.round(quality * 100)}%)
-                <input type="range" min={0.6} max={1} step={0.01} value={quality}
+              <label className="block text-sm font-semibold text-[var(--pms-ink)]">
+                <div className="flex items-center justify-between">
+                  <span>Quality</span>
+                  <span className="font-mono text-xs text-[var(--pms-muted)]">
+                    <AnimatedNumber value={Math.round(quality * 100)} suffix="%" />
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min={0.6}
+                  max={1}
+                  step={0.01}
+                  value={quality}
                   onChange={(e) => setQuality(Number(e.target.value))}
-                  className="mt-2 w-full" />
+                  className="mt-2 w-full accent-rose-600"
+                />
               </label>
 
-              <label className="block text-sm font-medium text-gray-700 dark:text-slate-300">
+              <label className="block text-sm font-semibold text-[var(--pms-ink)]">
                 Output Format
-                <select value={format} onChange={(e) => setFormat(e.target.value as any)}
-                  className="mt-2 w-full px-3 py-2 border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-900 dark:text-slate-100 rounded-lg">
+                <select
+                  value={format}
+                  onChange={(e) => setFormat(e.target.value as any)}
+                  className="mt-2 w-full px-3 py-2.5 border border-[var(--pms-border)] bg-white/85 dark:bg-slate-800/85 text-[var(--pms-ink)] rounded-xl text-sm font-medium focus:outline-none focus:border-rose-500"
+                >
                   <option value="png">PNG (transparent background)</option>
                   <option value="jpg">JPG</option>
                   <option value="jpeg">JPEG</option>
@@ -275,70 +326,90 @@ export default function RemoveBackground() {
               </label>
 
               {error && (
-                <div className="p-3 bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-300 text-sm rounded-lg border border-red-200 dark:border-red-900/50 space-y-2">
+                <div className="p-3 bg-rose-50/90 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 text-sm rounded-xl border border-rose-200 dark:border-rose-900/50 space-y-2">
                   <p>{error}</p>
                   {!modelReady && (
-                    <button type="button" onClick={loadModel}
-                      className="flex items-center gap-2 px-3 py-1.5 bg-red-600 text-white text-xs font-semibold rounded-lg hover:bg-red-700">
+                    <button
+                      type="button"
+                      onClick={loadModel}
+                      className="flex items-center gap-2 px-3 py-1.5 bg-rose-600 text-white text-xs font-semibold rounded-lg hover:bg-rose-700"
+                    >
                       <RefreshCw className="w-3 h-3" /> Retry
                     </button>
                   )}
                 </div>
               )}
               {progressText && (
-                <div className="p-3 bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 text-sm rounded-lg border border-blue-200 dark:border-blue-900/50">
+                <div className="p-3 bg-blue-50/85 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 text-sm font-medium rounded-xl border border-blue-200/80 dark:border-blue-900/50">
                   {progressText}
                 </div>
               )}
               {!modelReady && !error && loadingModel && (
-                <div className="p-3 bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 text-sm rounded-lg border border-amber-200 dark:border-amber-900/50">
+                <div className="p-3 bg-amber-50/85 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 text-sm font-medium rounded-xl border border-amber-200/80 dark:border-amber-900/50">
                   ⏳ Waiting for AI model to finish loading…
                 </div>
               )}
 
               <div className="flex gap-3 pt-2">
-                <button
+                <motion.button
+                  whileTap={prefersReduced ? undefined : { scale: 0.98 }}
+                  type="button"
                   onClick={process}
                   disabled={isProcessing || !modelReady}
-                  className="flex-1 py-3 bg-pink-600 text-white font-bold rounded-xl hover:bg-pink-700 disabled:opacity-50 flex items-center justify-center gap-2 transition-colors"
+                  className="pms-btn-primary flex-1 py-3 font-bold rounded-2xl disabled:opacity-50 flex items-center justify-center gap-2 transition"
                 >
                   <Eraser className="w-5 h-5" />
                   {isProcessing ? 'Removing...' : 'Remove Background'}
-                </button>
-                <button
+                </motion.button>
+                <motion.button
+                  whileTap={prefersReduced ? undefined : { scale: 0.97 }}
+                  type="button"
                   onClick={() => { setFile(null); setResultUrl(null); setError(null); setProgressText(''); }}
-                  className="px-5 py-3 bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-slate-200 font-semibold rounded-xl hover:bg-gray-200 dark:hover:bg-slate-700 transition-colors"
+                  className="px-5 py-3 bg-white/85 dark:bg-slate-800/85 border border-[var(--pms-border)] text-[var(--pms-ink)] font-semibold rounded-2xl hover:border-slate-400 transition-colors"
                 >
                   Reset
-                </button>
+                </motion.button>
               </div>
 
               {resultUrl && (
-                <div className="mt-2 space-y-3">
-                  <p className="text-sm font-semibold text-gray-800 dark:text-slate-200">Result Preview</p>
+                <motion.div
+                  initial={prefersReduced ? false : { opacity: 0, y: 8, scale: 0.98 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  className="mt-2 p-4 rounded-2xl bg-emerald-50/80 dark:bg-emerald-950/35 border border-emerald-200/80 dark:border-emerald-800/70 space-y-3"
+                >
+                  <div className="flex items-center gap-2 text-sm font-bold text-emerald-800 dark:text-emerald-200">
+                    <motion.div
+                      initial={prefersReduced ? false : { scale: 0.6 }}
+                      animate={{ scale: 1 }}
+                      transition={{ type: 'spring', stiffness: 420, damping: 24 }}
+                      className="w-6 h-6 rounded-lg bg-emerald-500/15 flex items-center justify-center"
+                    >
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                    </motion.div>
+                    <span>Cutout Ready</span>
+                  </div>
                   <div
-                    className="rounded-xl border border-gray-200 overflow-hidden"
-                    style={{
-                      background: format === 'png'
-                        ? 'repeating-conic-gradient(#e5e7eb 0% 25%, white 0% 50%) 0 0 / 16px 16px'
-                        : bgColor,
-                    }}
+                    className={`rounded-xl border border-[var(--pms-border)] overflow-hidden shadow-inner ${
+                      format === 'png' ? 'bg-white pms-checkerboard' : ''
+                    }`}
+                    style={format === 'png' ? undefined : { backgroundColor: bgColor }}
                   >
                     <img src={resultUrl} alt="Result" className="w-full h-auto object-contain max-h-[280px]" />
                   </div>
-                  <a
+                  <motion.a
+                    whileTap={prefersReduced ? undefined : { scale: 0.98 }}
                     href={resultUrl}
                     download={`${file.name.replace(/\.[^/.]+$/, '')}_no_bg.${format}`}
-                    className="w-full inline-flex items-center justify-center gap-2 py-3 bg-green-600 text-white font-bold rounded-xl hover:bg-green-700 transition-colors"
+                    className="w-full inline-flex items-center justify-center gap-2 py-3 bg-emerald-600 text-white font-bold rounded-xl hover:bg-emerald-700 shadow-sm transition-colors"
                   >
                     <Download className="w-5 h-5" />
                     Download Result
-                  </a>
-                </div>
+                  </motion.a>
+                </motion.div>
               )}
             </div>
           </div>
-        </div>
+        </motion.div>
       )}
       </div>
     </ToolWorkspaceShell>

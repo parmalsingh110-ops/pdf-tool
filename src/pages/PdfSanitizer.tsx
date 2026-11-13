@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { motion, useReducedMotion } from "motion/react";
 import { Shield, Download, CheckCircle, FileText, Loader2, AlertTriangle } from "lucide-react";
 import { PDFDocument, PDFName } from "pdf-lib";
 import * as pdfjsLib from "pdfjs-dist";
@@ -6,6 +7,9 @@ import "../lib/pdfWorker";
 import FileDropzone from "../components/FileDropzone";
 import { usePageSEO } from "../lib/usePageSEO";
 import { useSEO } from '../hooks/useSEO';
+import { toArrayBufferBytes, useAutoRevokeUrl } from "../lib/blobUrl";
+import ToolWorkspaceShell from "../components/pearl/ToolWorkspaceShell";
+import { AnimatedNumber, PearlScanOverlay, PearlStageSwitch } from "../components/pearl/PearlMotion";
 
 interface SanitizeReport {
   metadata: number;
@@ -36,6 +40,8 @@ export default function PdfSanitizer() {
   const [report, setReport] = useState<SanitizeReport | null>(null);
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  useAutoRevokeUrl(resultUrl);
 
   const handleDrop = (files: File[]) => {
     if (files[0]) { setFile(files[0]); setReport(null); setResultUrl(null); setError(null); }
@@ -165,7 +171,7 @@ export default function PdfSanitizer() {
       } catch { /* best-effort */ }
 
       // 10. Save
-      const outBytes = await pdfDoc.save({ useObjectStreams: false });
+      const outBytes = toArrayBufferBytes(await pdfDoc.save({ useObjectStreams: false }));
       const blob = new Blob([outBytes], { type: "application/pdf" });
       rep.newSize = (outBytes.length / 1024).toFixed(1);
       rep.savings = Math.max(0, (file.size - outBytes.length) / 1024).toFixed(1);
@@ -192,99 +198,182 @@ export default function PdfSanitizer() {
   ] : [];
 
   const totalRemoved = layers.filter((l: any) => !l.isStatus).reduce((s, l) => s + l.value, 0);
+  const prefersReduced = useReducedMotion();
+  const stageKey = !file ? "upload" : !resultUrl ? "ready" : "report";
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center p-8">
-      <div className="text-center mb-8">
-        <div className="w-16 h-16 bg-emerald-100 dark:bg-emerald-950/40 rounded-2xl flex items-center justify-center mx-auto mb-4">
-          <Shield className="w-8 h-8 text-emerald-600 dark:text-emerald-400" />
-        </div>
-        <h1 className="text-4xl font-bold text-gray-900 dark:text-white mb-3">PDF Deep Sanitizer</h1>
-        <p className="text-xl text-gray-600 dark:text-slate-400 max-w-2xl mx-auto">
-          Remove hidden metadata, JavaScript, embedded files, tracking data, comments, and 10+ hidden layers from your PDF.
-        </p>
-        <div className="flex flex-wrap items-center justify-center gap-2 mt-4">
-          {["Metadata", "JavaScript", "Hidden Text", "Bookmarks", "Attachments", "Form Fields", "Thumbnails", "XMP Data"].map(tag => (
-            <span key={tag} className="px-3 py-1 text-xs font-medium bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400 rounded-full border border-emerald-200 dark:border-emerald-800">
-              ✓ {tag}
-            </span>
-          ))}
-        </div>
+    <ToolWorkspaceShell
+      title="PDF Deep Sanitizer"
+      subtitle="Remove hidden metadata, JavaScript, embedded files, tracking data, comments, and 10+ hidden layers from your PDF."
+      categoryLabel="Deep Privacy Shield"
+      icon={Shield}
+      microVariant="security"
+      tone="emerald"
+      trustNote="100% browser-only deep scrub · Strips scripts, XMP & hidden OCR text"
+    >
+      <div className="flex flex-wrap items-center justify-center gap-2 mb-7">
+        {["Metadata", "JavaScript", "Hidden Text", "Bookmarks", "Attachments", "Form Fields", "Thumbnails", "XMP Data"].map((tag, idx) => (
+          <motion.span
+            key={tag}
+            initial={prefersReduced ? false : { opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.25, delay: idx * 0.03 }}
+            className="px-3 py-1 text-xs font-semibold bg-[var(--pms-soft-mint)] text-emerald-700 dark:text-emerald-300 rounded-full border border-[var(--pms-border)]"
+          >
+            ✓ {tag}
+          </motion.span>
+        ))}
       </div>
 
-      {!file ? (
-        <FileDropzone onDrop={handleDrop} multiple={false} />
-      ) : !resultUrl ? (
-        <div className="w-full max-w-lg space-y-4">
-          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-gray-200 dark:border-slate-700 p-6 flex items-center gap-4">
-            <div className="w-12 h-12 bg-emerald-50 dark:bg-emerald-950/40 rounded-xl flex items-center justify-center shrink-0">
-              <FileText className="w-6 h-6 text-emerald-600" />
+      <PearlStageSwitch stageKey={stageKey}>
+        {!file ? (
+          <div className="max-w-2xl mx-auto">
+            <FileDropzone onDrop={handleDrop} multiple={false} />
+          </div>
+        ) : !resultUrl ? (
+          <div className="relative w-full max-w-lg mx-auto pms-glass-panel rounded-3xl p-6 space-y-5 overflow-hidden">
+            <PearlScanOverlay active={busy} label="Inspecting & stripping 10 hidden layers…" />
+
+            <div
+              className="rounded-2xl border p-5 flex items-center gap-4"
+              style={{ backgroundColor: "var(--pms-white)", borderColor: "var(--pms-border)" }}
+            >
+              <div className="w-12 h-12 bg-[var(--pms-soft-mint)] rounded-xl flex items-center justify-center shrink-0">
+                <FileText className="w-6 h-6 text-emerald-600 dark:text-emerald-400" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="font-bold text-gray-900 dark:text-white truncate">{file.name}</p>
+                <p className="text-sm text-gray-500 dark:text-slate-400">{(file.size / 1024).toFixed(1)} KB</p>
+              </div>
             </div>
-            <div className="flex-1 min-w-0">
-              <p className="font-semibold text-gray-900 dark:text-white truncate">{file.name}</p>
-              <p className="text-sm text-gray-500 dark:text-slate-400">{(file.size / 1024).toFixed(1)} KB</p>
+
+            {error && (
+              <motion.div
+                initial={prefersReduced ? false : { opacity: 0, y: -6 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="p-4 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-xl flex items-start gap-3 text-red-700 dark:text-red-300"
+              >
+                <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" />
+                <p className="text-sm">{error}</p>
+              </motion.div>
+            )}
+
+            <div className="flex gap-3">
+              <motion.button
+                whileHover={prefersReduced || busy ? undefined : { scale: 1.01 }}
+                whileTap={prefersReduced || busy ? undefined : { scale: 0.985 }}
+                onClick={sanitize}
+                disabled={busy}
+                className="flex-1 pms-btn-primary py-4 font-bold rounded-2xl flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
+              >
+                {busy ? <Loader2 className="w-5 h-5 animate-spin" /> : <Shield className="w-5 h-5" />}
+                {busy ? "Sanitizing…" : "Deep Sanitize PDF"}
+              </motion.button>
+              <button
+                onClick={() => { setFile(null); setError(null); }}
+                disabled={busy}
+                className="px-6 py-4 bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-slate-300 rounded-2xl font-semibold hover:bg-gray-200 dark:hover:bg-slate-700 transition-colors disabled:opacity-50 cursor-pointer"
+              >
+                Cancel
+              </button>
             </div>
           </div>
-          {error && (
-            <div className="p-4 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-xl flex items-start gap-3 text-red-700 dark:text-red-300">
-              <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" />
-              <p className="text-sm">{error}</p>
+        ) : (
+          <div className="w-full max-w-xl mx-auto space-y-5">
+            <div className="pms-glass-panel rounded-3xl p-7 text-center border border-emerald-200/80 dark:border-emerald-800/70">
+              <motion.div
+                initial={prefersReduced ? false : { scale: 0.45, rotate: -10, opacity: 0 }}
+                animate={{ scale: 1, rotate: 0, opacity: 1 }}
+                transition={{ type: "spring", stiffness: 360, damping: 18 }}
+                className="w-16 h-16 bg-emerald-100 dark:bg-emerald-900/50 rounded-full flex items-center justify-center mx-auto mb-3 shadow-inner"
+              >
+                <CheckCircle className="w-8 h-8 text-emerald-600 dark:text-emerald-400" />
+              </motion.div>
+              <h2 className="text-2xl font-extrabold text-emerald-900 dark:text-emerald-200 mb-1">PDF Sanitized!</h2>
+              <p className="text-emerald-700 dark:text-emerald-400 text-sm mb-5">
+                Removed{" "}
+                <strong className="font-extrabold">
+                  <AnimatedNumber value={totalRemoved} />
+                </strong>{" "}
+                hidden elements across 10 layers
+                {Number(report?.savings) > 0 && (
+                  <>
+                    {" "}· Saved <AnimatedNumber value={Number(report?.savings || 0)} decimals={1} suffix=" KB" />
+                  </>
+                )}
+              </p>
+              <motion.a
+                whileHover={prefersReduced ? undefined : { scale: 1.02 }}
+                whileTap={prefersReduced ? undefined : { scale: 0.985 }}
+                href={resultUrl}
+                download={`sanitized_${file.name}`}
+                className="inline-flex items-center gap-2.5 px-8 py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-2xl shadow-lg shadow-emerald-600/20 transition-colors"
+              >
+                <Download className="w-5 h-5" />
+                Download Clean PDF
+              </motion.a>
             </div>
-          )}
-          <div className="flex gap-3">
-            <button onClick={sanitize} disabled={busy}
-              className="flex-1 py-4 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl flex items-center justify-center gap-2 transition-colors disabled:opacity-50">
-              {busy ? <Loader2 className="w-5 h-5 animate-spin" /> : <Shield className="w-5 h-5" />}
-              {busy ? "Sanitizing…" : "Deep Sanitize PDF"}
-            </button>
-            <button onClick={() => { setFile(null); setError(null); }}
-              className="px-6 py-4 bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-slate-300 rounded-xl font-semibold hover:bg-gray-200 dark:hover:bg-slate-700 transition-colors">
-              Cancel
-            </button>
-          </div>
-        </div>
-      ) : (
-        <div className="w-full max-w-xl space-y-4">
-          <div className="bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 rounded-2xl p-6 text-center">
-            <div className="w-14 h-14 bg-emerald-100 dark:bg-emerald-900/50 rounded-2xl flex items-center justify-center mx-auto mb-3">
-              <CheckCircle className="w-7 h-7 text-emerald-600 dark:text-emerald-400" />
-            </div>
-            <h2 className="text-2xl font-bold text-emerald-800 dark:text-emerald-300 mb-1">PDF Sanitized!</h2>
-            <p className="text-emerald-700 dark:text-emerald-400 text-sm mb-4">
-              Removed <strong>{totalRemoved}</strong> hidden elements across 10 layers
-              {Number(report?.savings) > 0 && ` • Saved ${report?.savings} KB`}
-            </p>
-            <a href={resultUrl} download={`sanitized_${file.name}`}
-              className="inline-flex items-center gap-2 px-8 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl transition-colors">
-              <Download className="w-5 h-5" />Download Clean PDF
-            </a>
-          </div>
-          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-gray-200 dark:border-slate-700 p-6">
-            <h3 className="font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
-              <Shield className="w-4 h-4 text-emerald-500" />Sanitization Report
-            </h3>
-            <div className="space-y-3">
-              {layers.map(layer => (
-                <div key={layer.label} className="flex items-center justify-between text-sm">
-                  <span className="text-gray-600 dark:text-slate-400">{layer.label}</span>
-                  <span className={`font-bold ${layer.value > 0 ? layer.color : "text-gray-400 dark:text-slate-600"}`}>
-                    {(layer as any).isStatus ? (layer.value > 0 ? `ℹ️ ${layer.value} page(s) inspected` : "✓ None found") : (layer.value > 0 ? `✕ ${layer.value} removed` : "✓ None found")}
-                  </span>
+
+            <div className="pms-glass-panel rounded-3xl p-6">
+              <h3 className="font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+                <Shield className="w-4 h-4 text-emerald-500" />
+                Sanitization Audit Report
+              </h3>
+              <div className="space-y-2.5">
+                {layers.map((layer, idx) => (
+                  <motion.div
+                    key={layer.label}
+                    initial={prefersReduced ? false : { opacity: 0, x: -10 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ duration: 0.24, delay: idx * 0.035 }}
+                    className="flex items-center justify-between text-sm py-1.5 px-2.5 rounded-xl bg-white/60 dark:bg-slate-800/40"
+                  >
+                    <span className="text-gray-700 dark:text-slate-300 font-medium">{layer.label}</span>
+                    <span className={`font-bold text-xs px-2.5 py-0.5 rounded-full ${
+                      layer.value > 0
+                        ? `${layer.color} bg-slate-100 dark:bg-slate-800`
+                        : "text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40"
+                    }`}>
+                      {(layer as any).isStatus
+                        ? (layer.value > 0 ? `ℹ️ ${layer.value} page(s) inspected` : "✓ None found")
+                        : (layer.value > 0 ? `✕ ${layer.value} removed` : "✓ None found")}
+                    </span>
+                  </motion.div>
+                ))}
+              </div>
+              <div className="mt-5 pt-4 border-t border-[var(--pms-border)] grid grid-cols-3 gap-3 text-center text-sm">
+                <div>
+                  <p className="text-xs text-gray-500 dark:text-slate-400">Original</p>
+                  <p className="font-bold text-gray-900 dark:text-white">
+                    <AnimatedNumber value={Number(report?.originalSize || 0)} decimals={1} suffix=" KB" />
+                  </p>
                 </div>
-              ))}
+                <div>
+                  <p className="text-xs text-gray-500 dark:text-slate-400">Sanitized</p>
+                  <p className="font-bold text-gray-900 dark:text-white">
+                    <AnimatedNumber value={Number(report?.newSize || 0)} decimals={1} suffix=" KB" />
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500 dark:text-slate-400">Saved</p>
+                  <p className={`font-bold ${Number(report?.savings) > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-gray-400"}`}>
+                    {Number(report?.savings) > 0 ? (
+                      <AnimatedNumber value={Number(report?.savings || 0)} decimals={1} suffix=" KB" />
+                    ) : "—"}
+                  </p>
+                </div>
+              </div>
             </div>
-            <div className="mt-4 pt-4 border-t border-gray-200 dark:border-slate-700 grid grid-cols-3 gap-3 text-center text-sm">
-              <div><p className="text-gray-500 dark:text-slate-400">Original</p><p className="font-bold text-gray-900 dark:text-white">{report?.originalSize} KB</p></div>
-              <div><p className="text-gray-500 dark:text-slate-400">Sanitized</p><p className="font-bold text-gray-900 dark:text-white">{report?.newSize} KB</p></div>
-              <div><p className="text-gray-500 dark:text-slate-400">Saved</p><p className={`font-bold ${Number(report?.savings) > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-gray-400"}`}>{Number(report?.savings) > 0 ? `${report?.savings} KB` : "—"}</p></div>
-            </div>
+
+            <button
+              onClick={() => { setFile(null); setReport(null); setResultUrl(null); }}
+              className="w-full py-3.5 bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-slate-300 rounded-2xl font-semibold hover:bg-gray-200 dark:hover:bg-slate-700 transition-colors cursor-pointer"
+            >
+              Sanitize Another PDF
+            </button>
           </div>
-          <button onClick={() => { setFile(null); setReport(null); setResultUrl(null); }}
-            className="w-full py-3 bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-slate-300 rounded-xl font-semibold hover:bg-gray-200 dark:hover:bg-slate-700 transition-colors">
-            Sanitize Another PDF
-          </button>
-        </div>
-      )}
-    </div>
+        )}
+      </PearlStageSwitch>
+    </ToolWorkspaceShell>
   );
 }

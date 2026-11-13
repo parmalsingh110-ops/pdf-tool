@@ -1,27 +1,26 @@
-import React, { useState, useRef } from 'react';
+import React, { useState } from 'react';
 import {
-  FileWarning,
   ShieldAlert,
   ShieldCheck,
   AlertOctagon,
   Scale,
   Download,
-  Upload,
-  CheckCircle2,
-  ChevronRight,
   Sparkles,
-  Info,
   Flame,
   Check,
   Copy,
-  BookOpen,
 } from 'lucide-react';
+import { motion, useReducedMotion } from 'motion/react';
 import * as pdfjsLib from 'pdfjs-dist';
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 import '../lib/pdfWorker';
 import { useSEO } from '../hooks/useSEO';
 import { usePageSEO } from '../lib/usePageSEO';
+import FileDropzone from '../components/FileDropzone';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { AnimatedNumber, PearlScanOverlay } from '../components/pearl/PearlMotion';
 import ToolSEOSection from '../components/ToolSEOSection';
+import { toArrayBufferBytes } from '../lib/blobUrl';
 import { downloadBlob } from '../lib/utils';
 
 function cleanWinAnsi(str: string): string {
@@ -127,8 +126,8 @@ export default function ContractRedline() {
   const [dangerScore, setDangerScore] = useState(0);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [rawPdfBytes, setRawPdfBytes] = useState<ArrayBuffer | null>(null);
+  const prefersReduced = useReducedMotion();
   const [selectedTrap, setSelectedTrap] = useState<ContractTrap | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileUpload = async (selectedFile: File) => {
     if (selectedFile.type !== 'application/pdf') {
@@ -238,7 +237,7 @@ export default function ContractRedline() {
       }
 
       const outBytes = await doc.save();
-      const blob = new Blob([outBytes as any], { type: 'application/pdf' });
+      const blob = new Blob([toArrayBufferBytes(outBytes)], { type: 'application/pdf' });
       downloadBlob(blob, `Redlined_Audit_${file.name.replace(/\.pdf$/i, '')}.pdf`);
     } catch (e) {
       console.error(e);
@@ -247,64 +246,55 @@ export default function ContractRedline() {
   };
 
   return (
-    <div className="w-full min-h-screen bg-slate-950 text-slate-100 py-10 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-7xl mx-auto space-y-8">
-        {/* Header */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-6">
-          <div>
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-950/80 border border-amber-700/60 text-xs font-bold text-amber-400 mb-2">
-              <Scale className="w-4 h-4 text-amber-400" /> Contract &amp; NDA Trap Redliner
-            </div>
-            <h1 className="text-3xl font-extrabold tracking-tight text-white flex items-center gap-3">
-              Contract Trap Redliner™ <span className="text-xs px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-400 font-mono">Fine-Print Shield</span>
-            </h1>
-            <p className="mt-1 text-sm text-slate-400 max-w-2xl">
-              Audit employment offers, lease agreements, and vendor contracts for hidden auto-renewals, non-compete traps, unlimited indemnity, and one-sided cancellation clauses.
-            </p>
-          </div>
-
-          {traps.length > 0 && (
+    <ToolWorkspaceShell
+      title="Contract Trap Redliner™"
+      subtitle="Audit employment offers, lease agreements, and vendor contracts for hidden auto-renewals, non-compete traps, unlimited indemnity, and one-sided cancellation clauses."
+      categoryLabel="Contract & NDA Trap Redliner • Fine-Print Shield"
+      icon={Scale}
+      microVariant="compare"
+      tone="amber"
+      trustNote="100% local contract clause scanning • Zero confidential legal text leaves your browser"
+    >
+      <div className="w-full max-w-7xl mx-auto space-y-8">
+        {traps.length > 0 && (
+          <div className="pms-glass-panel p-4 rounded-2xl flex flex-wrap items-center justify-between gap-3">
+            <span className="text-xs font-bold text-[var(--pms-ink)]">
+              Audit Ready: {file?.name} • {traps.length} Risk Clauses Flagged
+            </span>
             <button
               onClick={handleExportRedlinedPdf}
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-2xl bg-gradient-to-r from-amber-600 to-rose-600 hover:from-amber-500 hover:to-rose-500 text-white font-bold text-xs shadow-lg shadow-amber-950 transition-all"
+              className="pms-btn-primary inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-xs"
             >
               <Download className="w-4 h-4" /> Export Redlined PDF (With Margin Alerts)
             </button>
-          )}
-        </div>
+          </div>
+        )}
 
         {/* Upload State */}
         {!file && (
-          <div
-            onClick={() => fileInputRef.current?.click()}
-            className="border-2 border-dashed border-slate-800 hover:border-amber-500/60 rounded-3xl p-16 text-center bg-slate-900/60 hover:bg-slate-900 cursor-pointer transition-all group"
+          <motion.div
+            initial={prefersReduced ? false : { opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: prefersReduced ? 0 : 0.22 }}
+            className="w-full max-w-2xl mx-auto"
           >
-            <input
-              type="file"
-              ref={fileInputRef}
-              onChange={(e) => e.target.files?.[0] && handleFileUpload(e.target.files[0])}
-              accept="application/pdf"
-              className="hidden"
+            <FileDropzone
+              onDrop={(files) => files[0] && handleFileUpload(files[0])}
+              multiple={false}
+              accept={{ 'application/pdf': ['.pdf'] }}
+              title="Upload Agreement, Offer Letter, or Vendor Contract"
+              subtitle="Scans 100% locally in your browser. Confidential contracts are never stored or transmitted to external clouds."
             />
-            <div className="w-16 h-16 rounded-2xl bg-amber-950/50 border border-amber-800/40 text-amber-400 flex items-center justify-center mx-auto mb-4 group-hover:scale-110 transition-transform">
-              <FileWarning className="w-8 h-8" />
-            </div>
-            <h3 className="text-lg font-bold text-white mb-1">Upload Agreement, Offer Letter, or Vendor Contract</h3>
-            <p className="text-xs text-slate-400 max-w-md mx-auto mb-4">
-              Scans 100% locally in your browser. Confidential contracts are never stored or transmitted to external clouds.
-            </p>
-            <span className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-800 text-xs font-bold text-slate-200">
-              <Upload className="w-3.5 h-3.5" /> Select Legal PDF
-            </span>
-          </div>
+          </motion.div>
         )}
 
         {/* Auditing State */}
         {isAuditing && (
-          <div className="p-16 rounded-3xl bg-slate-900 border border-slate-800 text-center space-y-4">
+          <div className="p-16 rounded-3xl pms-glass-panel text-center space-y-4 relative overflow-hidden max-w-xl mx-auto">
+            <PearlScanOverlay active={isAuditing} label="Auditing clauses, indemnity caps & auto-renewals..." />
             <div className="w-12 h-12 border-4 border-amber-500 border-t-transparent rounded-full animate-spin mx-auto" />
-            <h3 className="text-lg font-bold text-white">Scanning Contract for Fine-Print Traps...</h3>
-            <p className="text-xs text-slate-400">
+            <h3 className="text-lg font-bold text-[var(--pms-ink)]">Scanning Contract for Fine-Print Traps...</h3>
+            <p className="text-xs text-[var(--pms-muted)]">
               Evaluating indemnity clauses, auto-renewal locks, jurisdiction venues, and non-compete bars.
             </p>
           </div>
@@ -312,33 +302,38 @@ export default function ContractRedline() {
 
         {/* Risk Results Workspace */}
         {!isAuditing && file && (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-            {/* Left 4 Cols: Danger Meter & Traps Feed */}
+          <motion.div
+            initial={prefersReduced ? false : { opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: prefersReduced ? 0 : 0.24 }}
+            className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start"
+          >
+            {/* Left 5 Cols: Danger Meter & Traps Feed */}
             <div className="lg:col-span-5 space-y-6">
               {/* Danger Meter */}
               <div
-                className={`p-6 rounded-3xl border ${
+                className={`p-6 rounded-3xl pms-glass-panel border ${
                   dangerScore >= 50
-                    ? 'bg-rose-950/30 border-rose-800/80'
+                    ? 'bg-rose-50/90 dark:bg-rose-950/35 border-rose-300 dark:border-rose-800/80'
                     : dangerScore >= 20
-                    ? 'bg-amber-950/30 border-amber-800/80'
-                    : 'bg-emerald-950/30 border-emerald-800/80'
+                    ? 'bg-amber-50/90 dark:bg-amber-950/35 border-amber-300 dark:border-amber-800/80'
+                    : 'bg-emerald-50/90 dark:bg-emerald-950/35 border-emerald-300 dark:border-emerald-800/80'
                 }`}
               >
                 <div className="flex items-center justify-between mb-3">
                   <div>
-                    <span className="text-[10px] uppercase font-bold tracking-widest text-slate-400 block">
+                    <span className="text-[10px] uppercase font-bold tracking-widest text-[var(--pms-muted)] block">
                       Contract Risk Score
                     </span>
-                    <h3 className="text-3xl font-black text-white flex items-center gap-2">
-                      {dangerScore}/100
+                    <h3 className="text-3xl font-black text-[var(--pms-ink)] flex items-center gap-2 mt-0.5">
+                      <AnimatedNumber value={dangerScore} suffix="/100" />
                       <span
                         className={`text-xs px-2.5 py-1 rounded-full font-bold uppercase ${
                           dangerScore >= 50
-                            ? 'bg-rose-500/20 text-rose-400 border border-rose-500/40'
+                            ? 'bg-rose-500/15 text-rose-700 dark:text-rose-300 border border-rose-500/40'
                             : dangerScore >= 20
-                            ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40'
-                            : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
+                            ? 'bg-amber-500/15 text-amber-800 dark:text-amber-300 border border-amber-500/40'
+                            : 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/40'
                         }`}
                       >
                         {dangerScore >= 50 ? 'HIGH DANGER' : dangerScore >= 20 ? 'CAUTION' : 'CLEAN'}
@@ -348,10 +343,10 @@ export default function ContractRedline() {
                   {dangerScore >= 50 ? (
                     <Flame className="w-10 h-10 text-rose-500 animate-bounce" />
                   ) : (
-                    <ShieldCheck className="w-10 h-10 text-emerald-400" />
+                    <ShieldCheck className="w-10 h-10 text-emerald-500 dark:text-emerald-400" />
                   )}
                 </div>
-                <p className="text-xs text-slate-300">
+                <p className="text-xs text-[var(--pms-ink)] opacity-90">
                   {traps.length > 0
                     ? `Detected ${traps.length} high-liability clauses that shift extreme legal or financial burden onto you.`
                     : 'No aggressive auto-renewals, unlimited indemnity, or non-competes detected in this agreement.'}
@@ -359,9 +354,9 @@ export default function ContractRedline() {
               </div>
 
               {/* Traps List */}
-              <div className="p-5 rounded-3xl bg-slate-900 border border-slate-800 space-y-3">
-                <div className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-                  <AlertOctagon className="w-4 h-4 text-amber-400" /> Redlined Trap Clauses ({traps.length})
+              <div className="p-5 rounded-3xl pms-glass-panel space-y-3">
+                <div className="text-xs font-bold uppercase tracking-wider text-[var(--pms-muted)] flex items-center gap-1.5">
+                  <AlertOctagon className="w-4 h-4 text-amber-500" /> Redlined Trap Clauses ({traps.length})
                 </div>
 
                 <div className="space-y-2 max-h-[500px] overflow-y-auto pr-1">
@@ -371,23 +366,23 @@ export default function ContractRedline() {
                       onClick={() => setSelectedTrap(trap)}
                       className={`p-4 rounded-2xl border cursor-pointer transition-all ${
                         selectedTrap?.id === trap.id
-                          ? 'bg-amber-950/40 border-amber-500 shadow-md shadow-amber-950'
-                          : 'bg-slate-950 border-slate-800 hover:border-slate-700'
+                          ? 'bg-amber-50/90 dark:bg-amber-950/40 border-amber-500 shadow-sm'
+                          : 'bg-white/60 dark:bg-slate-900/60 border-[var(--pms-border)] hover:border-amber-400/60'
                       }`}
                     >
                       <div className="flex items-center justify-between gap-2 mb-1.5">
-                        <span className="font-bold text-xs text-white">{trap.category}</span>
+                        <span className="font-bold text-xs text-[var(--pms-ink)]">{trap.category}</span>
                         <span
                           className={`text-[9px] px-2 py-0.5 rounded-md font-mono font-bold ${
                             trap.severity === 'CRITICAL'
-                              ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
-                              : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                              ? 'bg-rose-500/15 text-rose-700 dark:text-rose-300 border border-rose-500/30'
+                              : 'bg-amber-500/15 text-amber-800 dark:text-amber-300 border border-amber-500/30'
                           }`}
                         >
                           Page {trap.pageNumber}
                         </span>
                       </div>
-                      <p className="text-xs font-serif text-slate-300 italic line-clamp-2">{trap.clauseSnippet}</p>
+                      <p className="text-xs font-serif text-[var(--pms-muted)] italic line-clamp-2">{trap.clauseSnippet}</p>
                     </div>
                   ))}
                 </div>
@@ -397,57 +392,57 @@ export default function ContractRedline() {
             {/* Right 7 Cols: Detailed Trap Deep-Dive & Counter-Proposal Tip */}
             <div className="lg:col-span-7 space-y-4">
               {selectedTrap ? (
-                <div className="p-6 rounded-3xl bg-slate-900 border border-slate-800 space-y-6 shadow-xl">
+                <div className="p-6 rounded-3xl pms-glass-panel space-y-6">
                   {/* Category Header */}
-                  <div className="border-b border-slate-800 pb-4">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs uppercase font-mono font-bold text-amber-400 tracking-wider">
+                  <div className="border-b border-[var(--pms-border)] pb-4">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <span className="text-xs uppercase font-mono font-bold text-amber-600 dark:text-amber-400 tracking-wider">
                         Risk Category • Page {selectedTrap.pageNumber}
                       </span>
                       <span
                         className={`text-xs px-3 py-1 rounded-full font-bold uppercase ${
                           selectedTrap.severity === 'CRITICAL'
-                            ? 'bg-rose-500/20 text-rose-400 border border-rose-500/40'
-                            : 'bg-amber-500/20 text-amber-400 border border-amber-500/40'
+                            ? 'bg-rose-500/15 text-rose-700 dark:text-rose-300 border border-rose-500/40'
+                            : 'bg-amber-500/15 text-amber-800 dark:text-amber-300 border border-amber-500/40'
                         }`}
                       >
                         {selectedTrap.severity} LIABILITY
                       </span>
                     </div>
-                    <h2 className="text-xl font-bold text-white mt-1">{selectedTrap.category}</h2>
+                    <h2 className="text-xl font-bold text-[var(--pms-ink)] mt-1">{selectedTrap.category}</h2>
                   </div>
 
                   {/* Flagged Clause Snippet */}
                   <div className="space-y-2">
-                    <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--pms-muted)] block">
                       Exact Contract Clause Found:
                     </span>
-                    <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 font-serif text-sm text-amber-200/90 leading-relaxed italic border-l-4 border-l-amber-500">
+                    <div className="p-4 rounded-2xl bg-white/75 dark:bg-slate-950/75 border border-[var(--pms-border)] font-serif text-sm text-amber-900 dark:text-amber-200 leading-relaxed italic border-l-4 border-l-amber-500">
                       {selectedTrap.clauseSnippet}
                     </div>
                   </div>
 
                   {/* Why it is dangerous */}
-                  <div className="p-4 rounded-2xl bg-rose-950/30 border border-rose-800/50 space-y-1">
-                    <div className="text-xs font-bold text-rose-400 flex items-center gap-1.5 uppercase tracking-wide">
+                  <div className="p-4 rounded-2xl bg-rose-50/90 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-800/50 space-y-1">
+                    <div className="text-xs font-bold text-rose-700 dark:text-rose-400 flex items-center gap-1.5 uppercase tracking-wide">
                       <ShieldAlert className="w-4 h-4" /> Why this clause is dangerous for you:
                     </div>
-                    <p className="text-xs text-rose-200/80 leading-relaxed">{selectedTrap.whyDangerous}</p>
+                    <p className="text-xs text-rose-900/90 dark:text-rose-200/80 leading-relaxed">{selectedTrap.whyDangerous}</p>
                   </div>
 
                   {/* Recommended Counter-Proposal Language */}
-                  <div className="p-5 rounded-2xl bg-cyan-950/30 border border-cyan-800/60 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <div className="text-xs font-bold text-cyan-400 flex items-center gap-1.5 uppercase tracking-wide">
+                  <div className="p-5 rounded-2xl bg-cyan-50/85 dark:bg-cyan-950/30 border border-cyan-200 dark:border-cyan-800/60 space-y-3">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <div className="text-xs font-bold text-cyan-800 dark:text-cyan-300 flex items-center gap-1.5 uppercase tracking-wide">
                         <Sparkles className="w-4 h-4" /> Recommended Counter-Proposal Language:
                       </div>
                       <button
                         onClick={() => handleCopyProposal(selectedTrap.counterProposalTip, selectedTrap.id)}
-                        className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-cyan-900/60 hover:bg-cyan-800 text-cyan-200 text-xs font-bold transition-colors"
+                        className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-cyan-100 dark:bg-cyan-900/60 hover:bg-cyan-200 dark:hover:bg-cyan-800 text-cyan-900 dark:text-cyan-100 text-xs font-bold transition-colors"
                       >
                         {copiedId === selectedTrap.id ? (
                           <>
-                            <Check className="w-3.5 h-3.5 text-emerald-400" /> Copied!
+                            <Check className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" /> Copied!
                           </>
                         ) : (
                           <>
@@ -456,21 +451,21 @@ export default function ContractRedline() {
                         )}
                       </button>
                     </div>
-                    <p className="text-xs font-mono text-cyan-100 bg-slate-950/80 p-3.5 rounded-xl border border-cyan-900/50">
+                    <p className="text-xs font-mono text-cyan-950 dark:text-cyan-100 bg-white/80 dark:bg-slate-950/80 p-3.5 rounded-xl border border-cyan-200/80 dark:border-cyan-900/50">
                       {selectedTrap.counterProposalTip}
                     </p>
-                    <p className="text-[11px] text-slate-400">
+                    <p className="text-[11px] text-[var(--pms-muted)]">
                       💡 Tip: Email this counter-clause to the employer or vendor before signing to neutralize your legal risk.
                     </p>
                   </div>
                 </div>
               ) : (
-                <div className="p-16 rounded-3xl bg-slate-900/40 border border-slate-800 text-center text-xs text-slate-500">
+                <div className="p-16 rounded-3xl pms-glass-panel text-center text-xs text-[var(--pms-muted)]">
                   Select any detected trap clause from the left list to see why it is dangerous and copy the safe counter-proposal.
                 </div>
               )}
             </div>
-          </div>
+          </motion.div>
         )}
 
         <ToolSEOSection
@@ -485,6 +480,6 @@ export default function ContractRedline() {
           ]}
         />
       </div>
-    </div>
+    </ToolWorkspaceShell>
   );
 }

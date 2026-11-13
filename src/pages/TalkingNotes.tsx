@@ -1,29 +1,27 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
   Mic,
-  MicOff,
-  Play,
   Square,
-  Upload,
   Download,
   QrCode,
   Volume2,
-  FileText,
-  Sparkles,
-  CheckCircle2,
   Trash2,
   Plus,
   Radio,
-  BookOpen,
   ShieldCheck,
 } from 'lucide-react';
+import { motion, useReducedMotion } from 'motion/react';
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 import QRCode from 'qrcode';
 import * as pdfjsLib from 'pdfjs-dist';
 import '../lib/pdfWorker';
 import { useSEO } from '../hooks/useSEO';
 import { usePageSEO } from '../lib/usePageSEO';
+import FileDropzone from '../components/FileDropzone';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { AnimatedNumber, PearlScanOverlay } from '../components/pearl/PearlMotion';
 import ToolSEOSection from '../components/ToolSEOSection';
+import { toArrayBufferBytes } from '../lib/blobUrl';
 import { downloadBlob } from '../lib/utils';
 import { apiFetch } from '../lib/api';
 import {
@@ -84,10 +82,10 @@ export default function TalkingNotes() {
   const recordTimerRef = useRef<any>(null);
 
   // Canvas Preview
+  const prefersReduced = useReducedMotion();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [enableCloudQrAudio, setEnableCloudQrAudio] = useState(true);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Student QR Scan Playback State (?room=...&id=...&note=...#t=...&k=...)
   const [scannedNoteId, setScannedNoteId] = useState<string | null>(() => {
@@ -432,7 +430,7 @@ export default function TalkingNotes() {
       }
 
       const outBytes = await doc.save();
-      const blob = new Blob([outBytes as any], { type: 'application/pdf' });
+      const blob = new Blob([toArrayBufferBytes(outBytes)], { type: 'application/pdf' });
       downloadBlob(blob, `TalkingNotes_${fileName}`);
     } catch (err) {
       console.error(err);
@@ -443,26 +441,24 @@ export default function TalkingNotes() {
   };
 
   return (
-    <div className="w-full min-h-screen bg-slate-50 dark:bg-slate-950 py-10 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-6xl mx-auto space-y-8">
-        {/* Header */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800 text-xs font-bold text-indigo-700 dark:text-indigo-300 mb-2">
-              <Volume2 className="w-3.5 h-3.5" /> Smart Audio QR Handouts for Students &amp; Teachers
+    <ToolWorkspaceShell
+      title='"Talking Notes" Audio QR Handout Maker'
+      subtitle="Record voice explanations for complex formulas & diagrams. Embeds scannable audio QR codes on PDF pages for Xerox printing."
+      categoryLabel="Smart Audio QR Handouts for Students & Teachers"
+      icon={Volume2}
+      microVariant="edit"
+      tone="indigo"
+      trustNote="Zero-trust AES-GCM encryption for QR voice playback • Audio attachments work 100% offline"
+    >
+      <div className="w-full max-w-6xl mx-auto space-y-8">
+        {pdfBytes && (
+          <div className="pms-glass-panel p-4 rounded-2xl flex flex-wrap items-center justify-between gap-3">
+            <div className="text-xs font-semibold text-[var(--pms-ink)]">
+              Editing Handout: <span className="font-bold">{fileName}</span> ({totalPages} Pages)
             </div>
-            <h1 className="text-3xl font-extrabold text-slate-900 dark:text-white">
-              &quot;Talking Notes&quot; Audio QR Handout Maker
-            </h1>
-            <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
-              Record voice explanations for complex formulas &amp; diagrams. Embeds scannable audio QR codes on PDF pages for Xerox printing.
-            </p>
-          </div>
-
-          {pdfBytes && (
             <div className="flex flex-wrap items-center gap-3">
               <label
-                className="inline-flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 cursor-pointer"
+                className="inline-flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold bg-white/75 dark:bg-slate-900/75 border border-[var(--pms-border)] text-[var(--pms-ink)] cursor-pointer"
                 title="When OFF, audio stays 100% inside the downloaded PDF attachment with zero server upload."
               >
                 <input
@@ -471,37 +467,42 @@ export default function TalkingNotes() {
                   onChange={(e) => setEnableCloudQrAudio(e.target.checked)}
                   className="accent-indigo-600 rounded"
                 />
-                <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+                <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
                 <span>Temp Encrypted QR Playback (20m)</span>
               </label>
 
               <button
                 onClick={handleExportPdf}
                 disabled={isProcessing}
-                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white shadow-md shadow-indigo-200 dark:shadow-none transition-all disabled:opacity-50"
+                className="pms-btn-primary inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold disabled:opacity-50"
               >
                 <Download className="w-4 h-4" />
                 {isProcessing ? 'Generating Talking PDF...' : 'Download Talking Handout PDF'}
               </button>
             </div>
-          )}
-        </div>
+          </div>
+        )}
 
         {/* Student Scanned Audio Note Player Banner */}
         {scannedNoteId && (
-          <div className="p-6 rounded-3xl bg-indigo-600 text-white shadow-xl flex flex-col sm:flex-row items-center justify-between gap-4">
+          <motion.div
+            initial={prefersReduced ? false : { opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: prefersReduced ? 0 : 0.22 }}
+            className="p-6 rounded-3xl pms-glass-panel border-2 border-indigo-400/50 dark:border-indigo-500/40 bg-indigo-50/75 dark:bg-indigo-950/50 flex flex-col sm:flex-row items-center justify-between gap-4"
+          >
             <div className="space-y-1">
-              <div className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-indigo-200">
+              <div className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-indigo-600 dark:text-indigo-300">
                 <Volume2 className="w-4 h-4" /> Scanned Talking Handout Audio
               </div>
-              <h2 className="text-xl font-extrabold">{scannedNoteLabel}</h2>
-              <p className="text-xs text-indigo-100">
+              <h2 className="text-xl font-extrabold text-[var(--pms-ink)]">{scannedNoteLabel}</h2>
+              <p className="text-xs text-[var(--pms-muted)]">
                 Press play below to listen to the recorded voice explanation for this handout section.
               </p>
             </div>
             <div className="flex items-center gap-3 w-full sm:w-auto">
               {scannedAudioError ? (
-                <div className="text-xs font-semibold bg-rose-500/20 border border-rose-300/40 px-3 py-2 rounded-xl text-rose-100">
+                <div className="text-xs font-semibold bg-rose-500/15 border border-rose-400/40 px-3 py-2 rounded-xl text-rose-700 dark:text-rose-200">
                   {scannedAudioError}
                 </div>
               ) : scannedAudioBlobUrl ? (
@@ -512,52 +513,50 @@ export default function TalkingNotes() {
                   className="w-full sm:w-72 h-10 rounded-xl"
                 />
               ) : (
-                <div className="text-xs text-indigo-100 font-medium px-3 py-2">
+                <div className="text-xs text-[var(--pms-muted)] font-medium px-3 py-2">
                   Decrypting audio note...
                 </div>
               )}
               <button
                 onClick={() => setScannedNoteId(null)}
-                className="px-3 py-2 rounded-xl bg-indigo-700 hover:bg-indigo-800 text-xs font-bold"
+                className="px-3.5 py-2 rounded-xl bg-white/80 dark:bg-slate-800/80 border border-[var(--pms-border)] text-[var(--pms-ink)] hover:bg-white dark:hover:bg-slate-800 text-xs font-bold"
               >
                 Close
               </button>
             </div>
-          </div>
+          </motion.div>
         )}
 
         {/* Upload State */}
         {!pdfBytes && (
-          <div
-            onClick={() => fileInputRef.current?.click()}
-            className="border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-3xl p-12 text-center bg-white dark:bg-slate-900 hover:border-indigo-500 hover:bg-indigo-50/20 dark:hover:bg-indigo-950/20 cursor-pointer transition-all group"
+          <motion.div
+            initial={prefersReduced ? false : { opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: prefersReduced ? 0 : 0.22 }}
+            className="w-full max-w-2xl mx-auto"
           >
-            <input
-              type="file"
-              ref={fileInputRef}
-              onChange={(e) => e.target.files?.[0] && handleFileUpload(e.target.files[0])}
-              accept="application/pdf"
-              className="hidden"
+            <FileDropzone
+              onDrop={(files) => files[0] && handleFileUpload(files[0])}
+              multiple={false}
+              accept={{ 'application/pdf': ['.pdf'] }}
+              title="Drop Coaching Notes or Study PDF Here"
+              subtitle="Select any diagram, record your voice explanation via microphone, and print paper notes with interactive audio QR codes."
             />
-            <div className="w-16 h-16 rounded-2xl bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400 flex items-center justify-center mx-auto mb-4 group-hover:scale-110 transition-transform">
-              <Mic className="w-8 h-8" />
-            </div>
-            <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-2">
-              Drop Coaching Notes or Study PDF Here
-            </h3>
-            <p className="text-sm text-slate-500 dark:text-slate-400 max-w-md mx-auto">
-              Select any diagram, record your voice explanation via microphone, and print paper notes with interactive audio QR codes.
-            </p>
-          </div>
+          </motion.div>
         )}
 
-        {/* Studio Editor View */}
+        {/* Studio Editor View (kept synchronously mounted for canvasRef) */}
         {pdfBytes && (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+          <motion.div
+            initial={prefersReduced ? false : { opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: prefersReduced ? 0 : 0.24 }}
+            className="grid grid-cols-1 lg:grid-cols-12 gap-8"
+          >
             {/* Left Column: Interactive Page Canvas */}
             <div className="lg:col-span-7 space-y-4">
-              <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
+              <div className="p-4 rounded-2xl pms-glass-panel flex items-center justify-between flex-wrap gap-3">
+                <span className="text-xs font-bold text-[var(--pms-ink)]">
                   Page {currentPage} of {totalPages}
                 </span>
 
@@ -565,14 +564,14 @@ export default function TalkingNotes() {
                   <button
                     onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
                     disabled={currentPage <= 1}
-                    className="px-3 py-1 text-xs font-bold rounded-lg border disabled:opacity-40"
+                    className="px-3 py-1.5 text-xs font-bold rounded-lg border border-[var(--pms-border)] bg-white/70 dark:bg-slate-900/70 text-[var(--pms-ink)] disabled:opacity-40"
                   >
                     Prev
                   </button>
                   <button
                     onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
                     disabled={currentPage >= totalPages}
-                    className="px-3 py-1 text-xs font-bold rounded-lg border disabled:opacity-40"
+                    className="px-3 py-1.5 text-xs font-bold rounded-lg border border-[var(--pms-border)] bg-white/70 dark:bg-slate-900/70 text-[var(--pms-ink)] disabled:opacity-40"
                   >
                     Next
                   </button>
@@ -580,14 +579,14 @@ export default function TalkingNotes() {
 
                 <button
                   onClick={handleAddAnnotation}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-indigo-50 dark:bg-indigo-950 text-indigo-600 border border-indigo-200 dark:border-indigo-900"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-indigo-50/90 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 transition-colors"
                 >
                   <Plus className="w-3.5 h-3.5" /> Add Audio QR Note
                 </button>
               </div>
 
               {/* PDF Preview with Stamped Audio Badges */}
-              <div className="relative p-6 rounded-3xl bg-slate-200 dark:bg-slate-900 flex justify-center overflow-auto border border-slate-300 dark:border-slate-800 min-h-[500px]">
+              <div className="relative p-6 rounded-3xl pms-glass-panel flex justify-center overflow-auto min-h-[500px]">
                 <canvas ref={canvasRef} className="bg-white shadow-xl rounded-sm max-w-full" />
 
                 {/* Stamped QR Overlays */}
@@ -599,11 +598,11 @@ export default function TalkingNotes() {
                       style={{ top: `${a.yPos}%`, left: `${a.xPos}%` }}
                       className="absolute -translate-x-1/2 -translate-y-1/2 bg-white dark:bg-slate-800 border-2 border-indigo-600 rounded-2xl p-2 shadow-2xl flex items-center gap-2 pointer-events-auto"
                     >
-                      <div className="w-10 h-10 bg-indigo-50 dark:bg-indigo-950/60 rounded-xl flex items-center justify-center text-indigo-600">
+                      <div className="w-10 h-10 bg-indigo-50 dark:bg-indigo-950/60 rounded-xl flex items-center justify-center text-indigo-600 dark:text-indigo-400">
                         <QrCode className="w-6 h-6" />
                       </div>
                       <div className="pr-1 text-left">
-                        <div className="text-[10px] font-black text-indigo-600 uppercase">Audio QR</div>
+                        <div className="text-[10px] font-black text-indigo-600 dark:text-indigo-400 uppercase">Audio QR</div>
                         <div className="text-xs font-bold text-slate-800 dark:text-slate-200 truncate max-w-[100px]">
                           {a.label}
                         </div>
@@ -615,20 +614,22 @@ export default function TalkingNotes() {
 
             {/* Right Column: Audio Recording Controls & Annotations List */}
             <div className="lg:col-span-5 space-y-6">
-              <div className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-4">
+              <div className="p-6 rounded-3xl pms-glass-panel space-y-4 relative overflow-hidden">
+                <PearlScanOverlay active={isProcessing} label="Encrypting voice notes & embedding audio QR PDF..." />
+
                 <div className="flex items-center justify-between">
-                  <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                    <Radio className="w-4 h-4 text-indigo-600" /> Voice Explanations on This Sheet
+                  <h3 className="text-base font-bold text-[var(--pms-ink)] flex items-center gap-2">
+                    <Radio className="w-4 h-4 text-indigo-600 dark:text-indigo-400" /> Voice Explanations on This Sheet
                   </h3>
-                  <span className="text-xs font-bold text-slate-400">
-                    {annotations.length} Audio QR(s)
+                  <span className="text-xs font-bold text-[var(--pms-muted)]">
+                    <AnimatedNumber value={annotations.length} suffix=" Audio QR(s)" />
                   </span>
                 </div>
 
                 {annotations.length === 0 ? (
-                  <div className="p-8 text-center border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-2xl space-y-2">
-                    <Volume2 className="w-8 h-8 text-slate-300 dark:text-slate-600 mx-auto" />
-                    <p className="text-xs text-slate-500">
+                  <div className="p-8 text-center border-2 border-dashed border-[var(--pms-border)] rounded-2xl space-y-2">
+                    <Volume2 className="w-8 h-8 text-[var(--pms-muted)] opacity-50 mx-auto" />
+                    <p className="text-xs text-[var(--pms-muted)]">
                       No audio notes yet. Click &quot;Add Audio QR Note&quot; to attach teacher guidance.
                     </p>
                   </div>
@@ -640,7 +641,7 @@ export default function TalkingNotes() {
                       return (
                         <div
                           key={anno.id}
-                          className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-3"
+                          className="p-4 rounded-2xl bg-white/60 dark:bg-slate-900/60 border border-[var(--pms-border)] space-y-3"
                         >
                           <div className="flex items-center justify-between">
                             <input
@@ -653,11 +654,11 @@ export default function TalkingNotes() {
                                   )
                                 )
                               }
-                              className="text-xs font-bold bg-transparent border-b border-dashed border-slate-300 dark:border-slate-600 outline-none text-slate-900 dark:text-white w-2/3"
+                              className="text-xs font-bold bg-transparent border-b border-dashed border-[var(--pms-border)] outline-none text-[var(--pms-ink)] w-2/3"
                             />
                             <button
                               onClick={() => handleRemoveAnnotation(anno.id)}
-                              className="text-slate-400 hover:text-rose-600 p-1"
+                              className="text-[var(--pms-muted)] hover:text-rose-600 p-1 transition-colors"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>
@@ -668,7 +669,7 @@ export default function TalkingNotes() {
                             {!isThisRecording ? (
                               <button
                                 onClick={() => startRecording(anno.id)}
-                                className="flex-1 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white flex items-center justify-center gap-1.5 transition-colors"
+                                className="flex-1 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white flex items-center justify-center gap-1.5 transition-colors shadow-sm"
                               >
                                 <Mic className="w-3.5 h-3.5" />
                                 {anno.audioUrl ? 'Re-Record Voice' : 'Record Explanation'}
@@ -690,7 +691,7 @@ export default function TalkingNotes() {
                           </div>
 
                           {/* Position Sliders */}
-                          <div className="grid grid-cols-2 gap-3 text-[11px] text-slate-500 pt-1">
+                          <div className="grid grid-cols-2 gap-3 text-[11px] text-[var(--pms-muted)] pt-1">
                             <div>
                               <span>Horizontal Pos ({anno.xPos}%)</span>
                               <input
@@ -733,7 +734,7 @@ export default function TalkingNotes() {
                 )}
               </div>
             </div>
-          </div>
+          </motion.div>
         )}
 
         {/* SEO Information */}
@@ -743,6 +744,6 @@ export default function TalkingNotes() {
           description="Designed for professors, coaching faculties, school teachers, and study groups. Record voice instructions directly onto study PDF pages. The tool automatically embeds high-resolution scannable QR codes alongside complex equations and diagram steps. When students print the notes for offline study, they can scan any QR code with a smartphone camera to listen to the teacher's audio explanation on demand."
         />
       </div>
-    </div>
+    </ToolWorkspaceShell>
   );
 }

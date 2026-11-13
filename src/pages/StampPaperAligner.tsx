@@ -1,18 +1,14 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Upload,
   Download,
-  Printer,
   FileCheck2,
   Sliders,
   Scale,
-  ShieldCheck,
-  ChevronRight,
   Eye,
   Smartphone,
-  Info,
-  CheckCircle2,
 } from 'lucide-react';
+import { motion, AnimatePresence, useReducedMotion } from 'motion/react';
 import { PDFDocument } from 'pdf-lib';
 import * as pdfjsLib from 'pdfjs-dist';
 import '../lib/pdfWorker';
@@ -20,6 +16,9 @@ import { useSEO } from '../hooks/useSEO';
 import { usePageSEO } from '../lib/usePageSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
 import ShareQrModal from '../components/ShareQrModal';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { AnimatedNumber, PearlScanOverlay } from '../components/pearl/PearlMotion';
+import { toArrayBufferBytes } from '../lib/blobUrl';
 import { downloadBlob } from '../lib/utils';
 
 // State Presets for Indian E-Stamp Papers (offset in inches from top)
@@ -33,6 +32,8 @@ const STATE_PRESETS = [
 ];
 
 export default function StampPaperAligner() {
+  const prefersReduced = useReducedMotion();
+
   useSEO(
     'E-Stamp Paper Margin & Print Aligner Online — Rajasthan, Delhi, UP Legal Deed',
     'Align rent agreements, affidavits and legal deeds for printing on ₹50, ₹100, ₹500 E-Stamp paper. Automatically shifts Page 1 text below the government header.'
@@ -257,7 +258,7 @@ export default function StampPaperAligner() {
       }
 
       const outBytes = await outPdf.save();
-      const blob = new Blob([outBytes as any], { type: 'application/pdf' });
+      const blob = new Blob([toArrayBufferBytes(outBytes)], { type: 'application/pdf' });
       downloadBlob(blob, `stamp-paper-aligned-${Date.now()}.pdf`);
     } catch (err) {
       console.error('Error processing PDF:', err);
@@ -267,58 +268,73 @@ export default function StampPaperAligner() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 py-10 px-4 sm:px-6">
-      <div className="max-w-6xl mx-auto space-y-8">
-        {/* Header */}
-        <div className="text-center space-y-3">
-          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 text-xs font-bold uppercase tracking-wider">
-            <FileCheck2 className="w-4 h-4" /> Legal & Notary Aligner
-          </div>
-          <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight">
-            E-Stamp Paper Margin & Print Aligner
-          </h1>
-          <p className="text-sm sm:text-base text-slate-500 dark:text-slate-400 max-w-2xl mx-auto">
-            Perfect printing for Rent Agreements, Affidavits, Deeds, and Undertakings on ₹50, ₹100, ₹500 e-Stamp paper. 
-            Automatically adjusts Page 1 text below the government barcode line.
-          </p>
-        </div>
-
+    <ToolWorkspaceShell
+      title="E-Stamp Paper Margin & Print Aligner"
+      subtitle="Perfect printing for Rent Agreements, Affidavits, Deeds, and Undertakings on ₹50, ₹100, ₹500 e-Stamp paper. Automatically adjusts Page 1 text below the government barcode line."
+      categoryLabel="Legal & Notary Aligner"
+      icon={FileCheck2}
+      microVariant="crop"
+      tone="amber"
+      trustNote="Point-accurate PDF coordinates · Legal documents never leave your device"
+    >
+      <div className="space-y-8">
         {/* Upload State */}
         {!pdfBytes ? (
-          <div className="max-w-2xl mx-auto">
-            <label className="flex flex-col items-center justify-center p-12 border-2 border-dashed border-slate-300 dark:border-slate-700 hover:border-amber-500 rounded-3xl cursor-pointer bg-white dark:bg-slate-900 transition-all shadow-sm group">
+          <motion.div
+            initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="max-w-2xl mx-auto pms-glass-panel rounded-3xl p-4 relative overflow-hidden"
+          >
+            <PearlScanOverlay active={isProcessing} label="Reading PDF pages & stamp dimensions..." />
+            <label className="flex flex-col items-center justify-center p-12 border-2 border-dashed border-[var(--pms-border-strong)] hover:border-amber-500 rounded-2xl cursor-pointer bg-[var(--pms-white)] transition-all group">
               <input
                 type="file"
                 accept=".pdf"
                 onChange={handleFileUpload}
                 className="hidden"
               />
-              <div className="w-16 h-16 rounded-2xl bg-amber-50 dark:bg-amber-950/50 text-amber-600 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+              <div
+                className="w-16 h-16 rounded-2xl text-amber-600 dark:text-amber-400 border border-[var(--pms-border)] flex items-center justify-center mb-4 group-hover:scale-105 transition-transform"
+                style={{ background: 'var(--pms-soft-rose)' }}
+              >
                 <Upload className="w-8 h-8" />
               </div>
-              <span className="text-base font-bold text-slate-900 dark:text-white mb-1">
+              <span className="text-base font-bold text-[var(--pms-ink)] mb-1">
                 Drop Agreement or Deed PDF Here
               </span>
-              <span className="text-xs text-slate-400 text-center max-w-xs">
+              <span className="text-xs text-[var(--pms-muted)] text-center max-w-xs">
                 Supports any Rent Agreement, Affidavit, Notary, Partnership Deed, or General Power of Attorney PDF.
               </span>
             </label>
-          </div>
+          </motion.div>
         ) : (
           /* Editor Layout */
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
             {/* Left Controls */}
-            <div className="lg:col-span-5 space-y-5 bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm">
-              <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
-                <span className="text-sm font-bold flex items-center gap-2">
-                  <Sliders className="w-4 h-4 text-amber-500" /> Margin Settings
-                </span>
+            <motion.div
+              initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="lg:col-span-5 space-y-5 pms-glass-panel p-6 rounded-3xl"
+            >
+              <div className="flex items-center justify-between pb-3 border-b border-[var(--pms-border)]">
+                <div className="min-w-0">
+                  <span className="text-sm font-bold text-[var(--pms-ink)] flex items-center gap-2">
+                    <Sliders className="w-4 h-4 text-amber-500 shrink-0" /> Margin Settings
+                  </span>
+                  {file && (
+                    <span className="text-[11px] text-[var(--pms-muted)] block truncate mt-0.5">
+                      {file.name}
+                    </span>
+                  )}
+                </div>
                 <button
                   onClick={() => {
                     setFile(null);
                     setPdfBytes(null);
+                    setPreviewImageUrl(null);
+                    setPageCount(0);
                   }}
-                  className="text-xs text-rose-500 hover:text-rose-600 font-semibold"
+                  className="text-xs text-rose-500 hover:text-rose-600 font-semibold shrink-0 cursor-pointer"
                 >
                   Change PDF
                 </button>
@@ -326,7 +342,7 @@ export default function StampPaperAligner() {
 
               {/* State Presets */}
               <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">
+                <label className="block text-xs font-bold uppercase tracking-wider text-[var(--pms-muted)] mb-2">
                   Select State E-Stamp Format
                 </label>
                 <div className="grid grid-cols-2 gap-2 text-xs">
@@ -337,24 +353,24 @@ export default function StampPaperAligner() {
                         setSelectedPreset(p.id);
                         setTopOffsetInches(p.offsetInches);
                       }}
-                      className={`p-2.5 rounded-xl border text-left font-medium transition ${
+                      className={`p-2.5 rounded-xl border text-left font-medium transition cursor-pointer ${
                         selectedPreset === p.id
-                          ? 'border-amber-500 bg-amber-50/50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400'
-                          : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800'
+                          ? 'border-amber-500 bg-[var(--pms-soft-rose)] text-[var(--pms-ink)] shadow-sm'
+                          : 'border-[var(--pms-border)] bg-[var(--pms-white)] text-[var(--pms-muted)] hover:text-[var(--pms-ink)]'
                       }`}
                     >
                       <div className="font-bold">{p.name}</div>
-                      <div className="text-[10px] text-slate-400 mt-0.5">{p.offsetInches}" top space</div>
+                      <div className="text-[10px] opacity-75 mt-0.5">{p.offsetInches}" top space</div>
                     </button>
                   ))}
                 </div>
               </div>
 
               {/* Fine Offset Slider */}
-              <div className="p-4 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-3">
-                <div className="flex justify-between items-center text-xs font-semibold">
-                  <span className="text-slate-700 dark:text-slate-300">Top Space for Stamp Barcode</span>
-                  <span className="px-2 py-0.5 bg-amber-500 text-white rounded font-mono text-[11px]">
+              <div className="p-4 bg-[var(--pms-white)] rounded-2xl border border-[var(--pms-border)] space-y-3">
+                <div className="flex justify-between items-center text-xs font-semibold gap-2">
+                  <span className="text-[var(--pms-ink)]">Top Space for Stamp Barcode</span>
+                  <span className="px-2 py-0.5 bg-amber-500 text-white rounded font-mono text-[11px] shrink-0">
                     {topOffsetInches.toFixed(2)}" ({Math.round(topOffsetInches * 25.4)} mm)
                   </span>
                 </div>
@@ -370,7 +386,7 @@ export default function StampPaperAligner() {
                   }}
                   className="w-full accent-amber-600"
                 />
-                <div className="flex justify-between text-[10px] text-slate-400">
+                <div className="flex justify-between text-[10px] text-[var(--pms-muted)]">
                   <span>3.0" (Compact)</span>
                   <span>5.5" (Standard E-Stamp)</span>
                   <span>8.0" (Half Page)</span>
@@ -379,7 +395,7 @@ export default function StampPaperAligner() {
 
               {/* Left Gutter Margin for Advocate File Binding */}
               <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1.5">
+                <label className="block text-xs font-bold uppercase tracking-wider text-[var(--pms-muted)] mb-1.5">
                   Left Gutter Margin (Advocate Tag / Binding Space)
                 </label>
                 <div className="grid grid-cols-3 gap-2">
@@ -391,10 +407,10 @@ export default function StampPaperAligner() {
                     <button
                       key={g.label}
                       onClick={() => setLeftGutterInches(g.val)}
-                      className={`py-2 px-2 rounded-xl border text-xs font-bold text-center transition ${
+                      className={`py-2 px-2 rounded-xl border text-xs font-bold text-center transition cursor-pointer ${
                         leftGutterInches === g.val
                           ? 'border-amber-500 bg-amber-500 text-white shadow-sm'
-                          : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50'
+                          : 'border-[var(--pms-border)] bg-[var(--pms-white)] text-[var(--pms-muted)] hover:text-[var(--pms-ink)]'
                       }`}
                     >
                       {g.label}
@@ -405,36 +421,36 @@ export default function StampPaperAligner() {
 
               {/* Fitting Mode */}
               <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1.5">
+                <label className="block text-xs font-bold uppercase tracking-wider text-[var(--pms-muted)] mb-1.5">
                   Page 1 Content Fitting Mode
                 </label>
                 <div className="grid grid-cols-2 gap-2 text-xs">
                   <button
                     onClick={() => setFitMode('scale_fit')}
-                    className={`p-2.5 rounded-xl border text-left font-medium transition ${
+                    className={`p-2.5 rounded-xl border text-left font-medium transition cursor-pointer ${
                       fitMode === 'scale_fit'
-                        ? 'border-amber-500 bg-amber-50/50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400'
-                        : 'border-slate-200 dark:border-slate-700'
+                        ? 'border-amber-500 bg-[var(--pms-soft-rose)] text-[var(--pms-ink)] shadow-sm'
+                        : 'border-[var(--pms-border)] bg-[var(--pms-white)] text-[var(--pms-muted)]'
                     }`}
                   >
                     <div className="font-bold flex items-center gap-1">
                       <Scale className="w-3.5 h-3.5 text-amber-500" /> Scale to Fit
                     </div>
-                    <div className="text-[10px] text-slate-400 mt-0.5">
+                    <div className="text-[10px] opacity-75 mt-0.5">
                       Fits all text into bottom area without spilling to Page 2
                     </div>
                   </button>
 
                   <button
                     onClick={() => setFitMode('shift_down')}
-                    className={`p-2.5 rounded-xl border text-left font-medium transition ${
+                    className={`p-2.5 rounded-xl border text-left font-medium transition cursor-pointer ${
                       fitMode === 'shift_down'
-                        ? 'border-amber-500 bg-amber-50/50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400'
-                        : 'border-slate-200 dark:border-slate-700'
+                        ? 'border-amber-500 bg-[var(--pms-soft-rose)] text-[var(--pms-ink)] shadow-sm'
+                        : 'border-[var(--pms-border)] bg-[var(--pms-white)] text-[var(--pms-muted)]'
                     }`}
                   >
                     <div className="font-bold">Natural Push Down</div>
-                    <div className="text-[10px] text-slate-400 mt-0.5">
+                    <div className="text-[10px] opacity-75 mt-0.5">
                       Shifts content down at 100% original font size
                     </div>
                   </button>
@@ -443,69 +459,92 @@ export default function StampPaperAligner() {
 
               {/* Toggles */}
               <div className="space-y-2 pt-1">
-                <label className="flex items-center gap-2.5 text-xs text-slate-700 dark:text-slate-300 cursor-pointer">
+                <label className="flex items-center gap-2.5 text-xs text-[var(--pms-ink)] cursor-pointer">
                   <input
                     type="checkbox"
                     checked={applyOnlyToPageOne}
                     onChange={(e) => setApplyOnlyToPageOne(e.target.checked)}
-                    className="w-4 h-4 rounded text-amber-600 accent-amber-600"
+                    className="w-4 h-4 rounded accent-amber-600"
                   />
                   <span>Apply margin only to Page 1 (Subsequent pages start at top)</span>
                 </label>
-                <label className="flex items-center gap-2.5 text-xs text-slate-700 dark:text-slate-300 cursor-pointer">
+                <label className="flex items-center gap-2.5 text-xs text-[var(--pms-ink)] cursor-pointer">
                   <input
                     type="checkbox"
                     checked={showStampWatermark}
                     onChange={(e) => setShowStampWatermark(e.target.checked)}
-                    className="w-4 h-4 rounded text-amber-600 accent-amber-600"
+                    className="w-4 h-4 rounded accent-amber-600"
                   />
                   <span>Show simulated E-Stamp header guide on preview</span>
                 </label>
               </div>
 
               {/* Export Buttons */}
-              <div className="pt-3 border-t border-slate-100 dark:border-slate-800 space-y-2">
+              <div className="pt-3 border-t border-[var(--pms-border)] space-y-2">
                 <button
                   onClick={handleDownloadPdf}
                   disabled={isProcessing}
-                  className="w-full flex items-center justify-center gap-2 py-3.5 px-4 bg-amber-600 hover:bg-amber-700 text-white rounded-xl font-bold text-sm shadow-md transition disabled:opacity-50"
+                  className="pms-btn-primary w-full flex items-center justify-center gap-2 py-3.5 px-4 rounded-xl font-bold text-sm transition disabled:opacity-50 cursor-pointer"
                 >
                   <Download className="w-4 h-4" /> Download Aligned PDF for Printing
                 </button>
                 <button
                   onClick={() => setShowQrModal(true)}
-                  className="w-full flex items-center justify-center gap-1.5 py-2 px-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-xl font-semibold text-xs transition"
+                  className="w-full flex items-center justify-center gap-1.5 py-2.5 px-3 border border-[var(--pms-border)] text-[var(--pms-ink)] rounded-xl font-semibold text-xs transition cursor-pointer hover:opacity-90"
+                  style={{ background: 'var(--pms-soft-blue)' }}
                 >
-                  <Smartphone className="w-3.5 h-3.5" /> Send PDF to Mobile (WhatsApp / QR)
+                  <Smartphone className="w-3.5 h-3.5 text-[var(--pms-blue)]" /> Send PDF to Mobile (WhatsApp / QR)
                 </button>
               </div>
-            </div>
+            </motion.div>
 
             {/* Right Live Preview */}
-            <div className="lg:col-span-7 bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col items-center">
-              <div className="w-full flex items-center justify-between mb-4">
-                <span className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+            <motion.div
+              initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.06 }}
+              className="lg:col-span-7 pms-glass-panel p-6 rounded-3xl flex flex-col items-center relative overflow-hidden"
+            >
+              <PearlScanOverlay active={isProcessing} label="Aligning stamp paper PDF coordinates..." />
+
+              <div className="w-full flex items-center justify-between mb-4 flex-wrap gap-2">
+                <span className="text-xs font-bold uppercase tracking-wider text-[var(--pms-muted)] flex items-center gap-1.5">
                   <Eye className="w-4 h-4 text-amber-500" /> Page 1 Stamp Paper Alignment Preview
                 </span>
-                <span className="text-xs font-semibold px-2.5 py-1 bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400 rounded-lg">
-                  Total Pages: {pageCount}
+                <span
+                  className="text-xs font-semibold px-3 py-1 text-[var(--pms-ink)] rounded-full border border-[var(--pms-border)]"
+                  style={{ background: 'var(--pms-soft-lavender)' }}
+                >
+                  Total Pages: <AnimatedNumber value={pageCount} />
                 </span>
               </div>
 
-              {previewImageUrl ? (
-                <div className="w-full max-h-[640px] overflow-auto flex items-center justify-center p-4 bg-slate-100 dark:bg-slate-950 rounded-2xl border border-slate-200 dark:border-slate-800">
-                  <img
-                    src={previewImageUrl}
-                    alt="Stamp Paper Aligned Preview"
-                    className="max-h-[580px] w-auto object-contain rounded shadow-lg border border-slate-300 dark:border-slate-700"
-                  />
-                </div>
-              ) : (
-                <div className="w-full h-96 flex items-center justify-center text-slate-400 text-xs">
-                  Generating alignment preview...
-                </div>
-              )}
-            </div>
+              <AnimatePresence mode="wait">
+                {previewImageUrl ? (
+                  <motion.div
+                    key="stamp-preview"
+                    initial={prefersReduced ? false : { opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    className="w-full max-h-[640px] overflow-auto flex items-center justify-center p-4 pms-paper-grid rounded-2xl border border-[var(--pms-border)]"
+                  >
+                    <img
+                      src={previewImageUrl}
+                      alt="Stamp Paper Aligned Preview"
+                      className="max-h-[580px] w-auto object-contain rounded bg-white shadow-lg border border-[var(--pms-border-strong)]"
+                    />
+                  </motion.div>
+                ) : (
+                  <motion.div
+                    key="stamp-loading"
+                    initial={prefersReduced ? false : { opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    className="w-full h-96 flex items-center justify-center text-[var(--pms-muted)] text-xs"
+                  >
+                    Generating alignment preview...
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </motion.div>
           </div>
         )}
 
@@ -565,6 +604,6 @@ export default function StampPaperAligner() {
           fileName="stamp-paper-aligned.pdf"
         />
       </div>
-    </div>
+    </ToolWorkspaceShell>
   );
 }

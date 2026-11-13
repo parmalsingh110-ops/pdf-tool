@@ -1,6 +1,11 @@
-import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { ImagePlus, Download, Loader2, Move, RotateCw, Trash2, ZoomIn, ZoomOut, Lock, LockOpen } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { motion, useReducedMotion } from 'motion/react';
+import { ImagePlus, Download, Loader2, Trash2, ZoomIn, ZoomOut, Lock, LockOpen } from 'lucide-react';
+import FileDropzone from '../components/FileDropzone';
 import { useSEO } from '../hooks/useSEO';
+import { triggerBlobDownload, useAutoRevokeUrl } from '../lib/blobUrl';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { AnimatedNumber, PearlScanOverlay } from '../components/pearl/PearlMotion';
 
 interface InsertedImage {
   id: string;
@@ -28,17 +33,29 @@ export default function ImageInsertTool() {
 
   const containerRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ id: string; startX: number; startY: number; imgX: number; imgY: number } | null>(null);
-  const resizeRef = useRef<{ id: string; startX: number; startY: number; startW: number; startH: number; startImgX: number; startImgY: number; handle: string } | null>(null);
+  const resizeRef = useRef<{
+    id: string;
+    startX: number;
+    startY: number;
+    startW: number;
+    startH: number;
+    startImgX: number;
+    startImgY: number;
+    handle: string;
+  } | null>(null);
   const [lockAspect, setLockAspect] = useState(false);
 
-  const handleBaseUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0];
-    if (!f) return;
+  const prefersReduced = useReducedMotion();
+  useAutoRevokeUrl(baseUrl);
+
+  const loadBaseFile = (f: File) => {
     setBaseFile(f);
-    if (baseUrl) URL.revokeObjectURL(baseUrl);
     const url = URL.createObjectURL(f);
     setBaseUrl(url);
-    setInserts([]);
+    setInserts((prev) => {
+      prev.forEach((item) => URL.revokeObjectURL(item.url));
+      return [];
+    });
     setSelectedId(null);
     const img = new Image();
     img.onload = () => {
@@ -47,10 +64,18 @@ export default function ImageInsertTool() {
     img.src = url;
   };
 
+  const handleBaseUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    loadBaseFile(f);
+    e.target.value = '';
+  };
+
   // Calculate display scale
   useEffect(() => {
     if (!baseDim.w || !baseDim.h) return;
-    const maxW = 700, maxH = 500;
+    const maxW = 700,
+      maxH = 500;
     setDisplayScale(Math.min(maxW / baseDim.w, maxH / baseDim.h, 1));
   }, [baseDim]);
 
@@ -64,31 +89,34 @@ export default function ImageInsertTool() {
       // Default size: 30% of base image width
       const w = baseDim.w * 0.3;
       const h = (w / img.naturalWidth) * img.naturalHeight;
-      setInserts(prev => [...prev, {
-        id: Date.now().toString() + Math.random(),
-        url,
-        x: baseDim.w * 0.1,
-        y: baseDim.h * 0.1,
-        width: w,
-        height: h,
-        rotation: 0,
-        opacity: 1,
-        naturalW: img.naturalWidth,
-        naturalH: img.naturalHeight,
-      }]);
+      setInserts((prev) => [
+        ...prev,
+        {
+          id: Date.now().toString() + Math.random(),
+          url,
+          x: baseDim.w * 0.1,
+          y: baseDim.h * 0.1,
+          width: w,
+          height: h,
+          rotation: 0,
+          opacity: 1,
+          naturalW: img.naturalWidth,
+          naturalH: img.naturalHeight,
+        },
+      ]);
     };
     img.src = url;
   };
 
   const updateInsert = (id: string, updates: Partial<InsertedImage>) => {
-    setInserts(prev => prev.map(i => i.id === id ? { ...i, ...updates } : i));
+    setInserts((prev) => prev.map((i) => (i.id === id ? { ...i, ...updates } : i)));
   };
 
   const deleteInsert = (id: string) => {
-    setInserts(prev => {
-      const item = prev.find(i => i.id === id);
+    setInserts((prev) => {
+      const item = prev.find((i) => i.id === id);
       if (item) URL.revokeObjectURL(item.url);
-      return prev.filter(i => i.id !== id);
+      return prev.filter((i) => i.id !== id);
     });
     if (selectedId === id) setSelectedId(null);
   };
@@ -98,7 +126,7 @@ export default function ImageInsertTool() {
     e.stopPropagation();
     e.preventDefault();
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
-    const item = inserts.find(i => i.id === id);
+    const item = inserts.find((i) => i.id === id);
     if (!item) return;
     setSelectedId(id);
     dragRef.current = { id, startX: e.clientX, startY: e.clientY, imgX: item.x, imgY: item.y };
@@ -117,41 +145,67 @@ export default function ImageInsertTool() {
       const dx = (e.clientX - resizeRef.current.startX) / displayScale;
       const dy = (e.clientY - resizeRef.current.startY) / displayScale;
       const r = resizeRef.current;
-      const item = inserts.find(i => i.id === r.id);
+      const item = inserts.find((i) => i.id === r.id);
       if (!item) return;
       const aspect = r.startW / r.startH;
 
-      let newW = r.startW, newH = r.startH;
-      let newX = r.startImgX, newY = r.startImgY;
+      let newW = r.startW,
+        newH = r.startH;
+      let newX = r.startImgX,
+        newY = r.startImgY;
 
       const h = r.handle;
       // Bottom-right
-      if (h === 'br') { newW = r.startW + dx; newH = r.startH + dy; }
+      if (h === 'br') {
+        newW = r.startW + dx;
+        newH = r.startH + dy;
+      }
       // Bottom-left
-      else if (h === 'bl') { newW = r.startW - dx; newH = r.startH + dy; newX = r.startImgX + dx; }
+      else if (h === 'bl') {
+        newW = r.startW - dx;
+        newH = r.startH + dy;
+        newX = r.startImgX + dx;
+      }
       // Top-right
-      else if (h === 'tr') { newW = r.startW + dx; newH = r.startH - dy; newY = r.startImgY + dy; }
+      else if (h === 'tr') {
+        newW = r.startW + dx;
+        newH = r.startH - dy;
+        newY = r.startImgY + dy;
+      }
       // Top-left
-      else if (h === 'tl') { newW = r.startW - dx; newH = r.startH - dy; newX = r.startImgX + dx; newY = r.startImgY + dy; }
+      else if (h === 'tl') {
+        newW = r.startW - dx;
+        newH = r.startH - dy;
+        newX = r.startImgX + dx;
+        newY = r.startImgY + dy;
+      }
       // Right edge
-      else if (h === 'r') { newW = r.startW + dx; }
+      else if (h === 'r') {
+        newW = r.startW + dx;
+      }
       // Left edge
-      else if (h === 'l') { newW = r.startW - dx; newX = r.startImgX + dx; }
+      else if (h === 'l') {
+        newW = r.startW - dx;
+        newX = r.startImgX + dx;
+      }
       // Bottom edge
-      else if (h === 'b') { newH = r.startH + dy; }
+      else if (h === 'b') {
+        newH = r.startH + dy;
+      }
       // Top edge
-      else if (h === 't') { newH = r.startH - dy; newY = r.startImgY + dy; }
+      else if (h === 't') {
+        newH = r.startH - dy;
+        newY = r.startImgY + dy;
+      }
 
       newW = Math.max(15, newW);
       newH = Math.max(15, newH);
 
       if (lockAspect) {
         if (h === 'r' || h === 'l' || h === 'b' || h === 't') {
-          // Edge: constrain the other dimension
           if (h === 'r' || h === 'l') newH = newW / aspect;
           else newW = newH * aspect;
         } else {
-          // Corner: use the larger delta
           if (Math.abs(dx) > Math.abs(dy)) newH = newW / aspect;
           else newW = newH * aspect;
         }
@@ -162,7 +216,11 @@ export default function ImageInsertTool() {
   };
 
   const onPointerUp = (e: React.PointerEvent) => {
-    try { (e.target as HTMLElement).releasePointerCapture(e.pointerId); } catch { /* */ }
+    try {
+      (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+    } catch {
+      /* */
+    }
     dragRef.current = null;
     resizeRef.current = null;
   };
@@ -171,10 +229,19 @@ export default function ImageInsertTool() {
     e.stopPropagation();
     e.preventDefault();
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
-    const item = inserts.find(i => i.id === id);
+    const item = inserts.find((i) => i.id === id);
     if (!item) return;
     setSelectedId(id);
-    resizeRef.current = { id, startX: e.clientX, startY: e.clientY, startW: item.width, startH: item.height, startImgX: item.x, startImgY: item.y, handle };
+    resizeRef.current = {
+      id,
+      startX: e.clientX,
+      startY: e.clientY,
+      startW: item.width,
+      startH: item.height,
+      startImgX: item.x,
+      startImgY: item.y,
+      handle,
+    };
   };
 
   // Click on empty area to deselect
@@ -191,7 +258,9 @@ export default function ImageInsertTool() {
       const baseImg = new Image();
       baseImg.crossOrigin = 'anonymous';
       baseImg.src = baseUrl;
-      await new Promise<void>((res) => { baseImg.onload = () => res(); });
+      await new Promise<void>((res) => {
+        baseImg.onload = () => res();
+      });
 
       const canvas = document.createElement('canvas');
       canvas.width = baseDim.w;
@@ -204,7 +273,10 @@ export default function ImageInsertTool() {
         const insertImg = new Image();
         insertImg.crossOrigin = 'anonymous';
         insertImg.src = ins.url;
-        await new Promise<void>((res) => { insertImg.onload = () => res(); insertImg.onerror = () => res(); });
+        await new Promise<void>((res) => {
+          insertImg.onload = () => res();
+          insertImg.onerror = () => res();
+        });
 
         ctx.save();
         ctx.globalAlpha = ins.opacity;
@@ -220,14 +292,10 @@ export default function ImageInsertTool() {
         ctx.restore();
       }
 
-      canvas.toBlob(blob => {
-        if (!blob) return;
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = `composite_${baseFile?.name || 'image.png'}`;
-        a.click();
-        URL.revokeObjectURL(a.href);
-      }, 'image/png');
+      const blob = await new Promise<Blob | null>((res) => canvas.toBlob((b) => res(b), 'image/png'));
+      if (blob) {
+        triggerBlobDownload(blob, `composite_${baseFile?.name || 'image.png'}`);
+      }
     } catch (e: any) {
       alert(e?.message || 'Export failed.');
     } finally {
@@ -235,195 +303,320 @@ export default function ImageInsertTool() {
     }
   };
 
-  const selected = inserts.find(i => i.id === selectedId);
+  const selected = inserts.find((i) => i.id === selectedId);
   const dW = Math.round(baseDim.w * displayScale);
   const dH = Math.round(baseDim.h * displayScale);
 
   return (
-    <div className="flex-1 flex flex-col items-center p-8">
-      <div className="text-center mb-8">
-        <h1 className="text-4xl font-bold text-gray-900 dark:text-white mb-4">Image Insert & Overlay</h1>
-        <p className="text-xl text-gray-600 dark:text-gray-400">Place images inside another image — resize, position, and blend seamlessly.</p>
-      </div>
-
+    <ToolWorkspaceShell
+      title="Image Insert & Overlay"
+      subtitle="Place photos inside another image — drag, resize with 8 handles, rotate, and blend seamlessly."
+      categoryLabel="Layer Composite Studio"
+      icon={ImagePlus}
+      microVariant="edit"
+      tone="blue"
+      trustNote="Full-resolution layer compositing · 100% browser-only"
+    >
       {!baseFile ? (
-        <label className="flex flex-col items-center justify-center w-full max-w-xl h-64 border-2 border-dashed border-gray-300 rounded-2xl bg-gray-50 dark:bg-slate-900 cursor-pointer hover:bg-gray-100 dark:hover:bg-slate-800">
-          <ImagePlus className="w-12 h-12 text-gray-400 mb-3" />
-          <span className="text-gray-600 dark:text-gray-300 font-semibold">Upload base image</span>
-          <span className="text-xs text-gray-400 mt-1">The image where you'll insert others</span>
-          <input type="file" accept="image/*" className="hidden" onChange={handleBaseUpload} />
-        </label>
+        <motion.div
+          initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.25 }}
+          className="max-w-2xl mx-auto"
+        >
+          <FileDropzone
+            onDrop={(files) => {
+              if (files[0]) loadBaseFile(files[0]);
+            }}
+            multiple={false}
+            accept={{ 'image/*': ['.jpg', '.jpeg', '.png', '.webp'] }}
+            title="Upload base image"
+            subtitle="The background canvas where you will insert and arrange overlays"
+          />
+        </motion.div>
       ) : (
-        <div className="w-full max-w-6xl grid grid-cols-1 lg:grid-cols-[1fr_280px] gap-6">
-          {/* Canvas area */}
+        <motion.div
+          initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.26 }}
+          className="w-full max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-6 items-start"
+        >
+          {/* Canvas Area */}
           <div className="space-y-4">
-            <div className="flex items-center gap-2 flex-wrap">
-              <label className="px-4 py-2 bg-blue-600 text-white rounded-xl font-semibold text-sm cursor-pointer hover:bg-blue-700 inline-flex items-center gap-2">
+            <div className="pms-glass-panel rounded-2xl p-3 flex items-center gap-2.5 flex-wrap">
+              <label className="px-4 py-2 bg-[var(--pms-soft-blue)] text-[var(--pms-blue)] border border-sky-200 dark:border-sky-800 rounded-xl font-bold text-sm cursor-pointer hover:opacity-90 transition-opacity inline-flex items-center gap-2">
                 <ImagePlus className="w-4 h-4" /> Insert Image
                 <input type="file" accept="image/*" className="hidden" onChange={addInsertImage} />
               </label>
-              <button onClick={exportImage} disabled={busy} className="px-4 py-2 bg-green-600 text-white rounded-xl font-bold text-sm hover:bg-green-700 disabled:opacity-50 inline-flex items-center gap-2">
+
+              <motion.button
+                whileHover={prefersReduced || busy ? undefined : { scale: 1.01 }}
+                whileTap={prefersReduced || busy ? undefined : { scale: 0.985 }}
+                onClick={exportImage}
+                disabled={busy}
+                className="pms-btn-primary px-5 py-2 rounded-xl font-bold text-sm disabled:opacity-50 inline-flex items-center gap-2 cursor-pointer"
+              >
                 {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
                 {busy ? 'Exporting…' : 'Save Image'}
-              </button>
-              <label className="px-4 py-2 bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-gray-300 rounded-xl font-semibold text-sm cursor-pointer hover:bg-gray-200">
+              </motion.button>
+
+              <label className="px-4 py-2 bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-slate-300 rounded-xl font-semibold text-sm cursor-pointer hover:bg-gray-200 dark:hover:bg-slate-700 transition-colors ml-auto">
                 Change Base <input type="file" accept="image/*" className="hidden" onChange={handleBaseUpload} />
               </label>
             </div>
 
-            <div ref={containerRef}
-              className="relative bg-gray-100 dark:bg-slate-800 rounded-xl overflow-hidden border border-gray-200 dark:border-slate-700 inline-block cursor-default"
-              style={{ width: dW, height: dH }}
-              onPointerMove={onPointerMove}
-              onPointerUp={onPointerUp}
-              onPointerCancel={onPointerUp}
-              onClick={onContainerClick}
-            >
-              {/* Base image */}
-              <img src={baseUrl!} alt="Base" style={{ width: dW, height: dH }} className="block pointer-events-none select-none" draggable={false} />
+            <div className="relative pms-glass-panel rounded-3xl p-4 sm:p-5 flex flex-col items-center overflow-hidden">
+              <PearlScanOverlay active={busy} label="Compositing high-res overlay layers…" />
+              <div
+                ref={containerRef}
+                className="relative pms-checkerboard bg-white rounded-xl overflow-hidden border border-[var(--pms-border)] inline-block cursor-default shadow-inner"
+                style={{ width: dW, height: dH }}
+                onPointerMove={onPointerMove}
+                onPointerUp={onPointerUp}
+                onPointerCancel={onPointerUp}
+                onClick={onContainerClick}
+              >
+                {/* Base image */}
+                <img
+                  src={baseUrl!}
+                  alt="Base"
+                  style={{ width: dW, height: dH }}
+                  className="block pointer-events-none select-none"
+                  draggable={false}
+                />
 
-              {/* Inserted images */}
-              {inserts.map(ins => {
-                const isSel = ins.id === selectedId;
-                return (
-                  <div key={ins.id}
-                    className={`absolute touch-none ${isSel ? 'ring-2 ring-blue-500' : 'hover:ring-1 hover:ring-blue-300'}`}
-                    style={{
-                      left: ins.x * displayScale,
-                      top: ins.y * displayScale,
-                      width: ins.width * displayScale,
-                      height: ins.height * displayScale,
-                      opacity: ins.opacity,
-                      transform: ins.rotation ? `rotate(${ins.rotation}deg)` : undefined,
-                      cursor: 'move',
-                    }}
-                    onPointerDown={e => onPointerDown(e, ins.id)}
-                  >
-                    <img src={ins.url} alt="Insert" className="w-full h-full object-fill pointer-events-none select-none" draggable={false} />
-                    
-                    {/* 8 Resize handles: 4 corners + 4 edges */}
-                    {isSel && (
-                      <>
-                        {/* Corner handles */}
-                        <div className="absolute -top-1.5 -left-1.5 w-3 h-3 bg-blue-500 border border-white rounded-sm cursor-nwse-resize z-10"
-                          onPointerDown={e => onResizeHandle(e, ins.id, 'tl')} />
-                        <div className="absolute -top-1.5 -right-1.5 w-3 h-3 bg-blue-500 border border-white rounded-sm cursor-nesw-resize z-10"
-                          onPointerDown={e => onResizeHandle(e, ins.id, 'tr')} />
-                        <div className="absolute -bottom-1.5 -left-1.5 w-3 h-3 bg-blue-500 border border-white rounded-sm cursor-nesw-resize z-10"
-                          onPointerDown={e => onResizeHandle(e, ins.id, 'bl')} />
-                        <div className="absolute -bottom-1.5 -right-1.5 w-3 h-3 bg-blue-500 border border-white rounded-sm cursor-nwse-resize z-10"
-                          onPointerDown={e => onResizeHandle(e, ins.id, 'br')} />
-                        {/* Edge handles */}
-                        <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-6 h-2 bg-blue-400 border border-white rounded-sm cursor-ns-resize z-10"
-                          onPointerDown={e => onResizeHandle(e, ins.id, 't')} />
-                        <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-6 h-2 bg-blue-400 border border-white rounded-sm cursor-ns-resize z-10"
-                          onPointerDown={e => onResizeHandle(e, ins.id, 'b')} />
-                        <div className="absolute top-1/2 -left-1 -translate-y-1/2 w-2 h-6 bg-blue-400 border border-white rounded-sm cursor-ew-resize z-10"
-                          onPointerDown={e => onResizeHandle(e, ins.id, 'l')} />
-                        <div className="absolute top-1/2 -right-1 -translate-y-1/2 w-2 h-6 bg-blue-400 border border-white rounded-sm cursor-ew-resize z-10"
-                          onPointerDown={e => onResizeHandle(e, ins.id, 'r')} />
-                      </>
-                    )}
-                    {isSel && (
-                      <div className="absolute -top-5 left-0 text-[10px] font-bold text-blue-600 bg-white/80 px-1 rounded whitespace-nowrap">
-                        {Math.round(ins.width)}×{Math.round(ins.height)}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
+                {/* Inserted images */}
+                {inserts.map((ins) => {
+                  const isSel = ins.id === selectedId;
+                  return (
+                    <div
+                      key={ins.id}
+                      className={`absolute touch-none ${isSel ? 'ring-2 ring-sky-500' : 'hover:ring-1 hover:ring-sky-300'}`}
+                      style={{
+                        left: ins.x * displayScale,
+                        top: ins.y * displayScale,
+                        width: ins.width * displayScale,
+                        height: ins.height * displayScale,
+                        opacity: ins.opacity,
+                        transform: ins.rotation ? `rotate(${ins.rotation}deg)` : undefined,
+                        cursor: 'move',
+                      }}
+                      onPointerDown={(e) => onPointerDown(e, ins.id)}
+                    >
+                      <img
+                        src={ins.url}
+                        alt="Insert"
+                        className="w-full h-full object-fill pointer-events-none select-none"
+                        draggable={false}
+                      />
+
+                      {/* 8 Resize handles */}
+                      {isSel && (
+                        <>
+                          <div
+                            className="absolute -top-1.5 -left-1.5 w-3 h-3 bg-sky-500 border border-white rounded-sm cursor-nwse-resize z-10"
+                            onPointerDown={(e) => onResizeHandle(e, ins.id, 'tl')}
+                          />
+                          <div
+                            className="absolute -top-1.5 -right-1.5 w-3 h-3 bg-sky-500 border border-white rounded-sm cursor-nesw-resize z-10"
+                            onPointerDown={(e) => onResizeHandle(e, ins.id, 'tr')}
+                          />
+                          <div
+                            className="absolute -bottom-1.5 -left-1.5 w-3 h-3 bg-sky-500 border border-white rounded-sm cursor-nesw-resize z-10"
+                            onPointerDown={(e) => onResizeHandle(e, ins.id, 'bl')}
+                          />
+                          <div
+                            className="absolute -bottom-1.5 -right-1.5 w-3 h-3 bg-sky-500 border border-white rounded-sm cursor-nwse-resize z-10"
+                            onPointerDown={(e) => onResizeHandle(e, ins.id, 'br')}
+                          />
+                          <div
+                            className="absolute -top-1 left-1/2 -translate-x-1/2 w-6 h-2 bg-sky-400 border border-white rounded-sm cursor-ns-resize z-10"
+                            onPointerDown={(e) => onResizeHandle(e, ins.id, 't')}
+                          />
+                          <div
+                            className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-6 h-2 bg-sky-400 border border-white rounded-sm cursor-ns-resize z-10"
+                            onPointerDown={(e) => onResizeHandle(e, ins.id, 'b')}
+                          />
+                          <div
+                            className="absolute top-1/2 -left-1 -translate-y-1/2 w-2 h-6 bg-sky-400 border border-white rounded-sm cursor-ew-resize z-10"
+                            onPointerDown={(e) => onResizeHandle(e, ins.id, 'l')}
+                          />
+                          <div
+                            className="absolute top-1/2 -right-1 -translate-y-1/2 w-2 h-6 bg-sky-400 border border-white rounded-sm cursor-ew-resize z-10"
+                            onPointerDown={(e) => onResizeHandle(e, ins.id, 'r')}
+                          />
+                        </>
+                      )}
+                      {isSel && (
+                        <div className="absolute -top-5 left-0 text-[10px] font-bold text-sky-700 bg-white/90 px-1.5 py-0.5 rounded shadow-xs whitespace-nowrap">
+                          {Math.round(ins.width)}×{Math.round(ins.height)}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              <p className="text-xs text-gray-500 dark:text-slate-400 mt-3 text-center">
+                Click &ldquo;Insert Image&rdquo; to add layers. Drag to position, and use edge or corner handles to resize.
+              </p>
             </div>
-            <p className="text-xs text-gray-400">Click "Insert Image" to add photos. Drag to move, use corner handle to resize.</p>
           </div>
 
-          {/* Properties panel */}
-          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-gray-200 dark:border-slate-700 p-5 space-y-4 h-fit">
-            <h3 className="font-bold text-gray-900 dark:text-white text-sm">Properties</h3>
+          {/* Properties Panel */}
+          <div className="pms-glass-panel rounded-3xl p-5 sm:p-6 space-y-4 h-fit">
+            <div className="flex items-center justify-between">
+              <h3 className="font-extrabold text-gray-900 dark:text-white text-sm">Layer Properties</h3>
+              <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-[var(--pms-soft-blue)] text-[var(--pms-blue)]">
+                <AnimatedNumber value={inserts.length} suffix=" layer(s)" />
+              </span>
+            </div>
+
             {selected ? (
               <div className="space-y-3">
-                <p className="text-xs text-gray-500">Selected image ({Math.round(selected.width)}×{Math.round(selected.height)})</p>
-                
-                {/* Lock/Unlock aspect ratio toggle */}
-                <button onClick={() => setLockAspect(!lockAspect)}
-                  className={`w-full py-1.5 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 ${lockAspect ? 'bg-blue-100 dark:bg-blue-950 text-blue-700' : 'bg-gray-100 dark:bg-slate-800 text-gray-600 dark:text-gray-400'}`}>
-                  {lockAspect ? <Lock className="w-3 h-3" /> : <LockOpen className="w-3 h-3" />}
+                <p className="text-xs font-medium text-gray-500 dark:text-slate-400">
+                  Selected ({Math.round(selected.width)}×{Math.round(selected.height)} px)
+                </p>
+
+                <button
+                  onClick={() => setLockAspect(!lockAspect)}
+                  className={`w-full py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 border transition-colors cursor-pointer ${
+                    lockAspect
+                      ? 'bg-[var(--pms-soft-blue)] border-sky-300 dark:border-sky-700 text-[var(--pms-blue)]'
+                      : 'bg-white/70 dark:bg-slate-800/70 border-[var(--pms-border)] text-gray-600 dark:text-slate-300'
+                  }`}
+                >
+                  {lockAspect ? <Lock className="w-3.5 h-3.5" /> : <LockOpen className="w-3.5 h-3.5" />}
                   {lockAspect ? 'Aspect Locked' : 'Free Resize (unlock)'}
                 </button>
 
-                <label className="block text-xs font-medium text-gray-700 dark:text-gray-300">
-                  Width
-                  <input type="number" value={Math.round(selected.width)} min={10} onChange={e => {
-                    const w = Number(e.target.value);
-                    if (lockAspect) {
-                      const h = w / (selected.naturalW / selected.naturalH);
-                      updateInsert(selected.id, { width: w, height: h });
-                    } else {
-                      updateInsert(selected.id, { width: w });
-                    }
-                  }} className="mt-1 w-full px-2 py-1.5 border border-gray-300 dark:border-slate-600 rounded-lg text-sm bg-white dark:bg-slate-950" />
+                <div className="grid grid-cols-2 gap-2.5">
+                  <label className="block text-xs font-bold text-gray-700 dark:text-slate-300">
+                    Width
+                    <input
+                      type="number"
+                      value={Math.round(selected.width)}
+                      min={10}
+                      onChange={(e) => {
+                        const w = Number(e.target.value);
+                        if (lockAspect) {
+                          const h = w / (selected.naturalW / selected.naturalH);
+                          updateInsert(selected.id, { width: w, height: h });
+                        } else {
+                          updateInsert(selected.id, { width: w });
+                        }
+                      }}
+                      className="mt-1 w-full px-2.5 py-1.5 border border-[var(--pms-border)] rounded-xl text-sm bg-white/85 dark:bg-slate-900/70 text-gray-900 dark:text-white"
+                    />
+                  </label>
+
+                  <label className="block text-xs font-bold text-gray-700 dark:text-slate-300">
+                    Height
+                    <input
+                      type="number"
+                      value={Math.round(selected.height)}
+                      min={10}
+                      onChange={(e) => {
+                        const h = Number(e.target.value);
+                        if (lockAspect) {
+                          const w = h * (selected.naturalW / selected.naturalH);
+                          updateInsert(selected.id, { width: w, height: h });
+                        } else {
+                          updateInsert(selected.id, { height: h });
+                        }
+                      }}
+                      className="mt-1 w-full px-2.5 py-1.5 border border-[var(--pms-border)] rounded-xl text-sm bg-white/85 dark:bg-slate-900/70 text-gray-900 dark:text-white"
+                    />
+                  </label>
+                </div>
+
+                <label className="block text-xs font-bold text-gray-700 dark:text-slate-300">
+                  <div className="flex justify-between mb-1">
+                    <span>Opacity</span>
+                    <span className="font-mono text-[var(--pms-blue)]">{Math.round(selected.opacity * 100)}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={10}
+                    max={100}
+                    value={Math.round(selected.opacity * 100)}
+                    onChange={(e) => updateInsert(selected.id, { opacity: Number(e.target.value) / 100 })}
+                    className="w-full accent-sky-600 cursor-pointer"
+                  />
                 </label>
 
-                <label className="block text-xs font-medium text-gray-700 dark:text-gray-300">
-                  Height
-                  <input type="number" value={Math.round(selected.height)} min={10} onChange={e => {
-                    const h = Number(e.target.value);
-                    if (lockAspect) {
-                      const w = h * (selected.naturalW / selected.naturalH);
-                      updateInsert(selected.id, { width: w, height: h });
-                    } else {
-                      updateInsert(selected.id, { height: h });
-                    }
-                  }} className="mt-1 w-full px-2 py-1.5 border border-gray-300 dark:border-slate-600 rounded-lg text-sm bg-white dark:bg-slate-950" />
-                </label>
-
-                <label className="block text-xs font-medium text-gray-700 dark:text-gray-300">
-                  Opacity: {Math.round(selected.opacity * 100)}%
-                  <input type="range" min={10} max={100} value={Math.round(selected.opacity * 100)} onChange={e => updateInsert(selected.id, { opacity: Number(e.target.value) / 100 })} className="mt-1 w-full" />
-                </label>
-
-                <label className="block text-xs font-medium text-gray-700 dark:text-gray-300">
-                  Rotation: {selected.rotation}°
-                  <input type="range" min={0} max={360} value={selected.rotation} onChange={e => updateInsert(selected.id, { rotation: Number(e.target.value) })} className="mt-1 w-full" />
+                <label className="block text-xs font-bold text-gray-700 dark:text-slate-300">
+                  <div className="flex justify-between mb-1">
+                    <span>Rotation</span>
+                    <span className="font-mono text-[var(--pms-blue)]">{selected.rotation}°</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={0}
+                    max={360}
+                    value={selected.rotation}
+                    onChange={(e) => updateInsert(selected.id, { rotation: Number(e.target.value) })}
+                    className="w-full accent-sky-600 cursor-pointer"
+                  />
                 </label>
 
                 <div className="flex gap-2">
-                  <button onClick={() => updateInsert(selected.id, { width: selected.width * 1.1, height: selected.height * 1.1 })}
-                    className="flex-1 px-2 py-1.5 bg-gray-100 dark:bg-slate-800 rounded-lg text-xs font-bold flex items-center justify-center gap-1 hover:bg-gray-200">
-                    <ZoomIn className="w-3 h-3" /> Larger
+                  <button
+                    onClick={() =>
+                      updateInsert(selected.id, { width: selected.width * 1.1, height: selected.height * 1.1 })
+                    }
+                    className="flex-1 px-2 py-2 bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-slate-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1 hover:bg-gray-200 dark:hover:bg-slate-700 transition-colors cursor-pointer"
+                  >
+                    <ZoomIn className="w-3.5 h-3.5" /> Larger
                   </button>
-                  <button onClick={() => updateInsert(selected.id, { width: selected.width * 0.9, height: selected.height * 0.9 })}
-                    className="flex-1 px-2 py-1.5 bg-gray-100 dark:bg-slate-800 rounded-lg text-xs font-bold flex items-center justify-center gap-1 hover:bg-gray-200">
-                    <ZoomOut className="w-3 h-3" /> Smaller
+                  <button
+                    onClick={() =>
+                      updateInsert(selected.id, { width: selected.width * 0.9, height: selected.height * 0.9 })
+                    }
+                    className="flex-1 px-2 py-2 bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-slate-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1 hover:bg-gray-200 dark:hover:bg-slate-700 transition-colors cursor-pointer"
+                  >
+                    <ZoomOut className="w-3.5 h-3.5" /> Smaller
                   </button>
                 </div>
 
-                <button onClick={() => {
-                  // Fit to base image dimensions
-                  updateInsert(selected.id, { x: 0, y: 0, width: baseDim.w, height: baseDim.h });
-                }} className="w-full py-1.5 bg-blue-50 dark:bg-blue-950 text-blue-600 rounded-lg text-xs font-bold hover:bg-blue-100">Fit to canvas</button>
+                <button
+                  onClick={() => updateInsert(selected.id, { x: 0, y: 0, width: baseDim.w, height: baseDim.h })}
+                  className="w-full py-2 bg-[var(--pms-soft-blue)] text-[var(--pms-blue)] rounded-xl text-xs font-bold hover:opacity-90 transition-opacity cursor-pointer"
+                >
+                  Fit to canvas
+                </button>
 
-                <button onClick={() => {
-                  // Center
-                  updateInsert(selected.id, { x: (baseDim.w - selected.width) / 2, y: (baseDim.h - selected.height) / 2 });
-                }} className="w-full py-1.5 bg-gray-50 dark:bg-slate-800 text-gray-700 dark:text-gray-300 rounded-lg text-xs font-bold hover:bg-gray-100">Center</button>
+                <button
+                  onClick={() =>
+                    updateInsert(selected.id, {
+                      x: (baseDim.w - selected.width) / 2,
+                      y: (baseDim.h - selected.height) / 2,
+                    })
+                  }
+                  className="w-full py-2 bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-slate-200 rounded-xl text-xs font-bold hover:bg-gray-200 dark:hover:bg-slate-700 transition-colors cursor-pointer"
+                >
+                  Center
+                </button>
 
-                <button onClick={() => deleteInsert(selected.id)}
-                  className="w-full py-2 bg-red-50 dark:bg-red-950 text-red-600 rounded-lg text-xs font-bold hover:bg-red-100 flex items-center justify-center gap-1">
-                  <Trash2 className="w-3 h-3" /> Delete
+                <button
+                  onClick={() => deleteInsert(selected.id)}
+                  className="w-full py-2 bg-rose-50 dark:bg-rose-950/50 text-rose-600 dark:text-rose-400 border border-rose-200/70 dark:border-rose-800/60 rounded-xl text-xs font-bold hover:bg-rose-100 dark:hover:bg-rose-950/80 flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <Trash2 className="w-3.5 h-3.5" /> Delete Layer
                 </button>
               </div>
             ) : (
-              <p className="text-xs text-gray-400 italic">Select an inserted image to adjust its properties</p>
+              <p className="text-xs text-gray-500 dark:text-slate-400 italic">
+                Select an inserted image on the canvas to adjust dimensions, opacity, or rotation.
+              </p>
             )}
 
-            <hr className="border-gray-200 dark:border-slate-700" />
-            <p className="text-xs text-gray-500">{inserts.length} image(s) inserted</p>
-            <p className="text-[10px] text-gray-400 leading-relaxed">
-              💡 <strong>Tip:</strong> Insert a photo into a frame, ID card, or document. Position and resize it to fit perfectly, then save — the result looks seamless.
+            <hr className="border-[var(--pms-border)]" />
+            <p className="text-[11px] text-gray-500 dark:text-slate-400 leading-relaxed">
+              💡 <strong>Tip:</strong> Insert a photo into a frame, ID card, or document. Position and resize it to fit cleanly, then save.
             </p>
           </div>
-        </div>
+        </motion.div>
       )}
-    </div>
+    </ToolWorkspaceShell>
   );
 }

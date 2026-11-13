@@ -1,12 +1,15 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
-import { Upload, Download, Shield, EyeOff, Sparkles, CheckCircle2, AlertTriangle, Plus, Trash2, Move, FileText, Lock } from 'lucide-react';
+import { useState, useRef, useEffect } from 'react';
+import { motion, useReducedMotion } from 'motion/react';
+import { Download, Shield, EyeOff, Sparkles, CheckCircle2, Plus, Trash2, Move, Lock } from 'lucide-react';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
 import { PDFDocument } from 'pdf-lib';
 import { dataUrlToBytes } from '../lib/utils';
+import { toArrayBufferBytes } from '../lib/blobUrl';
 import { useToast } from '../components/Toast';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { AnimatedNumber, PearlScanOverlay } from '../components/pearl/PearlMotion';
 
 import * as pdfjsLib from 'pdfjs-dist';
 import '../lib/pdfWorker';
@@ -55,8 +58,11 @@ export default function MaskedAadhaar() {
   const [includeKycWatermark, setIncludeKycWatermark] = useState(true);
   const [kycPurposeText, setKycPurposeText] = useState('FOR KYC PURPOSE ONLY');
 
+  const prefersReduced = useReducedMotion();
+
   const [isProcessing, setIsProcessing] = useState(false);
   const [exportUrl, setExportUrl] = useState<string | null>(null);
+  const [lastExportFormat, setLastExportFormat] = useState<'pdf' | 'jpg' | null>(null);
 
   // Auto-cleanup blob URL on unmount or URL change
   useEffect(() => {
@@ -260,6 +266,8 @@ export default function MaskedAadhaar() {
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
+        setLastExportFormat('jpg');
+        toast.success('Masked Aadhaar JPG exported successfully!');
       } else {
         const pdfDoc = await PDFDocument.create();
         const page1 = pdfDoc.addPage([canvas.width * 0.5, canvas.height * 0.5]);
@@ -290,7 +298,7 @@ export default function MaskedAadhaar() {
         }
 
         const pdfBytes = await pdfDoc.save();
-        const blob = new Blob([pdfBytes as any], { type: 'application/pdf' });
+        const blob = new Blob([toArrayBufferBytes(pdfBytes)], { type: 'application/pdf' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
@@ -298,6 +306,7 @@ export default function MaskedAadhaar() {
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
+        setLastExportFormat('pdf');
         toast.success('Masked Aadhaar exported successfully!');
         setTimeout(() => {
           try {
@@ -326,24 +335,34 @@ export default function MaskedAadhaar() {
     >
 
       {!renderedImageUrl ? (
-        <div className="max-w-xl mx-auto p-8 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xs text-center">
-          <label className="flex flex-col items-center justify-center border-2 border-dashed border-emerald-300 dark:border-emerald-700 hover:border-emerald-500 rounded-2xl p-10 cursor-pointer transition-colors bg-emerald-50/20 dark:bg-emerald-950/20 hover:bg-emerald-50/40">
-            <Lock className="w-12 h-12 text-emerald-600 mb-3" />
-            <span className="text-base font-bold text-gray-800 dark:text-slate-100">
+        <motion.div
+          initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.28 }}
+          className="max-w-xl mx-auto p-6 sm:p-8 pms-glass-panel border border-[var(--pms-border)] rounded-3xl shadow-sm text-center"
+        >
+          <label className="flex flex-col items-center justify-center border-2 border-dashed border-emerald-400/70 dark:border-emerald-700/80 hover:border-emerald-500 rounded-2xl p-10 cursor-pointer transition-colors bg-white/60 dark:bg-slate-900/50 hover:bg-emerald-50/40 dark:hover:bg-emerald-950/30">
+            <div className="w-14 h-14 rounded-2xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200/80 dark:border-emerald-800/70 flex items-center justify-center mb-3">
+              <Lock className="w-7 h-7 text-emerald-600 dark:text-emerald-400" />
+            </div>
+            <span className="text-base font-extrabold text-[var(--pms-ink)]">
               Upload Aadhaar Card (Image or PDF)
             </span>
-            <span className="text-xs text-gray-500 dark:text-slate-400 mt-1">
+            <span className="text-xs text-[var(--pms-muted)] mt-1">
               Supports JPG, PNG, PDF • 100% Client-Side Privacy Guarantee
             </span>
             <input
               type="file"
               accept="image/*,application/pdf"
-              onChange={handleFileUpload}
+              onChange={(e) => {
+                setLastExportFormat(null);
+                handleFileUpload(e);
+              }}
               className="hidden"
             />
           </label>
 
-          <div className="mt-6 p-4 bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 rounded-xl text-left text-xs text-emerald-950 dark:text-emerald-100 flex items-start gap-2.5">
+          <div className="mt-6 p-4 bg-emerald-50/80 dark:bg-emerald-950/35 border border-emerald-200/80 dark:border-emerald-800/70 rounded-2xl text-left text-xs text-emerald-950 dark:text-emerald-100 flex items-start gap-2.5">
             <Shield className="w-5 h-5 shrink-0 text-emerald-600 dark:text-emerald-400 mt-0.5" />
             <div>
               <p className="font-bold mb-0.5">UIDAI & RBI Advisory:</p>
@@ -352,13 +371,20 @@ export default function MaskedAadhaar() {
               </p>
             </div>
           </div>
-        </div>
+        </motion.div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
           {/* Visual Masking Canvas (7 cols) */}
-          <div className="lg:col-span-7 space-y-4">
+          <motion.div
+            initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.28 }}
+            className="lg:col-span-7 relative overflow-hidden min-h-[360px] pms-glass-panel rounded-3xl border border-[var(--pms-border)] p-4 sm:p-5 space-y-4"
+          >
+            <PearlScanOverlay active={isProcessing} label="Flattening & masking Aadhaar..." />
+
             {/* Quick Layout Presets */}
-            <div className="p-3.5 bg-gradient-to-r from-emerald-500/10 to-blue-500/10 border border-emerald-200 dark:border-emerald-800/60 rounded-xl space-y-2">
+            <div className="p-3.5 bg-gradient-to-r from-emerald-500/10 to-blue-500/10 border border-emerald-200/80 dark:border-emerald-800/60 rounded-2xl space-y-2">
               <span className="text-[11px] font-bold text-emerald-800 dark:text-emerald-300 uppercase tracking-wider flex items-center gap-1.5">
                 <Sparkles className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" /> 1-Click Document Presets
               </span>
@@ -390,26 +416,27 @@ export default function MaskedAadhaar() {
                     ],
                   },
                 ].map((preset, idx) => (
-                  <button
+                  <motion.button
                     key={idx}
+                    whileTap={prefersReduced ? undefined : { scale: 0.96 }}
                     type="button"
                     onClick={() => {
                       setMasks(preset.masks);
                       setSelectedMaskId(preset.masks[0].id);
                     }}
-                    className="py-1 px-2.5 bg-white dark:bg-slate-800 hover:bg-emerald-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 text-xs font-semibold rounded-lg shadow-2xs transition-colors"
+                    className="py-1 px-2.5 bg-white/85 dark:bg-slate-800/85 hover:bg-emerald-50 dark:hover:bg-slate-700 text-[var(--pms-ink)] border border-[var(--pms-border)] text-xs font-semibold rounded-lg shadow-2xs transition-colors"
                   >
                     {preset.label}
-                  </button>
+                  </motion.button>
                 ))}
               </div>
             </div>
 
-            <div className="flex items-center justify-between text-xs text-gray-600 dark:text-slate-300">
-              <span className="font-semibold flex items-center gap-1.5">
+            <div className="flex items-center justify-between text-xs text-[var(--pms-muted)]">
+              <span className="font-semibold flex items-center gap-1.5 text-[var(--pms-ink)]">
                 <Move className="w-4 h-4 text-emerald-600 dark:text-emerald-400" /> Drag mask box over the 8 digits
               </span>
-              <span className="text-[11px] text-gray-400 dark:text-slate-500">Click mask box to select & resize</span>
+              <span className="text-[11px] text-[var(--pms-muted)]">Click mask box to select &amp; resize</span>
             </div>
 
             {/* Document Workspace with Draggable Overlays */}
@@ -417,7 +444,7 @@ export default function MaskedAadhaar() {
               ref={imageContainerRef}
               onPointerMove={handlePointerMove}
               onPointerUp={handlePointerUp}
-              className="relative border-2 border-dashed border-gray-300 dark:border-slate-700 rounded-2xl overflow-hidden bg-gray-100 dark:bg-slate-800 select-none shadow-inner touch-none"
+              className="relative border-2 border-dashed border-[var(--pms-border-strong)] rounded-2xl overflow-hidden bg-white select-none shadow-inner touch-none"
             >
               <img
                 src={renderedImageUrl}
@@ -460,34 +487,41 @@ export default function MaskedAadhaar() {
             </div>
 
             <div className="flex flex-wrap gap-2">
-              <button
+              <motion.button
+                whileTap={prefersReduced ? undefined : { scale: 0.97 }}
                 type="button"
                 onClick={addExtraMask}
-                className="px-3 py-2 bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-700 hover:bg-gray-50 dark:hover:bg-slate-700 rounded-xl text-xs font-semibold text-gray-700 dark:text-slate-200 flex items-center gap-1.5 shadow-xs transition-colors"
+                className="px-3 py-2 bg-white/85 dark:bg-slate-800/85 border border-[var(--pms-border)] hover:border-emerald-400 rounded-xl text-xs font-semibold text-[var(--pms-ink)] flex items-center gap-1.5 shadow-xs transition-colors"
               >
                 <Plus className="w-3.5 h-3.5" /> Add Another Mask Box
-              </button>
-              <button
+              </motion.button>
+              <motion.button
+                whileTap={prefersReduced ? undefined : { scale: 0.97 }}
                 type="button"
                 onClick={addQrMask}
-                className="px-3 py-2 bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-700 hover:bg-gray-50 dark:hover:bg-slate-700 rounded-xl text-xs font-semibold text-gray-700 dark:text-slate-200 flex items-center gap-1.5 shadow-xs transition-colors"
+                className="px-3 py-2 bg-white/85 dark:bg-slate-800/85 border border-[var(--pms-border)] hover:border-rose-400 rounded-xl text-xs font-semibold text-[var(--pms-ink)] flex items-center gap-1.5 shadow-xs transition-colors"
               >
                 <EyeOff className="w-3.5 h-3.5 text-red-500 dark:text-red-400" /> Redact QR Code
-              </button>
+              </motion.button>
             </div>
-          </div>
+          </motion.div>
 
           {/* Mask Controls & Download (5 cols) */}
-          <div className="lg:col-span-5 space-y-6 lg:sticky lg:top-8">
-            <div className="p-5 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xs space-y-5">
-              <h2 className="text-sm font-bold text-gray-900 dark:text-slate-100 flex items-center gap-2">
+          <motion.div
+            initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.28, delay: prefersReduced ? 0 : 0.05 }}
+            className="lg:col-span-5 space-y-6 lg:sticky lg:top-8"
+          >
+            <div className="p-5 sm:p-6 pms-glass-panel border border-[var(--pms-border)] rounded-3xl shadow-sm space-y-5">
+              <h2 className="text-sm font-extrabold text-[var(--pms-ink)] flex items-center gap-2">
                 <Shield className="w-4 h-4 text-emerald-600 dark:text-emerald-400" /> Mask Box Customization
               </h2>
 
               {selectedMask ? (
-                <div className="space-y-4 p-4 bg-gray-50 dark:bg-slate-800/60 rounded-xl border border-gray-200 dark:border-slate-700">
+                <div className="space-y-4 p-4 bg-white/65 dark:bg-slate-800/60 rounded-2xl border border-[var(--pms-border)]">
                   <div>
-                    <label className="block text-xs font-semibold text-gray-700 dark:text-slate-200 mb-1.5">
+                    <label className="block text-xs font-semibold text-[var(--pms-ink)] mb-1.5">
                       Mask Appearance Style:
                     </label>
                     <div className="grid grid-cols-2 gap-2">
@@ -507,10 +541,10 @@ export default function MaskedAadhaar() {
                               )
                             )
                           }
-                          className={`p-2 text-xs font-medium rounded-lg border text-left transition-colors ${
+                          className={`p-2 text-xs font-medium rounded-xl border text-left transition-colors ${
                             selectedMask.style === st.id
-                              ? 'bg-emerald-600 text-white border-emerald-600'
-                              : 'bg-white dark:bg-slate-800 text-gray-700 dark:text-slate-200 border-gray-200 dark:border-slate-700 hover:bg-gray-100 dark:hover:bg-slate-700'
+                              ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
+                              : 'bg-white/85 dark:bg-slate-800/85 text-[var(--pms-ink)] border-[var(--pms-border)] hover:border-emerald-400'
                           }`}
                         >
                           {st.label}
@@ -522,9 +556,11 @@ export default function MaskedAadhaar() {
                   {/* Width & Height Sliders */}
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <div className="flex justify-between text-xs font-semibold text-gray-700 dark:text-slate-200 mb-1">
+                      <div className="flex justify-between text-xs font-semibold text-[var(--pms-ink)] mb-1">
                         <span>Width</span>
-                        <span className="font-mono text-gray-500 dark:text-slate-400">{Math.round(selectedMask.wPercent)}%</span>
+                        <span className="font-mono text-[var(--pms-muted)]">
+                          <AnimatedNumber value={Math.round(selectedMask.wPercent)} suffix="%" />
+                        </span>
                       </div>
                       <input
                         type="range"
@@ -542,9 +578,11 @@ export default function MaskedAadhaar() {
                       />
                     </div>
                     <div>
-                      <div className="flex justify-between text-xs font-semibold text-gray-700 dark:text-slate-200 mb-1">
+                      <div className="flex justify-between text-xs font-semibold text-[var(--pms-ink)] mb-1">
                         <span>Height</span>
-                        <span className="font-mono text-gray-500 dark:text-slate-400">{Math.round(selectedMask.hPercent)}%</span>
+                        <span className="font-mono text-[var(--pms-muted)]">
+                          <AnimatedNumber value={Math.round(selectedMask.hPercent)} suffix="%" />
+                        </span>
                       </div>
                       <input
                         type="range"
@@ -572,13 +610,13 @@ export default function MaskedAadhaar() {
                   </button>
                 </div>
               ) : (
-                <p className="text-xs text-gray-500 dark:text-slate-400">Select a mask on the preview to adjust.</p>
+                <p className="text-xs text-[var(--pms-muted)]">Select a mask on the preview to adjust.</p>
               )}
 
               {/* KYC Purpose Watermark */}
-              <div className="p-4 bg-gray-50 dark:bg-slate-800/60 rounded-xl border border-gray-200 dark:border-slate-700 space-y-3">
+              <div className="p-4 bg-white/65 dark:bg-slate-800/60 rounded-2xl border border-[var(--pms-border)] space-y-3">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-gray-800 dark:text-slate-100 flex items-center gap-1.5">
+                  <span className="text-xs font-bold text-[var(--pms-ink)] flex items-center gap-1.5">
                     <Lock className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" /> Anti-Fraud KYC Watermark
                   </span>
                   <label className="relative inline-flex items-center cursor-pointer">
@@ -588,13 +626,13 @@ export default function MaskedAadhaar() {
                       onChange={(e) => setIncludeKycWatermark(e.target.checked)}
                       className="sr-only peer"
                     />
-                    <div className="w-9 h-5 bg-gray-200 dark:bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600"></div>
+                    <div className="w-9 h-5 bg-slate-200 dark:bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600"></div>
                   </label>
                 </div>
 
                 {includeKycWatermark && (
                   <div>
-                    <label className="block text-[11px] font-medium text-gray-600 dark:text-slate-300 mb-1">
+                    <label className="block text-[11px] font-medium text-[var(--pms-muted)] mb-1">
                       Custom Purpose Text:
                     </label>
                     <input
@@ -602,7 +640,7 @@ export default function MaskedAadhaar() {
                       value={kycPurposeText}
                       onChange={(e) => setKycPurposeText(e.target.value)}
                       placeholder="e.g. FOR HOTEL CHECK-IN ONLY"
-                      className="w-full px-3 py-1.5 bg-white dark:bg-slate-900 text-gray-900 dark:text-slate-100 border border-gray-300 dark:border-slate-700 rounded-lg text-xs font-medium focus:ring-2 focus:ring-emerald-500 outline-none uppercase"
+                      className="w-full px-3 py-1.5 bg-white/90 dark:bg-slate-900/90 text-[var(--pms-ink)] border border-[var(--pms-border)] rounded-xl text-xs font-medium focus:ring-2 focus:ring-emerald-500 outline-none uppercase"
                     />
                     <div className="flex flex-wrap gap-1 pt-1.5">
                       {[
@@ -615,7 +653,7 @@ export default function MaskedAadhaar() {
                           key={chip}
                           type="button"
                           onClick={() => setKycPurposeText(chip)}
-                          className="text-[10px] py-0.5 px-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:border-emerald-500 rounded text-slate-600 dark:text-slate-300 font-medium transition-colors"
+                          className="text-[10px] py-0.5 px-2 bg-white/85 dark:bg-slate-800/85 border border-[var(--pms-border)] hover:border-emerald-500 rounded-md text-[var(--pms-muted)] hover:text-[var(--pms-ink)] font-medium transition-colors"
                         >
                           {chip}
                         </button>
@@ -625,64 +663,87 @@ export default function MaskedAadhaar() {
                 )}
               </div>
 
+              {lastExportFormat && (
+                <motion.div
+                  initial={prefersReduced ? false : { opacity: 0, y: 6, scale: 0.98 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  className="p-3.5 rounded-2xl bg-emerald-50/90 dark:bg-emerald-950/40 border border-emerald-200/80 dark:border-emerald-800/70 flex items-center gap-2.5 text-xs text-emerald-800 dark:text-emerald-200 font-semibold"
+                >
+                  <motion.div
+                    initial={prefersReduced ? false : { scale: 0.6 }}
+                    animate={{ scale: 1 }}
+                    transition={{ type: 'spring', stiffness: 420, damping: 24 }}
+                    className="w-7 h-7 rounded-xl bg-emerald-500/15 flex items-center justify-center shrink-0"
+                  >
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                  </motion.div>
+                  <span>
+                    Flattened Masked Aadhaar {lastExportFormat.toUpperCase()} downloaded safely!
+                  </span>
+                </motion.div>
+              )}
+
               {/* Export Buttons */}
-              <div className="space-y-2.5 pt-2">
-                <button
+              <div className="space-y-2.5 pt-1">
+                <motion.button
+                  whileTap={prefersReduced ? undefined : { scale: 0.98 }}
                   type="button"
                   onClick={() => generateMaskedOutput('pdf')}
                   disabled={isProcessing}
-                  className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                  className="pms-btn-primary w-full py-3.5 font-bold rounded-2xl shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
                 >
                   <Download className="w-4 h-4" /> Download Masked Aadhaar PDF
-                </button>
-                <button
+                </motion.button>
+                <motion.button
+                  whileTap={prefersReduced ? undefined : { scale: 0.98 }}
                   type="button"
                   onClick={() => generateMaskedOutput('jpg')}
                   disabled={isProcessing}
-                  className="w-full py-2.5 bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700 text-gray-800 dark:text-slate-200 text-xs font-semibold rounded-xl border border-gray-200 dark:border-slate-700 transition-colors"
+                  className="w-full py-2.5 bg-white/85 dark:bg-slate-800/85 hover:border-emerald-400 text-[var(--pms-ink)] text-xs font-bold rounded-xl border border-[var(--pms-border)] transition-colors disabled:opacity-50"
                 >
                   Download as Masked JPG
-                </button>
+                </motion.button>
               </div>
 
-              <div className="text-center pt-2">
+              <div className="text-center pt-1">
                 <button
                   type="button"
                   onClick={() => {
                     setFile(null);
                     setRenderedImageUrl(null);
+                    setLastExportFormat(null);
                   }}
-                  className="text-xs text-gray-500 dark:text-slate-400 hover:text-red-600 dark:hover:text-red-400 font-medium"
+                  className="text-xs text-[var(--pms-muted)] hover:text-rose-600 dark:hover:text-rose-400 font-medium transition-colors"
                 >
                   ← Upload another document
                 </button>
               </div>
             </div>
-          </div>
+          </motion.div>
         </div>
       )}
 
       {/* Compliance Information */}
-      <div className="mt-16 border-t border-gray-200 dark:border-slate-800 pt-10 text-gray-800 dark:text-slate-200">
-        <h2 className="text-2xl font-bold mb-6 text-center text-gray-900 dark:text-slate-100">
+      <div className="mt-16 border-t border-[var(--pms-border)] pt-10 text-[var(--pms-ink)]">
+        <h2 className="text-2xl font-bold mb-6 text-center text-[var(--pms-ink)]">
           Why Should You Always Use Masked Aadhaar?
         </h2>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-sm">
-          <div className="p-5 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-xl shadow-xs">
-            <h3 className="font-bold text-gray-900 dark:text-slate-100 mb-2">1. Prevents Identity Fraud</h3>
-            <p className="text-gray-600 dark:text-slate-400 text-xs leading-relaxed">
+          <div className="p-5 pms-glass-panel border border-[var(--pms-border)] rounded-2xl shadow-xs">
+            <h3 className="font-bold text-[var(--pms-ink)] mb-2">1. Prevents Identity Fraud</h3>
+            <p className="text-[var(--pms-muted)] text-xs leading-relaxed">
               Sharing your full 12-digit Aadhaar number with unknown vendors, hotels, or rental agencies increases identity theft risk. Masked Aadhaar conceals the first 8 digits.
             </p>
           </div>
-          <div className="p-5 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-xl shadow-xs">
-            <h3 className="font-bold text-gray-900 dark:text-slate-100 mb-2">2. Legally Valid Everywhere</h3>
-            <p className="text-gray-600 dark:text-slate-400 text-xs leading-relaxed">
+          <div className="p-5 pms-glass-panel border border-[var(--pms-border)] rounded-2xl shadow-xs">
+            <h3 className="font-bold text-[var(--pms-ink)] mb-2">2. Legally Valid Everywhere</h3>
+            <p className="text-[var(--pms-muted)] text-xs leading-relaxed">
               Under RBI and UIDAI directives, all non-banking entities are mandated to accept Masked Aadhaar with the last 4 digits visible as valid photo ID proof.
             </p>
           </div>
-          <div className="p-5 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-xl shadow-xs">
-            <h3 className="font-bold text-gray-900 dark:text-slate-100 mb-2">3. Zero Data Storage</h3>
-            <p className="text-gray-600 dark:text-slate-400 text-xs leading-relaxed">
+          <div className="p-5 pms-glass-panel border border-[var(--pms-border)] rounded-2xl shadow-xs">
+            <h3 className="font-bold text-[var(--pms-ink)] mb-2">3. Zero Data Storage</h3>
+            <p className="text-[var(--pms-muted)] text-xs leading-relaxed">
               Our masking engine runs 100% locally in your web browser. Neither your Aadhaar image nor your demographic details ever leave your device.
             </p>
           </div>

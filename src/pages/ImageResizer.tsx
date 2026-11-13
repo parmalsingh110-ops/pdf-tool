@@ -1,12 +1,15 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { Download, Image as ImageIcon, Ruler, Package, Eraser, RotateCcw } from 'lucide-react';
+import { CheckCircle2, Download, Image as ImageIcon, Ruler, Package, Eraser, RotateCcw } from 'lucide-react';
 import { preload, removeBackground } from '@imgly/background-removal';
 import JSZip from 'jszip';
+import { motion, useReducedMotion } from 'motion/react';
 import FileDropzone from '../components/FileDropzone';
 import { encodeCanvasUnderByteBudget, type RasterMime } from '../lib/imageByteBudget';
 import { useSEO } from '../hooks/useSEO';
 import { dataUrlToBytes } from '../lib/utils';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { AnimatedNumber, PearlScanOverlay } from '../components/pearl/PearlMotion';
+import { toArrayBufferBytes } from '../lib/blobUrl';
 
 const RESIZER_IMAGE_ACCEPT: Record<string, string[]> = {
   'image/png': ['.png'],
@@ -93,6 +96,7 @@ export default function ImageResizer() {
   const [bgImageFile, setBgImageFile] = useState<File | null>(null);
   const [bgImageUrl, setBgImageUrl] = useState<string | null>(null);
 
+  const prefersReduced = useReducedMotion();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const batchInputRef = useRef<HTMLInputElement>(null);
@@ -223,7 +227,7 @@ export default function ImageResizer() {
   const urlToFile = async (url: string, filename: string, mime: string): Promise<File> => {
     if (url.startsWith('data:')) {
       const bytes = dataUrlToBytes(url);
-      return new File([bytes as any], filename, { type: mime });
+      return new File([toArrayBufferBytes(bytes)], filename, { type: mime });
     }
     const r = await fetch(url);
     const b = await r.blob();
@@ -570,10 +574,10 @@ export default function ImageResizer() {
       type="button"
       key={mode}
       onClick={() => setResizeMode(mode)}
-      className={`flex-1 px-2 py-2 text-xs sm:text-sm font-semibold rounded-lg transition-colors ${
+      className={`flex-1 px-2.5 py-2 text-xs sm:text-sm font-semibold rounded-xl transition-all ${
         resizeMode === mode
-          ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 shadow-sm'
-          : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+          ? 'bg-[var(--pms-white)] dark:bg-slate-900 text-[var(--pms-ink)] shadow-sm border border-[var(--pms-border)]'
+          : 'text-[var(--pms-muted)] hover:text-[var(--pms-ink)]'
       }`}
     >
       {label}
@@ -604,10 +608,10 @@ export default function ImageResizer() {
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:items-start">
           <div className="lg:col-span-4 space-y-4 relative z-[5] min-w-0 [contain:layout]">
-            <div className="bg-white dark:bg-slate-900/90 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 shadow-sm space-y-4">
-              <h2 className="text-sm font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wide">Resize settings</h2>
+            <div className="pms-glass-panel rounded-3xl p-5 space-y-4">
+              <h2 className="text-xs font-bold text-[var(--pms-subtle-text)] uppercase tracking-wider">Resize settings</h2>
 
-              <div className="flex rounded-xl bg-slate-100 dark:bg-slate-800 p-1 gap-1">
+              <div className="flex rounded-2xl bg-[var(--pms-pearl)]/80 dark:bg-slate-900/70 border border-[var(--pms-border)] p-1 gap-1">
                 {tabBtn('size', 'By size')}
                 {tabBtn('percent', 'As %')}
                 {tabBtn('social', 'Social')}
@@ -628,35 +632,35 @@ export default function ImageResizer() {
                     subtitle="Drag & drop or click — JPG, PNG, WebP, GIF"
                     buttonLabel="Choose image"
                   />
-                  {dropHint && <p className="text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 rounded-lg p-2">{dropHint}</p>}
+                  {dropHint && <p className="text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 rounded-xl p-2.5">{dropHint}</p>}
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
-                    className="w-full py-2.5 rounded-xl border-2 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold text-sm hover:bg-slate-50 dark:hover:bg-slate-800"
+                    className="w-full py-2.5 rounded-xl border border-[var(--pms-border-strong)] bg-[var(--pms-white)] dark:bg-slate-900 text-[var(--pms-ink)] font-semibold text-sm hover:bg-[var(--pms-soft-lavender)] transition-colors"
                   >
                     Browse files…
                   </button>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                  <p className="text-xs text-[var(--pms-muted)]">
                     Width/height unlock after you pick an image. Units apply to output size.
                   </p>
                 </div>
               ) : (
                 <div className="space-y-4">
-                  <div className="flex items-center justify-between gap-2 text-xs text-slate-500 dark:text-slate-400">
-                    <span className="truncate" title={file.name}>
+                  <div className="flex items-center justify-between gap-2 text-xs text-[var(--pms-muted)]">
+                    <span className="truncate font-medium text-[var(--pms-ink)]" title={file.name}>
                       {file.name}
                     </span>
                     <div className="flex gap-2 shrink-0">
                       <button
                         type="button"
-                        className="text-sky-600 dark:text-sky-400 font-semibold"
+                        className="text-[var(--pms-blue)] font-semibold hover:underline"
                         onClick={() => fileInputRef.current?.click()}
                       >
                         Change
                       </button>
                       <button
                         type="button"
-                        className="text-rose-600 dark:text-rose-400 font-semibold"
+                        className="text-[var(--pms-rose)] font-semibold hover:underline"
                         onClick={() => {
                           if (objectUrl) URL.revokeObjectURL(objectUrl);
                           if (resultUrl) URL.revokeObjectURL(resultUrl);
@@ -682,28 +686,28 @@ export default function ImageResizer() {
                     <>
                       <div className="space-y-3">
                         <div>
-                          <label className="text-xs font-medium text-slate-600 dark:text-slate-400">Width</label>
+                          <label className="text-xs font-medium text-[var(--pms-muted)]">Width</label>
                           <input
                             placeholder="Enter width"
-                            className="mt-1 w-full min-h-[2.75rem] bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 rounded-lg px-3 py-2.5 text-base tabular-nums"
+                            className="mt-1 w-full min-h-[2.75rem] bg-[var(--pms-white)] dark:bg-slate-900 border border-[var(--pms-border-strong)] text-[var(--pms-ink)] placeholder:text-[var(--pms-subtle-text)] rounded-xl px-3 py-2.5 text-base tabular-nums outline-none focus:ring-2 focus:ring-[var(--pms-blue)]/30"
                             value={widthIn}
                             onChange={(e) => onWidthChange(e.target.value)}
                             disabled={!natural}
                           />
                         </div>
                         <div>
-                          <label className="text-xs font-medium text-slate-600 dark:text-slate-400">Height</label>
+                          <label className="text-xs font-medium text-[var(--pms-muted)]">Height</label>
                           <input
                             placeholder="Enter height"
-                            className="mt-1 w-full min-h-[2.75rem] bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 rounded-lg px-3 py-2.5 text-base tabular-nums"
+                            className="mt-1 w-full min-h-[2.75rem] bg-[var(--pms-white)] dark:bg-slate-900 border border-[var(--pms-border-strong)] text-[var(--pms-ink)] placeholder:text-[var(--pms-subtle-text)] rounded-xl px-3 py-2.5 text-base tabular-nums outline-none focus:ring-2 focus:ring-[var(--pms-blue)]/30"
                             value={heightIn}
                             onChange={(e) => onHeightChange(e.target.value)}
                             disabled={!natural}
                           />
                         </div>
                         <div>
-                          <label className="text-xs font-medium text-slate-600 dark:text-slate-400">Unit</label>
-                          <div className="mt-1 flex flex-wrap gap-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-1">
+                          <label className="text-xs font-medium text-[var(--pms-muted)]">Unit</label>
+                          <div className="mt-1 flex flex-wrap gap-1 rounded-xl border border-[var(--pms-border)] bg-[var(--pms-pearl)]/80 dark:bg-slate-900/70 p-1">
                             {(
                               [
                                 ['px', 'px'],
@@ -716,10 +720,10 @@ export default function ImageResizer() {
                                 key={u}
                                 type="button"
                                 onClick={() => setUnit(u)}
-                                className={`flex-1 min-w-[2.5rem] rounded-md px-2 py-2 text-xs font-bold ${
+                                className={`flex-1 min-w-[2.5rem] rounded-lg px-2 py-2 text-xs font-bold transition-all ${
                                   unit === u
-                                    ? 'bg-white dark:bg-slate-900 text-sky-700 dark:text-sky-300 shadow'
-                                    : 'text-slate-600 dark:text-slate-400 hover:bg-white/80 dark:hover:bg-slate-700/70'
+                                    ? 'bg-[var(--pms-white)] dark:bg-slate-800 text-[var(--pms-blue)] shadow-sm'
+                                    : 'text-[var(--pms-muted)] hover:text-[var(--pms-ink)]'
                                 }`}
                               >
                                 {lab}
@@ -730,12 +734,12 @@ export default function ImageResizer() {
                       </div>
                       {unit !== 'px' && (
                         <div>
-                          <label className="text-xs font-medium text-slate-600 dark:text-slate-400">DPI (for cm/mm/in → px)</label>
+                          <label className="text-xs font-medium text-[var(--pms-muted)]">DPI (for cm/mm/in → px)</label>
                           <input
                             type="number"
                             min={36}
                             max={600}
-                            className="mt-1 w-full bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg px-3 py-2 text-sm"
+                            className="mt-1 w-full bg-[var(--pms-white)] dark:bg-slate-900 border border-[var(--pms-border-strong)] text-[var(--pms-ink)] rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--pms-blue)]/30"
                             value={dpi}
                             onChange={(e) => setDpi(Math.max(1, parseInt(e.target.value, 10) || 96))}
                           />
@@ -745,10 +749,10 @@ export default function ImageResizer() {
                                 key={d}
                                 type="button"
                                 onClick={() => setDpi(d)}
-                                className={`px-2 py-1 rounded-md text-[11px] font-bold border ${
+                                className={`px-2 py-1 rounded-lg text-[11px] font-bold border transition-colors ${
                                   dpi === d
-                                    ? 'bg-sky-600 text-white border-sky-600'
-                                    : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'
+                                    ? 'bg-[var(--pms-blue)] text-white border-[var(--pms-blue)]'
+                                    : 'border-[var(--pms-border)] bg-[var(--pms-pearl)]/60 dark:bg-slate-800/70 text-[var(--pms-muted)] hover:text-[var(--pms-ink)]'
                                 }`}
                               >
                                 {d}
@@ -757,11 +761,12 @@ export default function ImageResizer() {
                           </div>
                         </div>
                       )}
-                      <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300 cursor-pointer">
+                      <label className="flex items-center gap-2 text-sm text-[var(--pms-ink)] cursor-pointer">
                         <input
                           type="checkbox"
                           checked={lockAspect}
                           onChange={(e) => setLockAspect(e.target.checked)}
+                          className="rounded accent-sky-600"
                         />
                         Lock aspect ratio
                       </label>
@@ -770,17 +775,17 @@ export default function ImageResizer() {
 
                   {resizeMode === 'percent' && natural && (
                     <div>
-                      <label className="text-xs font-medium text-slate-600 dark:text-slate-400">Scale (% of original)</label>
+                      <label className="text-xs font-medium text-[var(--pms-muted)]">Scale (% of original)</label>
                       <input
                         type="number"
                         min={1}
                         max={500}
                         step={1}
-                        className="mt-1 w-full bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg px-3 py-2 text-sm"
+                        className="mt-1 w-full bg-[var(--pms-white)] dark:bg-slate-900 border border-[var(--pms-border-strong)] text-[var(--pms-ink)] rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--pms-blue)]/30"
                         value={percentStr}
                         onChange={(e) => setPercentStr(e.target.value)}
                       />
-                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                      <p className="text-xs text-[var(--pms-muted)] mt-1 tabular-nums">
                         From {natural.w}×{natural.h}px →{' '}
                         {Math.max(1, Math.round((natural.w * parseFloat(percentStr || '0')) / 100))}×
                         {Math.max(1, Math.round((natural.h * parseFloat(percentStr || '0')) / 100))}px
@@ -790,21 +795,21 @@ export default function ImageResizer() {
 
                   {resizeMode === 'social' && (
                     <div className="space-y-2">
-                      <p className="text-xs text-slate-500 dark:text-slate-400">Preset output (pixels)</p>
+                      <p className="text-xs text-[var(--pms-muted)]">Preset output (pixels)</p>
                       <div className="grid grid-cols-1 gap-1.5 max-h-48 overflow-y-auto">
                         {SOCIAL_PRESETS.map((p) => (
                           <button
                             type="button"
                             key={p.id}
                             onClick={() => applySocialPreset(p.id)}
-                            className={`text-left px-3 py-2 rounded-lg text-sm border transition-colors ${
+                            className={`text-left px-3 py-2 rounded-xl text-sm border transition-colors ${
                               socialId === p.id
-                                ? 'border-sky-500 bg-sky-50 dark:bg-sky-950/40 text-sky-900 dark:text-sky-200'
-                                : 'border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800'
+                                ? 'border-[var(--pms-blue)] bg-[var(--pms-soft-blue)]/75 text-[var(--pms-ink)] font-semibold'
+                                : 'border-[var(--pms-border)] bg-[var(--pms-pearl)]/50 dark:bg-slate-800/40 text-[var(--pms-ink)] hover:border-[var(--pms-border-strong)]'
                             }`}
                           >
                             <span className="font-medium">{p.label}</span>
-                            <span className="text-slate-500 dark:text-slate-400 text-xs ml-2">
+                            <span className="text-[var(--pms-muted)] text-xs ml-2 tabular-nums">
                               {p.w}×{p.h}
                             </span>
                           </button>
@@ -813,11 +818,11 @@ export default function ImageResizer() {
                     </div>
                   )}
 
-                  <div className="border-t border-slate-200 dark:border-slate-800 pt-4 mt-1 space-y-3">
-                    <label className="flex items-start gap-2 text-sm text-slate-700 dark:text-slate-300 cursor-pointer">
+                  <div className="border-t border-[var(--pms-border)] pt-4 mt-1 space-y-3">
+                    <label className="flex items-start gap-2 text-sm text-[var(--pms-ink)] cursor-pointer">
                       <input
                         type="checkbox"
-                        className="mt-1 rounded border-slate-300 dark:border-slate-600"
+                        className="mt-1 rounded accent-sky-600"
                         checked={changeBgPanel}
                         onChange={(e) => {
                           setChangeBgPanel(e.target.checked);
@@ -826,24 +831,24 @@ export default function ImageResizer() {
                       />
                       <span>
                         <span className="font-semibold">Change background</span>
-                        <span className="block text-xs text-slate-500 dark:text-slate-400 font-normal mt-0.5">
+                        <span className="block text-xs text-[var(--pms-muted)] font-normal mt-0.5">
                           Remove or replace the background, then set size and export here — no re-upload.
                         </span>
                       </span>
                     </label>
 
                     {changeBgPanel && (
-                      <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/90 dark:bg-slate-800/60 p-4 space-y-3 text-sm">
+                      <div className="rounded-2xl border border-[var(--pms-border)] bg-[var(--pms-pearl)]/70 dark:bg-slate-900/60 p-4 space-y-3 text-sm">
                         {!bgModelReady && (
-                          <p className="text-xs text-slate-600 dark:text-slate-400">{bgPreloadText || 'Preparing model…'}</p>
+                          <p className="text-xs text-[var(--pms-muted)]">{bgPreloadText || 'Preparing model…'}</p>
                         )}
                         {bgError && (
-                          <p className="text-xs text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800/60 rounded-lg p-2">
+                          <p className="text-xs text-[var(--pms-rose)] bg-[var(--pms-soft-rose)] border border-rose-200 dark:border-rose-800/60 rounded-xl p-2">
                             {bgError}
                           </p>
                         )}
 
-                        <label className="flex items-center gap-2 text-slate-700 dark:text-slate-300 cursor-pointer">
+                        <label className="flex items-center gap-2 text-[var(--pms-ink)] cursor-pointer">
                           <input
                             type="checkbox"
                             checked={bgTransparent}
@@ -855,22 +860,23 @@ export default function ImageResizer() {
                                 setBgImageUrl(null);
                               }
                             }}
+                            className="rounded accent-sky-600"
                           />
                           Transparent (no fill)
                         </label>
 
                         {!bgTransparent && (
                           <div>
-                            <label className="text-xs font-medium text-slate-600 dark:text-slate-400">Background color</label>
+                            <label className="text-xs font-medium text-[var(--pms-muted)]">Background color</label>
                             <div className="mt-1 flex gap-2 items-center">
                               <input
                                 type="color"
                                 value={bgFillColor}
                                 onChange={(e) => setBgFillColor(e.target.value)}
-                                className="h-10 w-14 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 cursor-pointer shrink-0"
+                                className="h-10 w-14 rounded-xl border border-[var(--pms-border-strong)] bg-[var(--pms-white)] dark:bg-slate-900 cursor-pointer shrink-0"
                               />
                               <input
-                                className="flex-1 min-w-0 bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg px-2 py-2 text-sm font-mono"
+                                className="flex-1 min-w-0 bg-[var(--pms-white)] dark:bg-slate-900 border border-[var(--pms-border-strong)] text-[var(--pms-ink)] rounded-xl px-2.5 py-2 text-sm font-mono outline-none"
                                 value={bgFillColor}
                                 onChange={(e) => setBgFillColor(e.target.value)}
                               />
@@ -879,8 +885,8 @@ export default function ImageResizer() {
                         )}
 
                         <div>
-                          <label className="text-xs font-medium text-slate-600 dark:text-slate-400">Background image (optional)</label>
-                          <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                          <label className="text-xs font-medium text-[var(--pms-muted)]">Background image (optional)</label>
+                          <p className="text-[11px] text-[var(--pms-subtle-text)] mt-0.5">
                             Fills behind the cutout (cover). Turn off Transparent to use it.
                           </p>
                           <input
@@ -906,7 +912,7 @@ export default function ImageResizer() {
                             <button
                               type="button"
                               onClick={() => bgImageInputRef.current?.click()}
-                              className="px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 text-xs font-semibold hover:bg-slate-50 dark:hover:bg-slate-700"
+                              className="px-3 py-2 rounded-xl border border-[var(--pms-border-strong)] bg-[var(--pms-white)] dark:bg-slate-900 text-[var(--pms-ink)] text-xs font-semibold hover:bg-[var(--pms-soft-lavender)] transition-colors"
                             >
                               Choose image…
                             </button>
@@ -918,7 +924,7 @@ export default function ImageResizer() {
                                   setBgImageFile(null);
                                   setBgImageUrl(null);
                                 }}
-                                className="text-xs font-semibold text-rose-600 dark:text-rose-400"
+                                className="text-xs font-semibold text-[var(--pms-rose)]"
                               >
                                 Clear
                               </button>
@@ -930,7 +936,7 @@ export default function ImageResizer() {
                           type="button"
                           disabled={bgBusy || !bgModelReady || !natural}
                           onClick={() => void applyRemoveBackground()}
-                          className="w-full inline-flex items-center justify-center gap-2 py-2.5 rounded-xl bg-slate-800 dark:bg-slate-700 text-white text-sm font-bold hover:bg-slate-900 dark:hover:bg-slate-600 disabled:opacity-50"
+                          className="w-full inline-flex items-center justify-center gap-2 py-2.5 rounded-xl bg-[var(--pms-ink)] text-[var(--pms-white)] text-sm font-bold hover:opacity-90 disabled:opacity-50 transition-opacity"
                         >
                           <Eraser className="w-4 h-4 shrink-0" />
                           {bgBusy ? 'Processing…' : 'Remove / apply background'}
@@ -940,7 +946,7 @@ export default function ImageResizer() {
                           <button
                             type="button"
                             onClick={revertToOriginalImage}
-                            className="w-full inline-flex items-center justify-center gap-2 py-2 text-xs font-semibold text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200"
+                            className="w-full inline-flex items-center justify-center gap-2 py-2 text-xs font-semibold text-[var(--pms-muted)] hover:text-[var(--pms-ink)]"
                           >
                             <RotateCcw className="w-3.5 h-3.5 shrink-0" />
                             Revert to original upload
@@ -953,13 +959,13 @@ export default function ImageResizer() {
               )}
             </div>
 
-            <div className="bg-white dark:bg-slate-900/90 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 shadow-sm">
-              <h2 className="text-sm font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wide mb-3">Export settings</h2>
+            <div className="pms-glass-panel rounded-3xl p-5 space-y-3">
+              <h2 className="text-xs font-bold text-[var(--pms-subtle-text)] uppercase tracking-wider">Export settings</h2>
               <div className="space-y-3">
                 <div>
-                  <label className="text-xs font-medium text-slate-600 dark:text-slate-400">Save image as</label>
+                  <label className="text-xs font-medium text-[var(--pms-muted)]">Save image as</label>
                   <select
-                    className="mt-1 w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg px-3 py-2 text-sm"
+                    className="mt-1 w-full bg-[var(--pms-white)] dark:bg-slate-900 border border-[var(--pms-border-strong)] text-[var(--pms-ink)] rounded-xl px-3 py-2 text-sm outline-none"
                     value={exportFormat}
                     onChange={(e) => setExportFormat(e.target.value as ExportFormat)}
                   >
@@ -970,16 +976,16 @@ export default function ImageResizer() {
                   </select>
                 </div>
                 <div>
-                  <label className="text-xs font-medium text-slate-600 dark:text-slate-400">Target file size (optional)</label>
+                  <label className="text-xs font-medium text-[var(--pms-muted)]">Target file size (optional)</label>
                   <div className="flex gap-2 mt-1">
                     <input
-                      className="flex-1 bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 rounded-lg px-3 py-2 text-sm"
+                      className="flex-1 bg-[var(--pms-white)] dark:bg-slate-900 border border-[var(--pms-border-strong)] text-[var(--pms-ink)] placeholder:text-[var(--pms-subtle-text)] rounded-xl px-3 py-2 text-sm outline-none"
                       placeholder="e.g. 50"
                       value={targetKb}
                       onChange={(e) => setTargetKb(e.target.value)}
                     />
                     <select
-                      className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg px-2 text-sm"
+                      className="bg-[var(--pms-white)] dark:bg-slate-900 border border-[var(--pms-border-strong)] text-[var(--pms-ink)] rounded-xl px-2.5 text-sm outline-none"
                       value={targetUnit}
                       onChange={(e) => setTargetUnit(e.target.value as 'KB' | 'MB')}
                     >
@@ -987,26 +993,28 @@ export default function ImageResizer() {
                       <option value="MB">MB</option>
                     </select>
                   </div>
-                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                  <p className="text-xs text-[var(--pms-subtle-text)] mt-1">
                     Best-effort for JPEG/WebP. Use JPEG for strict form limits.
                   </p>
                 </div>
-                <button
+                <motion.button
+                  whileHover={prefersReduced ? undefined : { scale: 1.015 }}
+                  whileTap={prefersReduced ? undefined : { scale: 0.985 }}
                   type="button"
                   disabled={!file || !natural || !activePreviewUrl || busy || bgBusy}
                   onClick={exportImage}
-                  className="w-full py-3 rounded-xl bg-sky-600 text-white font-bold hover:bg-sky-700 disabled:opacity-50"
+                  className="pms-btn-primary w-full py-3.5 rounded-2xl font-bold disabled:opacity-50"
                 >
                   {busy ? 'Processing…' : 'Export →'}
-                </button>
+                </motion.button>
               </div>
             </div>
 
-            <div className="bg-white dark:bg-slate-900/90 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 shadow-sm space-y-3">
-              <h2 className="text-sm font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wide">Batch (ZIP)</h2>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
+            <div className="pms-glass-panel rounded-3xl p-5 space-y-3">
+              <h2 className="text-xs font-bold text-[var(--pms-subtle-text)] uppercase tracking-wider">Batch (ZIP)</h2>
+              <p className="text-xs text-[var(--pms-muted)]">
                 Queue more images with the same resize rules (great for % or social presets). Export downloads a{' '}
-                <code className="text-[10px] bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 px-1 rounded">.zip</code>.
+                <code className="text-[10px] bg-[var(--pms-pearl)] dark:bg-slate-800 text-[var(--pms-ink)] px-1.5 py-0.5 rounded border border-[var(--pms-border)]">.zip</code>.
               </p>
               <input
                 ref={batchInputRef}
@@ -1023,18 +1031,18 @@ export default function ImageResizer() {
               <button
                 type="button"
                 onClick={() => batchInputRef.current?.click()}
-                className="w-full py-2.5 rounded-xl border-2 border-dashed border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold text-sm hover:bg-slate-50 dark:hover:bg-slate-800"
+                className="w-full py-2.5 rounded-xl border-2 border-dashed border-[var(--pms-border-strong)] bg-[var(--pms-pearl)]/50 dark:bg-slate-900/50 text-[var(--pms-ink)] font-semibold text-sm hover:border-[var(--pms-blue)] transition-colors"
               >
                 Add images to queue…
               </button>
               {batchQueue.length > 0 && (
-                <ul className="max-h-32 overflow-y-auto text-xs space-y-1 border border-slate-100 dark:border-slate-800 rounded-lg p-2 text-slate-700 dark:text-slate-300">
+                <ul className="max-h-32 overflow-y-auto text-xs space-y-1 border border-[var(--pms-border)] bg-[var(--pms-pearl)]/50 dark:bg-slate-900/50 rounded-xl p-2 text-[var(--pms-ink)]">
                   {batchQueue.map((f, i) => (
                     <li key={`${f.name}-${i}`} className="flex justify-between gap-2 truncate">
                       <span className="truncate">{f.name}</span>
                       <button
                         type="button"
-                        className="text-rose-600 dark:text-rose-400 font-semibold shrink-0"
+                        className="text-[var(--pms-rose)] font-semibold shrink-0"
                         onClick={() => setBatchQueue((q) => q.filter((_, j) => j !== i))}
                       >
                         ×
@@ -1043,25 +1051,38 @@ export default function ImageResizer() {
                   ))}
                 </ul>
               )}
-              <button
+              <motion.button
+                whileHover={prefersReduced ? undefined : { scale: 1.015 }}
+                whileTap={prefersReduced ? undefined : { scale: 0.985 }}
                 type="button"
                 disabled={batchBusy || batchQueue.length === 0}
                 onClick={exportZipFromQueue}
-                className="w-full py-3 rounded-xl bg-indigo-600 text-white font-bold hover:bg-indigo-700 disabled:opacity-50 inline-flex items-center justify-center gap-2"
+                className="w-full py-3 rounded-2xl bg-[var(--pms-violet)] hover:opacity-90 text-white font-bold disabled:opacity-50 inline-flex items-center justify-center gap-2 transition-opacity"
               >
                 <Package className="w-5 h-5" />
                 {batchBusy ? 'Zipping…' : 'Export queue as ZIP'}
-              </button>
+              </motion.button>
             </div>
           </div>
 
           <div className="lg:col-span-8 space-y-4 relative z-0 min-w-0 isolate">
-            <div className="bg-white dark:bg-slate-900/90 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 shadow-sm min-h-[320px] flex flex-col items-center justify-center overflow-hidden">
+            <div className="relative pms-glass-panel rounded-3xl p-6 min-h-[360px] flex flex-col items-center justify-center overflow-hidden">
+              <PearlScanOverlay
+                active={busy || bgBusy || batchBusy}
+                label={
+                  bgBusy
+                    ? (bgPreloadText || 'Updating background…')
+                    : batchBusy
+                      ? 'Packaging batch ZIP…'
+                      : 'Resizing image…'
+                }
+              />
+
               {objectUrl && natural ? (
                 <div className="w-full space-y-4">
-                  <div className="flex flex-wrap items-center gap-3 text-sm text-slate-600 dark:text-slate-300">
-                    <ImageIcon className="w-4 h-4" />
-                    <span className="font-mono bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded">
+                  <div className="flex flex-wrap items-center gap-3 text-sm text-[var(--pms-muted)]">
+                    <ImageIcon className="w-4 h-4 text-[var(--pms-blue)]" />
+                    <span className="font-mono bg-[var(--pms-pearl)] dark:bg-slate-900 border border-[var(--pms-border)] text-[var(--pms-ink)] px-2.5 py-1 rounded-xl text-xs tabular-nums">
                       {natural.w} × {natural.h} px
                       {resultMeta
                         ? ` → ${resultMeta.w} × ${resultMeta.h} px`
@@ -1070,12 +1091,18 @@ export default function ImageResizer() {
                           : ''}
                     </span>
                   </div>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                  <p className="text-xs text-[var(--pms-muted)]">
                     {editPreviewUrl
                       ? 'Preview uses your edited image (background changes apply here before resize).'
                       : 'Showing your file as uploaded.'}
                   </p>
-                  <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800/80 flex justify-center items-center max-h-[min(520px,65vh)] overflow-hidden">
+                  <div
+                    className={`rounded-2xl border border-[var(--pms-border)] flex justify-center items-center max-h-[min(520px,65vh)] overflow-hidden ${
+                      editPreviewUrl && bgTransparent
+                        ? 'bg-white pms-checkerboard'
+                        : 'bg-[var(--pms-pearl)]/80 dark:bg-slate-950/75'
+                    }`}
+                  >
                     {resultUrl ? (
                       <div className="w-full space-y-3 p-3">
                         <div className="relative inline-block max-w-full mx-auto select-none">
@@ -1094,7 +1121,7 @@ export default function ImageResizer() {
                           />
                         </div>
                         <div>
-                          <div className="flex justify-between text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wide">
+                          <div className="flex justify-between text-[10px] font-bold text-[var(--pms-muted)] uppercase tracking-wide">
                             <span>Before</span>
                             <span>After</span>
                           </div>
@@ -1119,31 +1146,55 @@ export default function ImageResizer() {
                     )}
                   </div>
                   {resultUrl && resultMeta && (
-                    <div className="flex flex-wrap items-center gap-4">
-                      <a
+                    <motion.div
+                      initial={prefersReduced ? false : { opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="pms-glass-panel rounded-2xl border border-emerald-200/80 dark:border-emerald-800/70 bg-[var(--pms-soft-mint)]/45 p-4 flex flex-wrap items-center justify-between gap-4"
+                    >
+                      <div className="flex items-center gap-3">
+                        <motion.div
+                          initial={prefersReduced ? false : { scale: 0.45, rotate: -10 }}
+                          animate={{ scale: 1, rotate: 0 }}
+                          transition={{ type: 'spring', stiffness: 420, damping: 20 }}
+                          className="w-10 h-10 rounded-xl bg-emerald-100 dark:bg-emerald-900/60 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0 border border-emerald-200 dark:border-emerald-800"
+                        >
+                          <CheckCircle2 className="w-5 h-5" />
+                        </motion.div>
+                        <div className="text-xs">
+                          <div className="font-bold text-[var(--pms-ink)]">Export Ready</div>
+                          <div className="text-emerald-700 dark:text-emerald-400 tabular-nums">
+                            {resultMeta.w}×{resultMeta.h}px · <AnimatedNumber value={resultMeta.bytes / 1024} decimals={1} suffix=" KB" />
+                          </div>
+                        </div>
+                      </div>
+                      <motion.a
+                        whileHover={prefersReduced ? undefined : { scale: 1.015 }}
+                        whileTap={prefersReduced ? undefined : { scale: 0.985 }}
                         href={resultUrl}
                         download={`resized_${file?.name?.replace(/\.[^.]+$/, '') || 'image'}.${ext}`}
-                        className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-600 text-white font-bold hover:bg-emerald-700"
+                        className="pms-btn-primary inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-sm"
                       >
-                        <Download className="w-5 h-5" />
-                        Download ({(resultMeta.bytes / 1024).toFixed(1)} KB)
-                      </a>
-                    </div>
+                        <Download className="w-4 h-4" />
+                        Download (<AnimatedNumber value={resultMeta.bytes / 1024} decimals={1} suffix=" KB" />)
+                      </motion.a>
+                    </motion.div>
                   )}
                   {note && (
-                    <p className="text-sm text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 rounded-lg p-3">{note}</p>
+                    <p className="text-sm text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 rounded-xl p-3">{note}</p>
                   )}
                 </div>
               ) : (
-                <div className="w-full max-w-md text-center space-y-3">
-                  <p className="text-slate-500 dark:text-slate-400">Preview appears here after you add an image.</p>
-                  <button
+                <div className="w-full max-w-md text-center space-y-4">
+                  <p className="text-[var(--pms-muted)] text-sm">Preview appears here after you add an image.</p>
+                  <motion.button
+                    whileHover={prefersReduced ? undefined : { scale: 1.015 }}
+                    whileTap={prefersReduced ? undefined : { scale: 0.985 }}
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
-                    className="inline-flex px-6 py-3 rounded-xl bg-sky-600 text-white font-bold hover:bg-sky-700"
+                    className="pms-btn-primary inline-flex px-6 py-3 rounded-2xl font-bold"
                   >
                     Select image
-                  </button>
+                  </motion.button>
                 </div>
               )}
             </div>
@@ -1153,14 +1204,14 @@ export default function ImageResizer() {
       <canvas ref={canvasRef} className="hidden" />
 
       {resultUrl && resultMeta && (
-        <div className="lg:hidden fixed bottom-0 inset-x-0 z-40 border-t border-slate-200 dark:border-slate-800 bg-white/95 dark:bg-slate-900/95 backdrop-blur px-4 py-3 flex items-center justify-between gap-3 shadow-[0_-8px_24px_rgba(0,0,0,0.08)]">
-          <span className="text-xs text-slate-600 dark:text-slate-300 truncate">
+        <div className="lg:hidden fixed bottom-0 inset-x-0 z-40 border-t border-[var(--pms-border)] bg-white/95 dark:bg-slate-900/95 backdrop-blur px-4 py-3 flex items-center justify-between gap-3 shadow-[0_-8px_24px_rgba(0,0,0,0.08)]">
+          <span className="text-xs text-[var(--pms-ink)] font-medium truncate tabular-nums">
             {(resultMeta.bytes / 1024).toFixed(1)} KB · {resultMeta.w}×{resultMeta.h}
           </span>
           <a
             href={resultUrl}
             download={`resized_${file?.name?.replace(/\.[^.]+$/, '') || 'image'}.${ext}`}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-600 text-white text-sm font-bold shrink-0"
+            className="pms-btn-primary inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold shrink-0"
           >
             <Download className="w-4 h-4" />
             Download

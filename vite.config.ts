@@ -176,18 +176,23 @@ function pmsShareTargetServerPlugin(): Plugin {
       let totalReceived = 0;
       let tooLarge = false;
       req.on('data', (c: Buffer) => {
+        if (tooLarge) return;
         totalReceived += c.byteLength;
         if (totalReceived > 105 * 1024 * 1024) {
           tooLarge = true;
           chunks.length = 0;
+          try {
+            res.statusCode = 413;
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({ error: 'File too large (max 100MB)' }));
+          } catch {}
+          try { req.destroy(); } catch {}
           return;
         }
         chunks.push(c);
       });
       req.on('end', async () => {
         if (tooLarge) {
-          res.statusCode = 413;
-          res.end(JSON.stringify({ error: 'File too large (max 100MB)' }));
           return;
         }
         try {
@@ -206,18 +211,36 @@ function pmsShareTargetServerPlugin(): Plugin {
           const sessionRaw = String(formData.get('session_id') || '');
           const cleanSession = sessionRaw.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
           const fileEntry = formData.get('file') as File | null;
-          if (!cleanSession || cleanSession === 'KIOSKSTATION' || cleanSession === 'AUDIONOTES' || !fileEntry || typeof fileEntry.arrayBuffer !== 'function') {
+          if (cleanSession.length < 3 || cleanSession.length > 12 || cleanSession === 'KIOSKSTATION' || cleanSession === 'AUDIONOTES' || !fileEntry || typeof fileEntry.arrayBuffer !== 'function') {
             res.statusCode = 400;
             res.end(JSON.stringify({ error: 'Invalid upload' }));
             return;
           }
+          if (!localRoomSecrets.has(cleanSession)) {
+            res.statusCode = 404;
+            res.end(JSON.stringify({ error: 'Counter station PIN is inactive. Keep Scan-to-Print open on the receiver PC.' }));
+            return;
+          }
+          if (localPrintRooms.size >= 500 && !localPrintRooms.has(cleanSession)) {
+            res.statusCode = 429;
+            res.end(JSON.stringify({ error: 'Local relay capacity reached.' }));
+            return;
+          }
+          const currentQueue = localPrintRooms.get(cleanSession) || [];
+          if (currentQueue.length >= 30) {
+            res.statusCode = 429;
+            res.end(JSON.stringify({ error: 'Counter queue is full (30 pending files).' }));
+            return;
+          }
           const ab = await fileEntry.arrayBuffer();
           const buf = Buffer.from(ab);
-          const jobId = String(formData.get('job_id') || `job_${Date.now()}`);
-          const copies = Number(formData.get('copies') || 1);
+          const rawJobId = String(formData.get('job_id') || `job_${Date.now()}`);
+          const jobId = rawJobId.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 48) || `job_${Date.now()}`;
+          const copies = Math.max(1, Math.min(20, Number(formData.get('copies') || 1) || 1));
           const colorMode = String(formData.get('color_mode') || 'bw') === 'color' ? 'color' : 'bw';
-          const senderDeviceId = String(formData.get('sender_device_id') || '');
-          const deviceLabel = String(formData.get('device_label') || 'Sender Device');
+          const senderDeviceId = String(formData.get('sender_device_id') || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 48);
+          const deviceLabel = String(formData.get('device_label') || 'Sender Device').replace(/[\x00-\x1f\x7f<>]/g, '').trim().slice(0, 32) || 'Sender Device';
+          const safeFileName = path.basename(String(fileEntry.name || 'Document.pdf')).replace(/[^\w.\-]/g, '_').slice(0, 180) || 'Document.pdf';
 
           if (!localDeviceTokens.has(cleanSession)) {
             localDeviceTokens.set(cleanSession, new Map());
@@ -244,7 +267,7 @@ function pmsShareTargetServerPlugin(): Plugin {
             tokenNum,
             senderDeviceId,
             deviceLabel,
-            name: fileEntry.name || 'Document.pdf',
+            name: safeFileName,
             size: buf.byteLength,
             type: fileEntry.type || 'application/pdf',
             fileUrl: `/api/print-drop/file/${cleanSession}/${jobId}`,
@@ -506,16 +529,17 @@ export default defineConfig(() => {
           "font-src    'self' https://fonts.gstatic.com data:",
           "img-src     'self' data: blob: https:",
           "media-src   'self' blob:",
-          "connect-src 'self' wss: https://*.peerjs.com wss://*.peerjs.com https://*.onrender.com https://pdfmediasuite.in https://www.pdfmediasuite.in https://generativelanguage.googleapis.com https://cdn.jsdelivr.net https://tessdata.projectnaptha.com https://staticimgly.com https://tfhub.dev https://storage.googleapis.com http://localhost:8000 http://127.0.0.1:8000",
+          "connect-src 'self' blob: data: wss: https://*.peerjs.com wss://*.peerjs.com https://*.onrender.com https://pdfmediasuite.in https://www.pdfmediasuite.in https://generativelanguage.googleapis.com https://cdn.jsdelivr.net https://unpkg.com https://tessdata.projectnaptha.com https://staticimgly.com https://tfhub.dev https://storage.googleapis.com http://localhost:8000 http://127.0.0.1:8000",
           "worker-src  'self' blob: https://cdn.jsdelivr.net https://pdfmediasuite.in https://www.pdfmediasuite.in",
           "object-src  'none'",
-          "frame-src   'none'",
+          "frame-src   'self' blob: data:",
           "base-uri    'self'",
           "form-action 'self'",
         ].join('; '),
         'X-Content-Type-Options': 'nosniff',
         'X-Frame-Options': 'DENY',
         'Referrer-Policy': 'strict-origin-when-cross-origin',
+        'Permissions-Policy': 'camera=(self), microphone=(self), geolocation=()',
       },
     },
   };

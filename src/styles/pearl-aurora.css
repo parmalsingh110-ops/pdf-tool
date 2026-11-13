@@ -197,6 +197,26 @@
   animation: pms-scan-sweep 3.2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
 }
 
+@keyframes pms-shimmer-slide {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.pms-shimmer {
+  background: linear-gradient(
+    90deg,
+    rgba(124, 58, 237, 0.05) 25%,
+    rgba(225, 29, 72, 0.09) 50%,
+    rgba(2, 132, 199, 0.05) 75%
+  );
+  background-size: 200% 100%;
+  animation: pms-shimmer-slide 2.1s ease-in-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;
@@ -204,6 +224,7 @@
   .pms-aurora-breathe-a,
   .pms-aurora-breathe-b,
   .pms-scan-bar,
+  .pms-shimmer,
   .pms-motion-safe-only {
     animation: none !important;
     transition: none !important;

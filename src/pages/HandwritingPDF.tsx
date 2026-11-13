@@ -1,15 +1,31 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { 
-  Pen, Download, FileText, Upload, Sparkles, Sliders, ChevronLeft, ChevronRight, 
-  Check, BookOpen, Scissors, Loader2, Eye, Palette, Maximize2, Camera, Calendar,
-  Sun, Moon, Shield, Award, Edit3, X, RefreshCw
+import {
+  Pen,
+  Download,
+  Sparkles,
+  Sliders,
+  ChevronLeft,
+  ChevronRight,
+  Check,
+  BookOpen,
+  Loader2,
+  Eye,
+  Palette,
+  Camera,
+  Calendar,
+  Edit3,
+  X,
 } from 'lucide-react';
+import { motion, AnimatePresence, useReducedMotion } from 'motion/react';
 import { PDFDocument } from 'pdf-lib';
 import * as pdfjsLib from 'pdfjs-dist';
 import '../lib/pdfWorker';
 import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { AnimatedNumber, PearlScanOverlay } from '../components/pearl/PearlMotion';
+import { toArrayBufferBytes } from '../lib/blobUrl';
 import { dataUrlToBytes } from '../lib/utils';
 
 interface HandwritingFont {
@@ -61,6 +77,8 @@ const SAMPLE_TEXTS = {
 };
 
 export default function HandwritingPDF() {
+  const prefersReduced = useReducedMotion();
+
   useSEO(
     'Custom Handwriting PDF Generator Online Free — Dual-Pen & Realistic Note Maker | PDF Media Suite',
     'Free online tool to convert typed notes and PDFs into authentic handwritten pages. Features Dual-Pen Mode for headings, realistic mistake scratch-outs, smartphone camera shadows, and notebook date headers.'
@@ -624,7 +642,7 @@ export default function HandwritingPDF() {
       }
 
       const pdfBytes = await newPdfDoc.save();
-      const blob = new Blob([pdfBytes as any], { type: 'application/pdf' });
+      const blob = new Blob([toArrayBufferBytes(pdfBytes)], { type: 'application/pdf' });
       const url = URL.createObjectURL(blob);
 
       const a = document.createElement('a');
@@ -725,38 +743,37 @@ export default function HandwritingPDF() {
   };
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center p-4 md:p-8 max-w-7xl mx-auto w-full">
-      {/* Header */}
-      <div className="text-center mb-8">
-        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400 text-xs font-bold tracking-widest uppercase mb-3 border border-amber-200 dark:border-amber-800">
-          <Pen className="w-3.5 h-3.5" /> AI Assignment & Handwritten Notes Studio Pro
-        </div>
-        <h1 className="text-3xl md:text-5xl font-extrabold text-gray-900 dark:text-white tracking-tight mb-3">
-          Custom Handwriting PDF Generator
-        </h1>
-        <p className="text-base md:text-lg text-gray-600 dark:text-slate-400 max-w-2xl mx-auto">
-          Convert typed notes and PDFs into authentic handwritten pages with Dual-Pen headings, smartphone camera shadows, notebook date headers, and mistake scratch-outs.
-        </p>
-      </div>
-
+    <ToolWorkspaceShell
+      title="Custom Handwriting PDF Generator"
+      subtitle="Convert typed notes and PDFs into authentic handwritten pages with Dual-Pen headings, smartphone camera shadows, notebook date headers, and mistake scratch-outs."
+      categoryLabel="AI Assignment & Handwritten Notes Studio Pro"
+      icon={Pen}
+      microVariant="edit"
+      tone="amber"
+      trustNote="Browser-only canvas rendering · Dual-pen & natural camera shadows"
+    >
       {/* Main Studio Grid */}
-      <div className="w-full grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+      <div className="w-full grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* Left Column: Input & Comprehensive Tuning Controls */}
-        <div className="lg:col-span-5 space-y-6">
+        <motion.div
+          initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="lg:col-span-5 space-y-5"
+        >
           {/* Input Mode Selector */}
-          <div className="bg-white dark:bg-slate-900 rounded-3xl p-5 border border-gray-200 dark:border-slate-800 shadow-sm space-y-4">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-gray-700 dark:text-slate-300 uppercase tracking-wider">
+          <div className="pms-glass-panel rounded-3xl p-5 space-y-4">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <span className="text-xs font-bold text-[var(--pms-muted)] uppercase tracking-wider">
                 1. Text / Document Source
               </span>
-              <div className="inline-flex rounded-xl bg-gray-100 dark:bg-slate-800 p-1 text-xs font-semibold">
+              <div className="inline-flex rounded-xl bg-[var(--pms-white)] border border-[var(--pms-border)] p-1 text-xs font-semibold">
                 <button
                   type="button"
                   onClick={() => setInputTab('text')}
-                  className={`px-3 py-1.5 rounded-lg transition-all ${
+                  className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
                     inputTab === 'text'
-                      ? 'bg-white dark:bg-slate-900 text-amber-700 dark:text-amber-400 shadow-xs'
-                      : 'text-gray-500 hover:text-gray-900 dark:text-slate-400'
+                      ? 'bg-[var(--pms-soft-rose)] text-[var(--pms-ink)] shadow-xs'
+                      : 'text-[var(--pms-muted)] hover:text-[var(--pms-ink)]'
                   }`}
                 >
                   Type / Notes
@@ -764,10 +781,10 @@ export default function HandwritingPDF() {
                 <button
                   type="button"
                   onClick={() => setInputTab('pdf')}
-                  className={`px-3 py-1.5 rounded-lg transition-all ${
+                  className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
                     inputTab === 'pdf'
-                      ? 'bg-white dark:bg-slate-900 text-amber-700 dark:text-amber-400 shadow-xs'
-                      : 'text-gray-500 hover:text-gray-900 dark:text-slate-400'
+                      ? 'bg-[var(--pms-soft-rose)] text-[var(--pms-ink)] shadow-xs'
+                      : 'text-[var(--pms-muted)] hover:text-[var(--pms-ink)]'
                   }`}
                 >
                   Upload PDF
@@ -775,10 +792,10 @@ export default function HandwritingPDF() {
                 <button
                   type="button"
                   onClick={() => setInputTab('customSheet')}
-                  className={`px-3 py-1.5 rounded-lg transition-all ${
+                  className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
                     inputTab === 'customSheet'
-                      ? 'bg-white dark:bg-slate-900 text-amber-700 dark:text-amber-400 shadow-xs'
-                      : 'text-gray-500 hover:text-gray-900 dark:text-slate-400'
+                      ? 'bg-[var(--pms-soft-rose)] text-[var(--pms-ink)] shadow-xs'
+                      : 'text-[var(--pms-muted)] hover:text-[var(--pms-ink)]'
                   }`}
                 >
                   My Sample
@@ -793,30 +810,37 @@ export default function HandwritingPDF() {
                   value={textInput}
                   onChange={(e) => setTextInput(e.target.value)}
                   placeholder="Paste notes here... Use ~~word~~ to simulate a pen scratch-out mistake!"
-                  className="w-full p-3.5 text-sm bg-gray-50 dark:bg-slate-800/80 border border-gray-200 dark:border-slate-700 rounded-2xl focus:outline-hidden focus:border-amber-500 font-mono leading-relaxed"
+                  className="w-full p-3.5 text-sm bg-[var(--pms-white)] border border-[var(--pms-border)] text-[var(--pms-ink)] rounded-2xl focus:outline-none focus:border-amber-500 font-mono leading-relaxed"
                 />
 
                 <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
                   <div className="flex flex-wrap items-center gap-1.5">
-                    <span className="text-[11px] font-bold text-gray-400">Presets:</span>
+                    <span className="text-[11px] font-bold text-[var(--pms-muted)]">Presets:</span>
                     <button
                       type="button"
                       onClick={() => setTextInput(SAMPLE_TEXTS.assignment)}
-                      className="px-2.5 py-1 text-[11px] bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 text-gray-700 dark:text-slate-300 rounded-lg font-medium"
+                      className="px-2.5 py-1 text-[11px] bg-[var(--pms-white)] border border-[var(--pms-border)] hover:border-[var(--pms-border-strong)] text-[var(--pms-ink)] rounded-lg font-medium cursor-pointer"
                     >
                       Assignment
                     </button>
                     <button
                       type="button"
                       onClick={() => setTextInput(SAMPLE_TEXTS.lecture)}
-                      className="px-2.5 py-1 text-[11px] bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 text-gray-700 dark:text-slate-300 rounded-lg font-medium"
+                      className="px-2.5 py-1 text-[11px] bg-[var(--pms-white)] border border-[var(--pms-border)] hover:border-[var(--pms-border-strong)] text-[var(--pms-ink)] rounded-lg font-medium cursor-pointer"
                     >
                       Lecture
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTextInput(SAMPLE_TEXTS.letter)}
+                      className="px-2.5 py-1 text-[11px] bg-[var(--pms-white)] border border-[var(--pms-border)] hover:border-[var(--pms-border-strong)] text-[var(--pms-ink)] rounded-lg font-medium cursor-pointer"
+                    >
+                      Letter
                     </button>
                   </div>
 
                   <span className="text-[11px] text-amber-700 dark:text-amber-400 font-semibold">
-                    Tip: Wrap with <code className="bg-amber-100 dark:bg-amber-900/40 px-1 rounded">~~word~~</code> for realistic scratch-out!
+                    Tip: Wrap with <code className="px-1 rounded border border-[var(--pms-border)]" style={{ background: 'var(--pms-soft-rose)' }}>~~word~~</code> for scratch-out
                   </span>
                 </div>
               </div>
@@ -829,19 +853,22 @@ export default function HandwritingPDF() {
                   multiple={false}
                   title="Drop Text PDF to Extract and Convert to Handwriting"
                 />
-                <p className="text-xs text-gray-500 text-center">
+                <p className="text-xs text-[var(--pms-muted)] text-center">
                   Extracts text and automatically formats it across notebook pages.
                 </p>
               </div>
             )}
 
             {inputTab === 'customSheet' && (
-              <div className="space-y-4 p-4 bg-amber-50/50 dark:bg-amber-950/20 rounded-2xl border border-amber-200/80 dark:border-amber-900/40">
+              <div
+                className="space-y-4 p-4 rounded-2xl border border-[var(--pms-border)]"
+                style={{ background: 'var(--pms-soft-rose)' }}
+              >
                 <div>
-                  <h4 className="text-xs font-bold text-amber-900 dark:text-amber-300 uppercase tracking-wider mb-1 flex items-center gap-1.5">
-                    <Sparkles className="w-3.5 h-3.5" /> Clone Your Real Handwriting
+                  <h4 className="text-xs font-bold text-[var(--pms-ink)] uppercase tracking-wider mb-1 flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" /> Clone Your Real Handwriting
                   </h4>
-                  <p className="text-xs text-amber-800 dark:text-amber-400 leading-relaxed">
+                  <p className="text-xs text-[var(--pms-muted)] leading-relaxed">
                     Download our 1-page A-Z template sheet, write on it with pen, and upload the photo to analyze your strokes!
                   </p>
                 </div>
@@ -850,12 +877,12 @@ export default function HandwritingPDF() {
                   <button
                     type="button"
                     onClick={downloadTemplateSheet}
-                    className="flex-1 py-2.5 px-3 bg-white dark:bg-slate-800 hover:bg-gray-50 border border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-200 text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 shadow-2xs"
+                    className="flex-1 py-2.5 px-3 bg-[var(--pms-white)] border border-[var(--pms-border-strong)] text-[var(--pms-ink)] text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer"
                   >
                     <Download className="w-4 h-4" /> Download A-Z Grid Sheet
                   </button>
 
-                  <label className="flex-1 py-2.5 px-3 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 cursor-pointer shadow-xs transition-colors">
+                  <label className="pms-btn-primary flex-1 py-2.5 px-3 text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 cursor-pointer">
                     <Camera className="w-4 h-4" /> Upload Filled Photo
                     <input
                       type="file"
@@ -867,14 +894,17 @@ export default function HandwritingPDF() {
                 </div>
 
                 {analyzingSheet && (
-                  <div className="flex items-center gap-2 text-xs font-semibold text-amber-800 dark:text-amber-300 pt-1">
-                    <Loader2 className="w-4 h-4 animate-spin" /> Analyzing handwriting strokes & ink density...
+                  <div className="flex items-center gap-2 text-xs font-semibold text-[var(--pms-ink)] pt-1">
+                    <Loader2 className="w-4 h-4 animate-spin text-amber-600" /> Analyzing handwriting strokes &amp; ink density...
                   </div>
                 )}
 
                 {customSampleName && (
-                  <div className="p-3 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 rounded-xl text-xs text-emerald-800 dark:text-emerald-300 flex items-center gap-2">
-                    <Check className="w-4 h-4 text-emerald-600" />
+                  <div
+                    className="p-3 border border-[var(--pms-border)] rounded-xl text-xs text-[var(--pms-ink)] flex items-center gap-2"
+                    style={{ background: 'var(--pms-soft-mint)' }}
+                  >
+                    <Check className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
                     <span>Analyzed sample: <strong>{customSampleName}</strong> (Profile Active)</span>
                   </div>
                 )}
@@ -883,9 +913,9 @@ export default function HandwritingPDF() {
           </div>
 
           {/* Dual-Pen Mode & Pen Colors */}
-          <div className="bg-white dark:bg-slate-900 rounded-3xl p-5 border border-gray-200 dark:border-slate-800 shadow-sm space-y-4">
+          <div className="pms-glass-panel rounded-3xl p-5 space-y-4">
             <div className="flex items-center justify-between">
-              <h3 className="text-xs font-bold text-gray-700 dark:text-slate-300 uppercase tracking-wider flex items-center gap-2">
+              <h3 className="text-xs font-bold text-[var(--pms-muted)] uppercase tracking-wider flex items-center gap-2">
                 <Palette className="w-3.5 h-3.5 text-amber-500" /> 2. Dual-Pen Mode (Headings vs Body)
               </h3>
               <label className="relative inline-flex items-center cursor-pointer">
@@ -895,13 +925,13 @@ export default function HandwritingPDF() {
                   onChange={(e) => setDualPenMode(e.target.checked)}
                   className="sr-only peer"
                 />
-                <div className="w-9 h-5 bg-gray-200 peer-focus:outline-hidden rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-amber-600"></div>
+                <div className="w-9 h-5 bg-slate-300 dark:bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-amber-600"></div>
               </label>
             </div>
 
             {/* Body Text Pen */}
             <div>
-              <label className="text-xs font-semibold text-gray-600 dark:text-slate-400 block mb-1.5">
+              <label className="text-xs font-semibold text-[var(--pms-muted)] block mb-1.5">
                 Body Text Pen Color:
               </label>
               <div className="flex flex-wrap items-center gap-2">
@@ -911,9 +941,9 @@ export default function HandwritingPDF() {
                     type="button"
                     onClick={() => setBodyColor(c.hex)}
                     title={c.name}
-                    className={`w-8 h-8 rounded-full border-2 transition-all flex items-center justify-center ${
+                    className={`w-8 h-8 rounded-full border-2 transition-all flex items-center justify-center cursor-pointer ${
                       bodyColor === c.hex
-                        ? 'border-amber-500 scale-110 shadow-md ring-2 ring-amber-200'
+                        ? 'border-white scale-110 shadow-md ring-2 ring-amber-500'
                         : 'border-transparent hover:scale-105'
                     }`}
                     style={{ backgroundColor: c.hex }}
@@ -925,59 +955,66 @@ export default function HandwritingPDF() {
             </div>
 
             {/* Heading Pen Options (if Dual-Pen active) */}
-            {dualPenMode && (
-              <div className="pt-3 border-t border-gray-100 dark:border-slate-800 space-y-3">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-semibold text-gray-700 dark:text-slate-300">
-                    Heading Pen Color:
-                  </label>
-                  <div className="flex items-center gap-1.5">
-                    {['#171717', '#b91c1c', '#1e40af'].map((hex) => (
-                      <button
-                        key={hex}
-                        type="button"
-                        onClick={() => setHeadingColor(hex)}
-                        className={`w-6 h-6 rounded-full border transition-all ${
-                          headingColor === hex ? 'ring-2 ring-amber-500 scale-110' : 'opacity-70'
-                        }`}
-                        style={{ backgroundColor: hex }}
-                      />
-                    ))}
+            <AnimatePresence>
+              {dualPenMode && (
+                <motion.div
+                  initial={prefersReduced ? false : { opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={prefersReduced ? undefined : { opacity: 0, height: 0 }}
+                  className="pt-3 border-t border-[var(--pms-border)] space-y-3"
+                >
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-semibold text-[var(--pms-ink)]">
+                      Heading Pen Color:
+                    </label>
+                    <div className="flex items-center gap-1.5">
+                      {['#171717', '#b91c1c', '#1e40af'].map((hex) => (
+                        <button
+                          key={hex}
+                          type="button"
+                          onClick={() => setHeadingColor(hex)}
+                          className={`w-6 h-6 rounded-full border transition-all cursor-pointer ${
+                            headingColor === hex ? 'ring-2 ring-amber-500 scale-110' : 'opacity-70'
+                          }`}
+                          style={{ backgroundColor: hex }}
+                        />
+                      ))}
+                    </div>
                   </div>
-                </div>
 
-                <div>
-                  <label className="text-xs font-semibold text-gray-700 dark:text-slate-300 block mb-1">
-                    Heading Underline Style:
-                  </label>
-                  <div className="grid grid-cols-3 gap-2">
-                    {[
-                      { id: 'wavy', name: 'Wavy Line (~)' },
-                      { id: 'straight', name: 'Straight Line' },
-                      { id: 'none', name: 'No Line' },
-                    ].map((item) => (
-                      <button
-                        key={item.id}
-                        type="button"
-                        onClick={() => setHeadingUnderline(item.id as any)}
-                        className={`py-1.5 text-xs font-bold rounded-lg border transition-all ${
-                          headingUnderline === item.id
-                            ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300 border-amber-400'
-                            : 'bg-gray-50 dark:bg-slate-800 text-gray-600 dark:text-slate-400 border-gray-200 dark:border-slate-700'
-                        }`}
-                      >
-                        {item.name}
-                      </button>
-                    ))}
+                  <div>
+                    <label className="text-xs font-semibold text-[var(--pms-ink)] block mb-1">
+                      Heading Underline Style:
+                    </label>
+                    <div className="grid grid-cols-3 gap-2">
+                      {[
+                        { id: 'wavy', name: 'Wavy Line (~)' },
+                        { id: 'straight', name: 'Straight Line' },
+                        { id: 'none', name: 'No Line' },
+                      ].map((item) => (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={() => setHeadingUnderline(item.id as any)}
+                          className={`py-1.5 text-xs font-bold rounded-lg border transition-all cursor-pointer ${
+                            headingUnderline === item.id
+                              ? 'bg-[var(--pms-soft-rose)] text-[var(--pms-ink)] border-amber-500'
+                              : 'bg-[var(--pms-white)] text-[var(--pms-muted)] border-[var(--pms-border)]'
+                          }`}
+                        >
+                          {item.name}
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                </div>
-              </div>
-            )}
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
 
           {/* Handwriting Style / Font Selection */}
-          <div className="bg-white dark:bg-slate-900 rounded-3xl p-5 border border-gray-200 dark:border-slate-800 shadow-sm space-y-4">
-            <h3 className="text-xs font-bold text-gray-700 dark:text-slate-300 uppercase tracking-wider flex items-center gap-2">
+          <div className="pms-glass-panel rounded-3xl p-5 space-y-4">
+            <h3 className="text-xs font-bold text-[var(--pms-muted)] uppercase tracking-wider flex items-center gap-2">
               <Pen className="w-3.5 h-3.5 text-amber-500" /> 3. Handwriting Font Style
             </h3>
 
@@ -987,16 +1024,16 @@ export default function HandwritingPDF() {
                   key={f.id}
                   type="button"
                   onClick={() => setSelectedFontId(f.id)}
-                  className={`text-left p-3 rounded-2xl border-2 transition-all flex flex-col justify-between ${
+                  className={`text-left p-3 rounded-2xl border-2 transition-all flex flex-col justify-between cursor-pointer ${
                     selectedFontId === f.id
-                      ? 'border-amber-500 bg-amber-50/40 dark:bg-amber-950/20 shadow-xs'
-                      : 'border-gray-200 dark:border-slate-800 hover:border-gray-300 bg-white dark:bg-slate-800/20'
+                      ? 'border-amber-500 bg-[var(--pms-soft-rose)] shadow-xs'
+                      : 'border-[var(--pms-border)] hover:border-[var(--pms-border-strong)] bg-[var(--pms-white)]'
                   }`}
                 >
-                  <span className="text-[10px] font-bold text-gray-400 uppercase">{f.category}</span>
-                  <p className="text-sm font-bold text-gray-900 dark:text-white truncate">{f.name}</p>
+                  <span className="text-[10px] font-bold text-[var(--pms-muted)] uppercase">{f.category}</span>
+                  <p className="text-sm font-bold text-[var(--pms-ink)] truncate">{f.name}</p>
                   <p
-                    className="text-base text-gray-600 dark:text-slate-300 mt-1 truncate"
+                    className="text-base text-[var(--pms-muted)] mt-1 truncate"
                     style={{ fontFamily: f.fontFamily }}
                   >
                     {f.sample}
@@ -1007,9 +1044,9 @@ export default function HandwritingPDF() {
           </div>
 
           {/* Paper Style & Official Header Box */}
-          <div className="bg-white dark:bg-slate-900 rounded-3xl p-5 border border-gray-200 dark:border-slate-800 shadow-sm space-y-4">
-            <h3 className="text-xs font-bold text-gray-700 dark:text-slate-300 uppercase tracking-wider flex items-center gap-2">
-              <BookOpen className="w-3.5 h-3.5 text-amber-500" /> 4. Paper Style & Header Box
+          <div className="pms-glass-panel rounded-3xl p-5 space-y-4">
+            <h3 className="text-xs font-bold text-[var(--pms-muted)] uppercase tracking-wider flex items-center gap-2">
+              <BookOpen className="w-3.5 h-3.5 text-amber-500" /> 4. Paper Style &amp; Typography
             </h3>
 
             {/* Paper Selector */}
@@ -1019,10 +1056,10 @@ export default function HandwritingPDF() {
                   key={p.id}
                   type="button"
                   onClick={() => setPaperType(p.id)}
-                  className={`p-2.5 rounded-xl text-xs font-bold border transition-all text-left ${
+                  className={`p-2.5 rounded-xl text-xs font-bold border transition-all text-left cursor-pointer ${
                     paperType === p.id
                       ? 'bg-amber-600 text-white border-amber-600 shadow-xs'
-                      : 'bg-white dark:bg-slate-800 text-gray-700 dark:text-slate-300 border-gray-200 dark:border-slate-700'
+                      : 'bg-[var(--pms-white)] text-[var(--pms-ink)] border-[var(--pms-border)]'
                   }`}
                 >
                   {p.name}
@@ -1030,11 +1067,43 @@ export default function HandwritingPDF() {
               ))}
             </div>
 
+            {/* Font Size & Line Spacing Sliders */}
+            <div className="grid grid-cols-2 gap-3 pt-1">
+              <div>
+                <div className="flex justify-between text-xs mb-1">
+                  <span className="font-medium text-[var(--pms-muted)]">Pen Size</span>
+                  <span className="font-bold font-mono text-[var(--pms-ink)]">{fontSize}px</span>
+                </div>
+                <input
+                  type="range"
+                  min={16}
+                  max={34}
+                  value={fontSize}
+                  onChange={(e) => setFontSize(Number(e.target.value))}
+                  className="w-full h-1.5 rounded-lg accent-amber-500"
+                />
+              </div>
+              <div>
+                <div className="flex justify-between text-xs mb-1">
+                  <span className="font-medium text-[var(--pms-muted)]">Rule Height</span>
+                  <span className="font-bold font-mono text-[var(--pms-ink)]">{lineSpacing}px</span>
+                </div>
+                <input
+                  type="range"
+                  min={26}
+                  max={52}
+                  value={lineSpacing}
+                  onChange={(e) => setLineSpacing(Number(e.target.value))}
+                  className="w-full h-1.5 rounded-lg accent-amber-500"
+                />
+              </div>
+            </div>
+
             {/* Official Notebook Header Box Toggle */}
-            <div className="p-4 bg-gray-50 dark:bg-slate-800/60 rounded-2xl border border-gray-200 dark:border-slate-700 space-y-3">
+            <div className="p-4 bg-[var(--pms-white)] rounded-2xl border border-[var(--pms-border)] space-y-3">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-gray-800 dark:text-white flex items-center gap-1.5">
-                  <Calendar className="w-3.5 h-3.5 text-amber-500" /> Notebook Date & Page Header Box
+                <span className="text-xs font-bold text-[var(--pms-ink)] flex items-center gap-1.5">
+                  <Calendar className="w-3.5 h-3.5 text-amber-500" /> Notebook Date &amp; Page Header Box
                 </span>
                 <input
                   type="checkbox"
@@ -1046,13 +1115,13 @@ export default function HandwritingPDF() {
 
               {showHeaderBox && (
                 <div className="flex items-center gap-2 pt-1">
-                  <span className="text-xs text-gray-500">Handwritten Date:</span>
+                  <span className="text-xs text-[var(--pms-muted)]">Handwritten Date:</span>
                   <input
                     type="text"
                     value={headerDate}
                     onChange={(e) => setHeaderDate(e.target.value)}
                     placeholder="DD/MM/YYYY"
-                    className="px-2.5 py-1 text-xs bg-white dark:bg-slate-900 border border-gray-300 dark:border-slate-700 rounded-lg font-mono font-bold"
+                    className="px-2.5 py-1 text-xs bg-[var(--pms-white)] border border-[var(--pms-border)] text-[var(--pms-ink)] rounded-lg font-mono font-bold"
                   />
                 </div>
               )}
@@ -1060,14 +1129,14 @@ export default function HandwritingPDF() {
           </div>
 
           {/* Camera Lighting & Natural Realism Flaws */}
-          <div className="bg-white dark:bg-slate-900 rounded-3xl p-5 border border-gray-200 dark:border-slate-800 shadow-sm space-y-4">
-            <h3 className="text-xs font-bold text-gray-700 dark:text-slate-300 uppercase tracking-wider flex items-center gap-2">
-              <Sliders className="w-3.5 h-3.5 text-amber-500" /> 5. Camera Scan & Human Realism
+          <div className="pms-glass-panel rounded-3xl p-5 space-y-4">
+            <h3 className="text-xs font-bold text-[var(--pms-muted)] uppercase tracking-wider flex items-center gap-2">
+              <Sliders className="w-3.5 h-3.5 text-amber-500" /> 5. Camera Scan &amp; Human Realism
             </h3>
 
             {/* Lighting Overlay Mode */}
             <div>
-              <label className="text-xs font-semibold text-gray-600 dark:text-slate-400 block mb-1.5">
+              <label className="text-xs font-semibold text-[var(--pms-muted)] block mb-1.5">
                 Lighting / Camera Scan Effect:
               </label>
               <div className="grid grid-cols-2 gap-2">
@@ -1076,10 +1145,10 @@ export default function HandwritingPDF() {
                     key={l.id}
                     type="button"
                     onClick={() => setLightingEffect(l.id as any)}
-                    className={`py-2 px-2.5 rounded-xl text-xs font-bold border transition-all text-center ${
+                    className={`py-2 px-2.5 rounded-xl text-xs font-bold border transition-all text-center cursor-pointer ${
                       lightingEffect === l.id
-                        ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300 border-amber-500'
-                        : 'bg-white dark:bg-slate-800 text-gray-600 dark:text-slate-400 border-gray-200 dark:border-slate-700'
+                        ? 'bg-[var(--pms-soft-rose)] text-[var(--pms-ink)] border-amber-500'
+                        : 'bg-[var(--pms-white)] text-[var(--pms-muted)] border-[var(--pms-border)]'
                     }`}
                   >
                     {l.name}
@@ -1092,8 +1161,8 @@ export default function HandwritingPDF() {
             <div className="space-y-3 pt-2">
               <div>
                 <div className="flex justify-between text-xs mb-1">
-                  <span className="font-medium text-gray-600 dark:text-slate-400">Baseline Jitter (Wobbly Lines)</span>
-                  <span className="font-bold font-mono">{jitterAmount}</span>
+                  <span className="font-medium text-[var(--pms-muted)]">Baseline Jitter (Wobbly Lines)</span>
+                  <span className="font-bold font-mono text-[var(--pms-ink)]">{jitterAmount}</span>
                 </div>
                 <input
                   type="range"
@@ -1101,14 +1170,14 @@ export default function HandwritingPDF() {
                   max={5}
                   value={jitterAmount}
                   onChange={(e) => setJitterAmount(Number(e.target.value))}
-                  className="w-full h-1.5 bg-gray-200 dark:bg-slate-700 rounded-lg accent-amber-500"
+                  className="w-full h-1.5 rounded-lg accent-amber-500"
                 />
               </div>
 
               <div>
                 <div className="flex justify-between text-xs mb-1">
-                  <span className="font-medium text-gray-600 dark:text-slate-400">Character Rotation / Tilt</span>
-                  <span className="font-bold font-mono">{tiltAmount}</span>
+                  <span className="font-medium text-[var(--pms-muted)]">Character Rotation / Tilt</span>
+                  <span className="font-bold font-mono text-[var(--pms-ink)]">{tiltAmount}</span>
                 </div>
                 <input
                   type="range"
@@ -1116,12 +1185,12 @@ export default function HandwritingPDF() {
                   max={5}
                   value={tiltAmount}
                   onChange={(e) => setTiltAmount(Number(e.target.value))}
-                  className="w-full h-1.5 bg-gray-200 dark:bg-slate-700 rounded-lg accent-amber-500"
+                  className="w-full h-1.5 rounded-lg accent-amber-500"
                 />
               </div>
 
               <div className="flex items-center justify-between pt-1">
-                <span className="text-xs font-medium text-gray-700 dark:text-slate-300">Liquid Ink Bleed / Pressure Variance</span>
+                <span className="text-xs font-medium text-[var(--pms-ink)]">Liquid Ink Bleed / Pressure Variance</span>
                 <input
                   type="checkbox"
                   checked={inkBleedVariance}
@@ -1131,7 +1200,7 @@ export default function HandwritingPDF() {
               </div>
 
               <div className="flex items-center justify-between">
-                <span className="text-xs font-medium text-gray-700 dark:text-slate-300">Natural Margin Drift (Organic Slope)</span>
+                <span className="text-xs font-medium text-[var(--pms-ink)]">Natural Margin Drift (Organic Slope)</span>
                 <input
                   type="checkbox"
                   checked={marginDrift}
@@ -1142,27 +1211,32 @@ export default function HandwritingPDF() {
             </div>
 
             {/* Hand-Drawn Signature Pad Button */}
-            <div className="pt-3 border-t border-gray-100 dark:border-slate-800">
+            <div className="pt-3 border-t border-[var(--pms-border)]">
               <button
                 type="button"
                 onClick={() => setShowSignModal(true)}
-                className="w-full py-2.5 px-3 bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700 text-gray-800 dark:text-slate-200 text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 transition-colors"
+                className="w-full py-2.5 px-3 bg-[var(--pms-white)] border border-[var(--pms-border)] hover:border-[var(--pms-border-strong)] text-[var(--pms-ink)] text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
               >
-                <Edit3 className="w-4 h-4 text-amber-600" />
+                <Edit3 className="w-4 h-4 text-amber-600 dark:text-amber-400" />
                 {signatureDataUrl ? 'Change Hand-Drawn Signature' : '+ Stamp Hand-Drawn Signature at Bottom'}
               </button>
             </div>
           </div>
-        </div>
+        </motion.div>
 
         {/* Right Column: Live A4 Notebook Canvas Preview & Export */}
-        <div className="lg:col-span-7 space-y-4 sticky top-6">
+        <motion.div
+          initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.06 }}
+          className="lg:col-span-7 space-y-4 lg:sticky lg:top-6"
+        >
           {/* Top Preview Controls */}
-          <div className="bg-white dark:bg-slate-900 rounded-3xl p-4 border border-gray-200 dark:border-slate-800 shadow-sm flex items-center justify-between">
+          <div className="pms-glass-panel rounded-2xl p-4 flex items-center justify-between gap-2 flex-wrap">
             <div className="flex items-center gap-2">
               <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
-              <span className="text-xs font-bold text-gray-800 dark:text-slate-200 uppercase tracking-wider">
-                Live A4 Preview (Page {currentPage} of {totalPages})
+              <span className="text-xs font-bold text-[var(--pms-ink)] uppercase tracking-wider">
+                Live A4 Preview (Page {currentPage} of <AnimatedNumber value={totalPages} />)
               </span>
             </div>
 
@@ -1172,18 +1246,18 @@ export default function HandwritingPDF() {
                 type="button"
                 disabled={currentPage <= 1}
                 onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                className="p-1.5 bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 rounded-lg disabled:opacity-30 text-gray-700 dark:text-slate-300"
+                className="p-1.5 bg-[var(--pms-white)] border border-[var(--pms-border)] hover:border-[var(--pms-border-strong)] rounded-lg disabled:opacity-30 text-[var(--pms-ink)] cursor-pointer"
               >
                 <ChevronLeft className="w-4 h-4" />
               </button>
-              <span className="text-xs font-mono font-bold px-2 text-gray-600 dark:text-slate-400">
+              <span className="text-xs font-mono font-bold px-2 text-[var(--pms-muted)]">
                 {currentPage} / {totalPages}
               </span>
               <button
                 type="button"
                 disabled={currentPage >= totalPages}
                 onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-                className="p-1.5 bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 rounded-lg disabled:opacity-30 text-gray-700 dark:text-slate-300"
+                className="p-1.5 bg-[var(--pms-white)] border border-[var(--pms-border)] hover:border-[var(--pms-border-strong)] rounded-lg disabled:opacity-30 text-[var(--pms-ink)] cursor-pointer"
               >
                 <ChevronRight className="w-4 h-4" />
               </button>
@@ -1191,21 +1265,24 @@ export default function HandwritingPDF() {
           </div>
 
           {/* Interactive Live Canvas Container with Notebook Shadow */}
-          <div className="rounded-3xl border border-gray-200 dark:border-slate-800 overflow-hidden bg-slate-200/60 dark:bg-slate-950 p-4 md:p-6 flex items-center justify-center shadow-inner">
-            <div className="relative shadow-2xl rounded-sm overflow-hidden bg-white max-w-full">
-              <canvas
-                ref={canvasRef}
-                className="w-full max-w-[560px] h-auto object-contain block"
-              />
+          <div className="pms-glass-panel rounded-3xl p-4 md:p-6 relative overflow-hidden">
+            <PearlScanOverlay active={isExporting} label="Compiling realistic handwritten pages into PDF..." />
+            <div className="pms-paper-grid rounded-2xl border border-[var(--pms-border)] p-4 flex items-center justify-center">
+              <div className="relative shadow-2xl rounded-sm overflow-hidden bg-white max-w-full">
+                <canvas
+                  ref={canvasRef}
+                  className="w-full max-w-[560px] h-auto object-contain block"
+                />
+              </div>
             </div>
           </div>
 
           {/* Export Action Buttons */}
-          <div className="flex flex-col sm:flex-row gap-3 pt-2">
+          <div className="flex flex-col sm:flex-row gap-3 pt-1">
             <button
               onClick={downloadHandwrittenPdf}
               disabled={isExporting}
-              className="flex-1 py-4 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-2xl transition-all shadow-md hover:shadow-lg disabled:opacity-50 flex items-center justify-center gap-2 text-base"
+              className="pms-btn-primary flex-1 py-4 px-5 font-bold rounded-2xl transition-all disabled:opacity-50 flex items-center justify-center gap-2 text-sm sm:text-base cursor-pointer"
             >
               {isExporting ? (
                 <>
@@ -1215,7 +1292,7 @@ export default function HandwritingPDF() {
               ) : (
                 <>
                   <Download className="w-5 h-5" />
-                  Download Complete Handwritten PDF ({totalPages} {totalPages === 1 ? 'Page' : 'Pages'})
+                  Download Handwritten PDF (<AnimatedNumber value={totalPages} suffix={totalPages === 1 ? ' Page' : ' Pages'} />)
                 </>
               )}
             </button>
@@ -1223,69 +1300,81 @@ export default function HandwritingPDF() {
             <button
               onClick={downloadCurrentPageImage}
               disabled={isExporting}
-              className="py-4 px-6 bg-white dark:bg-slate-800 hover:bg-gray-50 dark:hover:bg-slate-700 border border-gray-200 dark:border-slate-700 text-gray-800 dark:text-slate-200 font-bold rounded-2xl transition-all shadow-xs flex items-center justify-center gap-2 text-sm"
+              className="py-4 px-6 bg-[var(--pms-white)] hover:border-[var(--pms-border-strong)] border border-[var(--pms-border)] text-[var(--pms-ink)] font-bold rounded-2xl transition-all shadow-xs flex items-center justify-center gap-2 text-sm cursor-pointer"
             >
               <Eye className="w-4 h-4" /> Download Page {currentPage} (JPG)
             </button>
           </div>
-        </div>
+        </motion.div>
       </div>
 
       {/* Signature Draw Modal */}
-      {showSignModal && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 max-w-md w-full border border-gray-200 dark:border-slate-800 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="font-bold text-sm text-gray-900 dark:text-white flex items-center gap-2">
-                <Edit3 className="w-4 h-4 text-amber-500" /> Draw Your Signature / Stamp
-              </h3>
-              <button
-                type="button"
-                onClick={() => setShowSignModal(false)}
-                className="text-gray-400 hover:text-gray-600"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
+      <AnimatePresence>
+        {showSignModal && (
+          <motion.div
+            initial={prefersReduced ? false : { opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={prefersReduced ? undefined : { opacity: 0 }}
+            className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4"
+          >
+            <motion.div
+              initial={prefersReduced ? false : { opacity: 0, scale: 0.96, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={prefersReduced ? undefined : { opacity: 0, scale: 0.96, y: 10 }}
+              className="pms-glass-panel rounded-3xl p-6 max-w-md w-full shadow-2xl space-y-4"
+            >
+              <div className="flex items-center justify-between">
+                <h3 className="font-bold text-sm text-[var(--pms-ink)] flex items-center gap-2">
+                  <Edit3 className="w-4 h-4 text-amber-500" /> Draw Your Signature / Stamp
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setShowSignModal(false)}
+                  className="text-[var(--pms-muted)] hover:text-[var(--pms-ink)] cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
 
-            <p className="text-xs text-gray-500">
-              Draw with your mouse, finger, or stylus. It will be stamped at the bottom of your assignment.
-            </p>
+              <p className="text-xs text-[var(--pms-muted)]">
+                Draw with your mouse, finger, or stylus. It will be stamped at the bottom of your assignment.
+              </p>
 
-            <div className="border border-dashed border-gray-300 dark:border-slate-700 rounded-2xl overflow-hidden bg-gray-50 dark:bg-slate-800">
-              <canvas
-                ref={signCanvasRef}
-                width={380}
-                height={160}
-                onMouseDown={startSignDraw}
-                onMouseMove={drawSignMove}
-                onMouseUp={endSignDraw}
-                onTouchStart={startSignDraw}
-                onTouchMove={drawSignMove}
-                onTouchEnd={endSignDraw}
-                className="w-full h-[160px] cursor-crosshair block"
-              />
-            </div>
+              <div className="border-2 border-dashed border-[var(--pms-border-strong)] rounded-2xl overflow-hidden bg-white shadow-inner">
+                <canvas
+                  ref={signCanvasRef}
+                  width={380}
+                  height={160}
+                  onMouseDown={startSignDraw}
+                  onMouseMove={drawSignMove}
+                  onMouseUp={endSignDraw}
+                  onTouchStart={startSignDraw}
+                  onTouchMove={drawSignMove}
+                  onTouchEnd={endSignDraw}
+                  className="w-full h-[160px] cursor-crosshair block touch-none"
+                />
+              </div>
 
-            <div className="flex gap-2 pt-2">
-              <button
-                type="button"
-                onClick={saveSignature}
-                className="flex-1 py-2.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl text-xs transition-colors shadow-xs"
-              >
-                Attach to Document
-              </button>
-              <button
-                type="button"
-                onClick={clearSignCanvas}
-                className="px-4 py-2.5 bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-slate-300 font-semibold rounded-xl text-xs hover:bg-gray-200"
-              >
-                Clear
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={saveSignature}
+                  className="pms-btn-primary flex-1 py-2.5 font-bold rounded-xl text-xs transition-colors cursor-pointer"
+                >
+                  Attach to Document
+                </button>
+                <button
+                  type="button"
+                  onClick={clearSignCanvas}
+                  className="px-4 py-2.5 bg-[var(--pms-white)] border border-[var(--pms-border)] text-[var(--pms-ink)] font-semibold rounded-xl text-xs cursor-pointer"
+                >
+                  Clear
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </ToolWorkspaceShell>
   );
 }

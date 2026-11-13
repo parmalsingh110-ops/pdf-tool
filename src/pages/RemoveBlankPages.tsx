@@ -1,5 +1,6 @@
-import { useState, useRef, useEffect, useMemo } from 'react';
-import { FileX, Download, Loader2, CheckCircle2, AlertCircle, Sparkles, RefreshCw, Trash2, Check, SlidersHorizontal, ShieldCheck } from 'lucide-react';
+import { useState, useMemo } from 'react';
+import { motion, useReducedMotion } from 'motion/react';
+import { FileX, Download, Loader2, CheckCircle2, Trash2, SlidersHorizontal } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
 import { PDFDocument } from 'pdf-lib';
 import '../lib/pdfWorker';
@@ -8,6 +9,8 @@ import { usePageSEO } from '../lib/usePageSEO';
 import { useToast } from '../components/Toast';
 import { useSEO } from '../hooks/useSEO';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { AnimatedNumber, PearlScanOverlay, PearlStageSwitch } from '../components/pearl/PearlMotion';
+import { useAutoRevokeUrl, toArrayBufferBytes } from '../lib/blobUrl';
 
 interface PageAnalysis {
   pageNum: number;
@@ -36,7 +39,10 @@ export default function RemoveBlankPages() {
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [removedCount, setRemovedCount] = useState(0);
 
+  useAutoRevokeUrl(resultUrl);
+
   const toast = useToast();
+  const prefersReduced = useReducedMotion();
 
   const handleDrop = async (files: File[]) => {
     if (!files[0]) return;
@@ -166,7 +172,7 @@ export default function RemoveBlankPages() {
       copied.forEach((p) => newDoc.addPage(p));
 
       const bytes = await newDoc.save();
-      const blob = new Blob([bytes as any], { type: 'application/pdf' });
+      const blob = new Blob([toArrayBufferBytes(bytes)], { type: 'application/pdf' });
       setResultUrl(URL.createObjectURL(blob));
       setRemovedCount(pagesToDelete.length);
       toast.success(`Removed ${pagesToDelete.length} blank page(s) successfully!`);
@@ -189,8 +195,12 @@ export default function RemoveBlankPages() {
     >
       <div className="flex flex-col items-center justify-center max-w-7xl mx-auto w-full">
 
+      <PearlStageSwitch
+        stageKey={!file ? 'upload' : analyzing ? 'loading' : resultUrl ? 'result' : 'configure'}
+        className="w-full max-w-6xl"
+      >
       {!file ? (
-        <div className="w-full max-w-4xl">
+        <div className="w-full max-w-4xl mx-auto">
           <FileDropzone
             onDrop={handleDrop}
             multiple={false}
@@ -200,37 +210,46 @@ export default function RemoveBlankPages() {
           />
         </div>
       ) : analyzing ? (
-        <div className="w-full max-w-2xl bg-white dark:bg-slate-900 rounded-2xl shadow-sm border border-gray-200 dark:border-slate-800 p-12 text-center">
-          <div className="w-14 h-14 border-4 border-rose-500 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+        <div className="relative overflow-hidden w-full max-w-2xl mx-auto pms-glass-panel rounded-3xl p-12 text-center">
+          <PearlScanOverlay active label="Inspecting pixels and text density per page..." />
+          <div className="w-14 h-14 border-4 border-[var(--pms-rose)] border-t-transparent rounded-full animate-spin mx-auto mb-4" />
           <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Analyzing Document Density...</h3>
           <p className="text-sm text-gray-500 dark:text-slate-400">Inspecting each page for blank pixels, margin artifacts, and text</p>
         </div>
       ) : resultUrl ? (
         /* Results View */
-        <div className="w-full max-w-2xl bg-white dark:bg-slate-900 rounded-2xl shadow-sm border border-gray-200 dark:border-slate-800 p-8 text-center space-y-6">
-          <div className="p-8 bg-emerald-50 dark:bg-emerald-950/30 rounded-2xl border border-emerald-200 dark:border-emerald-800">
-            <div className="w-16 h-16 bg-emerald-100 dark:bg-emerald-900/50 text-emerald-600 dark:text-emerald-400 rounded-2xl flex items-center justify-center mx-auto mb-4">
+        <div className="w-full max-w-2xl mx-auto pms-glass-panel rounded-3xl p-8 text-center space-y-6">
+          <div className="p-8 rounded-2xl bg-gradient-to-br from-emerald-500/12 via-white/75 to-teal-500/12 dark:from-emerald-950/50 dark:via-slate-900/80 dark:to-teal-950/40 border border-emerald-200/80 dark:border-emerald-800/60">
+            <motion.div
+              initial={prefersReduced ? false : { scale: 0.6, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              transition={{ type: 'spring', stiffness: 420, damping: 24 }}
+              className="w-16 h-16 bg-gradient-to-br from-emerald-400 to-teal-500 text-white rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-emerald-500/25"
+            >
               <CheckCircle2 className="w-8 h-8" />
-            </div>
-            <h3 className="text-2xl font-bold text-emerald-900 dark:text-emerald-200 mb-2">
+            </motion.div>
+            <h3 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">
               Cleaned PDF Ready!
             </h3>
-            <p className="text-sm text-emerald-700 dark:text-emerald-400 mb-6">
-              Removed {removedCount} blank page{removedCount !== 1 ? 's' : ''} • Remaining pages: {pages.length - removedCount}
+            <p className="text-sm text-gray-600 dark:text-slate-300 mb-6 tabular-nums">
+              Removed <AnimatedNumber value={removedCount} /> blank page{removedCount !== 1 ? 's' : ''} • Remaining pages: <AnimatedNumber value={pages.length - removedCount} />
             </p>
-            <a
+            <motion.a
+              whileHover={prefersReduced ? undefined : { scale: 1.02 }}
+              whileTap={prefersReduced ? undefined : { scale: 0.98 }}
               href={resultUrl}
               download={`cleaned_${file.name}`}
-              className="inline-flex items-center justify-center gap-2 px-8 py-4 bg-emerald-600 hover:bg-emerald-700 text-white text-lg font-bold rounded-xl shadow-lg transition-all"
+              className="pms-btn-primary relative overflow-hidden inline-flex items-center justify-center gap-2 px-8 py-4 text-lg font-bold rounded-xl shadow-lg"
             >
+              <span className="pms-shimmer pointer-events-none" />
               <Download className="w-5 h-5" /> Download Cleaned PDF
-            </a>
+            </motion.a>
           </div>
 
-          <div className="flex justify-center gap-4">
+          <div className="flex flex-wrap justify-center gap-4">
             <button
               onClick={() => setResultUrl(null)}
-              className="px-6 py-3 bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700 text-gray-700 dark:text-slate-300 font-semibold rounded-xl transition-all"
+              className="px-6 py-3 bg-white/80 dark:bg-slate-800/80 hover:bg-white dark:hover:bg-slate-700 border border-[var(--pms-border)] text-gray-700 dark:text-slate-200 font-semibold rounded-xl transition-all"
             >
               Adjust Selection
             </button>
@@ -240,7 +259,7 @@ export default function RemoveBlankPages() {
                 setPages([]);
                 setResultUrl(null);
               }}
-              className="px-6 py-3 bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700 text-gray-700 dark:text-slate-300 font-semibold rounded-xl transition-all"
+              className="px-6 py-3 bg-white/80 dark:bg-slate-800/80 hover:bg-white dark:hover:bg-slate-700 border border-[var(--pms-border)] text-gray-700 dark:text-slate-200 font-semibold rounded-xl transition-all"
             >
               Process Another PDF
             </button>
@@ -248,20 +267,21 @@ export default function RemoveBlankPages() {
         </div>
       ) : (
         /* Workspace & Detection Review */
-        <div className="w-full max-w-6xl space-y-6">
+        <div className="w-full space-y-6">
           {/* Top Control Bar */}
-          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-gray-200 dark:border-slate-800 p-6 shadow-sm">
-            <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6 pb-6 border-b border-gray-100 dark:border-slate-800">
+          <div className="relative overflow-hidden pms-glass-panel rounded-3xl p-6">
+            <PearlScanOverlay active={busy} label={`Removing ${pagesToDelete.length} blank page(s)...`} />
+            <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6 pb-6 border-b border-[var(--pms-border)]">
               <div className="flex items-center gap-4">
-                <div className="w-12 h-12 bg-rose-100 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 rounded-xl flex items-center justify-center shrink-0">
+                <div className="w-12 h-12 bg-[var(--pms-soft-rose)] text-[var(--pms-rose)] border border-[var(--pms-border)] rounded-xl flex items-center justify-center shrink-0">
                   <FileX className="w-6 h-6" />
                 </div>
                 <div>
                   <h3 className="text-lg font-bold text-gray-900 dark:text-white truncate max-w-md">
                     {file.name}
                   </h3>
-                  <p className="text-sm text-gray-500 dark:text-slate-400">
-                    {pages.length} total pages • <span className="text-rose-600 dark:text-rose-400 font-semibold">{pagesToDelete.length} blank detected</span> • {pagesToKeep.length} will be kept
+                  <p className="text-sm text-gray-500 dark:text-slate-400 tabular-nums">
+                    {pages.length} total pages • <span className="text-[var(--pms-rose)] font-semibold">{pagesToDelete.length} blank detected</span> • {pagesToKeep.length} will be kept
                   </p>
                 </div>
               </div>
@@ -272,15 +292,18 @@ export default function RemoveBlankPages() {
                     setFile(null);
                     setPages([]);
                   }}
-                  className="px-4 py-2.5 text-sm font-semibold text-gray-600 dark:text-slate-400 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-xl transition-all"
+                  className="px-4 py-2.5 text-sm font-semibold text-gray-600 dark:text-slate-300 bg-white/75 dark:bg-slate-800/75 hover:bg-white dark:hover:bg-slate-700 border border-[var(--pms-border)] rounded-xl transition-all"
                 >
                   Cancel
                 </button>
-                <button
+                <motion.button
+                  whileHover={prefersReduced || busy || pagesToDelete.length === 0 ? undefined : { scale: 1.02 }}
+                  whileTap={prefersReduced || busy || pagesToDelete.length === 0 ? undefined : { scale: 0.98 }}
                   onClick={removeBlankPages}
                   disabled={busy || pagesToDelete.length === 0}
-                  className="flex-1 lg:flex-initial inline-flex items-center justify-center gap-2 px-8 py-3 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl shadow-md transition-all disabled:opacity-50"
+                  className="pms-btn-primary relative overflow-hidden flex-1 lg:flex-initial inline-flex items-center justify-center gap-2 px-8 py-3 font-bold rounded-xl shadow-md disabled:opacity-50"
                 >
+                  <span className="pms-shimmer pointer-events-none" />
                   {busy ? (
                     <>
                       <Loader2 className="w-5 h-5 animate-spin" /> Removing...
@@ -290,7 +313,7 @@ export default function RemoveBlankPages() {
                       <Trash2 className="w-5 h-5" /> Remove {pagesToDelete.length} Blank Page{pagesToDelete.length !== 1 ? 's' : ''}
                     </>
                   )}
-                </button>
+                </motion.button>
               </div>
             </div>
 
@@ -298,10 +321,10 @@ export default function RemoveBlankPages() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-6 items-center">
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <label className="text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-slate-400 flex items-center gap-2">
-                    <SlidersHorizontal className="w-3.5 h-3.5" /> Sensitivity Threshold: <span className="text-rose-600 dark:text-rose-400">{threshold}% White</span>
+                  <label className="text-xs font-bold uppercase tracking-wider text-gray-600 dark:text-slate-300 flex items-center gap-2">
+                    <SlidersHorizontal className="w-3.5 h-3.5 text-[var(--pms-rose)]" /> Sensitivity Threshold: <span className="text-[var(--pms-rose)]">{threshold}% White</span>
                   </label>
-                  <span className="text-xs text-gray-400">
+                  <span className="text-xs text-gray-500 dark:text-slate-400">
                     {threshold >= 99.5 ? 'Very Strict (Only pure blank)' : threshold <= 96 ? 'Aggressive (Includes light marks)' : 'Balanced Standard'}
                   </span>
                 </div>
@@ -315,9 +338,9 @@ export default function RemoveBlankPages() {
                     setThreshold(parseFloat(e.target.value));
                     setManualOverrides({});
                   }}
-                  className="w-full h-2 bg-gray-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer accent-rose-600"
+                  className="w-full h-2 bg-white/80 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer accent-rose-600"
                 />
-                <p className="text-[11px] text-gray-400 dark:text-slate-500 mt-1">
+                <p className="text-[11px] text-gray-500 dark:text-slate-400 mt-1">
                   Adjusting the slider automatically re-evaluates all pages in real-time.
                 </p>
               </div>
@@ -325,13 +348,13 @@ export default function RemoveBlankPages() {
               <div className="flex items-center justify-end gap-3">
                 <button
                   onClick={markAllDetectedAsDelete}
-                  className="px-4 py-2 text-xs font-bold bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700 text-gray-700 dark:text-slate-300 rounded-xl transition-colors"
+                  className="px-4 py-2 text-xs font-bold bg-[var(--pms-soft-rose)] hover:brightness-95 border border-[var(--pms-border)] text-rose-800 dark:text-rose-200 rounded-xl transition-all"
                 >
                   Auto-Select Detected
                 </button>
                 <button
                   onClick={keepAllPages}
-                  className="px-4 py-2 text-xs font-bold bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700 text-gray-700 dark:text-slate-300 rounded-xl transition-colors"
+                  className="px-4 py-2 text-xs font-bold bg-white/80 dark:bg-slate-800/80 hover:bg-white dark:hover:bg-slate-700 border border-[var(--pms-border)] text-gray-700 dark:text-slate-200 rounded-xl transition-colors"
                 >
                   Keep All Pages
                 </button>
@@ -347,15 +370,15 @@ export default function RemoveBlankPages() {
                 <div
                   key={p.pageNum}
                   onClick={() => togglePageStatus(p.pageNum)}
-                  className={`relative group bg-white dark:bg-slate-900 rounded-2xl border-2 transition-all cursor-pointer p-2 flex flex-col select-none shadow-sm ${
+                  className={`relative group pms-glass-panel rounded-2xl border-2 transition-all cursor-pointer p-2.5 flex flex-col select-none hover:shadow-md ${
                     isDeleting
-                      ? 'border-rose-500 bg-rose-50/20 dark:bg-rose-950/20'
-                      : 'border-emerald-500/50 hover:border-emerald-500'
+                      ? 'border-rose-500 bg-[var(--pms-soft-rose)]'
+                      : 'border-emerald-500/60 hover:border-emerald-500'
                   }`}
                 >
                   {/* Status Indicator */}
                   <div
-                    className={`absolute top-3 right-3 px-2 py-0.5 rounded-full text-[10px] font-bold z-10 shadow-sm ${
+                    className={`absolute top-3.5 right-3.5 px-2 py-0.5 rounded-full text-[10px] font-bold z-10 shadow-sm ${
                       isDeleting
                         ? 'bg-rose-600 text-white'
                         : 'bg-emerald-600 text-white'
@@ -365,12 +388,12 @@ export default function RemoveBlankPages() {
                   </div>
 
                   {/* Page Number */}
-                  <div className="absolute top-3 left-3 bg-black/60 backdrop-blur-sm text-white text-[10px] font-bold px-1.5 py-0.5 rounded z-10">
+                  <div className="absolute top-3.5 left-3.5 bg-slate-900/75 backdrop-blur-sm text-white text-[10px] font-bold px-1.5 py-0.5 rounded z-10">
                     #{p.pageNum}
                   </div>
 
-                  {/* Page Thumbnail */}
-                  <div className="aspect-[1/1.35] bg-gray-100 dark:bg-slate-950 rounded-xl overflow-hidden flex items-center justify-center p-2 mb-2 border border-gray-100 dark:border-slate-800">
+                  {/* Page Thumbnail - explicit white paper box */}
+                  <div className="aspect-[1/1.35] bg-white rounded-xl overflow-hidden flex items-center justify-center p-2 mb-2 border border-gray-200 dark:border-slate-700 shadow-inner">
                     <img
                       src={p.thumbUrl}
                       alt={`Page ${p.pageNum}`}
@@ -382,7 +405,7 @@ export default function RemoveBlankPages() {
 
                   {/* White Percentage Label */}
                   <div className="flex items-center justify-between px-1 text-[11px]">
-                    <span className="text-gray-500 dark:text-slate-400 font-medium">
+                    <span className="text-gray-600 dark:text-slate-300 font-medium tabular-nums">
                       {p.whitePct}% white
                     </span>
                     <span className="text-[10px] text-gray-400">
@@ -395,6 +418,7 @@ export default function RemoveBlankPages() {
           </div>
         </div>
       )}
+      </PearlStageSwitch>
       </div>
     </ToolWorkspaceShell>
   );

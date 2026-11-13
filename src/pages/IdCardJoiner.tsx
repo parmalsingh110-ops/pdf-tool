@@ -1,4 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
+import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import {
   Upload,
   Download,
@@ -7,20 +8,17 @@ import {
   ChevronRight,
   Crop,
   RotateCw,
-  Sparkles,
   Sliders,
   CheckCircle2,
-  RefreshCw,
-  FileText,
-  ShieldCheck,
-  Check,
 } from 'lucide-react';
 import { PDFDocument } from 'pdf-lib';
 import { Link } from 'react-router-dom';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
+import { toArrayBufferBytes } from '../lib/blobUrl';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { AnimatedNumber, PearlScanOverlay } from '../components/pearl/PearlMotion';
 import {
-  type Point,
   type TwelvePointMesh,
   type FilterMode,
   type FilterOptions,
@@ -113,16 +111,6 @@ export default function IdCardJoiner() {
     contrast,
     shadowRemoval,
   };
-
-  // Helper to re-render a card's filtered preview from its cropped canvas
-  const updateFilteredPreview = useCallback(
-    (canvas: HTMLCanvasElement | null, currentFilteredUrl: string | null) => {
-      if (!canvas) return null;
-      if (currentFilteredUrl) URL.revokeObjectURL(currentFilteredUrl);
-      return applyScannerFilter(canvas, filterOptions);
-    },
-    [filterMode, brightness, contrast, shadowRemoval]
-  );
 
   // Update filtered previews when filter options change
   useEffect(() => {
@@ -407,12 +395,12 @@ export default function IdCardJoiner() {
       const pdfDoc = await PDFDocument.create();
       const page = pdfDoc.addPage([595.28, 841.89]); // A4 in PDF points (72 DPI)
       const compositeBytes = await new Promise<Uint8Array>((res, rej) => {
-        compositeCanvas.toBlob(async (blob) => {
+        compositeCanvas.toBlob((blob) => {
           if (!blob) {
             rej(new Error('Canvas toBlob failed'));
             return;
           }
-          res(new Uint8Array(await blob.arrayBuffer()));
+          blob.arrayBuffer().then((buf) => res(new Uint8Array(buf)), rej);
         }, 'image/jpeg', 0.92);
       });
 
@@ -420,7 +408,7 @@ export default function IdCardJoiner() {
       page.drawImage(pdfImg, { x: 0, y: 0, width: 595.28, height: 841.89 });
 
       const pdfBytes = await pdfDoc.save();
-      const pdfBlob = new Blob([pdfBytes as any], { type: 'application/pdf' });
+      const pdfBlob = new Blob([toArrayBufferBytes(pdfBytes)], { type: 'application/pdf' });
       if (resultUrl) URL.revokeObjectURL(resultUrl);
       setResultUrl(URL.createObjectURL(pdfBlob));
       setStep('done');
@@ -516,8 +504,18 @@ export default function IdCardJoiner() {
     },
   ];
 
+  const prefersReduced = useReducedMotion();
+
   return (
-    <div className="flex-1 flex flex-col items-center p-4 sm:p-8 bg-gradient-to-b from-slate-50 to-white dark:from-slate-950 dark:to-slate-900 min-h-screen">
+    <ToolWorkspaceShell
+      title="ID Card Front & Back Joiner"
+      subtitle="Upload Aadhaar, PAN or Voter ID. 12-Point AI Auto-Crop trims background table clutter, and Magic Scan transforms phone photos into crystal-clear flatbed scans on a single print-ready A4 sheet."
+      categoryLabel="12-Point AI Auto-Crop · Real Scanner Enhancer"
+      icon={Layers}
+      microVariant="crop"
+      tone="rose"
+      trustNote="100% browser-only · Zero server uploads · Print-ready 150 DPI A4 PDF & JPG"
+    >
       {/* 12-Point Crop Modal */}
       {modalSide && (
         <TwelvePointCropModal
@@ -534,65 +532,61 @@ export default function IdCardJoiner() {
         />
       )}
 
-      {/* Header */}
-      <div className="text-center mb-6 max-w-3xl mx-auto px-4">
-        <div className="inline-flex items-center gap-2 bg-orange-50 dark:bg-orange-950/40 text-orange-600 dark:text-orange-400 text-xs font-bold px-3 py-1 rounded-full mb-3 border border-orange-200 dark:border-orange-800">
-          <ShieldCheck className="w-3.5 h-3.5" /> 12-POINT AI AUTO-CROP · REAL SCANNER ENHANCER
-        </div>
-        <h1 className="text-3xl sm:text-4xl font-extrabold text-slate-900 dark:text-white mb-3 leading-tight">
-          ID Card Front &amp; Back Joiner
-        </h1>
-        <p className="text-base sm:text-lg text-slate-600 dark:text-slate-400 leading-relaxed">
-          Upload Aadhaar, PAN or Voter ID. <strong>12-Point AI Auto-Crop</strong> trims background table clutter, and <strong>Magic Scan</strong> transforms phone photos into crystal-clear flatbed scans on a single <strong>print-ready A4 sheet</strong>.
-        </p>
-      </div>
-
-      <div className="w-full max-w-5xl space-y-5">
+      <motion.div
+        initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.28 }}
+        className="w-full max-w-5xl mx-auto space-y-5"
+      >
         {/* Filter Selection Panel */}
-        <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-5 shadow-sm">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+        <div className="pms-glass-panel rounded-3xl p-5 sm:p-6">
+          <div className="flex items-center justify-between mb-3.5">
+            <h2 className="text-sm font-bold flex items-center gap-2" style={{ color: 'var(--pms-ink)' }}>
               <span>🎨 Real Scanner Filters</span>
-              <span className="text-[11px] font-normal text-slate-500">
+              <span className="text-[11px] font-normal" style={{ color: 'var(--pms-muted)' }}>
                 (Click to switch style)
               </span>
             </h2>
             <button
               onClick={() => setShowSliders(!showSliders)}
-              className="flex items-center gap-1 text-xs font-semibold text-orange-600 dark:text-orange-400 hover:underline"
+              className="flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-full bg-[var(--pms-soft-rose)] text-[var(--pms-rose)] border border-[var(--pms-border)] cursor-pointer hover:opacity-90 transition-opacity"
             >
               <Sliders className="w-3.5 h-3.5" />
               <span>{showSliders ? 'Hide Sliders' : 'Fine-Tune Sliders'}</span>
             </button>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
             {FILTERS.map((f) => (
               <button
                 key={f.mode}
                 onClick={() => setFilterMode(f.mode)}
-                className={`relative rounded-xl border-2 p-2.5 text-left transition-all ${
+                className={`relative rounded-2xl border p-3 text-left transition-all cursor-pointer ${
                   filterMode === f.mode
-                    ? 'border-orange-500 bg-orange-50 dark:bg-orange-950/40 shadow-sm'
-                    : 'border-slate-200 dark:border-slate-700 hover:border-orange-300 hover:bg-orange-50/40 dark:hover:bg-orange-950/20'
+                    ? 'border-[var(--pms-rose)] bg-[var(--pms-soft-rose)] shadow-sm'
+                    : 'border-[var(--pms-border)] hover:border-rose-300 dark:hover:border-rose-700'
                 }`}
+                style={filterMode === f.mode ? undefined : { backgroundColor: 'var(--pms-white)' }}
               >
                 {f.badge && (
-                  <span className="absolute top-2 right-2 text-[9px] font-bold px-1.5 py-0.5 rounded bg-orange-500 text-white uppercase">
+                  <span
+                    className="absolute top-2 right-2 text-[9px] font-bold px-1.5 py-0.5 rounded-full uppercase"
+                    style={{
+                      backgroundColor: filterMode === f.mode ? 'var(--pms-rose)' : 'var(--pms-soft-lavender)',
+                      color: filterMode === f.mode ? '#fff' : 'var(--pms-violet)',
+                    }}
+                  >
                     {f.badge}
                   </span>
                 )}
                 <div className="text-lg mb-0.5">{f.icon}</div>
                 <div
-                  className={`text-xs font-bold ${
-                    filterMode === f.mode
-                      ? 'text-orange-600 dark:text-orange-400'
-                      : 'text-slate-800 dark:text-slate-200'
-                  }`}
+                  className="text-xs font-bold"
+                  style={{ color: filterMode === f.mode ? 'var(--pms-rose)' : 'var(--pms-ink)' }}
                 >
                   {f.label}
                 </div>
-                <div className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5 line-clamp-2 leading-tight">
+                <div className="text-[10px] mt-0.5 line-clamp-2 leading-tight" style={{ color: 'var(--pms-muted)' }}>
                   {f.desc}
                 </div>
               </button>
@@ -600,54 +594,63 @@ export default function IdCardJoiner() {
           </div>
 
           {/* Expandable Fine-Tune Sliders */}
-          {showSliders && (
-            <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-700/80 grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs animate-in slide-in-from-top-2 duration-150">
-              <div>
-                <div className="flex justify-between mb-1 font-semibold text-slate-700 dark:text-slate-300">
-                  <span>Brightness</span>
-                  <span className="font-mono text-orange-600">{brightness > 0 ? `+${brightness}` : brightness}</span>
-                </div>
-                <input
-                  type="range"
-                  min="-50"
-                  max="50"
-                  value={brightness}
-                  onChange={(e) => setBrightness(Number(e.target.value))}
-                  className="w-full accent-orange-500 cursor-pointer"
-                />
-              </div>
+          <AnimatePresence>
+            {showSliders && (
+              <motion.div
+                initial={prefersReduced ? false : { opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={prefersReduced ? undefined : { opacity: 0, height: 0 }}
+                className="overflow-hidden"
+              >
+                <div className="mt-4 pt-4 border-t border-[var(--pms-border)] grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
+                  <div>
+                    <div className="flex justify-between mb-1 font-semibold" style={{ color: 'var(--pms-ink)' }}>
+                      <span>Brightness</span>
+                      <span className="font-mono text-[var(--pms-rose)]">{brightness > 0 ? `+${brightness}` : brightness}</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="-50"
+                      max="50"
+                      value={brightness}
+                      onChange={(e) => setBrightness(Number(e.target.value))}
+                      className="w-full accent-rose-600 cursor-pointer"
+                    />
+                  </div>
 
-              <div>
-                <div className="flex justify-between mb-1 font-semibold text-slate-700 dark:text-slate-300">
-                  <span>Contrast</span>
-                  <span className="font-mono text-orange-600">{contrast > 0 ? `+${contrast}` : contrast}</span>
-                </div>
-                <input
-                  type="range"
-                  min="-50"
-                  max="50"
-                  value={contrast}
-                  onChange={(e) => setContrast(Number(e.target.value))}
-                  className="w-full accent-orange-500 cursor-pointer"
-                />
-              </div>
+                  <div>
+                    <div className="flex justify-between mb-1 font-semibold" style={{ color: 'var(--pms-ink)' }}>
+                      <span>Contrast</span>
+                      <span className="font-mono text-[var(--pms-rose)]">{contrast > 0 ? `+${contrast}` : contrast}</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="-50"
+                      max="50"
+                      value={contrast}
+                      onChange={(e) => setContrast(Number(e.target.value))}
+                      className="w-full accent-rose-600 cursor-pointer"
+                    />
+                  </div>
 
-              <div>
-                <div className="flex justify-between mb-1 font-semibold text-slate-700 dark:text-slate-300">
-                  <span>Paper Whitening</span>
-                  <span className="font-mono text-orange-600">{shadowRemoval}%</span>
+                  <div>
+                    <div className="flex justify-between mb-1 font-semibold" style={{ color: 'var(--pms-ink)' }}>
+                      <span>Paper Whitening</span>
+                      <span className="font-mono text-[var(--pms-rose)]">{shadowRemoval}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0"
+                      max="100"
+                      value={shadowRemoval}
+                      onChange={(e) => setShadowRemoval(Number(e.target.value))}
+                      className="w-full accent-rose-600 cursor-pointer"
+                    />
+                  </div>
                 </div>
-                <input
-                  type="range"
-                  min="0"
-                  max="100"
-                  value={shadowRemoval}
-                  onChange={(e) => setShadowRemoval(Number(e.target.value))}
-                  className="w-full accent-orange-500 cursor-pointer"
-                />
-              </div>
-            </div>
-          )}
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
 
         {/* Upload Cards Grid */}
@@ -668,7 +671,7 @@ export default function IdCardJoiner() {
           ].map(({ label, side, ref, card }) => (
             <div
               key={side}
-              className="bg-white dark:bg-slate-800 rounded-2xl border-2 border-slate-200 dark:border-slate-700 hover:border-orange-400 dark:hover:border-orange-500 transition-all overflow-hidden shadow-sm flex flex-col"
+              className="pms-glass-panel rounded-3xl border border-[var(--pms-border)] hover:border-rose-300 dark:hover:border-rose-700 transition-all overflow-hidden flex flex-col"
             >
               <input
                 ref={ref}
@@ -679,32 +682,32 @@ export default function IdCardJoiner() {
               />
 
               {card.filteredUrl ? (
-                <div className="p-3.5 flex flex-col flex-1">
+                <div className="p-4 flex flex-col flex-1">
                   {/* Card Title & Auto-Crop Badge */}
-                  <div className="flex items-center justify-between mb-2 px-1">
-                    <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                  <div className="flex items-center justify-between mb-2.5 px-1">
+                    <span className="text-xs font-bold" style={{ color: 'var(--pms-ink)' }}>
                       {label}
                     </span>
-                    <span className="inline-flex items-center gap-1 text-[10px] font-bold text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-950/50 px-2 py-0.5 rounded-full border border-green-200 dark:border-green-800">
-                      <CheckCircle2 className="w-3 h-3 text-green-600" />
+                    <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 dark:text-emerald-300 bg-[var(--pms-soft-mint)] px-2.5 py-0.5 rounded-full border border-[var(--pms-border)]">
+                      <CheckCircle2 className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
                       12-Pt Auto-Cropped
                     </span>
                   </div>
 
-                  {/* Cropped & Filtered Image Preview - Realistic Flatbed ID Card Look */}
-                  <div className="relative rounded-xl overflow-hidden bg-slate-100/90 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 flex items-center justify-center p-3 min-h-[200px] max-h-[250px]">
+                  {/* Cropped & Filtered Image Preview — crisp bg-white for ID card contrast */}
+                  <div className="relative rounded-2xl overflow-hidden bg-slate-100/90 dark:bg-slate-900/60 border border-[var(--pms-border)] flex items-center justify-center p-3 min-h-[200px] max-h-[250px]">
                     <img
                       src={card.filteredUrl}
                       alt={label}
-                      className="max-w-full max-h-[220px] object-contain rounded-lg shadow-md border border-slate-200/90 dark:border-slate-700/80 bg-white"
+                      className="max-w-full max-h-[220px] object-contain rounded-lg shadow-md border border-slate-200/90 bg-white"
                     />
                   </div>
 
                   {/* Actions Toolbar */}
-                  <div className="flex items-center justify-between gap-1.5 mt-3 pt-2 border-t border-slate-100 dark:border-slate-700">
+                  <div className="flex items-center justify-between gap-1.5 mt-3 pt-2.5 border-t border-[var(--pms-border)]">
                     <button
                       onClick={() => setModalSide(side)}
-                      className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-orange-50 dark:bg-orange-950/40 text-orange-600 dark:text-orange-400 hover:bg-orange-100 text-xs font-bold border border-orange-200 dark:border-orange-800 transition-colors"
+                      className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-[var(--pms-soft-rose)] text-[var(--pms-rose)] hover:opacity-90 text-xs font-bold border border-[var(--pms-border)] transition-opacity cursor-pointer"
                       title="Adjust 12 boundary points with 2.5x Loupe"
                     >
                       <Crop className="w-3.5 h-3.5" /> Adjust 12-Pt Edge
@@ -713,14 +716,16 @@ export default function IdCardJoiner() {
                     <div className="flex items-center gap-1.5">
                       <button
                         onClick={() => handleQuickRotate(side)}
-                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-xs font-semibold text-slate-700 dark:text-slate-200 transition-colors"
+                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl border border-[var(--pms-border)] text-xs font-semibold transition-colors cursor-pointer hover:border-rose-300 dark:hover:border-rose-700"
+                        style={{ backgroundColor: 'var(--pms-white)', color: 'var(--pms-ink)' }}
                         title="Rotate 90 degrees"
                       >
                         <RotateCw className="w-3.5 h-3.5" /> 90°
                       </button>
                       <button
                         onClick={() => ref.current?.click()}
-                        className="px-2.5 py-1.5 rounded-lg text-xs font-semibold text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 transition-colors"
+                        className="px-2.5 py-1.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer hover:underline"
+                        style={{ color: 'var(--pms-muted)' }}
                       >
                         Re-upload
                       </button>
@@ -732,21 +737,24 @@ export default function IdCardJoiner() {
                   onClick={() => ref.current?.click()}
                   className="w-full p-8 flex flex-col items-center justify-center gap-3 group flex-1 cursor-pointer"
                 >
-                  <div className="w-16 h-16 rounded-2xl bg-orange-50 dark:bg-orange-950/40 flex items-center justify-center text-3xl group-hover:scale-110 transition-transform shadow-inner">
+                  <div
+                    className="w-16 h-16 rounded-2xl flex items-center justify-center text-3xl group-hover:scale-110 transition-transform shadow-inner border border-[var(--pms-border)]"
+                    style={{ backgroundColor: 'var(--pms-soft-rose)' }}
+                  >
                     🪪
                   </div>
                   <div className="text-center">
-                    <p className="font-extrabold text-slate-800 dark:text-white text-sm">
+                    <p className="font-extrabold text-sm" style={{ color: 'var(--pms-ink)' }}>
                       {label}
                     </p>
-                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                    <p className="text-xs mt-1" style={{ color: 'var(--pms-muted)' }}>
                       Select any photo — camera or file
                     </p>
-                    <span className="inline-block mt-2 text-[10px] text-orange-600 dark:text-orange-400 font-semibold bg-orange-50 dark:bg-orange-950/30 px-2.5 py-0.5 rounded-full border border-orange-200 dark:border-orange-800">
+                    <span className="inline-block mt-2 text-[10px] text-[var(--pms-rose)] font-semibold bg-[var(--pms-soft-rose)] px-2.5 py-0.5 rounded-full border border-[var(--pms-border)]">
                       ✨ Auto-crops background automatically
                     </span>
                   </div>
-                  <div className="mt-2 px-4 py-2 rounded-xl bg-orange-500 text-white text-xs font-bold flex items-center gap-1.5 group-hover:bg-orange-600 transition-colors shadow-md">
+                  <div className="mt-2 px-5 py-2.5 rounded-full pms-btn-primary text-xs font-bold flex items-center gap-1.5">
                     <Upload className="w-3.5 h-3.5" /> Upload Photo
                   </div>
                 </button>
@@ -756,140 +764,159 @@ export default function IdCardJoiner() {
         </div>
 
         {/* Layout + Generate Sheet */}
-        {(front.filteredUrl || back.filteredUrl) && (
-          <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-5 shadow-sm">
-            <h2 className="text-sm font-bold text-slate-900 dark:text-white mb-3 flex items-center gap-2">
-              <Layers className="w-4 h-4 text-orange-500" /> A4 Page Layout
-            </h2>
-            <div className="flex gap-3 mb-5">
-              {[
-                {
-                  val: 'vertical' as Layout,
-                  label: '📄 Vertical Stack (Standard Photocopy)',
-                  desc: 'Front on top, Back on bottom — exactly as official photocopy shops print',
-                },
-                {
-                  val: 'horizontal' as Layout,
-                  label: '📋 Side by Side (Landscape Format)',
-                  desc: 'Both cards aligned side-by-side in center',
-                },
-              ].map((l) => (
-                <button
-                  key={l.val}
-                  onClick={() => setLayout(l.val)}
-                  className={`flex-1 rounded-xl border-2 p-3 text-left transition-all ${
-                    layout === l.val
-                      ? 'border-orange-500 bg-orange-50 dark:bg-orange-950/40 shadow-sm'
-                      : 'border-slate-200 dark:border-slate-700 hover:border-orange-300'
-                  }`}
-                >
-                  <p
-                    className={`text-xs font-bold ${
-                      layout === l.val
-                        ? 'text-orange-600 dark:text-orange-400'
-                        : 'text-slate-800 dark:text-slate-300'
-                    }`}
-                  >
-                    {l.label}
-                  </p>
-                  <p className="text-[10px] text-slate-500 mt-1 hidden sm:block">
-                    {l.desc}
-                  </p>
-                </button>
-              ))}
-            </div>
-
-            <button
-              onClick={buildPdf}
-              disabled={!front.filteredUrl || !back.filteredUrl || processing}
-              className="w-full py-4 rounded-xl bg-gradient-to-r from-orange-500 to-rose-500 text-white font-extrabold text-base shadow-lg hover:from-orange-600 hover:to-rose-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+        <AnimatePresence>
+          {(front.filteredUrl || back.filteredUrl) && (
+            <motion.div
+              initial={prefersReduced ? false : { opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={prefersReduced ? undefined : { opacity: 0, y: -6 }}
+              className="relative pms-glass-panel rounded-3xl p-5 sm:p-6 overflow-hidden"
             >
-              {processing ? (
-                <span className="flex items-center gap-2">
-                  <span className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin inline-block" />
-                  <span>Processing &amp; Generating A4 Sheet…</span>
-                </span>
-              ) : (
-                <span className="flex items-center gap-2">
-                  <Printer className="w-5 h-5" />
-                  <span>Generate Print-Ready A4 PDF &amp; JPG Sheet</span>
-                </span>
-              )}
-            </button>
+              <PearlScanOverlay active={processing} label="Composing 150 DPI A4 ID sheet…" />
+              <h2 className="text-sm font-bold mb-3 flex items-center gap-2" style={{ color: 'var(--pms-ink)' }}>
+                <Layers className="w-4 h-4 text-[var(--pms-rose)]" /> A4 Page Layout
+              </h2>
+              <div className="flex flex-col sm:flex-row gap-3 mb-5">
+                {[
+                  {
+                    val: 'vertical' as Layout,
+                    label: '📄 Vertical Stack (Standard Photocopy)',
+                    desc: 'Front on top, Back on bottom — exactly as official photocopy shops print',
+                  },
+                  {
+                    val: 'horizontal' as Layout,
+                    label: '📋 Side by Side (Landscape Format)',
+                    desc: 'Both cards aligned side-by-side in center',
+                  },
+                ].map((l) => (
+                  <button
+                    key={l.val}
+                    onClick={() => setLayout(l.val)}
+                    className={`flex-1 rounded-2xl border p-3.5 text-left transition-all cursor-pointer ${
+                      layout === l.val
+                        ? 'border-[var(--pms-rose)] bg-[var(--pms-soft-rose)] shadow-sm'
+                        : 'border-[var(--pms-border)] hover:border-rose-300 dark:hover:border-rose-700'
+                    }`}
+                    style={layout === l.val ? undefined : { backgroundColor: 'var(--pms-white)' }}
+                  >
+                    <p
+                      className="text-xs font-bold"
+                      style={{ color: layout === l.val ? 'var(--pms-rose)' : 'var(--pms-ink)' }}
+                    >
+                      {l.label}
+                    </p>
+                    <p className="text-[10px] mt-1 hidden sm:block" style={{ color: 'var(--pms-muted)' }}>
+                      {l.desc}
+                    </p>
+                  </button>
+                ))}
+              </div>
 
-            {(!front.filteredUrl || !back.filteredUrl) && (
-              <p className="text-center text-xs text-slate-400 mt-2">
-                ⚠️ Upload both Front &amp; Back photos to generate the sheet
-              </p>
-            )}
-          </div>
-        )}
+              <motion.button
+                whileHover={prefersReduced || !front.filteredUrl || !back.filteredUrl || processing ? undefined : { scale: 1.01 }}
+                whileTap={prefersReduced || !front.filteredUrl || !back.filteredUrl || processing ? undefined : { scale: 0.985 }}
+                onClick={buildPdf}
+                disabled={!front.filteredUrl || !back.filteredUrl || processing}
+                className="w-full py-4 rounded-2xl pms-btn-primary font-extrabold text-base disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 cursor-pointer"
+              >
+                {processing ? (
+                  <span className="flex items-center gap-2">
+                    <span className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin inline-block" />
+                    <span>Processing &amp; Generating A4 Sheet…</span>
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-2">
+                    <Printer className="w-5 h-5" />
+                    <span>Generate Print-Ready A4 PDF &amp; JPG Sheet</span>
+                  </span>
+                )}
+              </motion.button>
+
+              {(!front.filteredUrl || !back.filteredUrl) && (
+                <p className="text-center text-xs mt-2.5" style={{ color: 'var(--pms-subtle-text)' }}>
+                  ⚠️ Upload both Front &amp; Back photos to generate the sheet
+                </p>
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Result Panel */}
-        {step === 'done' && resultUrl && (
-          <div className="bg-gradient-to-br from-green-50 to-emerald-50 dark:from-green-950/40 dark:to-emerald-950/30 rounded-2xl border border-green-200 dark:border-green-800 p-6 shadow-sm animate-in fade-in duration-200">
-            <div className="flex items-center gap-3 mb-5">
-              <div className="w-11 h-11 rounded-full bg-green-500 text-white flex items-center justify-center text-2xl font-bold shadow-md">
-                ✓
-              </div>
-              <div>
-                <h3 className="font-extrabold text-green-900 dark:text-green-200 text-lg">
-                  Your ID Card Single-Page Sheet is Ready!
-                </h3>
-                <p className="text-xs text-green-700 dark:text-green-300">
-                  12-point auto-crop applied &amp; enhanced with{' '}
-                  <strong className="capitalize">
-                    {FILTERS.find((f) => f.mode === filterMode)?.label}
-                  </strong>
-                  .
-                </p>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <a
-                href={resultUrl}
-                download="id-card-a4-photocopy.pdf"
-                className="flex items-center justify-center gap-2 py-3.5 px-6 rounded-xl bg-green-600 text-white font-bold text-sm hover:bg-green-700 transition-colors shadow-md"
-              >
-                <Download className="w-4 h-4" /> Download A4 PDF (for Printing)
-              </a>
-              {resultJpgUrl && (
-                <a
-                  href={resultJpgUrl}
-                  download="id-card-sheet.jpg"
-                  className="flex items-center justify-center gap-2 py-3.5 px-6 rounded-xl bg-blue-600 text-white font-bold text-sm hover:bg-blue-700 transition-colors shadow-md"
-                >
-                  <Download className="w-4 h-4" /> Download JPG (for Portal Upload)
-                </a>
-              )}
-            </div>
-
-            <button
-              onClick={resetAll}
-              className="mt-4 text-xs text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200 font-medium mx-auto block transition-colors"
+        <AnimatePresence>
+          {step === 'done' && resultUrl && (
+            <motion.div
+              initial={prefersReduced ? false : { opacity: 0, y: 10, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={prefersReduced ? undefined : { opacity: 0, y: -6 }}
+              className="pms-glass-panel rounded-3xl border border-emerald-200/80 dark:border-emerald-800/70 p-6"
             >
-              ↩ Process Another ID Card
-            </button>
-          </div>
-        )}
+              <div className="flex items-center gap-3 mb-5">
+                <div className="w-11 h-11 rounded-full bg-emerald-600 text-white flex items-center justify-center text-2xl font-bold shadow-md">
+                  ✓
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-emerald-900 dark:text-emerald-200 text-lg">
+                    Your ID Card Single-Page Sheet is Ready!
+                  </h3>
+                  <p className="text-xs text-emerald-700 dark:text-emerald-300">
+                    12-point auto-crop applied &amp; enhanced with{' '}
+                    <strong className="capitalize">
+                      {FILTERS.find((f) => f.mode === filterMode)?.label}
+                    </strong>{' '}
+                    · <AnimatedNumber value={150} suffix=" DPI A4" />
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <a
+                  href={resultUrl}
+                  download="id-card-a4-photocopy.pdf"
+                  className="flex items-center justify-center gap-2 py-3.5 px-6 rounded-2xl bg-emerald-600 text-white font-bold text-sm hover:bg-emerald-700 transition-colors shadow-lg shadow-emerald-600/20"
+                >
+                  <Download className="w-4 h-4" /> Download A4 PDF (for Printing)
+                </a>
+                {resultJpgUrl && (
+                  <a
+                    href={resultJpgUrl}
+                    download="id-card-sheet.jpg"
+                    className="flex items-center justify-center gap-2 py-3.5 px-6 rounded-2xl bg-[var(--pms-blue)] text-white font-bold text-sm hover:opacity-90 transition-opacity shadow-md"
+                  >
+                    <Download className="w-4 h-4" /> Download JPG (for Portal Upload)
+                  </a>
+                )}
+              </div>
+
+              <button
+                onClick={resetAll}
+                className="mt-4 text-xs font-medium mx-auto block transition-colors cursor-pointer hover:underline"
+                style={{ color: 'var(--pms-muted)' }}
+              >
+                ↩ Process Another ID Card
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* FAQs */}
-        <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-6 shadow-sm">
-          <h2 className="text-lg font-bold text-slate-900 dark:text-white mb-4">
+        <div className="pms-glass-panel rounded-3xl p-6">
+          <h2 className="text-lg font-bold mb-4" style={{ color: 'var(--pms-ink)' }}>
             Frequently Asked Questions
           </h2>
           <div className="space-y-4">
             {FAQS.map((item, i) => (
               <details
                 key={i}
-                className="group border-b border-slate-100 dark:border-slate-700 pb-4 last:border-0 last:pb-0"
+                className="group border-b border-[var(--pms-border)] pb-4 last:border-0 last:pb-0"
               >
-                <summary className="cursor-pointer list-none flex items-center justify-between text-sm font-semibold text-slate-800 dark:text-slate-200 hover:text-orange-600 dark:hover:text-orange-400">
+                <summary
+                  className="cursor-pointer list-none flex items-center justify-between text-sm font-semibold hover:text-[var(--pms-rose)] transition-colors"
+                  style={{ color: 'var(--pms-ink)' }}
+                >
                   {item.q}
                   <ChevronRight className="w-4 h-4 shrink-0 ml-2 group-open:rotate-90 transition-transform" />
                 </summary>
-                <p className="mt-2 text-sm text-slate-600 dark:text-slate-400 leading-relaxed">
+                <p className="mt-2 text-sm leading-relaxed" style={{ color: 'var(--pms-muted)' }}>
                   {item.a}
                 </p>
               </details>
@@ -898,11 +925,11 @@ export default function IdCardJoiner() {
         </div>
 
         {/* Related Tools */}
-        <div className="bg-gradient-to-r from-orange-50 to-amber-50 dark:from-orange-950/30 dark:to-amber-950/20 rounded-2xl border border-orange-100 dark:border-orange-900 p-5">
-          <h3 className="text-sm font-bold text-slate-800 dark:text-slate-200 mb-3">
+        <div className="pms-glass-panel rounded-3xl p-5 sm:p-6">
+          <h3 className="text-sm font-bold mb-3" style={{ color: 'var(--pms-ink)' }}>
             🎓 Also useful for Govt Recruitment &amp; KYC:
           </h3>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
             {[
               { to: '/target-compress', label: '🎯 Target Compress', desc: 'Exact KB PDF' },
               { to: '/passport-photo-sheet', label: '🖼️ Passport Photo Sheet', desc: '8 photos on 4×6' },
@@ -912,19 +939,20 @@ export default function IdCardJoiner() {
               <Link
                 key={item.to}
                 to={item.to}
-                className="bg-white dark:bg-slate-800 rounded-xl p-3 border border-orange-100 dark:border-orange-900 hover:border-orange-400 hover:shadow-md transition-all group"
+                className="rounded-2xl p-3 border border-[var(--pms-border)] hover:border-[var(--pms-rose)] hover:shadow-sm transition-all group"
+                style={{ backgroundColor: 'var(--pms-white)' }}
               >
-                <p className="text-xs font-bold text-slate-800 dark:text-white group-hover:text-orange-600 dark:group-hover:text-orange-400">
+                <p className="text-xs font-bold group-hover:text-[var(--pms-rose)] transition-colors" style={{ color: 'var(--pms-ink)' }}>
                   {item.label}
                 </p>
-                <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
+                <p className="text-[10px] mt-0.5" style={{ color: 'var(--pms-muted)' }}>
                   {item.desc}
                 </p>
               </Link>
             ))}
           </div>
         </div>
-      </div>
-    </div>
+      </motion.div>
+    </ToolWorkspaceShell>
   );
 }

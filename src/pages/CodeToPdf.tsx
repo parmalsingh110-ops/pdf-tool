@@ -1,7 +1,11 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { FileCode, Download, Copy, Check, Upload, Trash2, RefreshCw } from 'lucide-react';
+import { motion, useReducedMotion } from 'motion/react';
+import { FileCode, Download, Copy, Check, Upload, Trash2, RefreshCw, CheckCircle2 } from 'lucide-react';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import { useSEO } from '../hooks/useSEO';
+import { toArrayBufferBytes } from '../lib/blobUrl';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { AnimatedNumber, PearlScanOverlay } from '../components/pearl/PearlMotion';
 
 // ─── Language registry ───────────────────────────────────────────────
 const LANGUAGES = [
@@ -55,7 +59,7 @@ const PDF_COLORS: Record<TokType, [number, number, number]> = {
   txt: [0.09, 0.09, 0.09],
 };
 
-// CSS preview colors (Tailwind-compatible inline styles)
+// CSS preview colors (Tailwind-compatible inline styles on crisp paper)
 const CSS_COLORS: Record<TokType, string> = {
   kw:  '#1a4dd4',
   str: '#147a27',
@@ -469,7 +473,8 @@ async function generateCodePdf(
     y -= lineH;
   }
 
-  return new Blob([await pdfDoc.save() as any], { type: 'application/pdf' });
+  const outBytes = toArrayBufferBytes(await pdfDoc.save());
+  return new Blob([outBytes], { type: 'application/pdf' });
 }
 
 // ─── React component ─────────────────────────────────────────────────
@@ -495,6 +500,7 @@ export default function CodeToPdf() {
   const lastUrlRef = useRef<string | null>(null);
   const mountedRef = useRef(true);
   const jobIdRef   = useRef(0);
+  const prefersReduced = useReducedMotion();
 
   useEffect(() => {
     mountedRef.current = true;
@@ -611,35 +617,29 @@ export default function CodeToPdf() {
   const charCount = code.length;
 
   return (
-    <div className="flex-1 flex flex-col min-h-0 p-6 md:p-8 max-w-7xl mx-auto w-full">
-      {/* Page header */}
-      <div className="mb-6">
-        <div className="inline-flex items-center gap-2 mb-2 px-3 py-1 bg-violet-50 dark:bg-violet-950/40 text-violet-600 dark:text-violet-400 rounded-full text-xs font-bold uppercase tracking-wider">
-          <FileCode className="w-3.5 h-3.5" />
-          Code to PDF
-        </div>
-        <h1 className="text-2xl md:text-3xl font-extrabold text-slate-900 dark:text-white mb-1">
-          Code / HTML to PDF
-        </h1>
-        <p className="text-slate-600 dark:text-slate-400 text-sm max-w-2xl">
-          Paste your code or upload a file — generates a beautiful syntax-highlighted PDF with line numbers. Supports 18 languages. Text is selectable &amp; copyable in the PDF.
-        </p>
-      </div>
-
+    <ToolWorkspaceShell
+      title="Code / HTML to PDF"
+      subtitle="Paste your code or upload a file — generates a beautiful syntax-highlighted PDF with line numbers. Supports 18 languages. Text is selectable & copyable in the PDF."
+      categoryLabel="Syntax-Highlighted Vector PDF"
+      icon={FileCode}
+      microVariant="convert"
+      tone="violet"
+      trustNote="100% browser-only · Selectable Courier vector text · Zero server uploads"
+    >
       <div className="flex flex-col lg:flex-row gap-5 flex-1 min-h-0">
 
         {/* ─── Left panel: editor + options ─────────────────────────── */}
         <div className="flex flex-col gap-4 lg:w-[55%]">
 
           {/* Toolbar */}
-          <div className="flex flex-wrap items-center gap-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-3">
+          <div className="pms-glass-panel rounded-2xl p-3.5 flex flex-wrap items-center gap-3">
             {/* Language */}
             <div className="flex items-center gap-2">
               <label className="text-xs font-semibold text-slate-600 dark:text-slate-400 whitespace-nowrap">Language</label>
               <select
                 value={langId}
                 onChange={e => setLangId(e.target.value)}
-                className="text-sm px-2 py-1.5 border border-slate-200 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-violet-300"
+                className="text-sm px-2.5 py-1.5 border border-[var(--pms-border)] rounded-xl bg-white/90 dark:bg-slate-800 text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-violet-300"
               >
                 {LANGUAGES.map(l => <option key={l.id} value={l.id}>{l.label}</option>)}
               </select>
@@ -650,7 +650,7 @@ export default function CodeToPdf() {
               <select
                 value={fontSize}
                 onChange={e => setFontSize(Number(e.target.value))}
-                className="text-sm px-2 py-1.5 border border-slate-200 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-none"
+                className="text-sm px-2.5 py-1.5 border border-[var(--pms-border)] rounded-xl bg-white/90 dark:bg-slate-800 text-slate-900 dark:text-white outline-none"
               >
                 <option value={7}>7pt (tiny)</option>
                 <option value={8}>8pt (small)</option>
@@ -665,14 +665,14 @@ export default function CodeToPdf() {
                 type="checkbox"
                 checked={showLineNums}
                 onChange={e => setShowLineNums(e.target.checked)}
-                className="rounded"
+                className="rounded accent-violet-600"
               />
               <span className="text-xs font-semibold text-slate-600 dark:text-slate-400">Line numbers</span>
             </label>
             {/* Upload file */}
             <button
               onClick={() => fileRef.current?.click()}
-              className="ml-auto flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-semibold rounded-lg transition-colors"
+              className="ml-auto flex items-center gap-1.5 px-3.5 py-1.5 bg-[var(--pms-soft-lavender)] hover:brightness-95 text-[var(--pms-violet)] border border-[var(--pms-border)] text-xs font-bold rounded-xl transition-all cursor-pointer"
             >
               <Upload className="w-3.5 h-3.5" />
               Upload File
@@ -682,20 +682,20 @@ export default function CodeToPdf() {
           </div>
 
           {/* Filename input */}
-          <div className="flex items-center gap-2">
+          <div className="pms-glass-panel rounded-2xl px-4 py-2.5 flex items-center gap-2">
             <label className="text-xs font-semibold text-slate-500 dark:text-slate-400 whitespace-nowrap">Filename:</label>
             <input
               type="text"
               value={filename}
               onChange={e => setFilename(e.target.value)}
               placeholder="e.g. index.html"
-              className="flex-1 text-sm px-3 py-1.5 border border-slate-200 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-violet-300"
+              className="flex-1 text-sm px-3 py-1.5 border border-[var(--pms-border)] rounded-xl bg-white/90 dark:bg-slate-800 text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-violet-300 font-mono"
             />
           </div>
 
           {/* Code editor area */}
           <div
-            className="relative flex-1 min-h-[320px] rounded-xl border-2 border-slate-200 dark:border-slate-700 overflow-hidden"
+            className="relative flex-1 min-h-[340px] rounded-2xl border-2 border-[var(--pms-border-strong)] overflow-hidden shadow-sm"
             onDrop={handleDrop}
             onDragOver={e => e.preventDefault()}
           >
@@ -719,17 +719,18 @@ export default function CodeToPdf() {
                 setPdfUrlSafe(null);
               }}
               spellCheck={false}
-              className="w-full h-full min-h-[320px] p-4 font-mono text-sm bg-slate-950 dark:bg-slate-950 text-slate-100 resize-none outline-none leading-relaxed"
+              className="w-full h-full min-h-[340px] p-4 font-mono text-sm bg-slate-950 text-slate-100 resize-none outline-none leading-relaxed"
               placeholder=""
               style={{ fontFamily: "'Courier New', Courier, monospace", tabSize: 4 }}
             />
           </div>
 
           {/* Stats + actions */}
-          <div className="flex items-center gap-3 flex-wrap">
+          <div className="flex items-center gap-3 flex-wrap px-1">
             {code && (
               <span className="text-xs text-slate-500 dark:text-slate-400">
-                {lineCount.toLocaleString()} lines · {charCount.toLocaleString()} chars · <span className="font-semibold text-violet-600 dark:text-violet-400">{langLabel}</span>
+                <AnimatedNumber value={lineCount} /> lines · <AnimatedNumber value={charCount} /> chars ·{' '}
+                <span className="font-bold text-[var(--pms-violet)]">{langLabel}</span>
               </span>
             )}
             <div className="ml-auto flex gap-2">
@@ -737,14 +738,14 @@ export default function CodeToPdf() {
                 <>
                   <button
                     onClick={handleCopy}
-                    className="flex items-center gap-1.5 px-3 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-semibold rounded-lg transition-colors"
+                    className="flex items-center gap-1.5 px-3.5 py-2 bg-white/85 dark:bg-slate-800 border border-[var(--pms-border)] hover:border-violet-300 text-slate-700 dark:text-slate-300 text-xs font-semibold rounded-xl transition-colors cursor-pointer"
                   >
                     {copied ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
                     {copied ? 'Copied!' : 'Copy Code'}
                   </button>
                   <button
                     onClick={() => { setCode(''); setPdfUrlSafe(null); setError(null); }}
-                    className="flex items-center gap-1.5 px-3 py-2 bg-red-50 dark:bg-red-950/30 hover:bg-red-100 dark:hover:bg-red-900/40 text-red-600 dark:text-red-400 text-xs font-semibold rounded-lg transition-colors"
+                    className="flex items-center gap-1.5 px-3.5 py-2 bg-[var(--pms-soft-rose)] text-[var(--pms-rose)] border border-[var(--pms-border)] text-xs font-semibold rounded-xl transition-colors cursor-pointer"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                     Clear
@@ -758,19 +759,19 @@ export default function CodeToPdf() {
         {/* ─── Right panel: preview + convert ───────────────────────── */}
         <div className="flex flex-col gap-4 lg:w-[45%]">
 
-          {/* Preview block */}
-          <div className="flex-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden flex flex-col">
-            <div className="px-4 py-2.5 border-b border-slate-100 dark:border-slate-800 flex items-center gap-2">
-              <div className="w-2.5 h-2.5 rounded-full bg-red-400" />
-              <div className="w-2.5 h-2.5 rounded-full bg-yellow-400" />
+          {/* Crisp Paper Sheet Preview block */}
+          <div className="flex-1 pms-glass-panel rounded-3xl overflow-hidden flex flex-col">
+            <div className="px-4 py-3 border-b border-[var(--pms-border)] flex items-center gap-2 bg-white/60 dark:bg-slate-900/60">
+              <div className="w-2.5 h-2.5 rounded-full bg-rose-400" />
+              <div className="w-2.5 h-2.5 rounded-full bg-amber-400" />
               <div className="w-2.5 h-2.5 rounded-full bg-emerald-400" />
-              <span className="ml-2 text-xs font-mono font-semibold text-slate-500 dark:text-slate-400">{filename}</span>
-              <span className="ml-auto text-[10px] font-bold uppercase tracking-wider text-violet-600 dark:text-violet-400">{langLabel}</span>
+              <span className="ml-2 text-xs font-mono font-semibold text-slate-600 dark:text-slate-300 truncate">{filename}</span>
+              <span className="ml-auto text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-[var(--pms-soft-lavender)] text-[var(--pms-violet)]">{langLabel}</span>
             </div>
-            <div className="flex-1 overflow-auto p-3" style={{ minHeight: '280px', backgroundColor: '#0f1117' }}>
+            <div className="flex-1 overflow-auto p-4 bg-white" style={{ minHeight: '280px' }}>
               {code ? (
                 <pre
-                  className="text-xs leading-relaxed font-mono"
+                  className="text-xs leading-relaxed font-mono text-slate-900"
                   style={{ fontFamily: "'Courier New', Courier, monospace" }}
                 >
                   {code.split('\n').map((line, li) => {
@@ -780,8 +781,8 @@ export default function CodeToPdf() {
                         {showLineNums && (
                           <span style={{
                             display: 'inline-block', minWidth: '2.8em', paddingRight: '0.5em',
-                            marginRight: '0.5em', borderRight: '1px solid #333',
-                            color: '#555', textAlign: 'right', userSelect: 'none', flexShrink: 0,
+                            marginRight: '0.5em', borderRight: '1px solid #e2e8f0',
+                            color: '#64748b', textAlign: 'right', userSelect: 'none', flexShrink: 0,
                           }}>
                             {li + 1}
                           </span>
@@ -798,9 +799,9 @@ export default function CodeToPdf() {
                   })}
                 </pre>
               ) : (
-                <div className="h-full flex items-center justify-center">
-                  <p className="text-xs text-slate-600 dark:text-slate-500 text-center">
-                    PDF preview will show here after conversion.<br />
+                <div className="h-full min-h-[240px] flex items-center justify-center">
+                  <p className="text-xs text-slate-500 text-center">
+                    Paper sheet preview will show here as you type.<br />
                     Paste code in the editor on the left to start.
                   </p>
                 </div>
@@ -809,55 +810,67 @@ export default function CodeToPdf() {
           </div>
 
           {/* Convert section */}
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-5 space-y-4">
+          <div className="relative pms-glass-panel rounded-3xl p-5 space-y-4 overflow-hidden">
+            <PearlScanOverlay active={isGenerating} label="Highlighting syntax & building vector PDF…" />
+
             <h3 className="font-bold text-slate-900 dark:text-white text-sm">Generate PDF</h3>
-            <div className="text-xs text-slate-500 dark:text-slate-400 space-y-1">
-              <div className="flex gap-2"><span className="text-emerald-500">✓</span> Syntax highlighting (18 languages)</div>
-              <div className="flex gap-2"><span className="text-emerald-500">✓</span> Line numbers &amp; page header</div>
-              <div className="flex gap-2"><span className="text-emerald-500">✓</span> Text fully selectable &amp; copyable from PDF</div>
-              <div className="flex gap-2"><span className="text-emerald-500">✓</span> Monospace Courier font, alternate row shading</div>
-              <div className="flex gap-2"><span className="text-emerald-500">✓</span> Runs 100% in your browser — files never uploaded</div>
+            <div className="text-xs text-slate-600 dark:text-slate-300 space-y-1.5">
+              <div className="flex gap-2"><span className="text-emerald-500 font-bold">✓</span> Syntax highlighting (18 languages)</div>
+              <div className="flex gap-2"><span className="text-emerald-500 font-bold">✓</span> Line numbers &amp; page header</div>
+              <div className="flex gap-2"><span className="text-emerald-500 font-bold">✓</span> Text fully selectable &amp; copyable from PDF</div>
+              <div className="flex gap-2"><span className="text-emerald-500 font-bold">✓</span> Monospace Courier font, alternate row shading</div>
+              <div className="flex gap-2"><span className="text-emerald-500 font-bold">✓</span> Runs 100% in your browser — files never uploaded</div>
             </div>
 
             {error && (
-              <div className="p-3 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg text-red-700 dark:text-red-400 text-xs">{error}</div>
+              <div className="p-3 bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-800 rounded-xl text-rose-700 dark:text-rose-400 text-xs">
+                {error}
+              </div>
             )}
 
-            <button
+            <motion.button
+              whileHover={prefersReduced || isGenerating || !code.trim() ? undefined : { scale: 1.01 }}
+              whileTap={prefersReduced || isGenerating || !code.trim() ? undefined : { scale: 0.985 }}
               onClick={handleConvert}
               disabled={isGenerating || !code.trim()}
-              className="w-full py-3 bg-violet-600 hover:bg-violet-700 text-white font-bold rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              className="w-full pms-btn-primary py-3.5 font-bold rounded-2xl disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 cursor-pointer"
             >
               {isGenerating
                 ? <><RefreshCw className="w-4 h-4 animate-spin" /> Generating PDF…</>
                 : <><FileCode className="w-4 h-4" /> Convert to PDF</>
               }
-            </button>
+            </motion.button>
 
             {pdfUrl && (
-              <a
-                href={pdfUrl}
-                download={`${filename.replace(/\.[^/.]+$/, '') || 'code'}.pdf`}
-                className="flex items-center justify-center gap-2 w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl transition-colors"
+              <motion.div
+                initial={prefersReduced ? false : { opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="p-4 rounded-2xl bg-[var(--pms-soft-mint)] border border-emerald-200/80 dark:border-emerald-800/70 space-y-2.5"
               >
-                <Download className="w-4 h-4" />
-                Download PDF
-              </a>
-            )}
-
-            {pdfUrl && (
-              <p className="text-xs text-center text-slate-500 dark:text-slate-400">
-                PDF ready! Text inside is selectable and copyable.
-              </p>
+                <div className="flex items-center justify-center gap-2 text-xs font-bold text-emerald-800 dark:text-emerald-200">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                  PDF ready! Text inside is selectable and copyable.
+                </div>
+                <motion.a
+                  whileHover={prefersReduced ? undefined : { scale: 1.015 }}
+                  whileTap={prefersReduced ? undefined : { scale: 0.985 }}
+                  href={pdfUrl}
+                  download={`${filename.replace(/\.[^/.]+$/, '') || 'code'}.pdf`}
+                  className="flex items-center justify-center gap-2 w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl transition-colors shadow-md"
+                >
+                  <Download className="w-4 h-4" />
+                  Download PDF
+                </motion.a>
+              </motion.div>
             )}
           </div>
 
           {/* Supported file types */}
-          <div className="bg-slate-50 dark:bg-slate-800/50 rounded-xl p-4">
-            <p className="text-xs font-semibold text-slate-600 dark:text-slate-400 mb-2">Supported file types</p>
+          <div className="pms-glass-panel rounded-2xl p-4">
+            <p className="text-xs font-semibold text-slate-600 dark:text-slate-300 mb-2">Supported file types</p>
             <div className="flex flex-wrap gap-1.5">
               {['.html','.css','.js','.ts','.jsx','.tsx','.py','.java','.c','.cpp','.cs','.php','.rb','.go','.rs','.sql','.json','.xml','.yaml','.sh','.txt','.md'].map(ext => (
-                <span key={ext} className="px-2 py-0.5 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 text-[11px] rounded font-mono">
+                <span key={ext} className="px-2 py-0.5 bg-white/80 dark:bg-slate-800 border border-[var(--pms-border)] text-slate-600 dark:text-slate-300 text-[11px] rounded-md font-mono">
                   {ext}
                 </span>
               ))}
@@ -865,6 +878,6 @@ export default function CodeToPdf() {
           </div>
         </div>
       </div>
-    </div>
+    </ToolWorkspaceShell>
   );
 }

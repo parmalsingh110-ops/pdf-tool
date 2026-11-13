@@ -1,13 +1,13 @@
-import React, { useState } from 'react';
-import { 
-  Palette, Download, Loader2, Copy, Check, Eye, 
-  Sparkles, ShieldCheck, AlertTriangle, FileText, ArrowRight
-} from 'lucide-react';
+import { useState } from 'react';
+import { motion, AnimatePresence, useReducedMotion } from 'motion/react';
+import { Palette, Loader2, Copy, Check, ShieldCheck } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
 import '../lib/pdfWorker';
 import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { AnimatedNumber, PearlScanOverlay } from '../components/pearl/PearlMotion';
 
 interface ColorSwatch {
   hex: string;
@@ -32,6 +32,8 @@ export default function ColorExtractor() {
   const [busy, setBusy] = useState(false);
   const [colors, setColors] = useState<ColorSwatch[]>([]);
   const [copiedHex, setCopiedHex] = useState<string | null>(null);
+
+  const prefersReduced = useReducedMotion();
 
   const rgbToCmyk = (r: number, g: number, b: number) => {
     const rNorm = r / 255;
@@ -58,12 +60,11 @@ export default function ColorExtractor() {
       const colorCounts = new Map<string, number>();
       let totalSamples = 0;
 
-      // Sample first 3 pages
       const pagesToScan = Math.min(pdf.numPages, 3);
 
       for (let p = 1; p <= pagesToScan; p++) {
         const page = await pdf.getPage(p);
-        const vp = page.getViewport({ scale: 0.5 }); // Lower scale for fast sampling
+        const vp = page.getViewport({ scale: 0.5 });
         const canvas = document.createElement('canvas');
         canvas.width = vp.width;
         canvas.height = vp.height;
@@ -73,15 +74,13 @@ export default function ColorExtractor() {
         const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
         const d = imgData.data;
 
-        // Sample every 4th pixel
         for (let i = 0; i < d.length; i += 16) {
           const r = Math.round(d[i] / 16) * 16;
           const g = Math.round(d[i + 1] / 16) * 16;
           const b = Math.round(d[i + 2] / 16) * 16;
           const a = d[i + 3];
 
-          if (a < 128) continue; // Skip transparent
-          // Skip pure white
+          if (a < 128) continue;
           if (r > 240 && g > 240 && b > 240) continue;
 
           const hex = `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
@@ -90,7 +89,6 @@ export default function ColorExtractor() {
         }
       }
 
-      // Sort top colors
       const sorted = Array.from(colorCounts.entries())
         .sort((a, b) => b[1] - a[1])
         .slice(0, 8);
@@ -105,7 +103,7 @@ export default function ColorExtractor() {
           rgb: `${r}, ${g}, ${b}`,
           cmyk: rgbToCmyk(r, g, b),
           percentage: Number(((count / Math.max(totalSamples, 1)) * 100).toFixed(1)),
-          isDark
+          isDark,
         };
       });
 
@@ -137,116 +135,172 @@ export default function ColorExtractor() {
   };
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-start p-4 sm:p-8 max-w-5xl mx-auto w-full">
-      {/* Header */}
-      <div className="text-center mb-6">
-        <div className="w-16 h-16 bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 rounded-2xl flex items-center justify-center mx-auto mb-3 shadow-sm border border-rose-100 dark:border-rose-900/50">
-          <Palette className="w-8 h-8" />
-        </div>
-        <h1 className="text-3xl sm:text-4xl font-extrabold text-slate-900 dark:text-white mb-2">
-          PDF Color Palette Extractor & Studio
-        </h1>
-        <p className="text-base text-slate-600 dark:text-slate-400 max-w-xl mx-auto">
-          Extract dominant branding colors and document swatches. Get HEX, RGB, and CMYK values, and export CSS theme variables.
-        </p>
-      </div>
-
+    <ToolWorkspaceShell
+      title="PDF Color Palette Extractor & Studio"
+      subtitle="Extract dominant branding colors and document swatches. Get HEX, RGB, and CMYK values, and export CSS theme variables."
+      categoryLabel="Brand Palette & Color Science"
+      icon={Palette}
+      microVariant="edit"
+      tone="rose"
+      trustNote="100% browser-only pixel histogram sampling · Instant CSS tokens"
+    >
       {!file ? (
-        <div className="w-full max-w-2xl space-y-6">
-          <FileDropzone 
-            onDrop={handleDrop} 
-            multiple={false} 
-            title="Select PDF Document to Extract Color Palette" 
+        <motion.div
+          initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.25 }}
+          className="w-full max-w-2xl mx-auto space-y-6"
+        >
+          <FileDropzone
+            onDrop={handleDrop}
+            multiple={false}
+            title="Select PDF Document to Extract Color Palette"
           />
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
-            <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 text-center">
-              <Palette className="w-6 h-6 text-rose-600 dark:text-rose-400 mx-auto mb-2" />
-              <h3 className="font-bold text-sm text-slate-800 dark:text-slate-200">Dominant Swatches</h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Identifies top brand colors and background accent tones.</p>
-            </div>
-            <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 text-center">
-              <Copy className="w-6 h-6 text-blue-600 dark:text-blue-400 mx-auto mb-2" />
-              <h3 className="font-bold text-sm text-slate-800 dark:text-slate-200">Multi-Code Values</h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Computes HEX, RGB, and print CMYK color profiles.</p>
-            </div>
-            <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 text-center">
-              <ShieldCheck className="w-6 h-6 text-emerald-600 dark:text-emerald-400 mx-auto mb-2" />
-              <h3 className="font-bold text-sm text-slate-800 dark:text-slate-200">CSS Export</h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">1-click copy :root CSS variables for web development.</p>
-            </div>
-          </div>
-        </div>
-      ) : busy ? (
-        <div className="p-12 text-center bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
-          <Loader2 className="w-10 h-10 animate-spin text-rose-600 mx-auto" />
-          <h3 className="text-lg font-bold text-slate-900 dark:text-white">Analyzing Document Color Palette...</h3>
-          <p className="text-xs text-slate-500">Sampling pixel histograms and computing color clusters...</p>
-        </div>
-      ) : (
-        /* Swatches Workspace */
-        <div className="w-full space-y-4">
-          <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex items-center justify-between">
-            <span className="text-sm font-bold text-slate-900 dark:text-white">
-              Extracted {colors.length} Dominant Colors in {file.name}
-            </span>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={copyCssVars}
-                className="py-1.5 px-3 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs flex items-center gap-1 shadow-sm"
+            {[
+              {
+                icon: Palette,
+                tint: 'bg-[var(--pms-soft-rose)] text-[var(--pms-rose)]',
+                title: 'Dominant Swatches',
+                desc: 'Identifies top brand colors and background accent tones.',
+              },
+              {
+                icon: Copy,
+                tint: 'bg-[var(--pms-soft-blue)] text-[var(--pms-blue)]',
+                title: 'Multi-Code Values',
+                desc: 'Computes HEX, RGB, and print CMYK color profiles.',
+              },
+              {
+                icon: ShieldCheck,
+                tint: 'bg-[var(--pms-soft-mint)] text-emerald-700 dark:text-emerald-300',
+                title: 'CSS Export',
+                desc: '1-click copy :root CSS variables for web development.',
+              },
+            ].map((card, idx) => (
+              <motion.div
+                key={card.title}
+                initial={prefersReduced ? false : { opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.28, delay: idx * 0.06 }}
+                whileHover={prefersReduced ? undefined : { y: -3 }}
+                className="pms-glass-panel p-5 rounded-2xl text-center"
               >
-                {copiedHex === 'css' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                Copy CSS Variables
-              </button>
-              <button onClick={reset} className="text-xs text-slate-400 hover:text-slate-600 underline ml-2">Change</button>
-            </div>
-          </div>
-
-          {/* Color Palette Grid */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
-            {colors.map((c, idx) => (
-              <div
-                key={idx}
-                className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-sm hover:shadow-md transition-shadow"
-              >
-                <div
-                  className="h-28 w-full flex items-end p-3 transition-transform"
-                  style={{ backgroundColor: c.hex }}
-                >
-                  <span className={`text-xs font-mono font-bold px-2 py-0.5 rounded ${
-                    c.isDark ? 'bg-white/90 text-slate-900' : 'bg-black/80 text-white'
-                  }`}>
-                    {c.hex}
-                  </span>
+                <div className={`w-10 h-10 rounded-xl ${card.tint} flex items-center justify-center mx-auto mb-2.5`}>
+                  <card.icon className="w-5 h-5" />
                 </div>
-
-                <div className="p-3.5 space-y-2 text-xs">
-                  <div className="flex justify-between items-center">
-                    <span className="text-slate-500">RGB:</span>
-                    <span className="font-mono text-slate-800 dark:text-slate-200">{c.rgb}</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-slate-500">CMYK:</span>
-                    <span className="font-mono text-slate-800 dark:text-slate-200">{c.cmyk}</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-slate-500">Presence:</span>
-                    <span className="font-bold text-rose-600">{c.percentage}%</span>
-                  </div>
-
-                  <button
-                    onClick={() => copyHex(c.hex)}
-                    className="w-full mt-1 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-300 font-bold rounded-lg text-[11px] flex items-center justify-center gap-1 transition-colors"
-                  >
-                    {copiedHex === c.hex ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
-                    Copy HEX
-                  </button>
-                </div>
-              </div>
+                <h3 className="font-bold text-sm text-slate-900 dark:text-white">{card.title}</h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">{card.desc}</p>
+              </motion.div>
             ))}
           </div>
-        </div>
+        </motion.div>
+      ) : busy ? (
+        <motion.div
+          initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.25 }}
+          className="relative max-w-lg mx-auto pms-glass-panel rounded-3xl p-12 text-center space-y-4 overflow-hidden"
+        >
+          <PearlScanOverlay active={busy} label="Sampling pixel histograms & computing color clusters…" />
+          <div className="w-14 h-14 rounded-2xl bg-[var(--pms-soft-rose)] text-[var(--pms-rose)] flex items-center justify-center mx-auto">
+            <Loader2 className="w-7 h-7 animate-spin" />
+          </div>
+          <h3 className="text-lg font-extrabold text-slate-900 dark:text-white">Analyzing Document Color Palette…</h3>
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            Sampling pixel histograms and computing color clusters for <span className="font-semibold">{file.name}</span>.
+          </p>
+        </motion.div>
+      ) : (
+        <motion.div
+          initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.25 }}
+          className="w-full space-y-5"
+        >
+          <div className="pms-glass-panel p-4 sm:p-5 rounded-2xl flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-3 min-w-0">
+              <span className="px-3 py-1 rounded-full bg-[var(--pms-soft-rose)] text-[var(--pms-rose)] text-xs font-extrabold border border-[var(--pms-border)]">
+                <AnimatedNumber value={colors.length} /> Dominant Colors
+              </span>
+              <span className="text-xs sm:text-sm font-semibold text-slate-700 dark:text-slate-200 truncate">
+                {file.name}
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <motion.button
+                whileHover={prefersReduced ? undefined : { scale: 1.02 }}
+                whileTap={prefersReduced ? undefined : { scale: 0.98 }}
+                onClick={copyCssVars}
+                disabled={colors.length === 0}
+                className="pms-btn-primary py-2 px-4 font-bold rounded-xl text-xs flex items-center gap-1.5 disabled:opacity-40 cursor-pointer"
+              >
+                {copiedHex === 'css' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                {copiedHex === 'css' ? 'Copied CSS Variables' : 'Copy CSS Variables'}
+              </motion.button>
+              <button
+                onClick={reset}
+                className="px-3.5 py-2 text-xs font-semibold rounded-xl border border-[var(--pms-border)] bg-white/75 dark:bg-slate-900/75 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white cursor-pointer"
+              >
+                Change File
+              </button>
+            </div>
+          </div>
+
+          <AnimatePresence initial={false}>
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+              {colors.map((c, idx) => (
+                <motion.div
+                  key={c.hex}
+                  initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.24, delay: idx * 0.04 }}
+                  whileHover={prefersReduced ? undefined : { y: -3 }}
+                  className="pms-glass-panel rounded-3xl overflow-hidden"
+                >
+                  <div
+                    className="h-28 w-full flex items-end p-3"
+                    style={{ backgroundColor: c.hex }}
+                  >
+                    <span
+                      className={`text-xs font-mono font-bold px-2.5 py-0.5 rounded-lg shadow-xs ${
+                        c.isDark ? 'bg-white/95 text-slate-900' : 'bg-slate-950/85 text-white'
+                      }`}
+                    >
+                      {c.hex}
+                    </span>
+                  </div>
+
+                  <div className="p-4 bg-white/75 dark:bg-slate-900/75 border-t border-[var(--pms-border)] space-y-2 text-xs">
+                    <div className="flex justify-between items-center">
+                      <span className="text-slate-500 dark:text-slate-400">RGB</span>
+                      <span className="font-mono text-slate-800 dark:text-slate-100">{c.rgb}</span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-slate-500 dark:text-slate-400">CMYK</span>
+                      <span className="font-mono text-slate-800 dark:text-slate-100 text-[11px]">{c.cmyk}</span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-slate-500 dark:text-slate-400">Presence</span>
+                      <span className="font-extrabold text-[var(--pms-rose)]">
+                        <AnimatedNumber value={c.percentage} decimals={1} suffix="%" />
+                      </span>
+                    </div>
+
+                    <button
+                      onClick={() => copyHex(c.hex)}
+                      className="w-full mt-1.5 py-2 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 border border-[var(--pms-border)] text-slate-700 dark:text-slate-200 font-bold rounded-xl text-[11px] flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                    >
+                      {copiedHex === c.hex ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                      {copiedHex === c.hex ? 'Copied!' : 'Copy HEX'}
+                    </button>
+                  </div>
+                </motion.div>
+              ))}
+            </div>
+          </AnimatePresence>
+        </motion.div>
       )}
-    </div>
+    </ToolWorkspaceShell>
   );
 }

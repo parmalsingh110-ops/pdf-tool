@@ -1,17 +1,11 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
+import { motion, useReducedMotion } from 'motion/react';
 import {
   Megaphone,
   Download,
-  Printer,
-  Sparkles,
-  LayoutGrid,
   Scissors,
-  CheckCircle2,
-  Phone,
-  MapPin,
-  QrCode,
-  Tag,
   Palette,
+  Loader2,
 } from 'lucide-react';
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 import { useSEO } from '../hooks/useSEO';
@@ -19,6 +13,9 @@ import { usePageSEO } from '../lib/usePageSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
 import { downloadBlob } from '../lib/utils';
 import { embedSmartFont } from '../lib/pdfFontHelper';
+import { toArrayBufferBytes } from '../lib/blobUrl';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { PearlScanOverlay } from '../components/pearl/PearlMotion';
 
 interface PresetTemplate {
   id: string;
@@ -154,6 +151,7 @@ export default function PamphletMaker() {
   // Layout mode: 4-in-1 (Quarter A4) or 2-in-1 (Half A4) or 1-in-1 (Full A4)
   const [layoutMode, setLayoutMode] = useState<'4-in-1' | '2-in-1' | '1-in-1'>('4-in-1');
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
+  const prefersReduced = useReducedMotion();
 
   const handleTemplateChange = (tmplId: string) => {
     setSelectedTemplateId(tmplId);
@@ -355,8 +353,8 @@ export default function PamphletMaker() {
         renderFlyer(0, 0, pageWidth, pageHeight);
       }
 
-      const outBytes = await doc.save();
-      const blob = new Blob([outBytes as any], { type: 'application/pdf' });
+      const outBytes = toArrayBufferBytes(await doc.save());
+      const blob = new Blob([outBytes], { type: 'application/pdf' });
       downloadBlob(blob, `Pamphlet_${layoutMode}_${title.replace(/\s+/g, '_')}.pdf`);
     } catch (err) {
       console.error(err);
@@ -366,52 +364,67 @@ export default function PamphletMaker() {
     }
   };
 
-  return (
-    <div className="w-full min-h-screen bg-slate-50 dark:bg-slate-950 py-10 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-6xl mx-auto space-y-8">
-        {/* Header */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-violet-50 dark:bg-violet-950/60 border border-violet-200 dark:border-violet-800 text-xs font-bold text-violet-700 dark:text-violet-300 mb-2">
-              <Megaphone className="w-3.5 h-3.5" /> 4-in-1 Mass Xerox Print Ready Layout
-            </div>
-            <h1 className="text-3xl font-extrabold text-slate-900 dark:text-white">
-              Instant Coaching &amp; Shop Pamphlet Maker
-            </h1>
-            <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
-              Create advertising flyers and parchis in 30 seconds. Automatically formats 4-in-1 or 2-in-1 on single A4 sheets with scissor cut marks for cheapest photocopying.
-            </p>
-          </div>
+  const layoutChoices: { id: '4-in-1' | '2-in-1' | '1-in-1'; label: string }[] = [
+    { id: '4-in-1', label: '4-in-1 (Quarter A4)' },
+    { id: '2-in-1', label: '2-in-1 (Half A4)' },
+    { id: '1-in-1', label: '1-in-1 (Full A4)' },
+  ];
 
-          <button
+  return (
+    <ToolWorkspaceShell
+      title="Instant Coaching & Shop Pamphlet Maker"
+      subtitle="Create advertising flyers and parchis in 30 seconds. Automatically formats 4-in-1 or 2-in-1 on single A4 sheets with scissor cut marks for cheapest photocopying."
+      categoryLabel="4-in-1 Mass Xerox Print Layout"
+      icon={Megaphone}
+      microVariant="crop"
+      tone="violet"
+      trustNote="Instant vector A4 print PDF · Scissor cut guidelines · 100% browser-only"
+    >
+      <div className="space-y-7">
+        {/* Top Action Bar */}
+        <div className="flex justify-end">
+          <motion.button
+            whileHover={prefersReduced || isProcessing ? undefined : { scale: 1.02 }}
+            whileTap={prefersReduced || isProcessing ? undefined : { scale: 0.985 }}
             onClick={handleGeneratePdf}
             disabled={isProcessing}
-            className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl text-xs font-bold bg-violet-600 hover:bg-violet-700 text-white shadow-lg shadow-violet-600/20 transition-all disabled:opacity-50"
+            className="pms-btn-primary inline-flex items-center gap-2 px-6 py-3 rounded-2xl text-xs sm:text-sm font-bold disabled:opacity-50 cursor-pointer"
           >
-            <Download className="w-4 h-4" />
+            {isProcessing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
             {isProcessing ? 'Generating Print PDF...' : `Download ${layoutMode} Print PDF`}
-          </button>
+          </motion.button>
         </div>
 
         {/* Quick Presets Picker */}
-        <div className="p-4 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-2">
-          <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
+        <div className="pms-glass-panel p-5 rounded-3xl space-y-3">
+          <span className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 block">
             Pick a Ready-to-Use Business Template:
           </span>
           <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
-            {PRESET_TEMPLATES.map((tmpl) => (
-              <button
-                key={tmpl.id}
-                onClick={() => handleTemplateChange(tmpl.id)}
-                className={`px-4 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
-                  selectedTemplateId === tmpl.id
-                    ? 'bg-violet-600 text-white shadow-sm'
-                    : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200'
-                }`}
-              >
-                {tmpl.label}
-              </button>
-            ))}
+            {PRESET_TEMPLATES.map((tmpl) => {
+              const active = selectedTemplateId === tmpl.id;
+              return (
+                <button
+                  key={tmpl.id}
+                  onClick={() => handleTemplateChange(tmpl.id)}
+                  className="relative px-4 py-2 rounded-xl border text-xs font-bold whitespace-nowrap transition-colors cursor-pointer overflow-hidden"
+                  style={{
+                    borderColor: active ? 'var(--pms-violet)' : 'var(--pms-border)',
+                    backgroundColor: active ? 'var(--pms-soft-lavender)' : 'var(--pms-white)',
+                    color: active ? 'var(--pms-violet)' : 'var(--pms-ink)',
+                  }}
+                >
+                  {active && (
+                    <motion.span
+                      layoutId="pamphlet-preset-pill"
+                      transition={{ type: 'spring', stiffness: 420, damping: 30 }}
+                      className="absolute inset-0 rounded-xl ring-2 ring-violet-500/30 pointer-events-none"
+                    />
+                  )}
+                  <span className="relative z-10">{tmpl.label}</span>
+                </button>
+              );
+            })}
           </div>
         </div>
 
@@ -419,9 +432,9 @@ export default function PamphletMaker() {
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
           {/* Left Column: Customization Fields */}
           <div className="lg:col-span-7 space-y-5">
-            <div className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-4 shadow-sm">
+            <div className="p-6 rounded-3xl pms-glass-panel space-y-4">
               <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                <Palette className="w-4 h-4 text-violet-600" /> Pamphlet Content &amp; Details
+                <Palette className="w-4 h-4 text-[var(--pms-violet)]" /> Pamphlet Content &amp; Details
               </h3>
 
               <div className="space-y-3 text-xs">
@@ -433,11 +446,11 @@ export default function PamphletMaker() {
                     type="text"
                     value={title}
                     onChange={(e) => setTitle(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-black text-sm text-slate-900 dark:text-white"
+                    className="w-full px-3 py-2 rounded-xl border border-[var(--pms-border)] bg-white/90 dark:bg-slate-800/80 font-black text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-violet-400"
                   />
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
                       Headline / Punchline
@@ -446,7 +459,7 @@ export default function PamphletMaker() {
                       type="text"
                       value={punchline}
                       onChange={(e) => setPunchline(e.target.value)}
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold"
+                      className="w-full px-3 py-2 rounded-xl border border-[var(--pms-border)] bg-white/90 dark:bg-slate-800/80 font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-violet-400"
                     />
                   </div>
                   <div>
@@ -457,13 +470,13 @@ export default function PamphletMaker() {
                       type="text"
                       value={badge}
                       onChange={(e) => setBadge(e.target.value)}
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold text-violet-600"
+                      className="w-full px-3 py-2 rounded-xl border border-[var(--pms-border)] bg-white/90 dark:bg-slate-800/80 font-bold text-[var(--pms-violet)] outline-none focus:ring-2 focus:ring-violet-400"
                     />
                   </div>
                 </div>
 
                 {/* 4 Feature Bullets */}
-                <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                <div className="space-y-2 pt-2 border-t border-[var(--pms-border)]">
                   <label className="block font-bold text-slate-700 dark:text-slate-300">
                     Key Features / Offer Points (4 Points)
                   </label>
@@ -472,32 +485,32 @@ export default function PamphletMaker() {
                     value={bullet1}
                     onChange={(e) => setBullet1(e.target.value)}
                     placeholder="Feature 1"
-                    className="w-full px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                    className="w-full px-3 py-2 rounded-xl border border-[var(--pms-border)] bg-white/90 dark:bg-slate-800/80 text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-violet-400"
                   />
                   <input
                     type="text"
                     value={bullet2}
                     onChange={(e) => setBullet2(e.target.value)}
                     placeholder="Feature 2"
-                    className="w-full px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                    className="w-full px-3 py-2 rounded-xl border border-[var(--pms-border)] bg-white/90 dark:bg-slate-800/80 text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-violet-400"
                   />
                   <input
                     type="text"
                     value={bullet3}
                     onChange={(e) => setBullet3(e.target.value)}
                     placeholder="Feature 3"
-                    className="w-full px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                    className="w-full px-3 py-2 rounded-xl border border-[var(--pms-border)] bg-white/90 dark:bg-slate-800/80 text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-violet-400"
                   />
                   <input
                     type="text"
                     value={bullet4}
                     onChange={(e) => setBullet4(e.target.value)}
                     placeholder="Feature 4"
-                    className="w-full px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                    className="w-full px-3 py-2 rounded-xl border border-[var(--pms-border)] bg-white/90 dark:bg-slate-800/80 text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-violet-400"
                   />
                 </div>
 
-                <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-100 dark:border-slate-800">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-[var(--pms-border)]">
                   <div>
                     <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
                       Contact Numbers
@@ -506,7 +519,7 @@ export default function PamphletMaker() {
                       type="text"
                       value={contact}
                       onChange={(e) => setContact(e.target.value)}
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold"
+                      className="w-full px-3 py-2 rounded-xl border border-[var(--pms-border)] bg-white/90 dark:bg-slate-800/80 font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-violet-400"
                     />
                   </div>
                   <div>
@@ -517,7 +530,7 @@ export default function PamphletMaker() {
                       type="text"
                       value={address}
                       onChange={(e) => setAddress(e.target.value)}
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                      className="w-full px-3 py-2 rounded-xl border border-[var(--pms-border)] bg-white/90 dark:bg-slate-800/80 text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-violet-400"
                     />
                   </div>
                 </div>
@@ -527,57 +540,53 @@ export default function PamphletMaker() {
 
           {/* Right Column: Layout Mode & Visual Preview */}
           <div className="lg:col-span-5 space-y-6">
-            <div className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-4 shadow-sm">
+            <div className="relative p-6 rounded-3xl pms-glass-panel space-y-4 overflow-hidden">
+              <PearlScanOverlay active={isProcessing} label={`Compiling ${layoutMode} A4 print sheet…`} />
+
               <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                <Scissors className="w-4 h-4 text-violet-600" /> Photocopy Sheet Layout
+                <Scissors className="w-4 h-4 text-[var(--pms-violet)]" /> Photocopy Sheet Layout
               </h3>
 
               {/* Layout mode switcher */}
               <div className="grid grid-cols-3 gap-2">
-                <button
-                  onClick={() => setLayoutMode('4-in-1')}
-                  className={`py-2 px-2 rounded-xl text-xs font-bold transition-all ${
-                    layoutMode === '4-in-1'
-                      ? 'bg-violet-600 text-white shadow-md'
-                      : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
-                  }`}
-                >
-                  4-in-1 (Quarter A4)
-                </button>
-                <button
-                  onClick={() => setLayoutMode('2-in-1')}
-                  className={`py-2 px-2 rounded-xl text-xs font-bold transition-all ${
-                    layoutMode === '2-in-1'
-                      ? 'bg-violet-600 text-white shadow-md'
-                      : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
-                  }`}
-                >
-                  2-in-1 (Half A4)
-                </button>
-                <button
-                  onClick={() => setLayoutMode('1-in-1')}
-                  className={`py-2 px-2 rounded-xl text-xs font-bold transition-all ${
-                    layoutMode === '1-in-1'
-                      ? 'bg-violet-600 text-white shadow-md'
-                      : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
-                  }`}
-                >
-                  1-in-1 (Full A4)
-                </button>
+                {layoutChoices.map((choice) => {
+                  const active = layoutMode === choice.id;
+                  return (
+                    <button
+                      key={choice.id}
+                      onClick={() => setLayoutMode(choice.id)}
+                      className="relative py-2 px-2 rounded-xl border text-xs font-bold transition-colors cursor-pointer overflow-hidden"
+                      style={{
+                        borderColor: active ? 'var(--pms-violet)' : 'var(--pms-border)',
+                        backgroundColor: active ? 'var(--pms-soft-lavender)' : 'var(--pms-white)',
+                        color: active ? 'var(--pms-violet)' : 'var(--pms-ink)',
+                      }}
+                    >
+                      {active && (
+                        <motion.span
+                          layoutId="pamphlet-layout-pill"
+                          transition={{ type: 'spring', stiffness: 420, damping: 30 }}
+                          className="absolute inset-0 rounded-xl ring-2 ring-violet-500/30 pointer-events-none"
+                        />
+                      )}
+                      <span className="relative z-10">{choice.label}</span>
+                    </button>
+                  );
+                })}
               </div>
 
-              {/* Single Flyer Mockup Card */}
-              <div className="border-2 border-slate-900 dark:border-white p-4 rounded-2xl bg-white dark:bg-slate-950 text-slate-900 dark:text-white space-y-2 shadow-lg text-center">
-                <div className="bg-slate-900 text-white dark:bg-white dark:text-slate-900 py-2 px-3 rounded-lg font-black text-sm uppercase tracking-wide">
+              {/* Single Flyer Mockup Card (Crisp White Print Sheet Preview) */}
+              <div className="border-2 border-slate-900 p-4 rounded-2xl bg-white text-slate-900 space-y-2 shadow-lg text-center">
+                <div className="bg-slate-900 text-white py-2 px-3 rounded-lg font-black text-sm uppercase tracking-wide">
                   {title}
                 </div>
                 <div className="text-[11px] font-black text-rose-600 uppercase">{punchline}</div>
                 {badge && (
-                  <div className="inline-block px-3 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 border text-[10px] font-bold">
+                  <div className="inline-block px-3 py-0.5 rounded-full bg-slate-100 border border-slate-300 text-[10px] font-bold text-slate-900">
                     {badge}
                   </div>
                 )}
-                <div className="space-y-1 text-[11px] text-left pt-2 px-2">
+                <div className="space-y-1 text-[11px] text-left pt-2 px-2 text-slate-800">
                   {[bullet1, bullet2, bullet3, bullet4].filter(Boolean).map((b, idx) => (
                     <div key={idx} className="flex items-center gap-1.5">
                       <span className="text-violet-600 font-bold">•</span>
@@ -585,13 +594,13 @@ export default function PamphletMaker() {
                     </div>
                   ))}
                 </div>
-                <div className="pt-3 border-t text-left text-[11px] space-y-0.5">
-                  <div className="font-bold">{contact}</div>
+                <div className="pt-3 border-t border-slate-200 text-left text-[11px] space-y-0.5">
+                  <div className="font-bold text-slate-900">{contact}</div>
                   <div className="text-slate-500 text-[10px]">{address}</div>
                 </div>
               </div>
 
-              <div className="p-3 rounded-xl bg-violet-50 dark:bg-violet-950/40 text-[11px] text-violet-800 dark:text-violet-300 flex items-center gap-2">
+              <div className="p-3.5 rounded-2xl bg-[var(--pms-soft-lavender)] border border-[var(--pms-border)] text-[11px] text-violet-800 dark:text-violet-200 flex items-center gap-2">
                 <Scissors className="w-4 h-4 shrink-0" />
                 <span>
                   {layoutMode === '4-in-1'
@@ -605,14 +614,12 @@ export default function PamphletMaker() {
           </div>
         </div>
 
-        {/* SEO Information */}
         <ToolSEOSection
           toolName="Instant Coaching & Shop Pamphlet Maker"
           headline="4-in-1 & 2-in-1 Mass Photocopy Flyer Layout for Local Businesses and Tuition Classes"
           description="A fast advertising flyer generator built for coaching centers, tuition classes, local grocery stores, clinics, and rental property owners. Formats 4 identical flyers per A4 sheet with dashed scissor cut guidelines, allowing businesses to print 100 marketing flyers from just 25 photocopies."
         />
       </div>
-    </div>
+    </ToolWorkspaceShell>
   );
 }
-

@@ -2,8 +2,6 @@ import React, { useState, useRef, useEffect } from 'react';
 import {
   Upload,
   Download,
-  CheckCircle2,
-  Sliders,
   PenTool,
   RotateCcw,
   Smartphone,
@@ -11,9 +9,8 @@ import {
   FileCheck,
   ChevronLeft,
   ChevronRight,
-  ShieldCheck,
-  Calendar,
 } from 'lucide-react';
+import { motion, AnimatePresence, useReducedMotion } from 'motion/react';
 import { PDFDocument } from 'pdf-lib';
 import * as pdfjsLib from 'pdfjs-dist';
 import '../lib/pdfWorker';
@@ -21,12 +18,17 @@ import { useSEO } from '../hooks/useSEO';
 import { usePageSEO } from '../lib/usePageSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
 import ShareQrModal from '../components/ShareQrModal';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { AnimatedNumber, PearlScanOverlay } from '../components/pearl/PearlMotion';
+import { toArrayBufferBytes } from '../lib/blobUrl';
 import { dataUrlToBytes, downloadBlob } from '../lib/utils';
 
 type AttestPhrase = 'Self Attested' | 'Self Attested with Date' | 'True Copy' | 'Verified from Original' | 'custom';
 type StampPosition = 'bottom_right' | 'bottom_left' | 'bottom_center' | 'custom';
 
 export default function SelfAttest() {
+  const prefersReduced = useReducedMotion();
+
   useSEO(
     'Batch Self-Attested & Signature Stamper Online — Sarkari & College KYC Documents',
     'Sign and self-attest all pages of your documents in 1-click. Draw signature or upload image, add date and "Self Attested" stamp across marksheets, certificates and KYC PDFs.'
@@ -54,11 +56,10 @@ export default function SelfAttest() {
   const [inkColor, setInkColor] = useState<'blue' | 'black'>('blue');
   const [position, setPosition] = useState<StampPosition>('bottom_right');
   const [applyTo, setApplyTo] = useState<'all' | 'first' | 'custom'>('all');
-  const [customRange, setCustomRange] = useState('1-5');
 
   // Fine coordinate sliders (% from page top-left)
-  const [customX, setCustomX] = useState(72);
-  const [customY, setCustomY] = useState(88);
+  const [customX] = useState(72);
+  const [customY] = useState(88);
 
   // Signature Pad State
   const sigCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -71,6 +72,8 @@ export default function SelfAttest() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [showQrModal, setShowQrModal] = useState(false);
 
+  const hasPdfLoaded = Boolean(pdfBytes);
+
   // Initialize signature drawing pad
   useEffect(() => {
     const canvas = sigCanvasRef.current;
@@ -82,7 +85,7 @@ export default function SelfAttest() {
     ctx.lineWidth = 2.5;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
-  }, [inkColor]);
+  }, [inkColor, hasPdfLoaded]);
 
   const startDrawing = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
     const canvas = sigCanvasRef.current;
@@ -408,7 +411,7 @@ export default function SelfAttest() {
       }
 
       const outBytes = await pdfDoc.save();
-      const blob = new Blob([outBytes as any], { type: 'application/pdf' });
+      const blob = new Blob([toArrayBufferBytes(outBytes)], { type: 'application/pdf' });
       downloadBlob(blob, `self-attested-${Date.now()}.pdf`);
     } catch (err) {
       console.error('Error batch self-attesting PDF:', err);
@@ -418,58 +421,73 @@ export default function SelfAttest() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 py-10 px-4 sm:px-6">
-      <div className="max-w-6xl mx-auto space-y-8">
-        {/* Header */}
-        <div className="text-center space-y-3">
-          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 text-xs font-bold uppercase tracking-wider">
-            <FileCheck className="w-4 h-4" /> Sarkari & KYC Batch Stamper
-          </div>
-          <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight">
-            Batch Self-Attested & Signature Stamper
-          </h1>
-          <p className="text-sm sm:text-base text-slate-500 dark:text-slate-400 max-w-2xl mx-auto">
-            Draw your signature once, and automatically stamp "Self Attested" + Date on all pages of your documents.
-            Perfect for government recruitment dossiers, university admissions, and bank KYC!
-          </p>
-        </div>
-
+    <ToolWorkspaceShell
+      title="Batch Self-Attested & Signature Stamper"
+      subtitle='Draw your signature once, and automatically stamp "Self Attested" + Date on all pages of your documents. Perfect for government recruitment dossiers, university admissions, and bank KYC.'
+      categoryLabel="Sarkari & KYC Batch Stamper"
+      icon={FileCheck}
+      microVariant="sign"
+      tone="blue"
+      trustNote="Browser-only digital signature pad · Signatures never leave your device"
+    >
+      <div className="space-y-8">
         {/* Upload State */}
         {!pdfBytes ? (
-          <div className="max-w-2xl mx-auto">
-            <label className="flex flex-col items-center justify-center p-12 border-2 border-dashed border-slate-300 dark:border-slate-700 hover:border-blue-500 rounded-3xl cursor-pointer bg-white dark:bg-slate-900 transition-all shadow-sm group">
+          <motion.div
+            initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="max-w-2xl mx-auto pms-glass-panel rounded-3xl p-4 relative overflow-hidden"
+          >
+            <PearlScanOverlay active={isProcessing} label="Loading document pages..." />
+            <label className="flex flex-col items-center justify-center p-12 border-2 border-dashed border-[var(--pms-border-strong)] hover:border-blue-500 rounded-2xl cursor-pointer bg-[var(--pms-white)] transition-all group">
               <input
                 type="file"
                 accept=".pdf"
                 onChange={handleFileUpload}
                 className="hidden"
               />
-              <div className="w-16 h-16 rounded-2xl bg-blue-50 dark:bg-blue-950/50 text-blue-600 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+              <div
+                className="w-16 h-16 rounded-2xl text-[var(--pms-blue)] border border-[var(--pms-border)] flex items-center justify-center mb-4 group-hover:scale-105 transition-transform"
+                style={{ background: 'var(--pms-soft-blue)' }}
+              >
                 <Upload className="w-8 h-8" />
               </div>
-              <span className="text-base font-bold text-slate-900 dark:text-white mb-1">
+              <span className="text-base font-bold text-[var(--pms-ink)] mb-1">
                 Drop Document PDF to Self-Attest
               </span>
-              <span className="text-xs text-slate-400 text-center max-w-xs">
+              <span className="text-xs text-[var(--pms-muted)] text-center max-w-xs">
                 Upload your combined marksheet, caste certificate, Aadhaar, PAN, or admission form PDF.
               </span>
             </label>
-          </div>
+          </motion.div>
         ) : (
           /* Editor Layout */
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
             {/* Left Controls & Signature Pad */}
-            <div className="lg:col-span-5 space-y-5 bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm">
-              <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
-                <span className="text-sm font-bold flex items-center gap-2">
-                  <PenTool className="w-4 h-4 text-blue-500" /> Signature & Text
-                </span>
+            <motion.div
+              initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="lg:col-span-5 space-y-5 pms-glass-panel p-6 rounded-3xl"
+            >
+              <div className="flex items-center justify-between pb-3 border-b border-[var(--pms-border)]">
+                <div className="min-w-0">
+                  <span className="text-sm font-bold text-[var(--pms-ink)] flex items-center gap-2">
+                    <PenTool className="w-4 h-4 text-[var(--pms-blue)] shrink-0" /> Signature &amp; Text
+                  </span>
+                  {file && (
+                    <span className="text-[11px] text-[var(--pms-muted)] block truncate mt-0.5">
+                      {file.name}
+                    </span>
+                  )}
+                </div>
                 <button
                   onClick={() => {
                     setFile(null);
                     setPdfBytes(null);
+                    setPreviewDataUrl(null);
+                    setPageCount(0);
                   }}
-                  className="text-xs text-rose-500 hover:text-rose-600 font-semibold"
+                  className="text-xs text-rose-500 hover:text-rose-600 font-semibold shrink-0 cursor-pointer"
                 >
                   Change PDF
                 </button>
@@ -478,17 +496,25 @@ export default function SelfAttest() {
               {/* Draw Signature Pad */}
               <div>
                 <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                  <label className="text-xs font-bold uppercase tracking-wider text-[var(--pms-muted)] flex items-center gap-2">
                     1. Draw Signature on Pad
+                    {hasSignature && (
+                      <span
+                        className="px-2 py-0.5 rounded-full text-[10px] font-bold normal-case text-[var(--pms-ink)] border border-[var(--pms-border)]"
+                        style={{ background: 'var(--pms-soft-mint)' }}
+                      >
+                        Ready
+                      </span>
+                    )}
                   </label>
                   <button
                     onClick={clearSignature}
-                    className="text-xs text-slate-400 hover:text-rose-500 flex items-center gap-1 font-semibold"
+                    className="text-xs text-[var(--pms-muted)] hover:text-rose-500 flex items-center gap-1 font-semibold cursor-pointer"
                   >
                     <RotateCcw className="w-3 h-3" /> Clear
                   </button>
                 </div>
-                <div className="border-2 border-slate-200 dark:border-slate-700 rounded-2xl overflow-hidden bg-white shadow-inner">
+                <div className="border-2 border-[var(--pms-border-strong)] rounded-2xl overflow-hidden bg-white shadow-inner">
                   <canvas
                     ref={sigCanvasRef}
                     width={360}
@@ -503,9 +529,9 @@ export default function SelfAttest() {
                     className="w-full h-28 cursor-crosshair block touch-none"
                   />
                 </div>
-                <div className="flex items-center justify-between mt-1 text-[11px] text-slate-400">
+                <div className="flex items-center justify-between mt-1.5 text-[11px] text-[var(--pms-muted)]">
                   <span>Sign with mouse or touchscreen</span>
-                  <label className="text-blue-600 hover:underline cursor-pointer font-semibold">
+                  <label className="text-[var(--pms-blue)] hover:underline cursor-pointer font-semibold">
                     Upload Sig Image
                     <input type="file" accept="image/*" onChange={handleUploadSigImage} className="hidden" />
                   </label>
@@ -513,24 +539,28 @@ export default function SelfAttest() {
               </div>
 
               {/* Ink Color & Phrase */}
-              <div className="space-y-3 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <div className="space-y-3 pt-3 border-t border-[var(--pms-border)]">
                 <div className="flex items-center justify-between">
-                  <label className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                  <label className="text-xs font-bold uppercase tracking-wider text-[var(--pms-muted)]">
                     Ink Color
                   </label>
                   <div className="flex gap-2">
                     <button
                       onClick={() => setInkColor('blue')}
-                      className={`px-3 py-1 rounded-lg text-xs font-bold transition ${
-                        inkColor === 'blue' ? 'bg-blue-600 text-white shadow-sm' : 'bg-slate-100 text-slate-600'
+                      className={`px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+                        inkColor === 'blue'
+                          ? 'bg-blue-600 text-white shadow-sm'
+                          : 'bg-[var(--pms-white)] border border-[var(--pms-border)] text-[var(--pms-muted)]'
                       }`}
                     >
                       Blue Ink
                     </button>
                     <button
                       onClick={() => setInkColor('black')}
-                      className={`px-3 py-1 rounded-lg text-xs font-bold transition ${
-                        inkColor === 'black' ? 'bg-slate-900 text-white shadow-sm' : 'bg-slate-100 text-slate-600'
+                      className={`px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+                        inkColor === 'black'
+                          ? 'bg-slate-900 text-white shadow-sm'
+                          : 'bg-[var(--pms-white)] border border-[var(--pms-border)] text-[var(--pms-muted)]'
                       }`}
                     >
                       Black Ink
@@ -539,13 +569,13 @@ export default function SelfAttest() {
                 </div>
 
                 <div>
-                  <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                  <label className="block text-[11px] font-semibold text-[var(--pms-muted)] mb-1">
                     Attestation Header Text
                   </label>
                   <select
                     value={phrase}
                     onChange={(e) => setPhrase(e.target.value as AttestPhrase)}
-                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-semibold"
+                    className="w-full px-3 py-2 text-xs rounded-xl border border-[var(--pms-border)] bg-[var(--pms-white)] text-[var(--pms-ink)] font-semibold focus:outline-none focus:border-blue-500"
                   >
                     <option value="Self Attested with Date">Self Attested (with Date)</option>
                     <option value="Self Attested">Self Attested (Only)</option>
@@ -561,27 +591,27 @@ export default function SelfAttest() {
                     value={customPhrase}
                     onChange={(e) => setCustomPhrase(e.target.value)}
                     placeholder="Enter custom text..."
-                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                    className="w-full px-3 py-2 text-xs rounded-xl border border-[var(--pms-border)] bg-[var(--pms-white)] text-[var(--pms-ink)]"
                   />
                 )}
 
                 <div>
-                  <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                  <label className="block text-[11px] font-semibold text-[var(--pms-muted)] mb-1">
                     Attestation Date
                   </label>
                   <input
                     type="text"
                     value={signDate}
                     onChange={(e) => setSignDate(e.target.value)}
-                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-mono"
+                    className="w-full px-3 py-2 text-xs rounded-xl border border-[var(--pms-border)] bg-[var(--pms-white)] text-[var(--pms-ink)] font-mono"
                   />
                 </div>
               </div>
 
               {/* Placement & Page Range */}
-              <div className="space-y-3 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <div className="space-y-3 pt-3 border-t border-[var(--pms-border)]">
                 <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1.5">
+                  <label className="block text-xs font-bold uppercase tracking-wider text-[var(--pms-muted)] mb-1.5">
                     Stamp Position on Page
                   </label>
                   <div className="grid grid-cols-3 gap-2 text-xs">
@@ -593,10 +623,10 @@ export default function SelfAttest() {
                       <button
                         key={pos.id}
                         onClick={() => setPosition(pos.id as StampPosition)}
-                        className={`py-2 px-1 rounded-xl border text-center font-bold transition ${
+                        className={`py-2 px-1 rounded-xl border text-center font-bold transition cursor-pointer ${
                           position === pos.id
                             ? 'border-blue-500 bg-blue-600 text-white shadow-sm'
-                            : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800'
+                            : 'border-[var(--pms-border)] bg-[var(--pms-white)] text-[var(--pms-ink)] hover:border-[var(--pms-border-strong)]'
                         }`}
                       >
                         {pos.label}
@@ -606,26 +636,26 @@ export default function SelfAttest() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1.5">
+                  <label className="block text-xs font-bold uppercase tracking-wider text-[var(--pms-muted)] mb-1.5">
                     Apply To Pages
                   </label>
                   <div className="grid grid-cols-2 gap-2 text-xs">
                     <button
                       onClick={() => setApplyTo('all')}
-                      className={`py-2 px-2 rounded-xl border text-center font-bold transition ${
+                      className={`py-2 px-2 rounded-xl border text-center font-bold transition cursor-pointer ${
                         applyTo === 'all'
-                          ? 'border-blue-500 bg-blue-50/50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400'
-                          : 'border-slate-200 dark:border-slate-700'
+                          ? 'border-blue-500 bg-[var(--pms-soft-blue)] text-[var(--pms-ink)] shadow-sm'
+                          : 'border-[var(--pms-border)] bg-[var(--pms-white)] text-[var(--pms-muted)]'
                       }`}
                     >
                       All Pages ({pageCount})
                     </button>
                     <button
                       onClick={() => setApplyTo('first')}
-                      className={`py-2 px-2 rounded-xl border text-center font-bold transition ${
+                      className={`py-2 px-2 rounded-xl border text-center font-bold transition cursor-pointer ${
                         applyTo === 'first'
-                          ? 'border-blue-500 bg-blue-50/50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400'
-                          : 'border-slate-200 dark:border-slate-700'
+                          ? 'border-blue-500 bg-[var(--pms-soft-blue)] text-[var(--pms-ink)] shadow-sm'
+                          : 'border-[var(--pms-border)] bg-[var(--pms-white)] text-[var(--pms-muted)]'
                       }`}
                     >
                       Page 1 Only
@@ -635,69 +665,89 @@ export default function SelfAttest() {
               </div>
 
               {/* Page Navigator */}
-              {pageCount > 1 && (
-                <div className="flex items-center justify-between p-3 bg-slate-100 dark:bg-slate-800 rounded-xl text-xs font-semibold">
-                  <button
-                    onClick={() => setActivePageIndex(Math.max(0, activePageIndex - 1))}
-                    disabled={activePageIndex === 0}
-                    className="p-1 rounded hover:bg-white dark:hover:bg-slate-700 disabled:opacity-30"
+              <AnimatePresence>
+                {pageCount > 1 && (
+                  <motion.div
+                    initial={prefersReduced ? false : { opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={prefersReduced ? undefined : { opacity: 0, height: 0 }}
+                    className="flex items-center justify-between p-3 bg-[var(--pms-white)] border border-[var(--pms-border)] rounded-xl text-xs font-semibold text-[var(--pms-ink)]"
                   >
-                    <ChevronLeft className="w-4 h-4" />
-                  </button>
-                  <span>Viewing Page {activePageIndex + 1} of {pageCount}</span>
-                  <button
-                    onClick={() => setActivePageIndex(Math.min(pageCount - 1, activePageIndex + 1))}
-                    disabled={activePageIndex === pageCount - 1}
-                    className="p-1 rounded hover:bg-white dark:hover:bg-slate-700 disabled:opacity-30"
-                  >
-                    <ChevronRight className="w-4 h-4" />
-                  </button>
-                </div>
-              )}
+                    <button
+                      onClick={() => setActivePageIndex(Math.max(0, activePageIndex - 1))}
+                      disabled={activePageIndex === 0}
+                      className="p-1.5 rounded-lg hover:bg-[var(--pms-soft-lavender)] disabled:opacity-30 cursor-pointer"
+                    >
+                      <ChevronLeft className="w-4 h-4" />
+                    </button>
+                    <span>
+                      Viewing Page {activePageIndex + 1} of <AnimatedNumber value={pageCount} />
+                    </span>
+                    <button
+                      onClick={() => setActivePageIndex(Math.min(pageCount - 1, activePageIndex + 1))}
+                      disabled={activePageIndex === pageCount - 1}
+                      className="p-1.5 rounded-lg hover:bg-[var(--pms-soft-lavender)] disabled:opacity-30 cursor-pointer"
+                    >
+                      <ChevronRight className="w-4 h-4" />
+                    </button>
+                  </motion.div>
+                )}
+              </AnimatePresence>
 
               {/* Action Buttons */}
-              <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-2">
+              <div className="pt-3 border-t border-[var(--pms-border)] space-y-2">
                 <button
                   onClick={handleDownloadPdf}
                   disabled={isProcessing}
-                  className="w-full flex items-center justify-center gap-2 py-3.5 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-sm shadow-md transition disabled:opacity-50"
+                  className="pms-btn-primary w-full flex items-center justify-center gap-2 py-3.5 px-4 rounded-xl font-bold text-sm transition disabled:opacity-50 cursor-pointer"
                 >
-                  <Download className="w-4 h-4" /> Download Self-Attested PDF ({pageCount} Pages)
+                  <Download className="w-4 h-4" /> Download Self-Attested PDF (<AnimatedNumber value={pageCount} /> Pages)
                 </button>
                 <button
                   onClick={() => setShowQrModal(true)}
-                  className="w-full flex items-center justify-center gap-1.5 py-2 px-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-xl font-semibold text-xs transition"
+                  className="w-full flex items-center justify-center gap-1.5 py-2.5 px-3 border border-[var(--pms-border)] text-[var(--pms-ink)] rounded-xl font-semibold text-xs transition cursor-pointer hover:opacity-90"
+                  style={{ background: 'var(--pms-soft-blue)' }}
                 >
-                  <Smartphone className="w-3.5 h-3.5" /> Send to Mobile Phone
+                  <Smartphone className="w-3.5 h-3.5 text-[var(--pms-blue)]" /> Send to Mobile Phone
                 </button>
               </div>
-            </div>
+            </motion.div>
 
             {/* Right Live Preview */}
-            <div className="lg:col-span-7 bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col items-center">
-              <div className="w-full flex items-center justify-between mb-4">
-                <span className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-                  <Eye className="w-4 h-4 text-blue-500" /> Page {activePageIndex + 1} Self-Attestation Preview
+            <motion.div
+              initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.06 }}
+              className="lg:col-span-7 pms-glass-panel p-6 rounded-3xl flex flex-col items-center relative overflow-hidden"
+            >
+              <PearlScanOverlay active={isProcessing} label="Applying self-attestation stamp across pages..." />
+
+              <div className="w-full flex items-center justify-between mb-4 flex-wrap gap-2">
+                <span className="text-xs font-bold uppercase tracking-wider text-[var(--pms-muted)] flex items-center gap-1.5">
+                  <Eye className="w-4 h-4 text-[var(--pms-blue)]" /> Page {activePageIndex + 1} Self-Attestation Preview
                 </span>
-                <span className="text-xs font-semibold px-2.5 py-1 bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-400 rounded-lg">
+                <span
+                  className="text-xs font-semibold px-3 py-1 text-[var(--pms-ink)] rounded-full border border-[var(--pms-border)]"
+                  style={{ background: 'var(--pms-soft-mint)' }}
+                >
                   {applyTo === 'all' ? `All ${pageCount} Pages Stamped` : 'Page 1 Stamped'}
                 </span>
               </div>
 
               {previewDataUrl ? (
-                <div className="w-full max-h-[640px] overflow-auto flex items-center justify-center p-4 bg-slate-100 dark:bg-slate-950 rounded-2xl border border-slate-200 dark:border-slate-800">
+                <div className="w-full max-h-[640px] overflow-auto flex items-center justify-center p-4 pms-paper-grid rounded-2xl border border-[var(--pms-border)]">
                   <img
                     src={previewDataUrl}
                     alt="Self Attested Document Preview"
-                    className="max-h-[580px] w-auto object-contain rounded shadow-lg border border-slate-300 dark:border-slate-700"
+                    className="max-h-[580px] w-auto object-contain rounded bg-white shadow-lg border border-[var(--pms-border-strong)]"
                   />
                 </div>
               ) : (
-                <div className="w-full h-96 flex items-center justify-center text-slate-400 text-xs">
+                <div className="w-full h-96 flex items-center justify-center text-[var(--pms-muted)] text-xs">
                   Rendering self-attested preview...
                 </div>
               )}
-            </div>
+            </motion.div>
           </div>
         )}
 
@@ -757,6 +807,6 @@ export default function SelfAttest() {
           fileName="self-attested.pdf"
         />
       </div>
-    </div>
+    </ToolWorkspaceShell>
   );
 }

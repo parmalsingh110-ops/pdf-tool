@@ -1,8 +1,18 @@
-import React, { useState } from 'react';
-import { 
-  FileSpreadsheet, Download, Loader2, Table, Copy, Check, 
-  FileCode, Sparkles, Layers, ChevronLeft, ChevronRight, Edit3, ArrowRight,
-  Plus, Trash2, Cpu, Server, FileDown
+import { useState } from 'react';
+import { motion, AnimatePresence, useReducedMotion } from 'motion/react';
+import {
+  FileSpreadsheet,
+  Download,
+  Loader2,
+  Table,
+  Copy,
+  Check,
+  FileCode,
+  Plus,
+  Trash2,
+  Cpu,
+  Server,
+  FileDown,
 } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
 import * as XLSX from 'xlsx';
@@ -11,6 +21,9 @@ import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { apiFetch } from '../lib/api';
+import { triggerBlobDownload } from '../lib/blobUrl';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { AnimatedNumber, PearlScanOverlay, PearlStageSwitch } from '../components/pearl/PearlMotion';
 
 interface ExtractedTable {
   id: string;
@@ -38,6 +51,8 @@ export default function ExtractTables() {
   const [copiedFormat, setCopiedFormat] = useState<string | null>(null);
   const [statusMsg, setStatusMsg] = useState('');
 
+  const prefersReduced = useReducedMotion();
+
   // Fallback spatial extractor running 100% in browser
   const extractClientSpatial = async (f: File): Promise<ExtractedTable[]> => {
     const buf = await f.arrayBuffer();
@@ -47,7 +62,7 @@ export default function ExtractTables() {
     for (let p = 1; p <= pdf.numPages; p++) {
       const page = await pdf.getPage(p);
       const textContent = await page.getTextContent();
-      
+
       const rowMap = new Map<number, { x: number; text: string }[]>();
 
       for (const item of textContent.items as any[]) {
@@ -87,7 +102,7 @@ export default function ExtractTables() {
           id: `tbl_p${p}`,
           pageIndex: p,
           name: `Table on Page ${p}`,
-          rows: normalizedRows
+          rows: normalizedRows,
         });
       }
     }
@@ -104,7 +119,6 @@ export default function ExtractTables() {
     setBusy(true);
 
     try {
-      // ── Strategy A: Backend Camelot-py (Lattice + Stream) ─────────
       let extracted: ExtractedTable[] = [];
       if (engineMode === 'camelot') {
         setStatusMsg('Analyzing document with Camelot-py ML table parser...');
@@ -121,12 +135,11 @@ export default function ExtractTables() {
           if (res.ok) {
             const arrayBuf = await res.arrayBuffer();
             const wb = XLSX.read(arrayBuf, { type: 'array' });
-            
+
             wb.SheetNames.forEach((sheetName, sIdx) => {
               const ws = wb.Sheets[sheetName];
               const rawData = XLSX.utils.sheet_to_json<string[]>(ws, { header: 1 }) as string[][];
               if (rawData && rawData.length > 0) {
-                // Ensure string arrays
                 const stringRows = rawData.map(r => (Array.isArray(r) ? r.map(c => String(c ?? '')) : []));
                 const maxC = Math.max(...stringRows.map(r => r.length));
                 const normalized = stringRows.map(r => {
@@ -138,7 +151,7 @@ export default function ExtractTables() {
                   id: `camelot_${sIdx}`,
                   pageIndex: sIdx + 1,
                   name: sheetName.replace(/_/g, ' '),
-                  rows: normalized
+                  rows: normalized,
                 });
               }
             });
@@ -148,7 +161,6 @@ export default function ExtractTables() {
         }
       }
 
-      // ── Strategy B: Client Spatial Fallback ────────────────────────
       if (extracted.length === 0) {
         setStatusMsg('Running client spatial table extraction...');
         extracted = await extractClientSpatial(f);
@@ -199,12 +211,12 @@ export default function ExtractTables() {
       if (idx !== activeTableIdx) return t;
       return {
         ...t,
-        rows: t.rows.map((r, rIdx) => [...r, rIdx === 0 ? `Column ${r.length + 1}` : ''])
+        rows: t.rows.map((r, rIdx) => [...r, rIdx === 0 ? `Column ${r.length + 1}` : '']),
       };
     }));
   };
 
-  // ─── Export Formats ────────────────────────────────────────────────
+  // Export Formats
   const downloadExcel = () => {
     if (!tables.length) return;
     const wb = XLSX.utils.book_new();
@@ -228,10 +240,7 @@ export default function ExtractTables() {
       .join('\n');
 
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `${file?.name.replace(/\.pdf$/i, '')}_Table_${activeTableIdx + 1}.csv`;
-    a.click();
+    triggerBlobDownload(blob, `${file?.name.replace(/\.pdf$/i, '')}_Table_${activeTableIdx + 1}.csv`);
   };
 
   const downloadJson = () => {
@@ -249,10 +258,7 @@ export default function ExtractTables() {
     });
 
     const blob = new Blob([JSON.stringify(jsonRecords, null, 2)], { type: 'application/json' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `${file?.name.replace(/\.pdf$/i, '')}_Table_${activeTableIdx + 1}.json`;
-    a.click();
+    triggerBlobDownload(blob, `${file?.name.replace(/\.pdf$/i, '')}_Table_${activeTableIdx + 1}.json`);
   };
 
   const copyMarkdown = () => {
@@ -277,241 +283,312 @@ export default function ExtractTables() {
   };
 
   const activeTable = tables[activeTableIdx];
+  const stageKey = !file ? 'upload' : busy ? 'scanning' : tables.length === 0 ? 'empty' : 'studio';
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-start p-4 sm:p-8 max-w-7xl mx-auto w-full">
-      {/* Header */}
-      <div className="text-center mb-6">
-        <div className="w-16 h-16 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 rounded-2xl flex items-center justify-center mx-auto mb-3 shadow-sm border border-emerald-100 dark:border-emerald-900/50">
-          <FileSpreadsheet className="w-8 h-8" />
-        </div>
-        <h1 className="text-3xl sm:text-4xl font-extrabold text-slate-900 dark:text-white mb-2">
-          PDF Table Extractor & Spreadsheet Studio
-        </h1>
-        <p className="text-base text-slate-600 dark:text-slate-400 max-w-xl mx-auto">
-          Extract tabular data from any PDF with Camelot-py accuracy. Live editable grid, cell editing, and 1-click export to Excel (.xlsx), CSV, JSON, and Markdown.
-        </p>
-      </div>
-
-      {!file ? (
-        <div className="w-full max-w-2xl space-y-6">
-          {/* Engine Selector */}
-          <div className="flex bg-slate-100 dark:bg-slate-800 p-1.5 rounded-xl border border-slate-200 dark:border-slate-700 max-w-md mx-auto">
-            <button
-              onClick={() => setEngineMode('camelot')}
-              className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition-all ${
-                engineMode === 'camelot'
-                  ? 'bg-white dark:bg-slate-900 text-emerald-600 shadow-sm'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
-              }`}
-            >
-              <Server className="w-3.5 h-3.5 text-emerald-500" /> Camelot-py ML (Highest Accuracy)
-            </button>
-            <button
-              onClick={() => setEngineMode('spatial')}
-              className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition-all ${
-                engineMode === 'spatial'
-                  ? 'bg-white dark:bg-slate-900 text-emerald-600 shadow-sm'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
-              }`}
-            >
-              <Cpu className="w-3.5 h-3.5 text-blue-500" /> Fast Client-Side (100% Private)
-            </button>
-          </div>
-
-          <FileDropzone 
-            onDrop={handleDrop} 
-            multiple={false} 
-            title="Select PDF Document to Extract Tables" 
-          />
-
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
-            <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 text-center">
-              <Table className="w-6 h-6 text-emerald-600 dark:text-emerald-400 mx-auto mb-2" />
-              <h3 className="font-bold text-sm text-slate-800 dark:text-slate-200">Interactive Editor</h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Edit cells, add rows, and tune columns before downloading.</p>
+    <ToolWorkspaceShell
+      title="PDF Table Extractor & Spreadsheet Studio"
+      subtitle="Extract tabular data from any PDF with Camelot-py accuracy. Live editable grid, cell editing, and 1-click export to Excel (.xlsx), CSV, JSON, and Markdown."
+      categoryLabel="Structured Data & Spreadsheets"
+      icon={FileSpreadsheet}
+      microVariant="convert"
+      tone="emerald"
+      trustNote="Camelot-py ML lattice detection · 100% private client spatial fallback"
+    >
+      <PearlStageSwitch stageKey={stageKey}>
+        {!file ? (
+          <div className="w-full max-w-2xl mx-auto space-y-6">
+            {/* Engine Selector */}
+            <div className="pms-glass-panel flex p-1.5 rounded-2xl max-w-md mx-auto">
+              {[
+                { id: 'camelot', label: 'Camelot-py ML', icon: Server, iconColor: 'text-emerald-600 dark:text-emerald-400' },
+                { id: 'spatial', label: 'Client Spatial (Private)', icon: Cpu, iconColor: 'text-[var(--pms-blue)]' },
+              ].map(eng => {
+                const active = engineMode === eng.id;
+                return (
+                  <button
+                    key={eng.id}
+                    type="button"
+                    onClick={() => setEngineMode(eng.id as 'camelot' | 'spatial')}
+                    className={`relative flex-1 py-2.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
+                      active ? 'text-slate-900 dark:text-white' : 'text-slate-500 dark:text-slate-400'
+                    }`}
+                  >
+                    {active && (
+                      <motion.span
+                        layoutId="table-engine-pill"
+                        transition={{ type: 'spring', stiffness: 420, damping: 32 }}
+                        className="absolute inset-0 rounded-xl bg-white dark:bg-slate-900 shadow-sm border border-[var(--pms-border)]"
+                      />
+                    )}
+                    <eng.icon className={`relative z-10 w-3.5 h-3.5 ${eng.iconColor}`} />
+                    <span className="relative z-10">{eng.label}</span>
+                  </button>
+                );
+              })}
             </div>
-            <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 text-center">
-              <FileDown className="w-6 h-6 text-blue-600 dark:text-blue-400 mx-auto mb-2" />
-              <h3 className="font-bold text-sm text-slate-800 dark:text-slate-200">Native Excel .xlsx</h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Multi-sheet Excel workbook export with zero format degradation.</p>
-            </div>
-            <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 text-center">
-              <FileCode className="w-6 h-6 text-purple-600 dark:text-purple-400 mx-auto mb-2" />
-              <h3 className="font-bold text-sm text-slate-800 dark:text-slate-200">CSV & JSON Ready</h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Instant export for database import, pandas, and data science.</p>
-            </div>
-          </div>
-        </div>
-      ) : busy ? (
-        <div className="w-full max-w-md py-16 text-center space-y-4">
-          <Loader2 className="w-10 h-10 animate-spin text-emerald-600 mx-auto" />
-          <p className="text-base font-semibold text-slate-800 dark:text-slate-200">
-            {statusMsg || 'Extracting tables from document...'}
-          </p>
-          <p className="text-xs text-slate-500">Parsing rows, columns, and data cells</p>
-        </div>
-      ) : tables.length === 0 ? (
-        <div className="w-full max-w-lg py-16 text-center space-y-4 bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-8 shadow-sm">
-          <div className="w-12 h-12 bg-amber-50 dark:bg-amber-950/40 text-amber-600 rounded-2xl flex items-center justify-center mx-auto mb-2">
-            <Table className="w-6 h-6" />
-          </div>
-          <h3 className="text-lg font-bold text-slate-900 dark:text-white">No Structured Tables Detected</h3>
-          <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto leading-relaxed">
-            We could not detect clear grid or column-aligned tables in this PDF. Try switching between Camelot-py and Fast Client-Side modes, or upload a document with clear borders.
-          </p>
-          <button onClick={reset} className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold text-xs rounded-xl transition">
-            Choose Another File
-          </button>
-        </div>
-      ) : (
-        /* Extracted Spreadsheet Studio */
-        <div className="w-full space-y-6">
-          {/* Top Actions & Tabs */}
-          <div className="flex flex-col md:flex-row items-center justify-between gap-4 bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
-            {/* Table Tabs */}
-            <div className="flex items-center gap-2 overflow-x-auto max-w-full pb-1 md:pb-0">
-              {tables.map((t, idx) => (
-                <button
-                  key={t.id}
-                  onClick={() => setActiveTableIdx(idx)}
-                  className={`py-2 px-4 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
-                    idx === activeTableIdx
-                      ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/20'
-                      : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200'
-                  }`}
+
+            <FileDropzone
+              onDrop={handleDrop}
+              multiple={false}
+              title="Select PDF Document to Extract Tables"
+            />
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
+              {[
+                {
+                  icon: Table,
+                  tint: 'bg-[var(--pms-soft-mint)] text-emerald-700 dark:text-emerald-300',
+                  title: 'Interactive Editor',
+                  desc: 'Edit cells, add rows, and tune columns before downloading.',
+                },
+                {
+                  icon: FileDown,
+                  tint: 'bg-[var(--pms-soft-blue)] text-[var(--pms-blue)]',
+                  title: 'Native Excel .xlsx',
+                  desc: 'Multi-sheet Excel workbook export with zero format degradation.',
+                },
+                {
+                  icon: FileCode,
+                  tint: 'bg-[var(--pms-soft-lavender)] text-[var(--pms-violet)]',
+                  title: 'CSV & JSON Ready',
+                  desc: 'Instant export for database import, pandas, and data science.',
+                },
+              ].map((card, idx) => (
+                <motion.div
+                  key={card.title}
+                  initial={prefersReduced ? false : { opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.28, delay: idx * 0.06 }}
+                  whileHover={prefersReduced ? undefined : { y: -3 }}
+                  className="pms-glass-panel p-5 rounded-2xl text-center"
                 >
-                  {t.name} ({t.rows.length} rows)
-                </button>
+                  <div className={`w-10 h-10 rounded-xl ${card.tint} flex items-center justify-center mx-auto mb-2.5`}>
+                    <card.icon className="w-5 h-5" />
+                  </div>
+                  <h3 className="font-bold text-sm text-slate-900 dark:text-white">{card.title}</h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">{card.desc}</p>
+                </motion.div>
+              ))}
+            </div>
+          </div>
+        ) : busy ? (
+          <div className="relative max-w-lg mx-auto pms-glass-panel rounded-3xl p-12 text-center space-y-4 overflow-hidden">
+            <PearlScanOverlay active={busy} label={statusMsg || 'Extracting tables from document…'} />
+            <div className="w-14 h-14 rounded-2xl bg-[var(--pms-soft-mint)] text-emerald-600 dark:text-emerald-400 flex items-center justify-center mx-auto">
+              <Loader2 className="w-7 h-7 animate-spin" />
+            </div>
+            <p className="text-lg font-extrabold text-slate-900 dark:text-white">
+              {statusMsg || 'Extracting tables from document…'}
+            </p>
+            <p className="text-xs text-slate-500 dark:text-slate-400">Parsing rows, lattice boundaries, and data cells</p>
+          </div>
+        ) : tables.length === 0 ? (
+          <div className="w-full max-w-lg mx-auto pms-glass-panel rounded-3xl p-10 text-center space-y-4">
+            <div className="w-12 h-12 bg-[var(--pms-soft-rose)] text-amber-600 dark:text-amber-400 rounded-2xl flex items-center justify-center mx-auto">
+              <Table className="w-6 h-6" />
+            </div>
+            <h3 className="text-lg font-extrabold text-slate-900 dark:text-white">No Structured Tables Detected</h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto leading-relaxed">
+              We could not detect clear grid or column-aligned tables in this PDF. Try switching between Camelot-py and Client Spatial modes, or upload a document with clear borders.
+            </p>
+            <button
+              onClick={reset}
+              className="px-5 py-2.5 bg-white/80 dark:bg-slate-800 hover:bg-white dark:hover:bg-slate-700 border border-[var(--pms-border)] text-slate-700 dark:text-slate-200 font-bold text-xs rounded-xl transition cursor-pointer"
+            >
+              Choose Another File
+            </button>
+          </div>
+        ) : (
+          <div className="w-full space-y-5">
+            {/* Metric Tiles */}
+            <div className="grid grid-cols-3 gap-3.5">
+              {[
+                { label: 'Detected Tables', val: tables.length, tint: 'bg-[var(--pms-soft-mint)] text-emerald-700 dark:text-emerald-300' },
+                { label: 'Active Rows', val: activeTable?.rows.length || 0, tint: 'bg-[var(--pms-soft-blue)] text-[var(--pms-blue)]' },
+                { label: 'Active Columns', val: activeTable?.rows[0]?.length || 0, tint: 'bg-[var(--pms-soft-lavender)] text-[var(--pms-violet)]' },
+              ].map((m, idx) => (
+                <motion.div
+                  key={m.label}
+                  initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.25, delay: idx * 0.04 }}
+                  className="pms-glass-panel rounded-2xl p-4"
+                >
+                  <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${m.tint} mb-1`}>
+                    {m.label}
+                  </span>
+                  <p className="text-2xl font-extrabold text-slate-900 dark:text-white">
+                    <AnimatedNumber value={m.val} />
+                  </p>
+                </motion.div>
               ))}
             </div>
 
-            {/* Export Buttons */}
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                onClick={downloadExcel}
-                className="py-2 px-3 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-sm transition-all"
-              >
-                <Download className="w-3.5 h-3.5" /> Export Excel (.xlsx)
-              </button>
-              <button
-                onClick={downloadCsv}
-                className="py-2 px-3 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-sm transition-all"
-              >
-                <Download className="w-3.5 h-3.5" /> CSV
-              </button>
-              <button
-                onClick={downloadJson}
-                className="py-2 px-3 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-sm transition-all"
-              >
-                <Download className="w-3.5 h-3.5" /> JSON
-              </button>
-              <button
-                onClick={copyMarkdown}
-                className="py-2 px-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-all"
-              >
-                {copiedFormat === 'markdown' ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
-                Copy MD
-              </button>
-              <button
-                onClick={reset}
-                className="py-2 px-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-600 dark:text-slate-400 text-xs font-medium rounded-xl transition-all"
-              >
-                New File
-              </button>
-            </div>
-          </div>
+            {/* Top Actions & Tabs */}
+            <div className="pms-glass-panel flex flex-col md:flex-row items-center justify-between gap-4 p-4 rounded-2xl">
+              <div className="flex items-center gap-2 overflow-x-auto max-w-full pb-1 md:pb-0">
+                {tables.map((t, idx) => {
+                  const active = idx === activeTableIdx;
+                  return (
+                    <button
+                      key={t.id}
+                      onClick={() => setActiveTableIdx(idx)}
+                      className={`relative py-2 px-4 rounded-xl text-xs font-bold whitespace-nowrap transition-colors cursor-pointer ${
+                        active
+                          ? 'text-white'
+                          : 'bg-white/75 dark:bg-slate-900/75 border border-[var(--pms-border)] text-slate-700 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-800'
+                      }`}
+                    >
+                      {active && (
+                        <motion.span
+                          layoutId="table-sheet-tab"
+                          transition={{ type: 'spring', stiffness: 420, damping: 32 }}
+                          className="absolute inset-0 rounded-xl bg-emerald-600 shadow-sm"
+                        />
+                      )}
+                      <span className="relative z-10">{t.name} ({t.rows.length} rows)</span>
+                    </button>
+                  );
+                })}
+              </div>
 
-          {/* Grid Toolbar: Add Row / Add Column */}
-          {activeTable && (
-            <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 px-1">
-              <span>
-                Viewing {activeTable.rows.length} rows &times; {activeTable.rows[0]?.length || 0} columns. Click any cell to edit.
-              </span>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={addRow}
-                  className="py-1 px-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-700 dark:text-slate-300 font-semibold rounded-lg flex items-center gap-1"
+              <div className="flex flex-wrap items-center gap-2">
+                <motion.button
+                  whileHover={prefersReduced ? undefined : { scale: 1.02 }}
+                  whileTap={prefersReduced ? undefined : { scale: 0.98 }}
+                  onClick={downloadExcel}
+                  className="pms-btn-primary py-2 px-3.5 text-xs font-bold rounded-xl flex items-center gap-1.5 cursor-pointer"
                 >
-                  <Plus className="w-3 h-3 text-emerald-600" /> Add Row
+                  <Download className="w-3.5 h-3.5" /> Export Excel (.xlsx)
+                </motion.button>
+                <button
+                  onClick={downloadCsv}
+                  className="py-2 px-3 bg-[var(--pms-soft-blue)] text-[var(--pms-blue)] border border-[var(--pms-border)] hover:brightness-95 text-xs font-bold rounded-xl flex items-center gap-1.5 transition cursor-pointer"
+                >
+                  <Download className="w-3.5 h-3.5" /> CSV
                 </button>
                 <button
-                  onClick={addColumn}
-                  className="py-1 px-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-700 dark:text-slate-300 font-semibold rounded-lg flex items-center gap-1"
+                  onClick={downloadJson}
+                  className="py-2 px-3 bg-[var(--pms-soft-lavender)] text-[var(--pms-violet)] border border-[var(--pms-border)] hover:brightness-95 text-xs font-bold rounded-xl flex items-center gap-1.5 transition cursor-pointer"
                 >
-                  <Plus className="w-3 h-3 text-emerald-600" /> Add Column
+                  <Download className="w-3.5 h-3.5" /> JSON
+                </button>
+                <button
+                  onClick={copyMarkdown}
+                  className="py-2 px-3 bg-white/80 dark:bg-slate-900/80 hover:bg-white dark:hover:bg-slate-800 border border-[var(--pms-border)] text-slate-700 dark:text-slate-200 text-xs font-bold rounded-xl flex items-center gap-1.5 transition cursor-pointer"
+                >
+                  {copiedFormat === 'markdown' ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+                  {copiedFormat === 'markdown' ? 'Copied MD' : 'Copy MD'}
+                </button>
+                <button
+                  onClick={reset}
+                  className="py-2 px-3 text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white text-xs font-semibold cursor-pointer"
+                >
+                  New File
                 </button>
               </div>
             </div>
-          )}
 
-          {/* Live Editable Spreadsheet Grid */}
-          {activeTable && (
-            <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
-              <div className="overflow-x-auto max-h-[600px] overflow-y-auto">
-                <table className="w-full border-collapse text-left text-xs">
-                  <thead>
-                    <tr className="bg-slate-100 dark:bg-slate-800/80 sticky top-0 border-b border-slate-200 dark:border-slate-700 z-10">
-                      <th className="py-2.5 px-3 w-10 text-center font-bold text-slate-400 border-r border-slate-200 dark:border-slate-700">#</th>
-                      {activeTable.rows[0]?.map((header, colIdx) => (
-                        <th
-                          key={colIdx}
-                          className="py-2.5 px-3 font-bold text-slate-800 dark:text-slate-200 border-r border-slate-200 dark:border-slate-700 min-w-[140px]"
-                        >
-                          <input
-                            type="text"
-                            value={header}
-                            onChange={(e) => updateCell(0, colIdx, e.target.value)}
-                            className="bg-transparent font-bold w-full outline-none focus:bg-white dark:focus:bg-slate-900 px-1 py-0.5 rounded"
-                          />
-                        </th>
-                      ))}
-                      <th className="py-2.5 px-2 w-10 text-center font-bold text-slate-400">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {activeTable.rows.slice(1).map((row, rowIdx) => {
-                      const actualRowIdx = rowIdx + 1;
-                      return (
-                        <tr
-                          key={actualRowIdx}
-                          className="border-b border-slate-100 dark:border-slate-800/60 hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors"
-                        >
-                          <td className="py-2 px-3 text-center text-slate-400 font-mono text-[11px] border-r border-slate-100 dark:border-slate-800">
-                            {actualRowIdx}
-                          </td>
-                          {row.map((cellVal, colIdx) => (
-                            <td
+            {/* Grid Toolbar */}
+            {activeTable && (
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-600 dark:text-slate-300 px-1">
+                <span>
+                  Editing <strong><AnimatedNumber value={activeTable.rows.length} /></strong> rows &times; <strong><AnimatedNumber value={activeTable.rows[0]?.length || 0} /></strong> columns. Click any cell to edit.
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={addRow}
+                    className="py-1.5 px-3 bg-white/80 dark:bg-slate-900/80 hover:bg-white dark:hover:bg-slate-800 border border-[var(--pms-border)] text-slate-700 dark:text-slate-200 font-semibold rounded-xl flex items-center gap-1 cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5 text-emerald-600" /> Add Row
+                  </button>
+                  <button
+                    onClick={addColumn}
+                    className="py-1.5 px-3 bg-white/80 dark:bg-slate-900/80 hover:bg-white dark:hover:bg-slate-800 border border-[var(--pms-border)] text-slate-700 dark:text-slate-200 font-semibold rounded-xl flex items-center gap-1 cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5 text-emerald-600" /> Add Column
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Live Editable Spreadsheet Grid */}
+            {activeTable && (
+              <div className="pms-glass-panel rounded-3xl p-4 sm:p-5">
+                <div className="bg-white/75 dark:bg-slate-900/75 rounded-2xl border border-[var(--pms-border)] overflow-hidden">
+                  <div className="overflow-x-auto max-h-[600px] overflow-y-auto">
+                    <table className="w-full border-collapse text-left text-xs">
+                      <thead>
+                        <tr className="bg-slate-100/90 dark:bg-slate-800/90 sticky top-0 border-b border-[var(--pms-border)] z-10">
+                          <th className="py-2.5 px-3 w-10 text-center font-bold text-slate-400 border-r border-[var(--pms-border)]">#</th>
+                          {activeTable.rows[0]?.map((header, colIdx) => (
+                            <th
                               key={colIdx}
-                              className="py-1 px-2 border-r border-slate-100 dark:border-slate-800"
+                              className="py-2.5 px-3 font-bold text-slate-800 dark:text-slate-100 border-r border-[var(--pms-border)] min-w-[140px]"
                             >
                               <input
                                 type="text"
-                                value={cellVal}
-                                onChange={(e) => updateCell(actualRowIdx, colIdx, e.target.value)}
-                                className="bg-transparent w-full outline-none focus:bg-white dark:focus:bg-slate-900 px-1.5 py-1 rounded text-slate-700 dark:text-slate-300 focus:ring-1 focus:ring-emerald-500"
+                                value={header}
+                                onChange={(e) => updateCell(0, colIdx, e.target.value)}
+                                className="bg-transparent font-bold w-full outline-none focus:bg-white dark:focus:bg-slate-900 px-1.5 py-0.5 rounded"
                               />
-                            </td>
+                            </th>
                           ))}
-                          <td className="py-2 px-2 text-center">
-                            <button
-                              onClick={() => deleteRow(actualRowIdx)}
-                              title="Delete row"
-                              className="text-slate-400 hover:text-red-600 transition-colors"
-                            >
-                              <Trash2 className="w-3.5 h-3.5 mx-auto" />
-                            </button>
-                          </td>
+                          <th className="py-2.5 px-2 w-12 text-center font-bold text-slate-400">Del</th>
                         </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                      </thead>
+                      <tbody>
+                        <AnimatePresence initial={false}>
+                          {activeTable.rows.slice(1).map((row, rowIdx) => {
+                            const actualRowIdx = rowIdx + 1;
+                            return (
+                              <motion.tr
+                                key={`${activeTable.id}-r-${actualRowIdx}`}
+                                initial={prefersReduced ? false : { opacity: 0 }}
+                                animate={{ opacity: 1 }}
+                                exit={prefersReduced ? undefined : { opacity: 0 }}
+                                transition={{ duration: 0.15 }}
+                                className="border-b border-[var(--pms-border)] hover:bg-slate-50/70 dark:hover:bg-slate-800/30 transition-colors"
+                              >
+                                <td className="py-2 px-3 text-center text-slate-400 font-mono text-[11px] border-r border-[var(--pms-border)]">
+                                  {actualRowIdx}
+                                </td>
+                                {row.map((cellVal, colIdx) => (
+                                  <td
+                                    key={colIdx}
+                                    className="py-1 px-2 border-r border-[var(--pms-border)]"
+                                  >
+                                    <input
+                                      type="text"
+                                      value={cellVal}
+                                      onChange={(e) => updateCell(actualRowIdx, colIdx, e.target.value)}
+                                      className="bg-transparent w-full outline-none focus:bg-white dark:focus:bg-slate-900 px-1.5 py-1 rounded text-slate-700 dark:text-slate-200 focus:ring-1 focus:ring-emerald-500"
+                                    />
+                                  </td>
+                                ))}
+                                <td className="py-2 px-2 text-center">
+                                  <button
+                                    onClick={() => deleteRow(actualRowIdx)}
+                                    title="Delete row"
+                                    className="text-slate-400 hover:text-rose-600 transition-colors cursor-pointer"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5 mx-auto" />
+                                  </button>
+                                </td>
+                              </motion.tr>
+                            );
+                          })}
+                        </AnimatePresence>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
               </div>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
+            )}
+          </div>
+        )}
+      </PearlStageSwitch>
+    </ToolWorkspaceShell>
   );
 }

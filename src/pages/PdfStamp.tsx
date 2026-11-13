@@ -1,11 +1,15 @@
 import { useState, useRef, useEffect } from 'react';
-import { Stamp, Download, Loader2, Sparkles, CheckCircle2, RotateCw, Calendar, Eye, Layers } from 'lucide-react';
-import { PDFDocument, rgb, StandardFonts, degrees } from 'pdf-lib';
+import { motion, useReducedMotion } from 'motion/react';
+import { Stamp, Download, Loader2, CheckCircle2, Calendar, Eye } from 'lucide-react';
+import { PDFDocument, degrees } from 'pdf-lib';
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
+import { toArrayBufferBytes, useAutoRevokeUrl } from '../lib/blobUrl';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { AnimatedNumber, PearlScanOverlay } from '../components/pearl/PearlMotion';
 
 // Initialize pdf.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
@@ -55,11 +59,7 @@ export default function PdfStamp() {
   const [busy, setBusy] = useState(false);
   const [resultUrl, setResultUrl] = useState<string | null>(null);
 
-  useEffect(() => {
-    return () => {
-      if (resultUrl) URL.revokeObjectURL(resultUrl);
-    };
-  }, [resultUrl]);
+  useAutoRevokeUrl(resultUrl);
 
   // Live Canvas Preview
   const [pageThumbUrl, setPageThumbUrl] = useState<string | null>(null);
@@ -67,6 +67,7 @@ export default function PdfStamp() {
   const [previewH, setPreviewH] = useState(550);
   const [loadingPreview, setLoadingPreview] = useState(false);
   const previewCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const prefersReduced = useReducedMotion();
 
   const handleDrop = async (files: File[]) => {
     if (files[0]) {
@@ -111,7 +112,7 @@ export default function PdfStamp() {
 
   // Redraw stamp over page preview in real time
   useEffect(() => {
-    if (!pageThumbUrl || !previewCanvasRef.current) return;
+    if (!pageThumbUrl || !previewCanvasRef.current || resultUrl) return;
     const canvas = previewCanvasRef.current;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
@@ -123,16 +124,15 @@ export default function PdfStamp() {
       ctx.drawImage(bgImg, 0, 0);
 
       // Draw stamp overlay
-      drawStampOnContext(ctx, previewW, previewH, true);
+      drawStampOnContext(ctx, previewW, previewH);
     };
     bgImg.src = pageThumbUrl;
-  }, [pageThumbUrl, stampText, stampColor, stampOpacity, stampSize, stampRotation, stampStyle, position, addDate, previewW, previewH]);
+  }, [pageThumbUrl, stampText, stampColor, stampOpacity, stampSize, stampRotation, stampStyle, position, addDate, previewW, previewH, resultUrl]);
 
   const drawStampOnContext = (
     ctx: CanvasRenderingContext2D,
     canvasW: number,
-    canvasH: number,
-    isCanvasPreview = true
+    canvasH: number
   ) => {
     ctx.save();
     ctx.globalAlpha = stampOpacity;
@@ -230,13 +230,6 @@ export default function PdfStamp() {
     ctx.restore();
   };
 
-  const hexToRgb = (hex: string) => {
-    const r = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-    return r
-      ? { r: parseInt(r[1], 16) / 255, g: parseInt(r[2], 16) / 255, b: parseInt(r[3], 16) / 255 }
-      : { r: 0.1, g: 0.65, b: 0.3 };
-  };
-
   const applyStampToPdf = async () => {
     if (!file || !stampText.trim()) return;
     setBusy(true);
@@ -244,9 +237,8 @@ export default function PdfStamp() {
     try {
       const buf = await file.arrayBuffer();
       const doc = await PDFDocument.load(buf);
+      const { StandardFonts } = await import('pdf-lib');
       const font = await doc.embedFont(StandardFonts.HelveticaBold);
-      const regularFont = await doc.embedFont(StandardFonts.Helvetica);
-      const { r, g, b } = hexToRgb(stampColor);
       const pages = doc.getPages();
       const dateStr = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
 
@@ -372,8 +364,8 @@ export default function PdfStamp() {
         stampCanvas.height = 0;
       }
 
-      const pdfBytes = await doc.save();
-      const blob = new Blob([pdfBytes as any], { type: 'application/pdf' });
+      const pdfBytes = toArrayBufferBytes(await doc.save());
+      const blob = new Blob([pdfBytes], { type: 'application/pdf' });
       setResultUrl(URL.createObjectURL(blob));
     } catch (e: any) {
       console.error(e);
@@ -384,22 +376,23 @@ export default function PdfStamp() {
   };
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center p-6 md:p-8 max-w-7xl mx-auto w-full">
-      {/* Header */}
-      <div className="text-center mb-8">
-        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 text-xs font-bold tracking-widest uppercase mb-3 border border-emerald-200 dark:border-emerald-800">
-          <Sparkles className="w-3.5 h-3.5" /> Professional Rubber Stamp Generator
-        </div>
-        <h1 className="text-3xl md:text-5xl font-extrabold text-gray-900 dark:text-white tracking-tight mb-3">
-          Add Stamp to PDF Document
-        </h1>
-        <p className="text-lg text-gray-600 dark:text-slate-400 max-w-2xl mx-auto">
-          Stamp documents with APPROVED, CONFIDENTIAL, or custom text. Inspect real-time live preview before saving.
-        </p>
-      </div>
-
+    <ToolWorkspaceShell
+      title="Add Stamp to PDF Document"
+      subtitle="Stamp documents with APPROVED, CONFIDENTIAL, or custom text. Inspect real-time live preview before saving."
+      categoryLabel="Professional Rubber Stamp Studio"
+      icon={Stamp}
+      microVariant="sign"
+      tone="emerald"
+      trustNote="100% browser-side stamping · Live interactive canvas preview"
+    >
       {!file ? (
-        <div className="w-full max-w-4xl">
+        <motion.div
+          key="stamp-upload"
+          initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.26 }}
+          className="w-full max-w-3xl mx-auto"
+        >
           <FileDropzone
             onDrop={handleDrop}
             multiple={false}
@@ -407,33 +400,53 @@ export default function PdfStamp() {
             title="Select PDF file to stamp"
             subtitle="or drop document here"
           />
-        </div>
+        </motion.div>
       ) : resultUrl ? (
         /* Results View */
-        <div className="w-full max-w-2xl bg-white dark:bg-slate-900 rounded-2xl shadow-sm border border-gray-200 dark:border-slate-800 p-8 text-center space-y-6">
-          <div className="p-8 bg-emerald-50 dark:bg-emerald-950/30 rounded-2xl border border-emerald-200 dark:border-emerald-800">
-            <div className="w-16 h-16 bg-emerald-100 dark:bg-emerald-900/50 text-emerald-600 dark:text-emerald-400 rounded-2xl flex items-center justify-center mx-auto mb-4">
-              <CheckCircle2 className="w-8 h-8" />
-            </div>
-            <h3 className="text-2xl font-bold text-emerald-900 dark:text-emerald-200 mb-2">
+        <motion.div
+          key="stamp-result"
+          initial={prefersReduced ? false : { opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.28 }}
+          className="w-full max-w-2xl mx-auto pms-glass-panel rounded-3xl border border-emerald-200/80 dark:border-emerald-800/70 p-8 text-center space-y-6"
+        >
+          <motion.div
+            initial={prefersReduced ? false : { scale: 0.45, rotate: -10, opacity: 0 }}
+            animate={{ scale: 1, rotate: 0, opacity: 1 }}
+            transition={{ type: 'spring', stiffness: 360, damping: 18 }}
+            className="w-20 h-20 bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 rounded-full flex items-center justify-center mx-auto shadow-inner"
+          >
+            <CheckCircle2 className="w-10 h-10" />
+          </motion.div>
+
+          <div>
+            <span className="inline-block px-3.5 py-1 bg-[var(--pms-soft-mint)] text-emerald-700 dark:text-emerald-300 rounded-full text-xs font-bold uppercase tracking-wider mb-2 border border-[var(--pms-border)]">
+              Stamp Sealed
+            </span>
+            <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white mb-1">
               Stamp Applied Successfully!
-            </h3>
-            <p className="text-sm text-emerald-700 dark:text-emerald-400 mb-6">
+            </h2>
+            <p className="text-sm text-slate-600 dark:text-slate-400">
               Applied &quot;{stampText}&quot; to {pageTarget === 'all' ? 'all pages' : pageTarget === 'first' ? 'first page' : 'last page'}.
             </p>
-            <a
-              href={resultUrl}
-              download={`stamped_${file.name}`}
-              className="inline-flex items-center justify-center gap-2 px-8 py-4 bg-emerald-600 hover:bg-emerald-700 text-white text-lg font-bold rounded-xl shadow-lg transition-all"
-            >
-              <Download className="w-5 h-5" /> Download Stamped PDF
-            </a>
           </div>
 
-          <div className="flex justify-center gap-4">
+          <div className="flex flex-col sm:flex-row gap-3 pt-1">
+            <motion.a
+              whileHover={prefersReduced ? undefined : { scale: 1.015 }}
+              whileTap={prefersReduced ? undefined : { scale: 0.985 }}
+              href={resultUrl}
+              download={`stamped_${file.name}`}
+              className="flex-1 pms-btn-primary py-4 px-6 font-bold rounded-2xl flex items-center justify-center gap-2 text-base"
+            >
+              <Download className="w-5 h-5" /> Download Stamped PDF
+            </motion.a>
+          </div>
+
+          <div className="flex justify-center gap-3 pt-1">
             <button
               onClick={() => setResultUrl(null)}
-              className="px-6 py-3 bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700 text-gray-700 dark:text-slate-300 font-semibold rounded-xl transition-all"
+              className="px-5 py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-semibold rounded-xl transition-colors text-sm cursor-pointer"
             >
               Adjust Stamp
             </button>
@@ -442,30 +455,41 @@ export default function PdfStamp() {
                 setFile(null);
                 setResultUrl(null);
               }}
-              className="px-6 py-3 bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700 text-gray-700 dark:text-slate-300 font-semibold rounded-xl transition-all"
+              className="px-5 py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-semibold rounded-xl transition-colors text-sm cursor-pointer"
             >
               Stamp Another PDF
             </button>
           </div>
-        </div>
+        </motion.div>
       ) : (
-        /* Workspace with Live Canvas Preview */
-        <div className="w-full max-w-6xl grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+        /* Workspace with Live Canvas Preview (synchronous motion.div so previewCanvasRef is always mounted) */
+        <motion.div
+          key="stamp-workspace"
+          initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.26 }}
+          className="w-full grid grid-cols-1 lg:grid-cols-12 gap-8 items-start"
+        >
           {/* Controls Panel (7 Cols) */}
-          <div className="lg:col-span-7 bg-white dark:bg-slate-900 rounded-2xl border border-gray-200 dark:border-slate-800 p-6 shadow-sm space-y-6">
-            <div className="flex items-center justify-between pb-4 border-b border-gray-100 dark:border-slate-800">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 rounded-xl flex items-center justify-center shrink-0">
+          <div className="relative lg:col-span-7 pms-glass-panel rounded-3xl p-6 space-y-6 overflow-hidden">
+            <PearlScanOverlay active={busy} label="Rendering high-DPI stamp onto PDF pages…" />
+
+            <div className="flex items-center justify-between pb-4 border-b border-[var(--pms-border)]">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-11 h-11 bg-[var(--pms-soft-mint)] text-emerald-600 dark:text-emerald-400 rounded-xl flex items-center justify-center shrink-0">
                   <Stamp className="w-5 h-5" />
                 </div>
-                <div>
-                  <h3 className="font-bold text-gray-900 dark:text-white truncate max-w-xs">{file.name}</h3>
-                  <p className="text-xs text-gray-500">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
+                <div className="min-w-0">
+                  <h3 className="font-bold text-slate-900 dark:text-white truncate max-w-xs">{file.name}</h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    <AnimatedNumber value={file.size / 1024 / 1024} decimals={2} suffix=" MB" />
+                  </p>
                 </div>
               </div>
               <button
                 onClick={() => setFile(null)}
-                className="text-xs font-semibold text-gray-500 hover:text-gray-700 dark:hover:text-slate-300"
+                disabled={busy}
+                className="text-xs font-semibold text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white px-3 py-1.5 rounded-xl border border-[var(--pms-border)] bg-white/70 dark:bg-slate-800/70 transition-colors cursor-pointer disabled:opacity-50"
               >
                 Change File
               </button>
@@ -473,26 +497,28 @@ export default function PdfStamp() {
 
             {/* Quick Presets */}
             <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-slate-400 mb-2">
+              <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2">
                 Quick Presets
               </label>
-              <div className="grid grid-cols-4 gap-2">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                 {PRESETS.map((p) => (
-                  <button
+                  <motion.button
                     key={p.text}
+                    type="button"
+                    whileTap={prefersReduced ? undefined : { scale: 0.97 }}
                     onClick={() => {
                       setStampText(p.text);
                       setStampColor(p.color);
                     }}
-                    className={`py-2 px-1 text-xs font-bold rounded-xl border transition-all ${
+                    className={`py-2 px-2 text-xs font-bold rounded-xl border transition-all cursor-pointer ${
                       stampText === p.text
                         ? 'text-white shadow-sm'
-                        : 'border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-800 text-gray-700 dark:text-slate-300 hover:border-gray-400'
+                        : 'border-[var(--pms-border)] bg-white/75 dark:bg-slate-800/70 text-slate-700 dark:text-slate-300 hover:border-slate-400 dark:hover:border-slate-600'
                     }`}
                     style={stampText === p.text ? { backgroundColor: p.color, borderColor: p.color } : {}}
                   >
                     {p.text}
-                  </button>
+                  </motion.button>
                 ))}
               </div>
             </div>
@@ -500,29 +526,29 @@ export default function PdfStamp() {
             {/* Custom Text & Color */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div className="sm:col-span-2">
-                <label className="block text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-slate-400 mb-2">
+                <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2">
                   Stamp Text
                 </label>
                 <input
                   type="text"
                   value={stampText}
                   onChange={(e) => setStampText(e.target.value)}
-                  className="w-full px-4 py-2.5 rounded-xl border border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-800 text-gray-900 dark:text-white font-bold tracking-wide focus:outline-none focus:border-emerald-500"
+                  className="w-full px-4 py-2.5 rounded-xl border border-[var(--pms-border)] bg-white/80 dark:bg-slate-800/80 text-slate-900 dark:text-white font-bold tracking-wide focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   placeholder="e.g. APPROVED"
                 />
               </div>
               <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-slate-400 mb-2">
+                <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2">
                   Color
                 </label>
-                <div className="flex items-center gap-2 p-1.5 rounded-xl border border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-800">
+                <div className="flex items-center gap-2 p-1.5 rounded-xl border border-[var(--pms-border)] bg-white/80 dark:bg-slate-800/80">
                   <input
                     type="color"
                     value={stampColor}
                     onChange={(e) => setStampColor(e.target.value)}
                     className="w-8 h-8 rounded-lg cursor-pointer border-0 p-0 bg-transparent"
                   />
-                  <span className="text-xs font-mono font-bold text-gray-700 dark:text-slate-300 uppercase">
+                  <span className="text-xs font-mono font-bold text-slate-700 dark:text-slate-300 uppercase">
                     {stampColor}
                   </span>
                 </div>
@@ -532,18 +558,19 @@ export default function PdfStamp() {
             {/* Stamp Style & Position */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-slate-400 mb-2">
+                <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2">
                   Stamp Border Style
                 </label>
                 <div className="grid grid-cols-3 gap-1.5">
                   {(['rubber_box', 'clean_banner', 'simple'] as StampStyle[]).map((st) => (
                     <button
                       key={st}
+                      type="button"
                       onClick={() => setStampStyle(st)}
-                      className={`py-2 text-[11px] font-bold rounded-xl capitalize border transition-all ${
+                      className={`py-2 text-[11px] font-bold rounded-xl capitalize border transition-all cursor-pointer ${
                         stampStyle === st
-                          ? 'bg-emerald-600 border-emerald-600 text-white'
-                          : 'border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-800 text-gray-700 dark:text-slate-300'
+                          ? 'bg-emerald-600 border-emerald-600 text-white shadow-xs'
+                          : 'border-[var(--pms-border)] bg-white/75 dark:bg-slate-800/70 text-slate-700 dark:text-slate-300'
                       }`}
                     >
                       {st === 'rubber_box' ? 'Box Seal' : st === 'clean_banner' ? 'Solid Banner' : 'Simple'}
@@ -553,18 +580,19 @@ export default function PdfStamp() {
               </div>
 
               <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-slate-400 mb-2">
+                <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2">
                   Position
                 </label>
                 <div className="grid grid-cols-3 gap-1.5">
                   {(['center', 'top_right', 'bottom_right'] as StampPosition[]).map((pos) => (
                     <button
                       key={pos}
+                      type="button"
                       onClick={() => setPosition(pos)}
-                      className={`py-2 text-[11px] font-bold rounded-xl capitalize border transition-all ${
+                      className={`py-2 text-[11px] font-bold rounded-xl capitalize border transition-all cursor-pointer ${
                         position === pos
-                          ? 'bg-emerald-600 border-emerald-600 text-white'
-                          : 'border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-800 text-gray-700 dark:text-slate-300'
+                          ? 'bg-emerald-600 border-emerald-600 text-white shadow-xs'
+                          : 'border-[var(--pms-border)] bg-white/75 dark:bg-slate-800/70 text-slate-700 dark:text-slate-300'
                       }`}
                     >
                       {pos === 'center' ? 'Center' : pos === 'top_right' ? 'Top Right' : 'Bottom Right'}
@@ -576,10 +604,12 @@ export default function PdfStamp() {
 
             {/* Sliders: Size, Opacity, Rotation */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
-              <div>
-                <div className="flex justify-between text-xs font-bold mb-1.5 text-gray-600 dark:text-slate-400">
+              <div className="p-3 rounded-2xl bg-white/60 dark:bg-slate-800/50 border border-[var(--pms-border)]">
+                <div className="flex justify-between text-xs font-bold mb-1.5 text-slate-600 dark:text-slate-300">
                   <span>Size</span>
-                  <span>{stampSize}px</span>
+                  <span className="px-1.5 py-0.5 rounded bg-[var(--pms-soft-mint)] text-emerald-700 dark:text-emerald-300">
+                    {stampSize}px
+                  </span>
                 </div>
                 <input
                   type="range"
@@ -591,10 +621,12 @@ export default function PdfStamp() {
                 />
               </div>
 
-              <div>
-                <div className="flex justify-between text-xs font-bold mb-1.5 text-gray-600 dark:text-slate-400">
+              <div className="p-3 rounded-2xl bg-white/60 dark:bg-slate-800/50 border border-[var(--pms-border)]">
+                <div className="flex justify-between text-xs font-bold mb-1.5 text-slate-600 dark:text-slate-300">
                   <span>Opacity</span>
-                  <span>{Math.round(stampOpacity * 100)}%</span>
+                  <span className="px-1.5 py-0.5 rounded bg-[var(--pms-soft-mint)] text-emerald-700 dark:text-emerald-300">
+                    {Math.round(stampOpacity * 100)}%
+                  </span>
                 </div>
                 <input
                   type="range"
@@ -607,10 +639,12 @@ export default function PdfStamp() {
                 />
               </div>
 
-              <div>
-                <div className="flex justify-between text-xs font-bold mb-1.5 text-gray-600 dark:text-slate-400">
+              <div className="p-3 rounded-2xl bg-white/60 dark:bg-slate-800/50 border border-[var(--pms-border)]">
+                <div className="flex justify-between text-xs font-bold mb-1.5 text-slate-600 dark:text-slate-300">
                   <span>Rotation</span>
-                  <span>{stampRotation}°</span>
+                  <span className="px-1.5 py-0.5 rounded bg-[var(--pms-soft-mint)] text-emerald-700 dark:text-emerald-300">
+                    {stampRotation}°
+                  </span>
                 </div>
                 <input
                   type="range"
@@ -624,27 +658,28 @@ export default function PdfStamp() {
             </div>
 
             {/* Page Target & Date Checkbox */}
-            <div className="flex flex-wrap items-center justify-between gap-4 pt-2 border-t border-gray-100 dark:border-slate-800">
-              <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-gray-700 dark:text-slate-300">
+            <div className="flex flex-wrap items-center justify-between gap-4 pt-3 border-t border-[var(--pms-border)]">
+              <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-slate-700 dark:text-slate-300">
                 <input
                   type="checkbox"
                   checked={addDate}
                   onChange={(e) => setAddDate(e.target.checked)}
                   className="w-4 h-4 accent-emerald-600 rounded"
                 />
-                <Calendar className="w-3.5 h-3.5" /> Include Current Date Stamp
+                <Calendar className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" /> Include Current Date Stamp
               </label>
 
               <div className="flex items-center gap-2 text-xs">
-                <span className="font-bold text-gray-500">Apply to:</span>
+                <span className="font-bold text-slate-500 dark:text-slate-400">Apply to:</span>
                 {(['all', 'first', 'last'] as PageTarget[]).map((tgt) => (
                   <button
                     key={tgt}
+                    type="button"
                     onClick={() => setPageTarget(tgt)}
-                    className={`px-2.5 py-1 rounded-lg font-bold capitalize transition-all ${
+                    className={`px-2.5 py-1 rounded-lg font-bold capitalize transition-all cursor-pointer ${
                       pageTarget === tgt
-                        ? 'bg-emerald-600 text-white'
-                        : 'bg-gray-100 dark:bg-slate-800 text-gray-600 dark:text-slate-400'
+                        ? 'bg-emerald-600 text-white shadow-xs'
+                        : 'bg-white/80 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-[var(--pms-border)]'
                     }`}
                   >
                     {tgt === 'all' ? 'All Pages' : tgt === 'first' ? '1st Page' : 'Last Page'}
@@ -654,46 +689,48 @@ export default function PdfStamp() {
             </div>
 
             {/* Apply Button */}
-            <button
+            <motion.button
+              whileHover={prefersReduced || busy || !stampText.trim() ? undefined : { scale: 1.01 }}
+              whileTap={prefersReduced || busy || !stampText.trim() ? undefined : { scale: 0.985 }}
               onClick={applyStampToPdf}
               disabled={busy || !stampText.trim()}
-              className="w-full py-4 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+              className="w-full pms-btn-primary py-4 font-bold rounded-2xl flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
             >
               {busy ? <Loader2 className="w-5 h-5 animate-spin" /> : <Stamp className="w-5 h-5" />}
               {busy ? 'Applying Stamp...' : 'Apply Stamp & Download PDF'}
-            </button>
+            </motion.button>
           </div>
 
           {/* Live Document Preview Panel (5 Cols) */}
-          <div className="lg:col-span-5 bg-white dark:bg-slate-900 rounded-2xl border border-gray-200 dark:border-slate-800 p-6 shadow-sm flex flex-col items-center">
+          <div className="lg:col-span-5 pms-glass-panel rounded-3xl p-6 flex flex-col items-center">
             <div className="flex items-center justify-between w-full mb-4">
-              <span className="text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-slate-400 flex items-center gap-1.5">
-                <Eye className="w-4 h-4" /> Live Document Preview (Page 1)
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300 flex items-center gap-1.5">
+                <Eye className="w-4 h-4 text-emerald-600 dark:text-emerald-400" /> Live Document Preview (Page 1)
               </span>
-              <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800">
+              <span className="text-[10px] text-emerald-700 dark:text-emerald-300 font-bold px-2.5 py-0.5 rounded-full bg-[var(--pms-soft-mint)] border border-[var(--pms-border)]">
                 Interactive
               </span>
             </div>
 
-            <div className="relative bg-gray-100 dark:bg-slate-950 p-2 rounded-xl shadow-inner border border-gray-200 dark:border-slate-800 flex items-center justify-center overflow-hidden min-h-[350px] w-full">
+            <div className="relative bg-slate-100/80 dark:bg-slate-950/70 p-3 rounded-2xl shadow-inner border border-[var(--pms-border)] flex items-center justify-center overflow-hidden min-h-[350px] w-full">
               {loadingPreview ? (
-                <div className="flex flex-col items-center gap-2 text-gray-500">
-                  <Loader2 className="w-8 h-8 animate-spin" />
+                <div className="flex flex-col items-center gap-2 text-slate-500 dark:text-slate-400">
+                  <Loader2 className="w-8 h-8 animate-spin text-emerald-600 dark:text-emerald-400" />
                   <span className="text-xs">Generating preview...</span>
                 </div>
               ) : (
                 <canvas
                   ref={previewCanvasRef}
-                  className="max-w-full max-h-[500px] object-contain shadow-lg rounded"
+                  className="max-w-full max-h-[500px] object-contain shadow-lg rounded bg-white"
                 />
               )}
             </div>
-            <p className="text-[11px] text-gray-400 dark:text-slate-500 mt-3 text-center">
+            <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-3 text-center">
               The stamp appears on document pages exactly as displayed in this preview.
             </p>
           </div>
-        </div>
+        </motion.div>
       )}
-    </div>
+    </ToolWorkspaceShell>
   );
 }

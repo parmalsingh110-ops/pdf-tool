@@ -1,17 +1,12 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Download,
   Stamp,
-  Sliders,
-  Sparkles,
-  Upload,
-  CheckCircle2,
   Smartphone,
   Eye,
-  RotateCw,
   FileText,
-  Palette,
 } from 'lucide-react';
+import { motion, AnimatePresence, useReducedMotion } from 'motion/react';
 import { PDFDocument } from 'pdf-lib';
 import * as pdfjsLib from 'pdfjs-dist';
 import '../lib/pdfWorker';
@@ -19,11 +14,16 @@ import { useSEO } from '../hooks/useSEO';
 import { usePageSEO } from '../lib/usePageSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
 import ShareQrModal from '../components/ShareQrModal';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { AnimatedNumber, PearlScanOverlay } from '../components/pearl/PearlMotion';
+import { toArrayBufferBytes } from '../lib/blobUrl';
 import { dataUrlToBytes, downloadBlob } from '../lib/utils';
 
 type StampShape = 'round_seal' | 'rectangle_box' | 'oval_seal';
 
 export default function RubberStampMaker() {
+  const prefersReduced = useReducedMotion();
+
   useSEO(
     'Digital Rubber Stamp & Round Seal Maker Online — Free Transparent PNG & PDF Stamping',
     'Design custom official circular rubber stamps (Gol Mohar) and rectangular verified stamps online. Choose blue, red or green ink with realistic grunge texture. Download transparent PNG or stamp on PDF.'
@@ -50,14 +50,14 @@ export default function RubberStampMaker() {
   const [inkColor, setInkColor] = useState('#1e40af'); // Classic Blue
   const [distressLevel, setDistressLevel] = useState(35); // 0-100 grunge
   const [stampAngle, setStampAngle] = useState(-3); // -15 to +15 deg tilt
-  const [inkOpacity, setInkOpacity] = useState(90); // 50-100%
+  const [inkOpacity] = useState(90); // 50-100%
 
   // Stamp on PDF Mode
   const [attachedPdf, setAttachedPdf] = useState<File | null>(null);
   const [pdfBytes, setPdfBytes] = useState<Uint8Array | null>(null);
   const [stampPosX, setStampPosX] = useState(70); // % from left
   const [stampPosY, setStampPosY] = useState(75); // % from top
-  const [stampSize, setStampSize] = useState(140); // px size on PDF
+  const [stampSize] = useState(140); // px size on PDF
   const [pdfPreviewUrl, setPdfPreviewUrl] = useState<string | null>(null);
   const [previewTab, setPreviewTab] = useState<'stamp' | 'document'>('stamp');
 
@@ -303,7 +303,7 @@ export default function RubberStampMaker() {
       });
 
       const outBytes = await pdfDoc.save();
-      const blob = new Blob([outBytes as any], { type: 'application/pdf' });
+      const blob = new Blob([toArrayBufferBytes(outBytes)], { type: 'application/pdf' });
       downloadBlob(blob, `stamped-document-${Date.now()}.pdf`);
     } catch (err) {
       console.error('Error stamping PDF:', err);
@@ -313,30 +313,28 @@ export default function RubberStampMaker() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 py-10 px-4 sm:px-6">
-      <div className="max-w-6xl mx-auto space-y-8">
-        {/* Header */}
-        <div className="text-center space-y-3">
-          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 text-xs font-bold uppercase tracking-wider">
-            <Stamp className="w-4 h-4" /> E-Mitra & Office Special
-          </div>
-          <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight">
-            Digital Rubber Stamp & Round Seal Maker
-          </h1>
-          <p className="text-sm sm:text-base text-slate-500 dark:text-slate-400 max-w-2xl mx-auto">
-            Design official circular rubber stamps (Gol Mohar) and rectangular verified seals.
-            Download as transparent 300 DPI PNG or stamp directly onto your PDF documents.
-          </p>
-        </div>
-
+    <ToolWorkspaceShell
+      title="Digital Rubber Stamp & Round Seal Maker"
+      subtitle="Design official circular rubber stamps (Gol Mohar) and rectangular verified seals. Download as transparent 300 DPI PNG or stamp directly onto your PDF documents."
+      categoryLabel="E-Mitra & Office Special"
+      icon={Stamp}
+      microVariant="sign"
+      tone="blue"
+      trustNote="300 DPI transparent PNG & instant PDF stamper · Local canvas"
+    >
+      <div className="space-y-8">
         {/* Editor Layout */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
           {/* Left Controls */}
-          <div className="lg:col-span-6 space-y-5 bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm">
+          <motion.div
+            initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="lg:col-span-6 space-y-5 pms-glass-panel p-6 rounded-3xl"
+          >
             {/* Stamp Shape */}
             <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">
-                Stamp Shape & Format
+              <label className="block text-xs font-bold uppercase tracking-wider text-[var(--pms-muted)] mb-2">
+                Stamp Shape &amp; Format
               </label>
               <div className="grid grid-cols-3 gap-2 text-xs">
                 {[
@@ -347,10 +345,10 @@ export default function RubberStampMaker() {
                   <button
                     key={s.id}
                     onClick={() => setShape(s.id as StampShape)}
-                    className={`py-2 px-2.5 rounded-xl border text-xs font-bold transition text-center ${
+                    className={`py-2 px-2.5 rounded-xl border text-xs font-bold transition text-center cursor-pointer ${
                       shape === s.id
                         ? 'border-blue-500 bg-blue-600 text-white shadow-sm'
-                        : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800'
+                        : 'border-[var(--pms-border)] bg-[var(--pms-white)] text-[var(--pms-ink)] hover:border-[var(--pms-border-strong)]'
                     }`}
                   >
                     {s.label}
@@ -361,10 +359,10 @@ export default function RubberStampMaker() {
 
             {/* Ink Color Picker */}
             <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1.5">
+              <label className="block text-xs font-bold uppercase tracking-wider text-[var(--pms-muted)] mb-1.5">
                 Rubber Stamp Ink Color
               </label>
-              <div className="flex gap-2">
+              <div className="flex gap-2.5">
                 {[
                   { name: 'Classic Blue', hex: '#1e40af' },
                   { name: 'Royal Violet', hex: '#581c87' },
@@ -377,7 +375,7 @@ export default function RubberStampMaker() {
                     onClick={() => setInkColor(c.hex)}
                     style={{ backgroundColor: c.hex }}
                     title={c.name}
-                    className={`w-8 h-8 rounded-full border-2 transition-transform ${
+                    className={`w-8 h-8 rounded-full border-2 transition-transform cursor-pointer ${
                       inkColor === c.hex ? 'scale-110 border-white ring-2 ring-blue-500' : 'border-transparent'
                     }`}
                   />
@@ -386,63 +384,63 @@ export default function RubberStampMaker() {
             </div>
 
             {/* Stamp Text Customization */}
-            <div className="space-y-3 pt-2 border-t border-slate-100 dark:border-slate-800">
+            <div className="space-y-3 pt-3 border-t border-[var(--pms-border)]">
               <div>
-                <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                <label className="block text-[11px] font-semibold text-[var(--pms-muted)] mb-1">
                   Top Curved / Header Text (Shop Name / Authority)
                 </label>
                 <input
                   type="text"
                   value={topText}
                   onChange={(e) => setTopText(e.target.value)}
-                  className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold"
+                  className="w-full px-3 py-2 text-xs rounded-xl border border-[var(--pms-border)] bg-[var(--pms-white)] text-[var(--pms-ink)] font-bold focus:outline-none focus:border-blue-500"
                 />
               </div>
 
               <div>
-                <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                <label className="block text-[11px] font-semibold text-[var(--pms-muted)] mb-1">
                   Center Main Text (Status / Signatory)
                 </label>
                 <input
                   type="text"
                   value={centerText}
                   onChange={(e) => setCenterText(e.target.value)}
-                  className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-extrabold text-blue-600 dark:text-blue-400"
+                  className="w-full px-3 py-2 text-xs rounded-xl border border-[var(--pms-border)] bg-[var(--pms-white)] font-extrabold text-[var(--pms-blue)] focus:outline-none focus:border-blue-500"
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                  <label className="block text-[11px] font-semibold text-[var(--pms-muted)] mb-1">
                     Bottom Text (City / State)
                   </label>
                   <input
                     type="text"
                     value={bottomText}
                     onChange={(e) => setBottomText(e.target.value)}
-                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                    className="w-full px-3 py-2 text-xs rounded-xl border border-[var(--pms-border)] bg-[var(--pms-white)] text-[var(--pms-ink)] focus:outline-none focus:border-blue-500"
                   />
                 </div>
                 <div>
-                  <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                  <label className="block text-[11px] font-semibold text-[var(--pms-muted)] mb-1">
                     Stamp Date
                   </label>
                   <input
                     type="text"
                     value={stampDate}
                     onChange={(e) => setStampDate(e.target.value)}
-                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-mono"
+                    className="w-full px-3 py-2 text-xs rounded-xl border border-[var(--pms-border)] bg-[var(--pms-white)] text-[var(--pms-ink)] font-mono focus:outline-none focus:border-blue-500"
                   />
                 </div>
               </div>
             </div>
 
             {/* Realism Sliders */}
-            <div className="p-3.5 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-3 text-xs">
+            <div className="p-3.5 bg-[var(--pms-white)] rounded-2xl border border-[var(--pms-border)] space-y-3 text-xs">
               <div>
-                <div className="flex justify-between font-semibold mb-1 text-slate-700 dark:text-slate-300">
+                <div className="flex justify-between font-semibold mb-1 text-[var(--pms-ink)]">
                   <span>Realistic Rubber Grunge Texture</span>
-                  <span>{distressLevel}%</span>
+                  <span className="font-mono text-[var(--pms-blue)]">{distressLevel}%</span>
                 </div>
                 <input
                   type="range"
@@ -455,9 +453,9 @@ export default function RubberStampMaker() {
               </div>
 
               <div>
-                <div className="flex justify-between font-semibold mb-1 text-slate-700 dark:text-slate-300">
+                <div className="flex justify-between font-semibold mb-1 text-[var(--pms-ink)]">
                   <span>Natural Hand Tilt Angle</span>
-                  <span>{stampAngle}°</span>
+                  <span className="font-mono text-[var(--pms-blue)]">{stampAngle}°</span>
                 </div>
                 <input
                   type="range"
@@ -471,47 +469,57 @@ export default function RubberStampMaker() {
             </div>
 
             {/* Optional: Stamp on PDF */}
-            <div className="p-4 bg-blue-50/60 dark:bg-blue-950/30 rounded-2xl border border-blue-200 dark:border-blue-800 space-y-2">
-              <span className="text-xs font-bold text-blue-900 dark:text-blue-300 flex items-center gap-1.5">
-                <FileText className="w-4 h-4 text-blue-600" /> Optional: Upload PDF to Stamp Directly
+            <div
+              className="p-4 rounded-2xl border border-[var(--pms-border)] space-y-2"
+              style={{ background: 'var(--pms-soft-blue)' }}
+            >
+              <span className="text-xs font-bold text-[var(--pms-ink)] flex items-center gap-1.5">
+                <FileText className="w-4 h-4 text-[var(--pms-blue)]" /> Optional: Upload PDF to Stamp Directly
               </span>
               <input
                 type="file"
                 accept=".pdf"
                 onChange={handlePdfUpload}
-                className="text-xs text-slate-500 file:mr-2 file:py-1 file:px-2.5 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-blue-600 file:text-white hover:file:bg-blue-700 cursor-pointer"
+                className="text-xs text-[var(--pms-muted)] file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-blue-600 file:text-white hover:file:bg-blue-700 cursor-pointer"
               />
-              {attachedPdf && (
-                <div className="space-y-2 pt-2">
-                  <div className="flex justify-between text-[11px] font-semibold text-blue-700 dark:text-blue-300">
-                    <span>Horizontal Position: {stampPosX}%</span>
-                    <span>Vertical Position: {stampPosY}%</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="10"
-                    max="90"
-                    value={stampPosX}
-                    onChange={(e) => setStampPosX(Number(e.target.value))}
-                    className="w-full accent-blue-600"
-                  />
-                  <input
-                    type="range"
-                    min="10"
-                    max="90"
-                    value={stampPosY}
-                    onChange={(e) => setStampPosY(Number(e.target.value))}
-                    className="w-full accent-blue-600"
-                  />
-                </div>
-              )}
+              <AnimatePresence>
+                {attachedPdf && (
+                  <motion.div
+                    initial={prefersReduced ? false : { opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={prefersReduced ? undefined : { opacity: 0, height: 0 }}
+                    className="space-y-2 pt-2"
+                  >
+                    <div className="flex justify-between text-[11px] font-semibold text-[var(--pms-ink)]">
+                      <span>Horizontal Position: {stampPosX}%</span>
+                      <span>Vertical Position: {stampPosY}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="10"
+                      max="90"
+                      value={stampPosX}
+                      onChange={(e) => setStampPosX(Number(e.target.value))}
+                      className="w-full accent-blue-600"
+                    />
+                    <input
+                      type="range"
+                      min="10"
+                      max="90"
+                      value={stampPosY}
+                      onChange={(e) => setStampPosY(Number(e.target.value))}
+                      className="w-full accent-blue-600"
+                    />
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
 
             {/* Export Buttons */}
-            <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-2">
+            <div className="pt-3 border-t border-[var(--pms-border)] space-y-2">
               <button
                 onClick={handleDownloadPng}
-                className="w-full flex items-center justify-center gap-2 py-3.5 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-sm shadow-md transition"
+                className="pms-btn-primary w-full flex items-center justify-center gap-2 py-3.5 px-4 rounded-xl font-bold text-sm transition cursor-pointer"
               >
                 <Download className="w-4 h-4" /> Download Transparent PNG Stamp (300 DPI)
               </button>
@@ -519,62 +527,77 @@ export default function RubberStampMaker() {
                 <button
                   onClick={handleDownloadStampedPdf}
                   disabled={isProcessing}
-                  className="w-full flex items-center justify-center gap-2 py-3 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-sm shadow-md transition disabled:opacity-50"
+                  className="w-full flex items-center justify-center gap-2 py-3 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-sm shadow-md transition disabled:opacity-50 cursor-pointer"
                 >
                   <Download className="w-4 h-4" /> Download Stamped PDF Document
                 </button>
               )}
               <button
                 onClick={() => setShowQrModal(true)}
-                className="w-full flex items-center justify-center gap-1.5 py-2 px-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-xl font-semibold text-xs transition"
+                className="w-full flex items-center justify-center gap-1.5 py-2.5 px-3 bg-[var(--pms-white)] border border-[var(--pms-border)] hover:border-[var(--pms-border-strong)] text-[var(--pms-ink)] rounded-xl font-semibold text-xs transition cursor-pointer"
               >
                 <Smartphone className="w-3.5 h-3.5" /> Send Stamp to Mobile Phone
               </button>
             </div>
-          </div>
+          </motion.div>
 
           {/* Right Live Preview */}
-          <div className="lg:col-span-6 bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col items-center">
-            <div className="w-full flex items-center justify-between mb-4">
-              <span className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-                <Eye className="w-4 h-4 text-blue-500" /> Live Stamp & Document Preview
+          <motion.div
+            initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.06 }}
+            className="lg:col-span-6 pms-glass-panel p-6 rounded-3xl flex flex-col items-center relative overflow-hidden"
+          >
+            <PearlScanOverlay active={isProcessing} label="Embedding stamp onto PDF document..." />
+
+            <div className="w-full flex items-center justify-between mb-4 flex-wrap gap-2">
+              <span className="text-xs font-bold uppercase tracking-wider text-[var(--pms-muted)] flex items-center gap-1.5">
+                <Eye className="w-4 h-4 text-[var(--pms-blue)]" /> Live Stamp &amp; Document Preview
               </span>
-              {attachedPdf && pdfPreviewUrl && (
-                <div className="inline-flex p-0.5 rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs">
-                  <button
-                    type="button"
-                    onClick={() => setPreviewTab('stamp')}
-                    className={`px-2.5 py-1 rounded-md font-semibold transition ${
-                      previewTab === 'stamp'
-                        ? 'bg-white dark:bg-slate-900 text-blue-600 shadow-xs'
-                        : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
-                    }`}
-                  >
-                    Stamp Only
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPreviewTab('document')}
-                    className={`px-2.5 py-1 rounded-md font-semibold transition ${
-                      previewTab === 'document'
-                        ? 'bg-white dark:bg-slate-900 text-emerald-600 shadow-xs'
-                        : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
-                    }`}
-                  >
-                    Stamped Document
-                  </button>
-                </div>
-              )}
+              <div className="flex items-center gap-2">
+                <span
+                  className="text-[11px] font-bold px-2.5 py-1 rounded-full text-[var(--pms-ink)] border border-[var(--pms-border)]"
+                  style={{ background: 'var(--pms-soft-lavender)' }}
+                >
+                  <AnimatedNumber value={300} suffix=" DPI PNG" />
+                </span>
+                {attachedPdf && pdfPreviewUrl && (
+                  <div className="inline-flex p-0.5 rounded-lg bg-[var(--pms-white)] border border-[var(--pms-border)] text-xs">
+                    <button
+                      type="button"
+                      onClick={() => setPreviewTab('stamp')}
+                      className={`px-2.5 py-1 rounded-md font-semibold transition cursor-pointer ${
+                        previewTab === 'stamp'
+                          ? 'bg-[var(--pms-soft-blue)] text-[var(--pms-ink)] shadow-xs'
+                          : 'text-[var(--pms-muted)] hover:text-[var(--pms-ink)]'
+                      }`}
+                    >
+                      Stamp Only
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPreviewTab('document')}
+                      className={`px-2.5 py-1 rounded-md font-semibold transition cursor-pointer ${
+                        previewTab === 'document'
+                          ? 'bg-[var(--pms-soft-mint)] text-[var(--pms-ink)] shadow-xs'
+                          : 'text-[var(--pms-muted)] hover:text-[var(--pms-ink)]'
+                      }`}
+                    >
+                      Stamped Document
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
 
             {previewTab === 'document' && pdfPreviewUrl ? (
               /* Live Stamped Document Overlay Preview */
-              <div className="w-full relative rounded-2xl overflow-hidden border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-950 flex items-center justify-center p-2 shadow-inner">
+              <div className="w-full relative rounded-2xl overflow-hidden border border-[var(--pms-border)] pms-paper-grid flex items-center justify-center p-4 shadow-inner">
                 <div className="relative inline-block max-w-full">
                   <img
                     src={pdfPreviewUrl}
                     alt="Document Background"
-                    className="max-h-[520px] w-auto block rounded shadow border border-slate-300 dark:border-slate-700 select-none pointer-events-none"
+                    className="max-h-[520px] w-auto block rounded bg-white shadow border border-[var(--pms-border-strong)] select-none pointer-events-none"
                   />
                   {stampPngUrl && (
                     <img
@@ -596,15 +619,7 @@ export default function RubberStampMaker() {
               </div>
             ) : (
               /* Checkered pattern background to show stamp transparency */
-              <div
-                className="w-full h-[460px] flex items-center justify-center p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-inner"
-                style={{
-                  backgroundImage:
-                    'linear-gradient(45deg, #e2e8f0 25%, transparent 25%), linear-gradient(-45deg, #e2e8f0 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #e2e8f0 75%), linear-gradient(-45deg, transparent 75%, #e2e8f0 75%)',
-                  backgroundSize: '20px 20px',
-                  backgroundPosition: '0 0, 0 10px, 10px -10px, -10px 0px',
-                }}
-              >
+              <div className="w-full h-[460px] flex items-center justify-center p-6 rounded-2xl border border-[var(--pms-border)] pms-checkerboard shadow-inner">
                 {stampPngUrl && (
                   <img
                     src={stampPngUrl}
@@ -614,7 +629,7 @@ export default function RubberStampMaker() {
                 )}
               </div>
             )}
-          </div>
+          </motion.div>
         </div>
 
         {/* SEO Section */}
@@ -673,6 +688,6 @@ export default function RubberStampMaker() {
           fileName="rubber-stamp.png"
         />
       </div>
-    </div>
+    </ToolWorkspaceShell>
   );
 }
