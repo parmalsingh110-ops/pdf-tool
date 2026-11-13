@@ -5,6 +5,7 @@ import { useSEO } from '../hooks/useSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
 import { PDFDocument } from 'pdf-lib';
 import { dataUrlToBytes } from '../lib/utils';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 
 type InkColorChoice = 'original' | 'black' | 'royal_blue' | 'navy_blue';
 
@@ -303,19 +304,14 @@ export default function CleanSignature() {
   };
 
   return (
-    <div className="flex-1 max-w-6xl mx-auto px-4 py-8 w-full">
-      {/* Title */}
-      <div className="text-center mb-8">
-        <div className="inline-flex items-center gap-2 px-3 py-1 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 rounded-full text-xs font-semibold mb-3 border border-indigo-200 dark:border-indigo-800">
-          <Sparkles className="w-3.5 h-3.5" /> Paper Photo to Clean Digital Signature
-        </div>
-        <h1 className="text-3xl sm:text-4xl font-extrabold text-gray-900 dark:text-white mb-3 tracking-tight">
-          Clean Paper Signature (White / Transparent Sign)
-        </h1>
-        <p className="text-base sm:text-lg text-gray-600 dark:text-slate-300 max-w-2xl mx-auto">
-          Apne phone se kagaz par ki gayi signature ki photo upload karein — shadows, wrinkles aur yellow background hatakar pure white ya transparent digital sign banayein.
-        </p>
-      </div>
+    <ToolWorkspaceShell
+      title="Clean Paper Signature (White / Transparent Sign)"
+      subtitle="Apne phone se kagaz par ki gayi signature ki photo upload karein — shadows, wrinkles aur yellow background hatakar pure white ya transparent digital sign banayein."
+      categoryLabel="Paper Photo to Clean Digital Signature"
+      icon={Contrast}
+      microVariant="sign"
+      tone="indigo"
+    >
 
       {!imageUrl ? (
         <div className="max-w-xl mx-auto p-8 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xs text-center">
@@ -814,6 +810,6 @@ export default function CleanSignature() {
           { name: 'Exact Image Size (KB)', path: '/exact-image-size', desc: 'Compress signature to strict 10KB - 20KB portal limits' },
         ]}
       />
-    </div>
+    </ToolWorkspaceShell>
   );
 }

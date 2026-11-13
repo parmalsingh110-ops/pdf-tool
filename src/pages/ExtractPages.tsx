@@ -8,6 +8,7 @@ import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { useToast } from '../components/Toast';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 
 interface PageThumb {
   index: number; // 1-based
@@ -204,19 +205,15 @@ export default function ExtractPages() {
   const selectedCount = pages.filter((p) => p.selected).length;
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center p-6 md:p-8 max-w-6xl mx-auto w-full">
-      {/* Header */}
-      <div className="text-center mb-8">
-        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-violet-50 dark:bg-violet-950/40 text-violet-600 dark:text-violet-400 text-xs font-bold tracking-widest uppercase mb-3 border border-violet-200 dark:border-violet-800">
-          <Layers className="w-3.5 h-3.5" /> Visual Page Extraction
-        </div>
-        <h1 className="text-3xl md:text-5xl font-extrabold text-gray-900 dark:text-white tracking-tight mb-3">
-          Extract Pages from PDF
-        </h1>
-        <p className="text-base md:text-lg text-gray-600 dark:text-slate-400 max-w-2xl mx-auto">
-          Visually select pages, enter page ranges, or filter odd/even pages. Export as a single combined PDF or separate individual files.
-        </p>
-      </div>
+    <ToolWorkspaceShell
+      title="Extract Pages from PDF"
+      subtitle="Visually select pages, enter page ranges, or filter odd/even pages. Export as a single combined PDF or separate individual files."
+      categoryLabel="Visual Page Extraction"
+      icon={Layers}
+      microVariant="split"
+      tone="violet"
+    >
+      <div className="flex flex-col items-center w-full">
 
       {!file ? (
         <div className="w-full max-w-2xl">
@@ -487,6 +484,7 @@ export default function ExtractPages() {
           </button>
         </div>
       )}
-    </div>
+      </div>
+    </ToolWorkspaceShell>
   );
 }

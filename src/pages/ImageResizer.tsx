@@ -6,6 +6,7 @@ import FileDropzone from '../components/FileDropzone';
 import { encodeCanvasUnderByteBudget, type RasterMime } from '../lib/imageByteBudget';
 import { useSEO } from '../hooks/useSEO';
 import { dataUrlToBytes } from '../lib/utils';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 
 const RESIZER_IMAGE_ACCEPT: Record<string, string[]> = {
   'image/png': ['.png'],
@@ -578,7 +579,14 @@ export default function ImageResizer() {
   );
 
   return (
-    <div className="flex-1 flex flex-col bg-slate-100 min-h-[calc(100vh-4rem)]">
+    <ToolWorkspaceShell
+      title="Image Resizer (Forms & Portals)"
+      subtitle="Resize for government and job portals: By size (px, in, cm, mm), percentage, or social presets with optional max KB limit and custom DPI."
+      categoryLabel="Precision Image Utility"
+      icon={Ruler}
+      microVariant="crop"
+      tone="sky"
+    >
       <input
         ref={fileInputRef}
         type="file"
@@ -590,20 +598,7 @@ export default function ImageResizer() {
           e.target.value = '';
         }}
       />
-      <div className="max-w-6xl mx-auto w-full px-4 py-8 flex flex-col gap-6">
-        <div className="flex items-start gap-4">
-          <div className="p-3 rounded-2xl bg-sky-100 text-sky-700">
-            <Ruler className="w-8 h-8" />
-          </div>
-          <div>
-            <h1 className="text-3xl font-extrabold text-slate-900">Image resizer (forms)</h1>
-            <p className="mt-2 text-slate-600 max-w-2xl">
-              Resize for government and job portals: <strong>By size</strong> (width/height + pixel, inch, cm, mm),{' '}
-              <strong>as %</strong>, or <strong>social presets</strong>. Optional max file size for JPEG/WebP. Set DPI
-              when using physical units (96 screen, 300 print).
-            </p>
-          </div>
-        </div>
+      <div className="w-full flex flex-col gap-6">
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:items-start">
           <div className="lg:col-span-4 space-y-4 relative z-[5] min-w-0 [contain:layout]">
@@ -1168,6 +1163,6 @@ export default function ImageResizer() {
           </a>
         </div>
       )}
-    </div>
+    </ToolWorkspaceShell>
   );
 }

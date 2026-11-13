@@ -1,8 +1,12 @@
 import { Link } from 'react-router-dom';
 import { FileQuestion, ArrowLeft, Search, Layers, Combine, FileText, Minimize2 } from 'lucide-react';
+import { motion, useReducedMotion } from 'motion/react';
 import { useSEO } from '../hooks/useSEO';
+import { VERIFIED_TOOL_COUNT } from '../components/GlobalSearch';
+import PearlAuroraBackground from '../components/pearl/PearlAuroraBackground';
 
 export default function NotFound() {
+  const prefersReduced = useReducedMotion();
   useSEO({
     title: 'Page Not Found (404)',
     description: 'The page or PDF tool you are looking for does not exist or may have been moved.',
@@ -15,73 +19,102 @@ export default function NotFound() {
   });
 
   return (
-    <div className="min-h-[70vh] flex items-center justify-center px-4 py-16 dark:bg-slate-950">
-      <div className="max-w-xl w-full text-center">
-        <div className="w-20 h-20 mx-auto rounded-3xl bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 flex items-center justify-center mb-6 shadow-sm border border-rose-100 dark:border-rose-900/40">
+    <div
+      className="relative flex-1 min-h-[75vh] flex items-center justify-center px-4 py-16 transition-colors"
+      style={{ backgroundColor: 'var(--pms-pearl)', color: 'var(--pms-ink)' }}
+    >
+      <PearlAuroraBackground mode="workspace" />
+      <motion.div
+        initial={prefersReduced ? false : { opacity: 0, y: 14 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.34, ease: [0.22, 1, 0.36, 1] }}
+        className="relative z-10 max-w-xl w-full text-center"
+      >
+        <div
+          className="w-20 h-20 mx-auto rounded-3xl flex items-center justify-center mb-6 border"
+          style={{
+            backgroundColor: 'var(--pms-soft-rose)',
+            color: 'var(--pms-rose)',
+            borderColor: 'var(--pms-border)',
+            boxShadow: 'var(--pms-shadow-sm)',
+          }}
+        >
           <FileQuestion className="w-10 h-10" />
         </div>
 
-        <span className="inline-block px-3.5 py-1 text-xs font-bold uppercase tracking-wider text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/50 rounded-full mb-3">
+        <span
+          className="inline-block px-3.5 py-1 text-xs font-bold uppercase tracking-wider rounded-full mb-3 border"
+          style={{
+            backgroundColor: 'var(--pms-soft-lavender)',
+            color: 'var(--pms-violet)',
+            borderColor: 'var(--pms-border)',
+          }}
+        >
           Error 404 • Page Not Found
         </span>
 
-        <h1 className="text-3xl sm:text-4xl font-extrabold text-slate-900 dark:text-white mb-3">
+        <h1 className="text-3xl sm:text-4xl font-extrabold mb-3" style={{ color: 'var(--pms-ink)' }}>
           Looking for a PDF Tool?
         </h1>
 
-        <p className="text-slate-600 dark:text-slate-300 text-sm sm:text-base mb-8 max-w-md mx-auto">
-          The link you followed may be broken or the tool page has moved. Pick one of our popular tools below or search our 110+ free tools.
+        <p className="text-sm sm:text-base mb-8 max-w-md mx-auto" style={{ color: 'var(--pms-muted)' }}>
+          The link you followed may be broken or the tool page has moved. Pick one of our popular tools below or search our {VERIFIED_TOOL_COUNT}+ free tools.
         </p>
 
         {/* Quick Links */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-8">
           <Link
             to="/merge"
-            className="p-3.5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-rose-300 dark:hover:border-rose-700 hover:shadow-md transition-all text-center group"
+            className="p-3.5 rounded-2xl border hover:border-rose-300 dark:hover:border-rose-700 hover:-translate-y-0.5 transition-all text-center group"
+            style={{ backgroundColor: 'var(--pms-white)', borderColor: 'var(--pms-border)', boxShadow: 'var(--pms-shadow-sm)' }}
           >
-            <Combine className="w-5 h-5 mx-auto mb-1.5 text-rose-600 group-hover:scale-110 transition-transform" />
-            <span className="text-xs font-bold text-slate-800 dark:text-slate-200 block">Merge PDF</span>
+            <Combine className="w-5 h-5 mx-auto mb-1.5 text-[var(--pms-rose)] group-hover:scale-110 transition-transform" />
+            <span className="text-xs font-bold block" style={{ color: 'var(--pms-ink)' }}>Merge PDF</span>
           </Link>
           <Link
             to="/pdf-to-word"
-            className="p-3.5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-blue-300 dark:hover:border-blue-700 hover:shadow-md transition-all text-center group"
+            className="p-3.5 rounded-2xl border hover:border-sky-300 dark:hover:border-sky-700 hover:-translate-y-0.5 transition-all text-center group"
+            style={{ backgroundColor: 'var(--pms-white)', borderColor: 'var(--pms-border)', boxShadow: 'var(--pms-shadow-sm)' }}
           >
-            <FileText className="w-5 h-5 mx-auto mb-1.5 text-blue-600 group-hover:scale-110 transition-transform" />
-            <span className="text-xs font-bold text-slate-800 dark:text-slate-200 block">PDF to Word</span>
+            <FileText className="w-5 h-5 mx-auto mb-1.5 text-[var(--pms-blue)] group-hover:scale-110 transition-transform" />
+            <span className="text-xs font-bold block" style={{ color: 'var(--pms-ink)' }}>PDF to Word</span>
           </Link>
           <Link
             to="/compress"
-            className="p-3.5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-emerald-300 dark:hover:border-emerald-700 hover:shadow-md transition-all text-center group"
+            className="p-3.5 rounded-2xl border hover:border-emerald-300 dark:hover:border-emerald-700 hover:-translate-y-0.5 transition-all text-center group"
+            style={{ backgroundColor: 'var(--pms-white)', borderColor: 'var(--pms-border)', boxShadow: 'var(--pms-shadow-sm)' }}
           >
-            <Minimize2 className="w-5 h-5 mx-auto mb-1.5 text-emerald-600 group-hover:scale-110 transition-transform" />
-            <span className="text-xs font-bold text-slate-800 dark:text-slate-200 block">Compress</span>
+            <Minimize2 className="w-5 h-5 mx-auto mb-1.5 text-emerald-600 dark:text-emerald-400 group-hover:scale-110 transition-transform" />
+            <span className="text-xs font-bold block" style={{ color: 'var(--pms-ink)' }}>Compress</span>
           </Link>
           <Link
             to="/all-tools"
-            className="p-3.5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-violet-300 dark:hover:border-violet-700 hover:shadow-md transition-all text-center group"
+            className="p-3.5 rounded-2xl border hover:border-violet-300 dark:hover:border-violet-700 hover:-translate-y-0.5 transition-all text-center group"
+            style={{ backgroundColor: 'var(--pms-white)', borderColor: 'var(--pms-border)', boxShadow: 'var(--pms-shadow-sm)' }}
           >
-            <Layers className="w-5 h-5 mx-auto mb-1.5 text-violet-600 group-hover:scale-110 transition-transform" />
-            <span className="text-xs font-bold text-slate-800 dark:text-slate-200 block">All 110+ Tools</span>
+            <Layers className="w-5 h-5 mx-auto mb-1.5 text-[var(--pms-violet)] group-hover:scale-110 transition-transform" />
+            <span className="text-xs font-bold block" style={{ color: 'var(--pms-ink)' }}>All {VERIFIED_TOOL_COUNT}+ Tools</span>
           </Link>
         </div>
 
         <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
           <Link
             to="/"
-            className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-sm shadow-md transition-all w-full sm:w-auto"
+            className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-full pms-btn-primary font-bold text-sm w-full sm:w-auto"
           >
             <ArrowLeft className="w-4 h-4" />
             Back to Homepage
           </Link>
           <Link
             to="/all-tools"
-            className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold text-sm transition-all w-full sm:w-auto"
+            className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-full border font-bold text-sm transition-all hover:border-rose-300 w-full sm:w-auto"
+            style={{ backgroundColor: 'var(--pms-white)', borderColor: 'var(--pms-border-strong)', color: 'var(--pms-ink)' }}
           >
             <Search className="w-4 h-4" />
             Search All Tools
           </Link>
         </div>
-      </div>
+      </motion.div>
     </div>
   );
 }

@@ -6,6 +6,7 @@ import '../lib/pdfWorker';
 import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 
 interface SheetPlan {
   sheetNumber: number;
@@ -172,19 +173,15 @@ export default function Booklet() {
   const blankPaddingCount = (Math.ceil(pageCount / 4) * 4) - pageCount;
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center p-6 md:p-8 max-w-6xl mx-auto w-full">
-      {/* Header */}
-      <div className="text-center mb-8">
-        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-teal-50 dark:bg-teal-950/40 text-teal-600 dark:text-teal-400 text-xs font-bold tracking-widest uppercase mb-3 border border-teal-200 dark:border-teal-800">
-          <BookOpen className="w-3.5 h-3.5" /> Print Imposition & Booklet Creator
-        </div>
-        <h1 className="text-3xl md:text-5xl font-extrabold text-gray-900 dark:text-white tracking-tight mb-3">
-          Convert PDF to Booklet Spreads
-        </h1>
-        <p className="text-base md:text-lg text-gray-600 dark:text-slate-400 max-w-2xl mx-auto">
-          Automatically re-order and pair pages into 2-up spreads so you can fold and staple a real booklet directly from standard double-sided home/office printers.
-        </p>
-      </div>
+    <ToolWorkspaceShell
+      title="Convert PDF to Booklet Spreads"
+      subtitle="Automatically re-order and pair pages into 2-up spreads so you can fold and staple a real booklet directly from standard double-sided home/office printers."
+      categoryLabel="Print Imposition & Booklet Creator"
+      icon={BookOpen}
+      microVariant="split"
+      tone="emerald"
+    >
+      <div className="flex flex-col items-center justify-center max-w-6xl mx-auto w-full">
 
       {!file ? (
         <div className="w-full max-w-2xl">
@@ -399,6 +396,7 @@ export default function Booklet() {
           </button>
         </div>
       )}
-    </div>
+      </div>
+    </ToolWorkspaceShell>
   );
 }

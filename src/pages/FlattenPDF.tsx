@@ -8,6 +8,7 @@ import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { dataUrlToBytes } from '../lib/utils';
 import { useToast } from '../components/Toast';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 
 export default function FlattenPDF() {
   useSEO(
@@ -189,19 +190,15 @@ export default function FlattenPDF() {
   };
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center p-6 md:p-8 max-w-6xl mx-auto w-full">
-      {/* Header */}
-      <div className="text-center mb-8">
-        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-orange-50 dark:bg-orange-950/40 text-orange-600 dark:text-orange-400 text-xs font-bold tracking-widest uppercase mb-3 border border-orange-200 dark:border-orange-800">
-          <Layers className="w-3.5 h-3.5" /> PDF Security & Form Sealing
-        </div>
-        <h1 className="text-3xl md:text-5xl font-extrabold text-gray-900 dark:text-white tracking-tight mb-3">
-          Flatten PDF Document
-        </h1>
-        <p className="text-base md:text-lg text-gray-600 dark:text-slate-400 max-w-2xl mx-auto">
-          Make fillable form fields and annotations permanent and read-only, or rasterize all layers to seal the PDF against unwanted edits.
-        </p>
-      </div>
+    <ToolWorkspaceShell
+      title="Flatten PDF Document"
+      subtitle="Make fillable form fields and annotations permanent and read-only, or rasterize all layers to seal the PDF against unwanted edits."
+      categoryLabel="PDF Security & Form Sealing"
+      icon={Layers}
+      microVariant="security"
+      tone="amber"
+    >
+      <div className="flex flex-col items-center justify-center max-w-6xl mx-auto w-full">
 
       {!file ? (
         <div className="w-full max-w-2xl">
@@ -484,6 +481,7 @@ export default function FlattenPDF() {
           )}
         </div>
       )}
-    </div>
+      </div>
+    </ToolWorkspaceShell>
   );
 }

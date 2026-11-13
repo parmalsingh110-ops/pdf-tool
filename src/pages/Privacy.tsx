@@ -1,29 +1,48 @@
 import { Link } from 'react-router-dom';
 import { Shield, ArrowLeft } from 'lucide-react';
+import { motion, useReducedMotion } from 'motion/react';
 import { useSEO } from '../hooks/useSEO';
+import PearlAuroraBackground from '../components/pearl/PearlAuroraBackground';
 
 export default function Privacy() {
+  const prefersReduced = useReducedMotion();
   useSEO(
     'Privacy Policy — Browser-First & Ephemeral Private Document Processing | PDF Media Suite',
     'PDF Media Suite runs most tools directly in your browser. Server-assisted Office/OCR conversions and E2EE print relays process files ephemerally with immediate deletion and zero permanent storage.'
   );
 
   return (
-    <div className="max-w-3xl mx-auto px-6 py-12 text-slate-700 dark:text-slate-300">
-      <Link
-        to="/"
-        className="inline-flex items-center gap-2 text-sm font-semibold text-rose-600 dark:text-rose-400 mb-8"
+    <div className="relative flex-1 transition-colors" style={{ backgroundColor: 'var(--pms-pearl)', color: 'var(--pms-ink)' }}>
+      <PearlAuroraBackground mode="workspace" />
+      <motion.div
+        initial={prefersReduced ? false : { opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.34, ease: [0.22, 1, 0.36, 1] }}
+        className="relative z-10 max-w-3xl mx-auto px-6 py-12"
+        style={{ color: 'var(--pms-muted)' }}
       >
-        <ArrowLeft className="w-4 h-4" />
-        Back to home
-      </Link>
-      <div className="flex items-center gap-3 mb-6">
-        <div className="p-3 rounded-2xl bg-rose-50 dark:bg-rose-950/50 text-rose-600">
-          <Shield className="w-8 h-8" />
+        <Link
+          to="/"
+          className="inline-flex items-center gap-2 text-sm font-semibold mb-8 hover:opacity-80"
+          style={{ color: 'var(--pms-rose)' }}
+        >
+          <ArrowLeft className="w-4 h-4" />
+          Back to home
+        </Link>
+        <div className="flex items-center gap-3 mb-6">
+          <div className="p-3 rounded-2xl" style={{ backgroundColor: 'var(--pms-soft-rose)', color: 'var(--pms-rose)' }}>
+            <Shield className="w-8 h-8" />
+          </div>
+          <h1 className="text-3xl font-extrabold" style={{ color: 'var(--pms-ink)' }}>Privacy &amp; processing</h1>
         </div>
-        <h1 className="text-3xl font-extrabold text-slate-900 dark:text-white">Privacy &amp; processing</h1>
-      </div>
-      <div className="space-y-6 text-sm leading-relaxed">
+        <div
+          className="space-y-6 text-sm leading-relaxed rounded-3xl border p-6 sm:p-8"
+          style={{
+            backgroundColor: 'var(--pms-white)',
+            borderColor: 'var(--pms-border)',
+            boxShadow: 'var(--pms-shadow-card)',
+          }}
+        >
         <p>
           Most tools in PDF Media Suite run <strong>in your browser</strong> (client-side). Files you select are
           processed locally where possible and are not uploaded to our servers by default.
@@ -52,11 +71,12 @@ export default function Privacy() {
         </p>
         <p className="text-xs text-slate-500 dark:text-slate-400">
           This page is informational and not legal advice. For questions about our privacy practices or data handling, contact us at{' '}
-          <a href="mailto:support@pdfmediasuite.in" className="text-rose-600 dark:text-rose-400 font-medium hover:underline">
+          <a href="mailto:support@pdfmediasuite.in" className="font-medium hover:underline" style={{ color: 'var(--pms-rose)' }}>
             support@pdfmediasuite.in
           </a>.
         </p>
-      </div>
+        </div>
+      </motion.div>
     </div>
   );
 }

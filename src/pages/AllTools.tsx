@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom';
 import { 
   Combine, Scissors, Minimize2, Image as ImageIcon, FileImage, Layers, 
   Lock, Unlock, Droplet, Hash, Edit3, Target, ImageMinus, Maximize, 
-  FileType, Tag, ArrowUpDown, FilePlus, Search, ShieldCheck, FileCode, CheckCircle,
+  FileType, Tag, ArrowUpDown, Search, ShieldCheck, FileCode, CheckCircle,
   FileText, Trash2, Contrast, Sparkles, Ruler, ScanText,
   ContactRound, LayoutGrid, QrCode, Pen, ScanLine, GitCompare, Palette, Crop,
   FormInput, BarChart3, BookOpen, Copy, RotateCw, ShieldOff, RefreshCw,
@@ -13,12 +13,15 @@ import {
   // New icons for 13 new tools
   Shield, Wrench, Globe, FileCode2, Type, Accessibility, Volume2, Link as LinkIcon, BookMarked, Eraser,
   Shuffle, FlipHorizontal, Compass, Bookmark, FileCheck2, Printer, Grid,
-  Briefcase, GraduationCap, Building2, Award, X,
+  GraduationCap, X,
   Calculator, Monitor, Scale, Megaphone,
   ShieldAlert, Maximize2, FileWarning, WifiOff,
 } from 'lucide-react';
 import { toggleFavorite, isFavorite } from '../lib/favorites';
 import { useSEO } from '../hooks/useSEO';
+import { VERIFIED_TOOL_COUNT } from '../components/GlobalSearch';
+import PearlAuroraBackground from '../components/pearl/PearlAuroraBackground';
+import ToolMicroPreview, { inferToolMicroVariant } from '../components/pearl/ToolMicroPreview';
 
 function categoryAnchor(title: string): string {
   if (title.includes('Deep-Tech')) return 'cat-deep-tech';
@@ -400,7 +403,7 @@ export default function AllTools() {
 
   usePageSEO(
     'All Tools | PDF Media Suite',
-    'Search and explore all 90+ free PDF and image processing tools on PDF Media Suite. Merge PDF, split PDF, compress PDF, convert PDF to Word/Excel/JPG, image resizer, remove background, OCR, digital signature, redact PDF, watermark, QR code generator, and many more — all free, browser-based, private.',
+    `Search and explore all ${VERIFIED_TOOL_COUNT}+ free PDF and image processing tools on PDF Media Suite. Merge PDF, split PDF, compress PDF, convert PDF to Word/Excel/JPG, image resizer, remove background, OCR, digital signature, redact PDF, watermark, QR code generator, and many more — all free, browser-based, private.`,
     'all pdf tools, free pdf tools list, online pdf converter, pdf editor online, image editor online, pdf to word, pdf to excel, merge pdf free, compress pdf free, pdf media suite tools'
   );
   const [sortMode, setSortMode] = useState<'most-used' | 'newest' | 'a-z'>('most-used');
@@ -501,9 +504,20 @@ export default function AllTools() {
   }
 
   return (
-    <div className="w-full min-h-screen bg-slate-50 dark:bg-slate-950">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 flex gap-6 lg:gap-8">
-        <aside className="hidden lg:flex flex-col w-64 xl:w-72 shrink-0 sticky top-24 self-start max-h-[calc(100vh-115px)] bg-white dark:bg-slate-900 rounded-3xl border border-slate-200/90 dark:border-slate-800 p-4 shadow-sm">
+    <div
+      className="relative w-full min-h-screen overflow-x-clip transition-colors"
+      style={{ backgroundColor: 'var(--pms-pearl)', color: 'var(--pms-ink)' }}
+    >
+      <PearlAuroraBackground mode="workspace" />
+      <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 flex gap-6 lg:gap-8">
+        <aside
+          className="hidden lg:flex flex-col w-64 xl:w-72 shrink-0 sticky top-24 self-start max-h-[calc(100vh-115px)] rounded-3xl border p-4"
+          style={{
+            backgroundColor: 'var(--pms-white)',
+            borderColor: 'var(--pms-border)',
+            boxShadow: 'var(--pms-shadow-sm)',
+          }}
+        >
           <div className="overflow-y-auto scrollbar-none flex flex-col flex-1 pr-0.5">
             {/* Workspaces by Profile */}
             <div className="mb-4">
@@ -563,48 +577,58 @@ export default function AllTools() {
               </div>
             </div>
 
-            <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center gap-2 px-2 text-slate-500 text-[11px]">
+            <div className="mt-4 pt-3 border-t flex items-center gap-2 px-2 text-[11px]" style={{ borderColor: 'var(--pms-border)', color: 'var(--pms-muted)' }}>
               <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0 animate-pulse" />
-              <span className="font-semibold text-slate-700 dark:text-slate-300 truncate">110+ Free &amp; Private Tools</span>
+              <span className="font-semibold truncate" style={{ color: 'var(--pms-ink)' }}>{VERIFIED_TOOL_COUNT}+ Free &amp; Private Tools</span>
             </div>
           </div>
         </aside>
 
         <div className="flex-1 min-w-0">
           <header className="mb-12">
-            <h1 className="text-4xl md:text-5xl font-extrabold tracking-tight text-slate-900 dark:text-white">All Tools</h1>
-            <p className="mt-3 text-lg text-slate-600 dark:text-slate-400 max-w-2xl">
+            <h1 className="text-4xl md:text-5xl font-extrabold tracking-tight" style={{ color: 'var(--pms-ink)' }}>
+              All Tools
+            </h1>
+            <p className="mt-3 text-lg max-w-2xl" style={{ color: 'var(--pms-muted)' }}>
               Curated collection of high-performance PDF and media processing utilities.
             </p>
             <div className="mt-6 flex flex-col sm:flex-row sm:items-center gap-3">
-              <div className="inline-flex items-center bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-full p-1 text-xs font-bold">
+              <div
+                className="inline-flex items-center border rounded-full p-1 text-xs font-bold"
+                style={{ backgroundColor: 'var(--pms-white)', borderColor: 'var(--pms-border)' }}
+              >
                 <button
                   onClick={() => setSortMode('most-used')}
-                  className={`px-5 py-2 rounded-full ${sortMode === 'most-used' ? 'bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900' : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'}`}
+                  className={`px-5 py-2 rounded-full ${sortMode === 'most-used' ? 'bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900' : 'text-[var(--pms-muted)] hover:text-[var(--pms-ink)]'}`}
                 >
                   Most Used
                 </button>
                 <button
                   onClick={() => setSortMode('newest')}
-                  className={`px-5 py-2 rounded-full ${sortMode === 'newest' ? 'bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900' : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'}`}
+                  className={`px-5 py-2 rounded-full ${sortMode === 'newest' ? 'bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900' : 'text-[var(--pms-muted)] hover:text-[var(--pms-ink)]'}`}
                 >
                   Newest
                 </button>
                 <button
                   onClick={() => setSortMode('a-z')}
-                  className={`px-5 py-2 rounded-full ${sortMode === 'a-z' ? 'bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900' : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'}`}
+                  className={`px-5 py-2 rounded-full ${sortMode === 'a-z' ? 'bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900' : 'text-[var(--pms-muted)] hover:text-[var(--pms-ink)]'}`}
                 >
                   A-Z
                 </button>
               </div>
               <div className="relative flex-1 max-w-md">
-                <Search className="w-4 h-4 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2" />
+                <Search className="w-4 h-4 absolute left-4 top-1/2 -translate-y-1/2" style={{ color: 'var(--pms-muted)' }} />
                 <input
                   type="text"
-                  placeholder="Search 90+ tools (e.g. merge, compress, protect...)"
+                  placeholder={`Search ${VERIFIED_TOOL_COUNT}+ tools (e.g. merge, compress, protect...)`}
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
-                  className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-full pl-10 pr-10 py-2.5 text-sm outline-none focus:ring-2 focus:ring-rose-200 dark:text-slate-100 placeholder:text-slate-400"
+                  className="w-full border rounded-full pl-10 pr-10 py-2.5 text-sm outline-none focus:ring-2 focus:ring-rose-200 placeholder:text-[var(--pms-muted)]"
+                  style={{
+                    backgroundColor: 'var(--pms-white)',
+                    borderColor: 'var(--pms-border)',
+                    color: 'var(--pms-ink)',
+                  }}
                 />
                 {query && (
                   <button
@@ -621,6 +645,7 @@ export default function AllTools() {
             <div className="mt-5 flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none">
               {categoryFilters.map((tab) => {
                 const isActive = activeCategory === tab.id;
+                const selected = isActive && selectedRole === 'all';
                 return (
                   <button
                     key={tab.id}
@@ -628,11 +653,20 @@ export default function AllTools() {
                       setActiveCategory(tab.id);
                       if (selectedRole !== 'all') setSelectedRole('all');
                     }}
-                    className={`inline-flex items-center gap-2 px-4 py-2 rounded-full text-xs font-bold whitespace-nowrap transition-all ${
-                      isActive && selectedRole === 'all'
-                        ? 'bg-rose-600 text-white shadow-sm shadow-rose-200'
-                        : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-800 hover:border-rose-300 hover:text-rose-600'
+                    className={`inline-flex items-center gap-2 px-4 py-2 rounded-full text-xs font-bold whitespace-nowrap transition-all border cursor-pointer ${
+                      selected
+                        ? 'pms-btn-primary border-transparent'
+                        : 'hover:border-rose-300 dark:hover:border-rose-700 hover:text-[var(--pms-rose)]'
                     }`}
+                    style={
+                      selected
+                        ? undefined
+                        : {
+                            backgroundColor: 'var(--pms-white)',
+                            borderColor: 'var(--pms-border)',
+                            color: 'var(--pms-muted)',
+                          }
+                    }
                   >
                     <tab.icon className="w-3.5 h-3.5" />
                     {tab.label}
@@ -643,31 +677,51 @@ export default function AllTools() {
 
             {/* Role / Profile Quick Filter Chips (Mobile & Quick Access) */}
             <div className="mt-3 flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
-              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider whitespace-nowrap">Profile:</span>
+              <span className="text-[11px] font-bold uppercase tracking-wider whitespace-nowrap" style={{ color: 'var(--pms-subtle-text)' }}>Profile:</span>
               <button
                 onClick={() => setSelectedRole('all')}
-                className={`px-3 py-1 rounded-full text-xs font-semibold whitespace-nowrap transition-all ${
+                className="px-3 py-1 rounded-full text-xs font-semibold whitespace-nowrap transition-all border cursor-pointer"
+                style={
                   selectedRole === 'all'
-                    ? 'bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 font-bold shadow-sm'
-                    : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-800 hover:border-slate-400'
-                }`}
+                    ? {
+                        backgroundColor: 'var(--pms-ink)',
+                        borderColor: 'var(--pms-ink)',
+                        color: 'var(--pms-pearl)',
+                        boxShadow: 'var(--pms-shadow-sm)',
+                      }
+                    : {
+                        backgroundColor: 'var(--pms-white)',
+                        borderColor: 'var(--pms-border)',
+                        color: 'var(--pms-muted)',
+                      }
+                }
               >
                 🌐 All Workspaces
               </button>
-              {ROLE_PROFILES.map((rp) => (
-                <button
-                  key={rp.id}
-                  onClick={() => setSelectedRole(rp.id)}
-                  className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold whitespace-nowrap transition-all ${
-                    selectedRole === rp.id
-                      ? 'bg-rose-600 text-white font-bold shadow-sm shadow-rose-200'
-                      : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-800 hover:border-rose-300 hover:text-rose-600'
-                  }`}
-                >
-                  <span>{rp.emoji}</span>
-                  {rp.label}
-                </button>
-              ))}
+              {ROLE_PROFILES.map((rp) => {
+                const isSel = selectedRole === rp.id;
+                return (
+                  <button
+                    key={rp.id}
+                    onClick={() => setSelectedRole(rp.id)}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold whitespace-nowrap transition-all border cursor-pointer ${
+                      isSel ? 'pms-btn-primary border-transparent' : 'hover:border-rose-300 dark:hover:border-rose-700 hover:text-[var(--pms-rose)]'
+                    }`}
+                    style={
+                      isSel
+                        ? undefined
+                        : {
+                            backgroundColor: 'var(--pms-white)',
+                            borderColor: 'var(--pms-border)',
+                            color: 'var(--pms-muted)',
+                          }
+                    }
+                  >
+                    <span>{rp.emoji}</span>
+                    {rp.label}
+                  </button>
+                );
+              })}
             </div>
           </header>
 
@@ -767,14 +821,39 @@ export default function AllTools() {
                     <div className="h-px flex-1 bg-slate-200 dark:bg-slate-700" />
                   </div>
                   <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-                    <Link to="/merge" className="lg:col-span-8 rounded-3xl bg-white border border-slate-200 p-8 shadow-[0px_20px_40px_rgba(0,0,0,0.04)] hover:-translate-y-1 transition-all">
-                      <span className="inline-flex text-xs px-3 py-1 rounded-full bg-rose-50 text-rose-700 font-bold">Essential</span>
-                      <h3 className="mt-5 text-2xl font-extrabold text-slate-900">Omni-Merge Pro</h3>
-                      <p className="mt-2 text-slate-600 text-sm">Combine PDFs with smooth ordering and high-fidelity outputs.</p>
+                    <Link
+                      to="/merge"
+                      className="lg:col-span-8 rounded-3xl border p-8 hover:-translate-y-1 transition-all group"
+                      style={{ backgroundColor: 'var(--pms-white)', borderColor: 'var(--pms-border)', boxShadow: 'var(--pms-shadow-card)' }}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <span
+                          className="inline-flex text-xs px-3 py-1 rounded-full font-bold"
+                          style={{ backgroundColor: 'var(--pms-soft-rose)', color: 'var(--pms-rose)' }}
+                        >
+                          Essential
+                        </span>
+                        <ToolMicroPreview variant="merge" />
+                      </div>
+                      <h3 className="mt-5 text-2xl font-extrabold" style={{ color: 'var(--pms-ink)' }}>Omni-Merge Pro</h3>
+                      <p className="mt-2 text-sm" style={{ color: 'var(--pms-muted)' }}>Combine PDFs with smooth ordering and high-fidelity outputs.</p>
                     </Link>
-                    <Link to="/compress" className="lg:col-span-4 rounded-3xl bg-white border border-slate-200 p-8 shadow-[0px_20px_40px_rgba(0,0,0,0.04)] hover:-translate-y-1 transition-all">
-                      <h3 className="text-xl font-bold text-slate-900">Ultra-Shrink</h3>
-                      <p className="mt-2 text-slate-600 text-sm">Reduce size while preserving readability.</p>
+                    <Link
+                      to="/compress"
+                      className="lg:col-span-4 rounded-3xl border p-8 hover:-translate-y-1 transition-all group"
+                      style={{ backgroundColor: 'var(--pms-white)', borderColor: 'var(--pms-border)', boxShadow: 'var(--pms-shadow-card)' }}
+                    >
+                      <div className="flex items-start justify-between gap-3 mb-4">
+                        <span
+                          className="inline-flex text-xs px-3 py-1 rounded-full font-bold"
+                          style={{ backgroundColor: 'var(--pms-soft-mint)', color: '#047857' }}
+                        >
+                          Optimize
+                        </span>
+                        <ToolMicroPreview variant="compress" />
+                      </div>
+                      <h3 className="text-xl font-bold" style={{ color: 'var(--pms-ink)' }}>Ultra-Shrink</h3>
+                      <p className="mt-2 text-sm" style={{ color: 'var(--pms-muted)' }}>Reduce size while preserving readability.</p>
                     </Link>
                   </div>
                 </section>
@@ -797,29 +876,46 @@ export default function AllTools() {
                         const faved = isAvailable && isFavorite(tool.path);
                         const cardContent = (
                           <>
-                            <div className="flex items-start justify-between mb-3">
-                              <div className={`w-10 h-10 rounded-xl ${tool.bg || 'bg-slate-100'} ${tool.color || 'text-slate-400'} flex items-center justify-center`}>
+                            <div className="flex items-start justify-between gap-2 mb-3">
+                              <div className={`w-10 h-10 rounded-xl ${tool.bg || 'bg-slate-100'} ${tool.color || 'text-slate-400'} flex items-center justify-center shrink-0`}>
                                 <tool.icon className="w-5 h-5" />
                               </div>
-                              {isAvailable && (
-                                <button
-                                  onClick={(e) => handleToggleFav(e, tool.path, tool.title)}
-                                  title={faved ? 'Remove from favorites' : 'Add to favorites'}
-                                  className={`p-1 rounded-lg transition-colors ${
-                                    faved
-                                      ? 'text-amber-400 hover:text-amber-500'
-                                      : 'text-slate-300 dark:text-slate-600 hover:text-amber-400'
-                                  }`}
-                                >
-                                  <Star className="w-3.5 h-3.5" fill={faved ? 'currentColor' : 'none'} />
-                                </button>
-                              )}
+                              <div className="flex items-center gap-1.5">
+                                {isAvailable && (
+                                  <ToolMicroPreview variant={inferToolMicroVariant(tool.path)} />
+                                )}
+                                {isAvailable && (
+                                  <button
+                                    onClick={(e) => handleToggleFav(e, tool.path, tool.title)}
+                                    title={faved ? 'Remove from favorites' : 'Add to favorites'}
+                                    className={`p-1 rounded-lg transition-colors ${
+                                      faved
+                                        ? 'text-amber-400 hover:text-amber-500'
+                                        : 'text-slate-300 dark:text-slate-600 hover:text-amber-400'
+                                    }`}
+                                  >
+                                    <Star className="w-3.5 h-3.5" fill={faved ? 'currentColor' : 'none'} />
+                                  </button>
+                                )}
+                              </div>
                             </div>
-                            <h3 className={`font-semibold text-sm ${isAvailable ? 'text-slate-900 dark:text-slate-100 group-hover:text-rose-600 dark:group-hover:text-rose-400' : 'text-slate-500 dark:text-slate-500'}`}>
+                            <h3
+                              className={`font-semibold text-sm ${
+                                isAvailable ? 'group-hover:text-[var(--pms-rose)] transition-colors' : 'opacity-60'
+                              }`}
+                              style={{ color: isAvailable ? 'var(--pms-ink)' : 'var(--pms-muted)' }}
+                            >
                               {hl(tool.title)}
                             </h3>
                             {!isAvailable && (
-                              <span className="inline-block mt-2 text-[10px] uppercase tracking-wider font-bold text-violet-700 dark:text-violet-300 bg-violet-50 dark:bg-violet-950/60 border border-violet-200 dark:border-violet-800 px-2 py-1 rounded-md">
+                              <span
+                                className="inline-block mt-2 text-[10px] uppercase tracking-wider font-bold border px-2 py-1 rounded-md"
+                                style={{
+                                  backgroundColor: 'var(--pms-soft-lavender)',
+                                  color: 'var(--pms-violet)',
+                                  borderColor: 'var(--pms-border)',
+                                }}
+                              >
                                 Coming soon
                               </span>
                             )}
@@ -831,7 +927,12 @@ export default function AllTools() {
                             <Link
                               key={idx}
                               to={tool.path}
-                              className="p-4 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700 hover:border-rose-200 dark:hover:border-rose-800 hover:shadow-md transition-all group"
+                              className="p-4 rounded-2xl border hover:border-rose-300 dark:hover:border-rose-700 hover:-translate-y-0.5 transition-all group"
+                              style={{
+                                backgroundColor: 'var(--pms-white)',
+                                borderColor: 'var(--pms-border)',
+                                boxShadow: 'var(--pms-shadow-sm)',
+                              }}
                             >
                               {cardContent}
                             </Link>
@@ -839,7 +940,14 @@ export default function AllTools() {
                         }
 
                         return (
-                          <div key={idx} className="p-4 bg-slate-50 dark:bg-slate-900/60 rounded-2xl border border-dashed border-slate-300 dark:border-slate-600 opacity-80 cursor-not-allowed">
+                          <div
+                            key={idx}
+                            className="p-4 rounded-2xl border border-dashed opacity-75 cursor-not-allowed"
+                            style={{
+                              backgroundColor: 'var(--pms-lavender-surface)',
+                              borderColor: 'var(--pms-border-strong)',
+                            }}
+                          >
                             {cardContent}
                           </div>
                         );
@@ -854,7 +962,7 @@ export default function AllTools() {
       </div>
 
       {/* ===== SEO CONTENT BLOCK — Rich text for Google indexing ===== */}
-      <section className="max-w-7xl mx-auto px-6 py-16 border-t border-slate-200 dark:border-slate-800">
+      <section className="relative z-10 max-w-7xl mx-auto px-6 py-16 border-t" style={{ borderColor: 'var(--pms-border)' }}>
         <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-6">Complete List of PDF & Image Tools</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 text-sm text-slate-600 dark:text-slate-400">
           <div>
@@ -951,9 +1059,9 @@ export default function AllTools() {
             </ul>
           </div>
         </div>
-        <p className="mt-10 text-slate-500 dark:text-slate-500 text-sm max-w-4xl">
+        <p className="mt-10 text-sm max-w-4xl" style={{ color: 'var(--pms-muted)' }}>
           PDF Media Suite (pdfmediasuite.in) is a completely free, browser-based tool suite for PDF and image processing.
-          All 90+ tools work directly in your browser — no file uploads to servers, no account required, 100% private.
+          All {VERIFIED_TOOL_COUNT}+ tools work directly in your browser — no file uploads to servers, no account required, 100% private.
           Whether you need to <strong>merge PDF</strong>, <strong>compress PDF</strong>, <strong>convert PDF to Word</strong>,
           <strong>remove background from images</strong>, <strong>resize images</strong>, <strong>add watermarks</strong>,
           <strong>sign documents</strong>, or <strong>redact sensitive information</strong> — we have the right tool for you.

@@ -7,6 +7,7 @@ import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 
 interface DocItem {
   file: File;
@@ -188,20 +189,14 @@ export default function AlternateMix() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 py-12 px-4 transition-colors">
-      <div className="max-w-5xl mx-auto">
-        {/* Header */}
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-400 text-sm font-semibold mb-3">
-            <Shuffle className="w-4 h-4" /> Duplex Scanner Interleave Merger
-          </div>
-          <h1 className="text-3xl md:text-5xl font-extrabold text-slate-900 dark:text-white tracking-tight mb-3">
-            Alternate & Mix PDF
-          </h1>
-          <p className="text-base md:text-lg text-slate-600 dark:text-slate-400 max-w-2xl mx-auto">
-            Combine two PDF documents by alternating between their pages. Perfect for merging odd and even scanned pages from duplex feeder scans.
-          </p>
-        </div>
+    <ToolWorkspaceShell
+      title="Alternate & Mix PDF"
+      subtitle="Combine two PDF documents by alternating between their pages. Perfect for merging odd and even scanned pages from duplex feeder scans."
+      categoryLabel="Duplex Scanner Interleave Merger"
+      icon={Shuffle}
+      microVariant="merge"
+      tone="emerald"
+    >
 
         {/* Upload Columns */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
@@ -523,7 +518,6 @@ export default function AlternateMix() {
             },
           ]}
         />
-      </div>
-    </div>
+    </ToolWorkspaceShell>
   );
 }

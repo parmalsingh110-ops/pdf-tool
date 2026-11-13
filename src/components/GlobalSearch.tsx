@@ -1,18 +1,18 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Search, ArrowRight, X, Combine, Scissors, Minimize2, FileText, Image as ImageIcon,
   Edit3, Lock, Unlock, Droplet, Hash, Layers, RotateCw, ShieldOff, Stamp, BarChart3,
   BookOpen, Presentation, FileX, Images, Code, Palette, Crop, RefreshCw, ScanSearch,
-  ShieldCheck, Maximize, Target, Ruler, ScanText, ContactRound, ArrowUpDown, FilePlus,
+  ShieldCheck, Maximize, Target, Ruler, ScanText, ContactRound, ArrowUpDown,
   Search as SearchIcon, Trash2, Contrast, Sparkles, LayoutGrid, QrCode, Pen, ScanLine,
   GitCompare, FormInput, Copy, MonitorSmartphone, Wand2, Globe, Volume2, Link as LinkIcon,
-  Shield, Wrench, FileCode2, Type, BookMarked, Accessibility, Tag, BarChart2,
+  Shield, Wrench, FileCode2, Type, BookMarked, Accessibility, Tag,
   Shuffle, FlipHorizontal, Compass, Bookmark, FileCheck2, Printer, Grid,
   Calculator, Monitor, Scale, GraduationCap, Megaphone,
   ShieldAlert, Maximize2, FileWarning, WifiOff,
 } from 'lucide-react';
 
-interface ToolEntry {
+export interface ToolEntry {
   title: string;
   path: string;
   icon: React.ElementType;
@@ -20,7 +20,7 @@ interface ToolEntry {
   keywords?: string;
 }
 
-const ALL_TOOLS: ToolEntry[] = [
+export const ALL_TOOLS: ToolEntry[] = [
   // Deep-Tech & Forensics
   { title: 'DocForensics™ AI Forgery & Tamper Inspector', path: '/doc-forensics', icon: ShieldAlert, category: 'Deep-Tech', keywords: 'forensics tamper forgery fake salary slip whiteout bank statement audit fraud detection' },
   { title: 'TrueVector 4K™ Blueprint & Scan Vectorizer', path: '/true-vector-4k', icon: Maximize2, category: 'Deep-Tech', keywords: 'vectorize svg bezier curve blueprint cad denoise upscale depixelate 4k clean line art' },
@@ -173,6 +173,8 @@ const ALL_TOOLS: ToolEntry[] = [
   { title: 'Add DRM', path: '/add-drm', icon: Lock, category: 'Security', keywords: 'drm rights protection' },
 ];
 
+export const VERIFIED_TOOL_COUNT = new Set(ALL_TOOLS.map((t) => t.path)).size;
+
 interface Props {
   open: boolean;
   onClose: () => void;
@@ -260,37 +262,58 @@ export default function GlobalSearch({ open, onClose }: Props) {
       onClick={onClose}
     >
       {/* Backdrop */}
-      <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" />
+      <div className="absolute inset-0 bg-[#17172F]/35 dark:bg-black/60 backdrop-blur-sm" />
 
       {/* Modal */}
       <div
-        className="relative w-full max-w-xl bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 overflow-hidden animate-search-in"
+        className="relative w-full max-w-xl rounded-2xl border overflow-hidden animate-search-in"
+        style={{
+          backgroundColor: 'var(--pms-white)',
+          borderColor: 'var(--pms-border-strong)',
+          boxShadow: 'var(--pms-shadow-float)',
+        }}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Search Input */}
-        <div className="flex items-center gap-3 px-4 py-3.5 border-b border-slate-200 dark:border-slate-700">
-          <Search className="w-5 h-5 text-slate-400 shrink-0" />
+        <div
+          className="flex items-center gap-3 px-4 py-3.5 border-b"
+          style={{ borderColor: 'var(--pms-border)' }}
+        >
+          <Search className="w-5 h-5 shrink-0" style={{ color: 'var(--pms-rose)' }} />
           <input
             ref={inputRef}
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search tools..."
-            className="flex-1 bg-transparent text-slate-900 dark:text-slate-100 placeholder:text-slate-400 text-base outline-none"
+            placeholder={`Search ${VERIFIED_TOOL_COUNT}+ verified tools...`}
+            className="flex-1 bg-transparent text-base outline-none placeholder:text-[var(--pms-muted)]"
+            style={{ color: 'var(--pms-ink)' }}
           />
-          <kbd className="hidden sm:inline-flex items-center px-2 py-0.5 text-[10px] font-bold text-slate-400 bg-slate-100 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-600">
+          <kbd
+            className="hidden sm:inline-flex items-center px-2 py-0.5 text-[10px] font-bold rounded border"
+            style={{
+              backgroundColor: 'var(--pms-lavender-surface)',
+              borderColor: 'var(--pms-border)',
+              color: 'var(--pms-muted)',
+            }}
+          >
             ESC
           </kbd>
-          <button onClick={onClose} className="p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800">
-            <X className="w-4 h-4 text-slate-400" />
+          <button
+            onClick={onClose}
+            aria-label="Close search"
+            className="p-1 rounded-lg hover:opacity-75 transition-opacity"
+            style={{ color: 'var(--pms-muted)' }}
+          >
+            <X className="w-4 h-4" />
           </button>
         </div>
 
         {/* Results */}
         <div ref={listRef} className="max-h-80 overflow-y-auto py-2">
           {filtered.length === 0 ? (
-            <div className="px-4 py-8 text-center text-slate-400 text-sm">
-              No tools found for "<span className="font-semibold text-slate-600 dark:text-slate-300">{query}</span>"
+            <div className="px-4 py-8 text-center text-sm" style={{ color: 'var(--pms-muted)' }}>
+              No tools found for "<span className="font-semibold" style={{ color: 'var(--pms-ink)' }}>{query}</span>"
             </div>
           ) : (
             filtered.map((tool, i) => {
@@ -301,24 +324,30 @@ export default function GlobalSearch({ open, onClose }: Props) {
                   key={tool.path}
                   onClick={() => { navigate(tool.path); onClose(); }}
                   onMouseEnter={() => setSelected(i)}
-                  className={`w-full flex items-center gap-3 px-4 py-2.5 text-left transition-colors ${
-                    isSelected
-                      ? 'bg-rose-50 dark:bg-rose-950/40'
-                      : 'hover:bg-slate-50 dark:hover:bg-slate-800'
-                  }`}
+                  className="w-full flex items-center gap-3 px-4 py-2.5 text-left transition-colors"
+                  style={{
+                    backgroundColor: isSelected ? 'var(--pms-lavender-surface)' : 'transparent',
+                  }}
                 >
-                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
-                    isSelected ? 'bg-rose-100 dark:bg-rose-900/60' : 'bg-slate-100 dark:bg-slate-800'
-                  }`}>
-                    <Icon className={`w-4 h-4 ${isSelected ? 'text-rose-600 dark:text-rose-400' : 'text-slate-500 dark:text-slate-400'}`} />
+                  <div
+                    className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
+                    style={{
+                      backgroundColor: isSelected ? 'var(--pms-soft-rose)' : 'var(--pms-pearl)',
+                      color: isSelected ? 'var(--pms-rose)' : 'var(--pms-muted)',
+                    }}
+                  >
+                    <Icon className="w-4 h-4" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className={`text-sm font-semibold truncate ${isSelected ? 'text-rose-700 dark:text-rose-300' : 'text-slate-800 dark:text-slate-200'}`}>
+                    <p
+                      className="text-sm font-semibold truncate"
+                      style={{ color: isSelected ? 'var(--pms-rose)' : 'var(--pms-ink)' }}
+                    >
                       {highlight(tool.title, query)}
                     </p>
-                    <p className="text-xs text-slate-400 truncate">{tool.category}</p>
+                    <p className="text-xs truncate" style={{ color: 'var(--pms-muted)' }}>{tool.category}</p>
                   </div>
-                  {isSelected && <ArrowRight className="w-4 h-4 text-rose-400 shrink-0" />}
+                  {isSelected && <ArrowRight className="w-4 h-4 shrink-0" style={{ color: 'var(--pms-rose)' }} />}
                 </button>
               );
             })
@@ -326,7 +355,10 @@ export default function GlobalSearch({ open, onClose }: Props) {
         </div>
 
         {/* Footer hint */}
-        <div className="border-t border-slate-100 dark:border-slate-800 px-4 py-2 flex items-center gap-4 text-[11px] text-slate-400">
+        <div
+          className="border-t px-4 py-2 flex items-center gap-4 text-[11px]"
+          style={{ borderColor: 'var(--pms-border)', color: 'var(--pms-muted)', backgroundColor: 'var(--pms-pearl)' }}
+        >
           <span><kbd className="font-bold">↑↓</kbd> navigate</span>
           <span><kbd className="font-bold">↵</kbd> open</span>
           <span><kbd className="font-bold">Esc</kbd> close</span>

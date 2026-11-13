@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
+import { motion, useReducedMotion } from 'motion/react';
 import {
   ArrowLeft,
   User,
@@ -26,6 +27,7 @@ import {
 } from 'lucide-react';
 import { useSEO } from '../hooks/useSEO';
 import { FOUNDER_INFO, TEAM_MEMBERS, TeamMember } from '../config/founderInfo';
+import PearlAuroraBackground from '../components/pearl/PearlAuroraBackground';
 
 export default function About() {
   useSEO({
@@ -74,13 +76,21 @@ export default function About() {
   });
 
   const [imgErrors, setImgErrors] = useState<Record<string, boolean>>({});
+  const prefersReduced = useReducedMotion();
 
   const handleImgError = (id: string) => {
     setImgErrors((prev) => ({ ...prev, [id]: true }));
   };
 
   return (
-    <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-12 text-slate-700 dark:text-slate-300">
+    <div className="relative flex-1 transition-colors" style={{ backgroundColor: 'var(--pms-pearl)', color: 'var(--pms-ink)' }}>
+      <PearlAuroraBackground mode="workspace" />
+      <motion.div
+        initial={prefersReduced ? false : { opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.34, ease: [0.22, 1, 0.36, 1] }}
+        className="relative z-10 max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-12 text-slate-700 dark:text-slate-300"
+      >
       {/* Back to Home navigation */}
       <Link
         to="/"
@@ -400,6 +410,7 @@ export default function About() {
           </div>
         </section>
       </div>
+      </motion.div>
     </div>
   );
 }

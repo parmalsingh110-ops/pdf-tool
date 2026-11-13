@@ -6,6 +6,7 @@ import * as pdfjsLib from 'pdfjs-dist';
 import '../lib/pdfWorker';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 
 type NumberPosition = 'bottom-center' | 'bottom-right' | 'bottom-left' | 'top-center' | 'top-right' | 'top-left';
 type NumberFormat = 'page-n-of-total' | 'n-of-total' | 'page-n' | 'just-n' | 'dash-n-dash';
@@ -224,14 +225,15 @@ export default function PageNumbersPDF() {
   };
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-start p-6 md:p-8 min-h-screen bg-gradient-to-br from-pink-50/40 via-white to-slate-50">
-      <div className="text-center mb-10 max-w-2xl">
-        <div className="inline-flex items-center justify-center w-14 h-14 bg-pink-100 rounded-2xl mb-4">
-          <Hash className="w-7 h-7 text-pink-600" />
-        </div>
-        <h1 className="text-4xl font-extrabold text-gray-900 mb-3">Add Page Numbers to PDF</h1>
-        <p className="text-lg text-gray-500">Number PDF pages with live visual preview. Choose positions, formats, and skip cover pages.</p>
-      </div>
+    <ToolWorkspaceShell
+      title="Add Page Numbers to PDF"
+      subtitle="Number PDF pages with live visual preview. Choose positions, formats, and skip cover pages."
+      categoryLabel="PDF Pagination Studio"
+      icon={Hash}
+      microVariant="edit"
+      tone="rose"
+    >
+      <div className="flex flex-col items-center w-full">
 
       {!file ? (
         <FileDropzone onDrop={handleDrop} multiple={false} title="Drop PDF here or click to select" />
@@ -493,6 +495,7 @@ export default function PageNumbersPDF() {
           </div>
         </div>
       )}
-    </div>
+      </div>
+    </ToolWorkspaceShell>
   );
 }

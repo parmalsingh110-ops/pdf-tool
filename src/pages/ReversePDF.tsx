@@ -7,6 +7,7 @@ import '../lib/pdfWorker';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { useToast } from '../components/Toast';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 
 interface PageThumbnail {
   originalIndex: number; // 1-based
@@ -157,19 +158,15 @@ export default function ReversePDF() {
   const simulatedSequence = totalPages > 0 ? getReversedIndices(totalPages) : [];
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center p-6 md:p-8 max-w-6xl mx-auto w-full">
-      {/* Header */}
-      <div className="text-center mb-8">
-        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 text-xs font-bold tracking-widest uppercase mb-3 border border-indigo-200 dark:border-indigo-800">
-          <ArrowUpDown className="w-3.5 h-3.5" /> Document Flow & Ordering
-        </div>
-        <h1 className="text-3xl md:text-5xl font-extrabold text-gray-900 dark:text-white tracking-tight mb-3">
-          Reverse PDF Page Order
-        </h1>
-        <p className="text-base md:text-lg text-gray-600 dark:text-slate-400 max-w-2xl mx-auto">
-          Flip the page order of your PDF document back-to-front with visual thumbnail validation. Perfect for duplex scans and reversed prints.
-        </p>
-      </div>
+    <ToolWorkspaceShell
+      title="Reverse PDF Page Order"
+      subtitle="Flip the page order of your PDF document back-to-front with visual thumbnail validation. Perfect for duplex scans and reversed prints."
+      categoryLabel="Document Flow & Ordering"
+      icon={ArrowUpDown}
+      microVariant="split"
+      tone="indigo"
+    >
+      <div className="flex flex-col items-center justify-center max-w-6xl mx-auto w-full">
 
       {!file ? (
         <div className="w-full max-w-2xl">
@@ -409,6 +406,7 @@ export default function ReversePDF() {
           )}
         </div>
       )}
-    </div>
+      </div>
+    </ToolWorkspaceShell>
   );
 }

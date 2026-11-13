@@ -9,6 +9,7 @@ import { useSEO } from '../hooks/useSEO';
 import { dataUrlToBytes } from '../lib/utils';
 import { useToast } from '../components/Toast';
 import { embedSmartFont } from '../lib/pdfFontHelper';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 
 type WatermarkType = 'text' | 'image';
 type Position = 'center' | 'diagonal' | 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' | 'top-center' | 'bottom-center';
@@ -236,14 +237,15 @@ export default function WatermarkPDF() {
   };
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-start p-6 md:p-8 min-h-screen bg-gradient-to-br from-cyan-50/40 via-white to-slate-50">
-      <div className="text-center mb-10 max-w-2xl">
-        <div className="inline-flex items-center justify-center w-14 h-14 bg-cyan-100 rounded-2xl mb-4">
-          <Droplets className="w-7 h-7 text-cyan-600" />
-        </div>
-        <h1 className="text-4xl font-extrabold text-gray-900 mb-3">Add Watermark to PDF</h1>
-        <p className="text-lg text-gray-500">Text or image watermark with full opacity, position and color control.</p>
-      </div>
+    <ToolWorkspaceShell
+      title="Add Watermark to PDF"
+      subtitle="Text or image watermark with full opacity, position and color control."
+      categoryLabel="PDF Branding · Live Preview"
+      icon={Droplets}
+      microVariant="edit"
+      tone="sky"
+    >
+      <div className="flex flex-col items-center w-full">
 
       {!file ? (
         <FileDropzone onDrop={handleDrop} multiple={false} title="Drop PDF here or click to select" />
@@ -406,6 +408,7 @@ export default function WatermarkPDF() {
           </div>
         </div>
       )}
-    </div>
+      </div>
+    </ToolWorkspaceShell>
   );
 }

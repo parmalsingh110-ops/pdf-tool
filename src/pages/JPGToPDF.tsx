@@ -6,6 +6,7 @@ import JSZip from 'jszip';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { dataUrlToBytes } from '../lib/utils';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 
 type PageSizeOption = 'fit' | 'a4' | 'letter';
 type OrientationOption = 'auto' | 'portrait' | 'landscape';
@@ -240,19 +241,15 @@ export default function JPGToPDF() {
   };
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center p-6 md:p-8 max-w-7xl mx-auto w-full">
-      {/* Header */}
-      <div className="text-center mb-8">
-        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 text-xs font-bold tracking-widest uppercase mb-3 border border-blue-200 dark:border-blue-800">
-          <Sparkles className="w-3.5 h-3.5" /> High-Performance Image to PDF
-        </div>
-        <h1 className="text-3xl md:text-5xl font-extrabold text-gray-900 dark:text-white tracking-tight mb-3">
-          JPG & Image to PDF Converter
-        </h1>
-        <p className="text-lg text-gray-600 dark:text-slate-400 max-w-2xl mx-auto">
-          Convert JPG, PNG, and WebP images into a single professional PDF document. Reorder, rotate, and choose paper sizes.
-        </p>
-      </div>
+    <ToolWorkspaceShell
+      title="JPG & Image to PDF Converter"
+      subtitle="Convert JPG, PNG, and WebP images into a single professional PDF document. Reorder, rotate, and choose paper sizes."
+      categoryLabel="Image to PDF Studio"
+      icon={ImageIcon}
+      microVariant="convert"
+      tone="blue"
+    >
+      <div className="flex flex-col items-center w-full">
 
       {items.length === 0 ? (
         <div className="w-full max-w-4xl">
@@ -522,6 +519,7 @@ export default function JPGToPDF() {
           </div>
         </div>
       )}
-    </div>
+      </div>
+    </ToolWorkspaceShell>
   );
 }

@@ -6,6 +6,7 @@ import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import FileDropzone from '../components/FileDropzone';
 import { useSEO } from '../hooks/useSEO';
 import { dataUrlToBytes } from '../lib/utils';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
@@ -321,19 +322,15 @@ export default function InkSaverPDF() {
   };
 
   return (
-    <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 text-slate-800 dark:text-slate-200">
-      <header className="max-w-3xl mb-10">
-        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 text-xs font-bold tracking-wider uppercase">
-          <Sparkles className="w-3.5 h-3.5" />
-          Eco-Print & Toner Saver
-        </div>
-        <h1 className="mt-4 text-3xl sm:text-5xl font-extrabold tracking-tight text-slate-900 dark:text-white">
-          Ink Saver PDF
-        </h1>
-        <p className="mt-4 text-base sm:text-lg text-slate-600 dark:text-slate-300 leading-relaxed">
-          Save 30% to 60% printer ink and toner. Invert heavy dark presentation slides to crisp white paper, whiten murky scanned backgrounds, and keep all your text 100% sharp and readable.
-        </p>
-      </header>
+    <ToolWorkspaceShell
+      title="Ink Saver PDF"
+      subtitle="Save 30% to 60% printer ink and toner. Invert heavy dark presentation slides to crisp white paper, whiten murky scanned backgrounds, and keep all your text 100% sharp and readable."
+      categoryLabel="Eco-Print & Toner Saver"
+      icon={Contrast}
+      microVariant="compress"
+      tone="emerald"
+    >
+      <div className="w-full max-w-7xl mx-auto text-slate-800 dark:text-slate-200">
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
         <div className="lg:col-span-8 space-y-6">
@@ -698,6 +695,7 @@ export default function InkSaverPDF() {
           </div>
         </aside>
       </div>
-    </div>
+      </div>
+    </ToolWorkspaceShell>
   );
 }

@@ -5,6 +5,7 @@ import { useSEO } from '../hooks/useSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
 import { PDFDocument } from 'pdf-lib';
 import { dataUrlToBytes } from '../lib/utils';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 
 type LayoutMode = 'ssc_combo' | 'side_by_side' | 'photo_only' | 'sign_only';
 
@@ -380,19 +381,14 @@ export default function SarkariPhotoSignature() {
   };
 
   return (
-    <div className="flex-1 max-w-6xl mx-auto px-4 py-8 w-full">
-      {/* Title */}
-      <div className="text-center mb-8">
-        <div className="inline-flex items-center gap-2 px-3 py-1 bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 rounded-full text-xs font-semibold mb-3 border border-amber-200 dark:border-amber-800">
-          <Sparkles className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" /> SSC, UPSC, IBPS, Railway & State Exam Format
-        </div>
-        <h1 className="text-3xl sm:text-4xl font-extrabold text-gray-900 dark:text-white mb-3 tracking-tight">
-          Sarkari Photo & Signature Joiner (With Name & DOP)
-        </h1>
-        <p className="text-base sm:text-lg text-gray-600 dark:text-slate-300 max-w-2xl mx-auto">
-          Add Candidate Name & Date of Photo (DOP) at bottom of passport photo, join signature, and compress strictly within required file size (20 KB – 50 KB).
-        </p>
-      </div>
+    <ToolWorkspaceShell
+      title="Sarkari Photo & Signature Joiner (With Name & DOP)"
+      subtitle="Add Candidate Name & Date of Photo (DOP) at bottom of passport photo, join signature, and compress strictly within required file size (20 KB – 50 KB)."
+      categoryLabel="SSC · UPSC · IBPS · Railway Exam Format"
+      icon={User}
+      microVariant="crop"
+      tone="amber"
+    >
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
         {/* Left Column: Controls & Inputs (7 Cols) */}
@@ -784,6 +780,6 @@ export default function SarkariPhotoSignature() {
           { name: 'Exact Image Size (KB)', path: '/exact-image-size', desc: 'Strict KB sizing (20KB, 50KB, 100KB) for government portals' },
         ]}
       />
-    </div>
+    </ToolWorkspaceShell>
   );
 }

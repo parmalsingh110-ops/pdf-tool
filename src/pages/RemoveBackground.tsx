@@ -1,7 +1,8 @@
-﻿import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Download, Eraser, ImageIcon, RefreshCw } from 'lucide-react';
 import FileDropzone from '../components/FileDropzone';
 import { useSEO } from '../hooks/useSEO';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 
 // â”€â”€â”€ CDN fallback chain â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // staticimgly.com often has CORS / availability issues.
@@ -148,7 +149,7 @@ export default function RemoveBackground() {
       if (!outBlob) throw new Error('Failed to export output image');
 
       setResultUrl(URL.createObjectURL(outBlob));
-      setProgressText('Done âœ“');
+      setProgressText('Done ✓');
     } catch (e: any) {
       console.error(e);
       setError(e?.message || 'Background removal failed. Please try again.');
@@ -159,38 +160,39 @@ export default function RemoveBackground() {
   };
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center p-8">
-      <div className="text-center mb-8">
-        <h1 className="text-4xl font-bold text-gray-900 mb-4">Remove Background</h1>
-        <p className="text-xl text-gray-600">
-          AI-powered background removal â€” runs entirely in your browser.
-        </p>
-      </div>
-
-      {/* Model loading banner */}
-      {!modelReady && (
-        <div className="w-full max-w-xl mb-6">
-          {loadingModel && (
-            <div className="bg-blue-50 border border-blue-200 rounded-xl p-5">
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-sm font-semibold text-blue-800">Loading AI Modelâ€¦</p>
-                <span className="text-sm font-bold text-blue-700">{loadProgress}%</span>
+    <ToolWorkspaceShell
+      title="Remove Background"
+      subtitle="AI-powered background removal — runs entirely in your browser."
+      categoryLabel="Image Studio · On-Device Segmentation"
+      icon={Eraser}
+      microVariant="remove-bg"
+      tone="rose"
+    >
+      <div className="flex flex-col items-center">
+        {/* Model loading banner */}
+        {!modelReady && (
+          <div className="w-full max-w-xl mb-6">
+            {loadingModel && (
+              <div className="bg-blue-50 border border-blue-200 rounded-xl p-5">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-sm font-semibold text-blue-800">Loading AI Model…</p>
+                  <span className="text-sm font-bold text-blue-700">{loadProgress}%</span>
+                </div>
+                <div className="w-full bg-blue-100 rounded-full h-2.5">
+                  <div
+                    className="bg-blue-600 h-2.5 rounded-full transition-all duration-300"
+                    style={{ width: `${loadProgress}%` }}
+                  />
+                </div>
+                <p className="text-xs text-blue-600 mt-2">{progressText}</p>
+                <p className="text-xs text-blue-500 mt-1">
+                  First time only (~25 MB). Cached in browser for instant future use.
+                </p>
               </div>
-              <div className="w-full bg-blue-100 rounded-full h-2.5">
-                <div
-                  className="bg-blue-600 h-2.5 rounded-full transition-all duration-300"
-                  style={{ width: `${loadProgress}%` }}
-                />
-              </div>
-              <p className="text-xs text-blue-600 mt-2">{progressText}</p>
-              <p className="text-xs text-blue-500 mt-1">
-                First time only (~25 MB). Cached in browser for instant future use.
-              </p>
-            </div>
-          )}
-          {error && !loadingModel && (
-            <div className="bg-red-50 border border-red-200 rounded-xl p-5 space-y-3">
-              <p className="text-sm font-semibold text-red-700">âš  Model failed to load</p>
+            )}
+            {error && !loadingModel && (
+              <div className="bg-red-50 border border-red-200 rounded-xl p-5 space-y-3">
+                <p className="text-sm font-semibold text-red-700">⚠ Model failed to load</p>
               <p className="text-xs text-red-600">{error}</p>
               <button
                 type="button"
@@ -290,7 +292,7 @@ export default function RemoveBackground() {
               )}
               {!modelReady && !error && loadingModel && (
                 <div className="p-3 bg-amber-50 text-amber-800 text-sm rounded-lg border border-amber-200">
-                  â³ Waiting for AI model to finish loadingâ€¦
+                  ⏳ Waiting for AI model to finish loading…
                 </div>
               )}
 
@@ -338,6 +340,7 @@ export default function RemoveBackground() {
           </div>
         </div>
       )}
-    </div>
+      </div>
+    </ToolWorkspaceShell>
   );
 }

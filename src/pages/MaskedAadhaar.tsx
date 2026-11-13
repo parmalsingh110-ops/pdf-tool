@@ -6,6 +6,7 @@ import ToolSEOSection from '../components/ToolSEOSection';
 import { PDFDocument } from 'pdf-lib';
 import { dataUrlToBytes } from '../lib/utils';
 import { useToast } from '../components/Toast';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 
 import * as pdfjsLib from 'pdfjs-dist';
 import '../lib/pdfWorker';
@@ -315,19 +316,14 @@ export default function MaskedAadhaar() {
   const selectedMask = masks.find((m) => m.id === selectedMaskId);
 
   return (
-    <div className="flex-1 max-w-6xl mx-auto px-4 py-8 w-full">
-      {/* Title */}
-      <div className="text-center mb-8">
-        <div className="inline-flex items-center gap-2 px-3 py-1 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 rounded-full text-xs font-semibold mb-3 border border-emerald-200 dark:border-emerald-800">
-          <Shield className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" /> UIDAI & RBI Compliant Masking
-        </div>
-        <h1 className="text-3xl sm:text-4xl font-extrabold text-gray-900 dark:text-white mb-3 tracking-tight">
-          Masked Aadhaar Card Maker (Mask First 8 Digits)
-        </h1>
-        <p className="text-base sm:text-lg text-gray-600 dark:text-slate-300 max-w-2xl mx-auto">
-          Hide first 8 digits (XXXX-XXXX-1234) and QR code on Aadhaar image or PDF. Safe for hotels, SIM verification, and exam KYC without exposing full Aadhaar number.
-        </p>
-      </div>
+    <ToolWorkspaceShell
+      title="Masked Aadhaar Card Maker (Mask First 8 Digits)"
+      subtitle="Hide first 8 digits (XXXX-XXXX-1234) and QR code on Aadhaar image or PDF. Safe for hotels, SIM verification, and exam KYC without exposing full Aadhaar number."
+      categoryLabel="UIDAI & RBI Compliant Masking"
+      icon={Shield}
+      microVariant="security"
+      tone="emerald"
+    >
 
       {!renderedImageUrl ? (
         <div className="max-w-xl mx-auto p-8 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xs text-center">
@@ -740,6 +736,6 @@ export default function MaskedAadhaar() {
           { name: 'PDF Redact', path: '/redact', desc: 'Permanently black out sensitive text, account numbers, and phone numbers' },
         ]}
       />
-    </div>
+    </ToolWorkspaceShell>
   );
 }

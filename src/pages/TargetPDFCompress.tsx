@@ -5,6 +5,7 @@ import { PDFDocument } from 'pdf-lib';
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { useSEO } from '../hooks/useSEO';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 
 // Initialize pdf.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
@@ -231,11 +232,15 @@ export default function TargetPDFCompress() {
   };
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center p-8">
-      <div className="text-center mb-8">
-        <h1 className="text-4xl font-bold text-gray-900 mb-2">Target Size PDF Compress</h1>
-        <p className="text-lg text-gray-600">Compress PDF to an exact target file size in KB or MB (e.g. 100 KB, 500 KB, 1 MB, 2 MB).</p>
-      </div>
+    <ToolWorkspaceShell
+      title="Target Size PDF Compress"
+      subtitle="Compress PDF to an exact target file size in KB or MB (e.g. 100 KB, 500 KB, 1 MB, 2 MB)."
+      categoryLabel="Exact KB Optimizer"
+      icon={Target}
+      microVariant="compress"
+      tone="emerald"
+    >
+      <div className="flex flex-col items-center w-full">
 
       {!file ? (
         <FileDropzone onDrop={handleDrop} multiple={false} title="Select PDF file" />
@@ -499,6 +504,7 @@ export default function TargetPDFCompress() {
           </div>
         </div>
       )}
-    </div>
+      </div>
+    </ToolWorkspaceShell>
   );
 }

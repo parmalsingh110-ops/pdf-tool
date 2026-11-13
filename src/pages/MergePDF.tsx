@@ -8,6 +8,7 @@ import '../lib/pdfWorker';
 import { useSEO } from '../hooks/useSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
 import { useToast } from '../components/Toast';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 
 const ORDER_KEY = 'mergePdfOrderV1';
 type OrderEntry = { name: string; size: number; lastModified: number };
@@ -480,31 +481,32 @@ export default function MergePDF() {
   );
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-start p-6 md:p-8 min-h-screen bg-gradient-to-br from-red-50/40 via-white to-slate-50">
-      <div className="text-center mb-8 max-w-3xl">
-        <div className="inline-flex items-center justify-center w-14 h-14 bg-red-100 rounded-2xl mb-4">
-          <Layers className="w-7 h-7 text-red-600" />
-        </div>
-        <h1 className="text-4xl font-extrabold text-gray-900 mb-3">Merge PDF Files</h1>
-        <p className="text-lg text-gray-500 mb-3">Combine multiple PDFs into one. See thumbnail previews, drag to reorder.</p>
-        <div className="flex flex-wrap items-center justify-center gap-2 mt-2">
-          <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold bg-red-100 text-red-800 shadow-xs">
+    <ToolWorkspaceShell
+      title="Merge PDF Files"
+      subtitle="Combine multiple PDFs into one. See thumbnail previews, drag to reorder."
+      categoryLabel="PDF Assembly · Browser Engine"
+      icon={Layers}
+      microVariant="merge"
+      tone="rose"
+    >
+      <div className="flex flex-col items-center">
+        <div className="flex flex-wrap items-center justify-center gap-2 mb-7">
+          <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold bg-rose-100/80 text-rose-800 border border-rose-200/70">
             📑 Smart Clickable TOC Index
           </span>
-          <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-800 shadow-xs">
+          <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold bg-sky-100/80 text-sky-800 border border-sky-200/70">
             📐 A4 / Letter Normalizer
           </span>
-          <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 shadow-xs">
+          <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-100/80 text-emerald-800 border border-emerald-200/70">
             🧹 Auto-Purge Blank Pages
           </span>
           <Link
             to="/alternate-mix"
-            className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-teal-100 text-teal-800 hover:bg-teal-200 transition-colors shadow-xs"
+            className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-violet-100/80 text-violet-800 hover:bg-violet-200/80 transition-colors border border-violet-200/70"
           >
             🔀 Alternate & Mix →
           </Link>
         </div>
-      </div>
 
       {entries.length === 0 ? (
         <div className="w-full max-w-5xl space-y-6">
@@ -679,6 +681,7 @@ export default function MergePDF() {
           { name: 'PDF to Word', path: '/pdf-to-word', desc: 'Convert PDF to editable DOCX format' },
         ]}
       />
-    </div>
+      </div>
+    </ToolWorkspaceShell>
   );
 }

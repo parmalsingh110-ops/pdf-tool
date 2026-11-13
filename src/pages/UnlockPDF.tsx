@@ -6,6 +6,7 @@ import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { dataUrlToBytes } from '../lib/utils';
 import { apiFetch } from '../lib/api';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 
 interface DocPreset {
   id: string;
@@ -564,19 +565,15 @@ export default function UnlockPDF() {
   };
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center p-4 sm:p-8 max-w-5xl mx-auto w-full">
-      {/* Page Title & Intro */}
-      <div className="text-center mb-8">
-        <div className="inline-flex items-center gap-2 px-3 py-1 bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 rounded-full text-xs font-semibold mb-3 border border-purple-200 dark:border-purple-800">
-          <Sparkles className="w-3.5 h-3.5" /> Smart Document Password Helper Included
-        </div>
-        <h1 className="text-3xl sm:text-4xl font-extrabold text-gray-900 dark:text-white mb-3 tracking-tight">
-          Unlock PDF & Remove Password
-        </h1>
-        <p className="text-base sm:text-lg text-gray-600 dark:text-slate-300 max-w-2xl mx-auto">
-          Direct password pata hai ya nahi? Select your document (Aadhaar, SBI, HDFC, Jan Aadhaar, Form 16) aur hamara smart helper khud password banakar unlock karega!
-        </p>
-      </div>
+    <ToolWorkspaceShell
+      title="Unlock PDF & Remove Password"
+      subtitle="Direct password pata hai ya nahi? Select your document (Aadhaar, SBI, HDFC, Jan Aadhaar, Form 16) aur hamara smart helper khud password banakar unlock karega!"
+      categoryLabel="PDF Security · Smart Password Helper"
+      icon={Unlock}
+      microVariant="security"
+      tone="violet"
+    >
+      <div className="flex flex-col items-center w-full">
 
       {!file ? (
         <div className="w-full max-w-2xl">
@@ -952,6 +949,7 @@ export default function UnlockPDF() {
           </div>
         </div>
       </div>
-    </div>
+      </div>
+    </ToolWorkspaceShell>
   );
 }

@@ -41,6 +41,7 @@ import SignatureCanvas from 'react-signature-canvas';
 import FileDropzone from '../components/FileDropzone';
 import { useSEO } from '../hooks/useSEO';
 import { apiFetch } from '../lib/api';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 import {
   drawMatchedLatinText,
   drawVectorHarfbuzzText,
@@ -2356,15 +2357,18 @@ export default function AdvancedEditor() {
   return (
     <div className="flex-1 flex flex-col bg-gray-100">
       {!file ? (
-        <div className="flex-1 flex items-center justify-center p-8">
-          <div className="w-full max-w-3xl">
-            <div className="text-center mb-8">
-              <h1 className="text-4xl font-bold text-gray-900 mb-4">Advanced PDF Editor</h1>
-              <p className="text-xl text-gray-600">Add text, whiteout, highlights, signatures, freehand draw, links, and more.</p>
-            </div>
+        <ToolWorkspaceShell
+          title="Advanced PDF Editor"
+          subtitle="Edit existing vector/scanned text inline with automatic font & background matching, plus annotations, whiteout, signatures & links."
+          categoryLabel="Document Atelier · Vector & OCR Editor"
+          icon={SquarePen}
+          microVariant="edit"
+          tone="rose"
+        >
+          <div className="w-full max-w-3xl mx-auto">
             <FileDropzone onDrop={handleDrop} multiple={false} title="Select PDF file" />
           </div>
-        </div>
+        </ToolWorkspaceShell>
       ) : !editedUrl ? (
         <div className="flex-1 flex flex-col h-full">
           {/* Toolbar */}

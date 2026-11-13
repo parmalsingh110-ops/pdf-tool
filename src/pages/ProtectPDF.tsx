@@ -6,6 +6,7 @@ import * as pdfjsLib from 'pdfjs-dist';
 import '../lib/pdfWorker';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 
 type PrintPermission = 'none' | 'low' | 'high';
 
@@ -141,14 +142,15 @@ export default function ProtectPDF() {
   };
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-start p-6 md:p-8 min-h-screen bg-gradient-to-br from-purple-50/40 via-white to-slate-50">
-      <div className="text-center mb-10 max-w-2xl">
-        <div className="inline-flex items-center justify-center w-14 h-14 bg-purple-100 rounded-2xl mb-4">
-          <ShieldCheck className="w-7 h-7 text-purple-600" />
-        </div>
-        <h1 className="text-4xl font-extrabold text-gray-900 mb-3">Protect PDF with Password</h1>
-        <p className="text-lg text-gray-500">Encrypt your PDF with standard AES encryption. Restrict printing, text copying, and editing.</p>
-      </div>
+    <ToolWorkspaceShell
+      title="Protect PDF with Password"
+      subtitle="Encrypt your PDF with standard AES encryption. Restrict printing, text copying, and editing."
+      categoryLabel="Security Vault · Client-Side Encryption"
+      icon={ShieldCheck}
+      microVariant="security"
+      tone="violet"
+    >
+      <div className="flex flex-col items-center">
 
       {!file ? (
         <FileDropzone onDrop={handleDrop} multiple={false} title="Drop PDF here or click to select" />
@@ -467,6 +469,7 @@ export default function ProtectPDF() {
           </div>
         </div>
       )}
-    </div>
+      </div>
+    </ToolWorkspaceShell>
   );
 }

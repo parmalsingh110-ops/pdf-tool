@@ -7,6 +7,7 @@ import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { useToast } from '../components/Toast';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 
 interface PageInfo {
   index: number;
@@ -157,14 +158,15 @@ export default function RotatePages() {
   const selectedCount = pages.filter(p => p.selected).length;
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-start p-6 md:p-8 min-h-screen bg-gradient-to-br from-sky-50/40 via-white to-slate-50">
-      <div className="text-center mb-10 max-w-2xl">
-        <div className="inline-flex items-center justify-center w-14 h-14 bg-sky-100 rounded-2xl mb-4">
-          <RotateCw className="w-7 h-7 text-sky-600" />
-        </div>
-        <h1 className="text-4xl font-extrabold text-gray-900 mb-3">Rotate PDF Pages</h1>
-        <p className="text-lg text-gray-500">Rotate individual pages, selected ranges, or entire document 90° clockwise, counter-clockwise, or 180°.</p>
-      </div>
+    <ToolWorkspaceShell
+      title="Rotate PDF Pages"
+      subtitle="Rotate individual pages, selected ranges, or entire document 90° clockwise, counter-clockwise, or 180°."
+      categoryLabel="PDF Page Orientation"
+      icon={RotateCw}
+      microVariant="edit"
+      tone="sky"
+    >
+      <div className="flex flex-col items-center w-full">
 
       {!file ? (
         <FileDropzone onDrop={handleDrop} multiple={false} title="Drop PDF here or click to select" />
@@ -427,6 +429,7 @@ export default function RotatePages() {
           </div>
         </div>
       )}
-    </div>
+      </div>
+    </ToolWorkspaceShell>
   );
 }

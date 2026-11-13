@@ -7,6 +7,7 @@ import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { embedSmartFont } from '../lib/pdfFontHelper';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 
 // Initialize pdf.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
@@ -251,19 +252,15 @@ export default function BatesNumbering() {
   };
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center p-6 md:p-8 max-w-7xl mx-auto w-full">
-      {/* Header */}
-      <div className="text-center mb-8">
-        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 text-xs font-bold tracking-widest uppercase mb-3 border border-indigo-200 dark:border-indigo-800">
-          <Scale className="w-3.5 h-3.5" /> Legal & Compliance Tool
-        </div>
-        <h1 className="text-3xl md:text-5xl font-extrabold text-gray-900 dark:text-white tracking-tight mb-3">
-          Bates Numbering for PDFs
-        </h1>
-        <p className="text-lg text-gray-600 dark:text-slate-400 max-w-2xl mx-auto">
-          Number court exhibits, litigation discovery, and audit documents sequentially with live positioning preview.
-        </p>
-      </div>
+    <ToolWorkspaceShell
+      title="Bates Numbering for PDFs"
+      subtitle="Number court exhibits, litigation discovery, and audit documents sequentially with live positioning preview."
+      categoryLabel="Legal & Compliance Tool"
+      icon={Hash}
+      microVariant="edit"
+      tone="indigo"
+    >
+      <div className="flex flex-col items-center justify-center max-w-7xl mx-auto w-full">
 
       {!file ? (
         <div className="w-full max-w-4xl">
@@ -543,6 +540,7 @@ export default function BatesNumbering() {
           </div>
         </div>
       )}
-    </div>
+      </div>
+    </ToolWorkspaceShell>
   );
 }

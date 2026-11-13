@@ -11,6 +11,7 @@ import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { dataUrlToBytes } from '../lib/utils';
 import { useToast } from '../components/Toast';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 
 type RedactStyle = 'blackout' | 'whiteout' | 'confidential' | 'pixelate';
 
@@ -518,19 +519,15 @@ export default function RedactPdf() {
   const currentRects = rects.filter(r => r.pageIndex === currentPage);
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-start p-4 sm:p-8 max-w-6xl mx-auto w-full">
-      {/* Header */}
-      <div className="text-center mb-6">
-        <div className="w-16 h-16 bg-red-50 dark:bg-red-950/40 text-red-600 dark:text-red-400 rounded-2xl flex items-center justify-center mx-auto mb-3 shadow-sm border border-red-100 dark:border-red-900/50">
-          <ShieldOff className="w-8 h-8" />
-        </div>
-        <h1 className="text-3xl sm:text-4xl font-extrabold text-slate-900 dark:text-white mb-2">
-          Smart PDF Redaction Studio
-        </h1>
-        <p className="text-base text-slate-600 dark:text-slate-400 max-w-xl mx-auto">
-          Permanently redact sensitive PII, blackout confidential numbers, or search and scrub text with 100% irreversible pixel burn.
-        </p>
-      </div>
+    <ToolWorkspaceShell
+      title="Smart PDF Redaction Studio"
+      subtitle="Permanently redact sensitive PII, blackout confidential numbers, or search and scrub text with 100% irreversible pixel burn."
+      categoryLabel="Privacy & PII Sanitization"
+      icon={ShieldOff}
+      microVariant="security"
+      tone="rose"
+    >
+      <div className="flex flex-col items-center w-full">
 
       {!file ? (
         <div className="w-full max-w-2xl space-y-6">
@@ -882,6 +879,7 @@ export default function RedactPdf() {
           )}
         </div>
       )}
-    </div>
+      </div>
+    </ToolWorkspaceShell>
   );
 }

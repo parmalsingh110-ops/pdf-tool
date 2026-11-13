@@ -7,6 +7,7 @@ import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useToast } from '../components/Toast';
 import { useSEO } from '../hooks/useSEO';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 
 interface PageAnalysis {
   pageNum: number;
@@ -178,19 +179,15 @@ export default function RemoveBlankPages() {
   };
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center p-6 md:p-8 max-w-7xl mx-auto w-full">
-      {/* Header */}
-      <div className="text-center mb-8">
-        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 text-xs font-bold tracking-widest uppercase mb-3 border border-rose-200 dark:border-rose-800">
-          <Sparkles className="w-3.5 h-3.5" /> Intelligent Blank Page Filter
-        </div>
-        <h1 className="text-3xl md:text-5xl font-extrabold text-gray-900 dark:text-white tracking-tight mb-3">
-          Remove Blank Pages from PDF
-        </h1>
-        <p className="text-lg text-gray-600 dark:text-slate-400 max-w-2xl mx-auto">
-          Scans and detects empty or near-white pages from documents. Review thumbnails before deleting to ensure zero accidental page loss.
-        </p>
-      </div>
+    <ToolWorkspaceShell
+      title="Remove Blank Pages from PDF"
+      subtitle="Scans and detects empty or near-white pages from documents. Review thumbnails before deleting to ensure zero accidental page loss."
+      categoryLabel="Intelligent Blank Page Filter"
+      icon={FileX}
+      microVariant="split"
+      tone="rose"
+    >
+      <div className="flex flex-col items-center justify-center max-w-7xl mx-auto w-full">
 
       {!file ? (
         <div className="w-full max-w-4xl">
@@ -398,6 +395,7 @@ export default function RemoveBlankPages() {
           </div>
         </div>
       )}
-    </div>
+      </div>
+    </ToolWorkspaceShell>
   );
 }

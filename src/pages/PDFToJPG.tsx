@@ -8,6 +8,7 @@ import * as UTIF from 'utif';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { dataUrlToBytes } from '../lib/utils';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 
 // Initialize pdf.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
@@ -241,19 +242,15 @@ export default function PDFToJPG() {
   };
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center p-6 md:p-8 max-w-7xl mx-auto w-full">
-      {/* Header */}
-      <div className="text-center mb-8">
-        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 text-xs font-bold tracking-widest uppercase mb-3 border border-amber-200 dark:border-amber-800">
-          <Sparkles className="w-3.5 h-3.5" /> High-Resolution Converter
-        </div>
-        <h1 className="text-3xl md:text-5xl font-extrabold text-gray-900 dark:text-white tracking-tight mb-3">
-          PDF to JPG & Image Converter
-        </h1>
-        <p className="text-lg text-gray-600 dark:text-slate-400 max-w-2xl mx-auto">
-          Convert PDF pages to crystal-clear JPG, PNG, or WebP images. Select specific pages, adjust DPI, and download as single images or a ZIP.
-        </p>
-      </div>
+    <ToolWorkspaceShell
+      title="PDF to JPG & Image Converter"
+      subtitle="Convert PDF pages to crystal-clear JPG, PNG, or WebP images. Select specific pages, adjust DPI, and download as single images or a ZIP."
+      categoryLabel="High-Resolution Converter"
+      icon={ImageIcon}
+      microVariant="convert"
+      tone="amber"
+    >
+      <div className="flex flex-col items-center w-full">
 
       {!file ? (
         <div className="w-full max-w-4xl">
@@ -589,6 +586,7 @@ export default function PDFToJPG() {
           </div>
         </div>
       )}
-    </div>
+      </div>
+    </ToolWorkspaceShell>
   );
 }

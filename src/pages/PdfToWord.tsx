@@ -15,6 +15,7 @@ import ToolSEOSection from '../components/ToolSEOSection';
 import { useSEO } from '../hooks/useSEO';
 import { apiFetch } from '../lib/api';
 import '../lib/pdfWorker';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 
 type Stage = 'idle' | 'analyzing' | 'converting' | 'backend' | 'done' | 'error';
 type EngineMode = 'precision' | 'frontend' | 'ocr';
@@ -464,34 +465,27 @@ export default function PdfToWord() {
   };
 
   return (
-    <div className="flex-1 w-full bg-gradient-to-br from-slate-50 via-blue-50/20 to-indigo-50/30 dark:from-slate-950 dark:via-slate-900 dark:to-slate-900 min-h-screen">
-      <div className="max-w-4xl mx-auto px-4 py-12 space-y-8">
-
-        {/* Header */}
-        <div className="text-center space-y-3">
-          <div className="inline-flex p-3 bg-gradient-to-tr from-blue-600 via-indigo-600 to-violet-600 rounded-2xl shadow-xl shadow-blue-500/20 text-white mb-2">
-            <FileText className="w-8 h-8" />
-          </div>
-          <h1 className="text-4xl md:text-5xl font-black text-slate-900 dark:text-white tracking-tight">
-            PDF to Word Converter
-          </h1>
-          <p className="text-base md:text-lg text-slate-600 dark:text-slate-400 max-w-2xl mx-auto">
-            Ultra-precision conversion that preserves <span className="font-semibold text-blue-600 dark:text-blue-400">tables, column layouts, fonts, formatting, and images</span> with zero distortion.
-          </p>
-
-          <div className="flex flex-wrap justify-center gap-2 pt-2">
-            {[
-              { icon: TableIcon, t: 'Tables & Grids Intact', color: 'text-indigo-500' },
-              { icon: Layout, t: 'Multi-Column Alignment', color: 'text-blue-500' },
-              { icon: Sparkles, t: 'Exact Fonts & Colors', color: 'text-amber-500' },
-              { icon: ShieldCheck, t: '100% Secure & Private', color: 'text-emerald-500' },
-            ].map(({ icon: Icon, t, color }) => (
-              <span key={t} className="inline-flex items-center gap-1.5 px-3 py-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/80 rounded-full text-xs font-semibold text-slate-700 dark:text-slate-300 shadow-sm">
-                <Icon className={`w-3.5 h-3.5 ${color}`} />
-                {t}
-              </span>
-            ))}
-          </div>
+    <ToolWorkspaceShell
+      title="PDF to Word Converter"
+      subtitle="Ultra-precision conversion that preserves tables, column layouts, fonts, formatting, and images."
+      categoryLabel="Document Conversion · Hybrid Engine"
+      icon={FileText}
+      microVariant="convert"
+      tone="blue"
+    >
+      <div className="max-w-4xl mx-auto space-y-8">
+        <div className="flex flex-wrap justify-center gap-2">
+          {[
+            { icon: TableIcon, t: 'Tables & Grids Intact', color: 'text-indigo-500' },
+            { icon: Layout, t: 'Multi-Column Alignment', color: 'text-blue-500' },
+            { icon: Sparkles, t: 'Exact Fonts & Colors', color: 'text-amber-500' },
+            { icon: ShieldCheck, t: '100% Secure & Private', color: 'text-emerald-500' },
+          ].map(({ icon: Icon, t, color }) => (
+            <span key={t} className="inline-flex items-center gap-1.5 px-3 py-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/80 rounded-full text-xs font-semibold text-slate-700 dark:text-slate-300 shadow-sm">
+              <Icon className={`w-3.5 h-3.5 ${color}`} />
+              {t}
+            </span>
+          ))}
         </div>
 
         {/* Options & Upload */}
@@ -778,6 +772,6 @@ export default function PdfToWord() {
           { name: 'Extract Tables', path: '/extract-tables', desc: 'Isolate and export data tables as CSV, Excel, or JSON' },
         ]}
       />
-    </div>
+    </ToolWorkspaceShell>
   );
 }

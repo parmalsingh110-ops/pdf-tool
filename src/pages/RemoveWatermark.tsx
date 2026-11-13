@@ -12,6 +12,7 @@ import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { dataUrlToBytes } from '../lib/utils';
 import { apiFetch } from '../lib/api';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 
 type RemovalMode = 'bottom-crop' | 'box-erase' | 'contrast-cleaner' | 'backend-vector';
 
@@ -286,19 +287,15 @@ export default function RemoveWatermark() {
   };
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-start p-4 sm:p-8 max-w-6xl mx-auto w-full">
-      {/* Header */}
-      <div className="text-center mb-6">
-        <div className="w-16 h-16 bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 rounded-2xl flex items-center justify-center mx-auto mb-3 shadow-sm border border-rose-100 dark:border-rose-900/50">
-          <Eraser className="w-8 h-8" />
-        </div>
-        <h1 className="text-3xl sm:text-4xl font-extrabold text-slate-900 dark:text-white mb-2">
-          PDF Watermark Remover Studio
-        </h1>
-        <p className="text-base text-slate-600 dark:text-slate-400 max-w-xl mx-auto">
-          Erase CamScanner footers, delete watermark annotations, and wipe background stamps with 100% vector sharpness preservation.
-        </p>
-      </div>
+    <ToolWorkspaceShell
+      title="PDF Watermark Remover Studio"
+      subtitle="Erase CamScanner footers, delete watermark annotations, and wipe background stamps with 100% vector sharpness preservation."
+      categoryLabel="Clean Vector Remover"
+      icon={Eraser}
+      microVariant="security"
+      tone="rose"
+    >
+      <div className="flex flex-col items-center justify-start max-w-6xl mx-auto w-full">
 
       {!file ? (
         <div className="w-full max-w-2xl space-y-6">
@@ -597,6 +594,7 @@ export default function RemoveWatermark() {
           </div>
         </div>
       )}
-    </div>
+      </div>
+    </ToolWorkspaceShell>
   );
 }

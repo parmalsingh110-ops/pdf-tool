@@ -9,6 +9,7 @@ import BackendLoader from '../components/BackendLoader';
 import ToolSEOSection from '../components/ToolSEOSection';
 import { useSEO } from '../hooks/useSEO';
 import { apiFetch } from '../lib/api';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 
 type CompressionLevel = 'backend-high-quality' | 'extreme' | 'recommended' | 'low';
 
@@ -341,16 +342,20 @@ export default function CompressPDF() {
   ];
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center p-8">
-      <div className="text-center mb-12 max-w-3xl mx-auto px-4">
-        <h1 className="text-4xl font-bold text-gray-900 mb-4">Compress PDF file</h1>
-        <p className="text-xl text-gray-600">Reduce file size while optimizing for maximal PDF quality.</p>
-        
+    <ToolWorkspaceShell
+      title="Compress PDF file"
+      subtitle="Reduce file size while optimizing for maximal PDF quality."
+      categoryLabel="Optimization Engine · Local & High-Quality"
+      icon={Minimize2}
+      microVariant="compress"
+      tone="emerald"
+    >
+      <div className="flex flex-col items-center">
         {/* Prominent Target Size Banner / Action Button */}
-        <div className="mt-6 p-4 sm:p-5 bg-gradient-to-r from-emerald-50 via-teal-50 to-blue-50 dark:from-emerald-950/40 dark:via-teal-950/40 dark:to-blue-950/40 border-2 border-emerald-300 dark:border-emerald-700 rounded-2xl shadow-sm flex flex-col sm:flex-row items-center justify-between gap-4 text-left">
+        <div className="mb-8 w-full max-w-3xl p-4 sm:p-5 bg-gradient-to-r from-emerald-50 via-teal-50 to-blue-50 dark:from-emerald-950/40 dark:via-teal-950/40 dark:to-blue-950/40 border-2 border-emerald-300 dark:border-emerald-700 rounded-2xl shadow-sm flex flex-col sm:flex-row items-center justify-between gap-4 text-left">
           <div className="flex items-start gap-3.5">
             <div className="w-11 h-11 rounded-2xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-md">
-              <Target className="w-6 h-6 animate-pulse" />
+              <Target className="w-6 h-6" />
             </div>
             <div>
               <div className="flex items-center gap-2">
@@ -378,7 +383,6 @@ export default function CompressPDF() {
             <span>Open Target Compress →</span>
           </Link>
         </div>
-      </div>
 
       {!file ? (
         <FileDropzone onDrop={handleDrop} multiple={false} title="Select PDF file" />
@@ -726,6 +730,7 @@ export default function CompressPDF() {
           { name: 'PDF to JPG', path: '/pdf-to-jpg', desc: 'Convert PDF pages into lightweight image files' },
         ]}
       />
-    </div>
+      </div>
+    </ToolWorkspaceShell>
   );
 }
