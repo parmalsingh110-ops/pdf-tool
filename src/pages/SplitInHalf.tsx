@@ -506,7 +506,7 @@ export default function SplitInHalf() {
                 <p className="text-sm text-emerald-700 dark:text-emerald-300 mb-4">
                   Your two-page layout document has been split down the center into individual, correctly ordered pages.
                 </p>
-                <div className="flex items-center justify-center gap-3">
+                <div className="flex flex-wrap items-center justify-center gap-3">
                   <a
                     href={resultUrl}
                     download={resultName}
@@ -518,7 +518,7 @@ export default function SplitInHalf() {
                     href={resultUrl}
                     target="_blank"
                     rel="noreferrer"
-                    className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-emerald-800 dark:text-emerald-200 bg-white dark:bg-slate-800 border border-emerald-300 dark:border-emerald-700 hover:bg-emerald-100/50 transition-colors"
+                    className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-emerald-800 dark:text-emerald-200 bg-white dark:bg-slate-800 border border-emerald-300 dark:border-emerald-700 hover:bg-emerald-100/50 dark:hover:bg-slate-700 transition-colors"
                   >
                     <Eye className="w-4 h-4" /> Preview in Browser
                   </a>

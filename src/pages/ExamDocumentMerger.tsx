@@ -264,7 +264,7 @@ export default function ExamDocumentMerger() {
                 className={`text-xs px-3 py-1.5 rounded-lg border font-semibold transition-all ${
                   targetSizeLimitKb === preset.kb
                     ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
-                    : 'bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100'
+                    : 'bg-gray-50 dark:bg-slate-800 text-gray-700 dark:text-slate-200 border-gray-200 dark:border-slate-700 hover:bg-gray-100 dark:hover:bg-slate-700'
                 }`}
               >
                 {preset.label}
@@ -276,12 +276,12 @@ export default function ExamDocumentMerger() {
 
       {/* Dropzone */}
       <div className="mb-6">
-        <label className="flex flex-col items-center justify-center border-2 border-dashed border-blue-300 hover:border-blue-500 rounded-2xl p-8 cursor-pointer transition-colors bg-blue-50/20 hover:bg-blue-50/40 text-center">
-          <Upload className="w-10 h-10 text-blue-600 mb-2" />
-          <span className="text-base font-bold text-gray-800">
+        <label className="flex flex-col items-center justify-center border-2 border-dashed border-blue-300 dark:border-blue-700 hover:border-blue-500 rounded-2xl p-8 cursor-pointer transition-colors bg-blue-50/20 dark:bg-blue-950/20 hover:bg-blue-50/40 dark:hover:bg-blue-950/30 text-center">
+          <Upload className="w-10 h-10 text-blue-600 dark:text-blue-400 mb-2" />
+          <span className="text-base font-bold text-gray-800 dark:text-slate-100">
             Select All Certificates & Marksheets (PDF, JPG, PNG)
           </span>
-          <span className="text-xs text-gray-500 mt-1">
+          <span className="text-xs text-gray-500 dark:text-slate-400 mt-1">
             Upload multiple files at once. You can reorder and tag each certificate below.
           </span>
           <input
@@ -297,27 +297,27 @@ export default function ExamDocumentMerger() {
       {/* Document List */}
       {docs.length > 0 && (
         <div className="space-y-4 mb-8">
-          <div className="flex items-center justify-between text-xs text-gray-600 px-1">
-            <span className="font-bold text-gray-800">
+          <div className="flex items-center justify-between text-xs text-gray-600 dark:text-slate-300 px-1">
+            <span className="font-bold text-gray-800 dark:text-slate-100">
               {docs.length} Documents Selected • Total Raw Size: {(totalInputSizeKb / 1024).toFixed(2)} MB
             </span>
-            <span className="text-gray-400">Reorder with ↑ ↓ arrows to set page sequence</span>
+            <span className="text-gray-400 dark:text-slate-500">Reorder with ↑ ↓ arrows to set page sequence</span>
           </div>
 
           <div className="space-y-2.5">
             {docs.map((doc, idx) => (
               <div
                 key={doc.id}
-                className="p-3.5 bg-white border border-gray-200 rounded-xl shadow-xs flex flex-col sm:flex-row sm:items-center gap-3 justify-between"
+                className="p-3.5 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-xl shadow-xs flex flex-col sm:flex-row sm:items-center gap-3 justify-between"
               >
                 {/* Index & File Name */}
                 <div className="flex items-center gap-3 flex-1 min-w-0">
-                  <span className="w-7 h-7 rounded-lg bg-blue-100 text-blue-700 font-bold text-xs flex items-center justify-center shrink-0">
+                  <span className="w-7 h-7 rounded-lg bg-blue-100 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 font-bold text-xs flex items-center justify-center shrink-0">
                     {idx + 1}
                   </span>
                   <div className="flex-1 min-w-0">
-                    <p className="text-xs font-bold text-gray-900 truncate">{doc.file.name}</p>
-                    <p className="text-[11px] text-gray-500">
+                    <p className="text-xs font-bold text-gray-900 dark:text-slate-100 truncate">{doc.file.name}</p>
+                    <p className="text-[11px] text-gray-500 dark:text-slate-400">
                       {doc.sizeKb} KB • {doc.type.toUpperCase()}
                     </p>
                   </div>
@@ -326,13 +326,13 @@ export default function ExamDocumentMerger() {
                 {/* Document Type Label Selector */}
                 <div className="flex-1 min-w-0 max-w-xs">
                   <div className="relative">
-                    <Tag className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-2.5" />
+                    <Tag className="w-3.5 h-3.5 text-gray-400 dark:text-slate-500 absolute left-2.5 top-2.5" />
                     <input
                       type="text"
                       value={doc.label}
                       onChange={(e) => updateLabel(doc.id, e.target.value)}
                       placeholder="Certificate label..."
-                      className="w-full pl-8 pr-3 py-1.5 bg-gray-50 border border-gray-300 rounded-lg text-xs font-medium focus:ring-2 focus:ring-blue-500 outline-none"
+                      className="w-full pl-8 pr-3 py-1.5 bg-gray-50 dark:bg-slate-800 text-gray-900 dark:text-slate-100 border border-gray-300 dark:border-slate-700 rounded-lg text-xs font-medium focus:ring-2 focus:ring-blue-500 outline-none"
                     />
                   </div>
                 </div>
@@ -343,7 +343,7 @@ export default function ExamDocumentMerger() {
                     type="button"
                     onClick={() => moveUp(idx)}
                     disabled={idx === 0}
-                    className="p-1.5 rounded-lg text-gray-500 hover:text-gray-900 hover:bg-gray-100 disabled:opacity-30"
+                    className="p-1.5 rounded-lg text-gray-500 dark:text-slate-400 hover:text-gray-900 dark:hover:text-slate-100 hover:bg-gray-100 dark:hover:bg-slate-800 disabled:opacity-30"
                     title="Move up"
                   >
                     <ArrowUp className="w-4 h-4" />
@@ -352,7 +352,7 @@ export default function ExamDocumentMerger() {
                     type="button"
                     onClick={() => moveDown(idx)}
                     disabled={idx === docs.length - 1}
-                    className="p-1.5 rounded-lg text-gray-500 hover:text-gray-900 hover:bg-gray-100 disabled:opacity-30"
+                    className="p-1.5 rounded-lg text-gray-500 dark:text-slate-400 hover:text-gray-900 dark:hover:text-slate-100 hover:bg-gray-100 dark:hover:bg-slate-800 disabled:opacity-30"
                     title="Move down"
                   >
                     <ArrowDown className="w-4 h-4" />
@@ -360,7 +360,7 @@ export default function ExamDocumentMerger() {
                   <button
                     type="button"
                     onClick={() => removeDoc(doc.id)}
-                    className="p-1.5 rounded-lg text-red-500 hover:bg-red-50"
+                    className="p-1.5 rounded-lg text-red-500 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40"
                     title="Remove"
                   >
                     <Trash2 className="w-4 h-4" />
@@ -374,10 +374,10 @@ export default function ExamDocumentMerger() {
           {!mergedPdfUrl ? (
             <div className="pt-4 space-y-3">
               {isProcessing && progressMsg && (
-                <div className="p-4 bg-blue-50 border border-blue-200 rounded-xl">
+                <div className="p-4 bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 rounded-xl">
                   <div className="flex items-center gap-3">
-                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600 shrink-0"></div>
-                    <p className="text-xs font-semibold text-blue-700">{progressMsg}</p>
+                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600 dark:border-blue-400 shrink-0"></div>
+                    <p className="text-xs font-semibold text-blue-700 dark:text-blue-300">{progressMsg}</p>
                   </div>
                 </div>
               )}
@@ -403,13 +403,13 @@ export default function ExamDocumentMerger() {
               </button>
             </div>
           ) : (
-            <div className="p-6 bg-emerald-50 border border-emerald-200 rounded-2xl text-center space-y-4">
-              <div className="w-12 h-12 bg-emerald-100 text-emerald-700 rounded-full flex items-center justify-center mx-auto">
+            <div className="p-6 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 rounded-2xl text-center space-y-4">
+              <div className="w-12 h-12 bg-emerald-100 dark:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 rounded-full flex items-center justify-center mx-auto">
                 <CheckCircle2 className="w-7 h-7" />
               </div>
               <div>
-                <h3 className="text-xl font-extrabold text-emerald-950">Documents Merged &amp; Compressed!</h3>
-                <p className="text-xs text-emerald-800 mt-1">
+                <h3 className="text-xl font-extrabold text-emerald-950 dark:text-emerald-100">Documents Merged &amp; Compressed!</h3>
+                <p className="text-xs text-emerald-800 dark:text-emerald-300 mt-1">
                   <span>Final Bundle Size: </span>
                   <strong className="notranslate" translate="no">{finalSizeKb} KB</strong>
                   <span> (Limit: Under {targetSizeLimitKb} KB) • Portal Accepted ✅</span>
@@ -428,7 +428,7 @@ export default function ExamDocumentMerger() {
                 <button
                   type="button"
                   onClick={() => setMergedPdfUrl(null)}
-                  className="text-xs text-gray-500 hover:text-gray-900 font-semibold"
+                  className="text-xs text-gray-500 dark:text-slate-400 hover:text-gray-900 dark:hover:text-slate-100 font-semibold"
                 >
                   Adjust files or re-compress
                 </button>
@@ -439,26 +439,26 @@ export default function ExamDocumentMerger() {
       )}
 
       {/* Trust & FAQ */}
-      <div className="mt-16 border-t border-gray-200 pt-10 text-gray-800">
-        <h2 className="text-2xl font-bold mb-6 text-center text-gray-900">
+      <div className="mt-16 border-t border-gray-200 dark:border-slate-800 pt-10 text-gray-800 dark:text-slate-200">
+        <h2 className="text-2xl font-bold mb-6 text-center text-gray-900 dark:text-slate-100">
           Official Guidelines for Exam Document Bundles
         </h2>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-sm">
-          <div className="p-5 bg-white border border-gray-200 rounded-xl shadow-xs">
-            <h3 className="font-bold text-gray-900 mb-2">UPSC & State PSCs</h3>
-            <p className="text-gray-600 text-xs leading-relaxed">
+          <div className="p-5 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-xl shadow-xs">
+            <h3 className="font-bold text-gray-900 dark:text-slate-100 mb-2">UPSC & State PSCs</h3>
+            <p className="text-gray-600 dark:text-slate-400 text-xs leading-relaxed">
               Most PSC forms require all educational qualifications merged in chronological order (10th → 12th → Graduation) into a single PDF under 1 MB.
             </p>
           </div>
-          <div className="p-5 bg-white border border-gray-200 rounded-xl shadow-xs">
-            <h3 className="font-bold text-gray-900 mb-2">Smart DPI Compression</h3>
-            <p className="text-gray-600 text-xs leading-relaxed">
+          <div className="p-5 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-xl shadow-xs">
+            <h3 className="font-bold text-gray-900 dark:text-slate-100 mb-2">Smart DPI Compression</h3>
+            <p className="text-gray-600 dark:text-slate-400 text-xs leading-relaxed">
               Instead of naive blurring, our engine selectively balances text contrast and JPEG compression so your roll numbers and marks remain crisp.
             </p>
           </div>
-          <div className="p-5 bg-white border border-gray-200 rounded-xl shadow-xs">
-            <h3 className="font-bold text-gray-900 mb-2">Private & Local</h3>
-            <p className="text-gray-600 text-xs leading-relaxed">
+          <div className="p-5 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-xl shadow-xs">
+            <h3 className="font-bold text-gray-900 dark:text-slate-100 mb-2">Private & Local</h3>
+            <p className="text-gray-600 dark:text-slate-400 text-xs leading-relaxed">
               Your certificates contain private marks and personal records. Everything is merged strictly inside your browser without uploading to any server.
             </p>
           </div>

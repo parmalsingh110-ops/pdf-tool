@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { PDFDocument } from 'pdf-lib';
-import { Download, Scissors, FileText, CheckSquare, Square, Layers, LayoutGrid, Archive, HardDrive, Search, Sparkles } from 'lucide-react';
+import { Download, Eye, Scissors, FileText, CheckSquare, Square, Layers, LayoutGrid, Archive, HardDrive, Search, Sparkles } from 'lucide-react';
 import JSZip from 'jszip';
 import FileDropzone from '../components/FileDropzone';
 import * as pdfjsLib from 'pdfjs-dist';
@@ -39,7 +39,7 @@ export default function SplitPDF() {
 
   const [isProcessing, setIsProcessing] = useState(false);
   const [processStep, setProcessStep] = useState('');
-  const [splitUrls, setSplitUrls] = useState<{ url: string; name: string; pages: string }[]>([]);
+  const [splitUrls, setSplitUrls] = useState<{ url: string; name: string; pages: string; sizeLabel: string }[]>([]);
 
   const toast = useToast();
 
@@ -145,7 +145,11 @@ export default function SplitPDF() {
         }
         throw new Error('Could not read the PDF file. It may be corrupted.');
       }
-      const results: { url: string; name: string; pages: string }[] = [];
+      const formatSplitSize = (sizeBytes: number) =>
+        sizeBytes >= 1024 * 1024
+          ? `${(sizeBytes / 1024 / 1024).toFixed(2)} MB`
+          : `${Math.max(1, Math.round(sizeBytes / 1024))} KB`;
+      const results: { url: string; name: string; pages: string; sizeLabel: string }[] = [];
 
       if (splitMode === 'all') {
         for (let i = 0; i < pageCount; i++) {
@@ -155,7 +159,7 @@ export default function SplitPDF() {
           newPdf.addPage(copied);
           const bytes = await newPdf.save();
           const blob = new Blob([bytes as any], { type: 'application/pdf' });
-          results.push({ url: URL.createObjectURL(blob), name: `page_${i + 1}.pdf`, pages: `Page ${i + 1}` });
+          results.push({ url: URL.createObjectURL(blob), name: `page_${i + 1}.pdf`, pages: `Page ${i + 1}`, sizeLabel: formatSplitSize(blob.size) });
         }
       } else if (splitMode === 'selection') {
         const sorted = Array.from(selectedPages).sort((a, b) => a - b);
@@ -167,7 +171,7 @@ export default function SplitPDF() {
         const bytes = await newPdf.save();
         const blob = new Blob([bytes as any], { type: 'application/pdf' });
         const label = sorted.length === 1 ? `${sorted[0]}` : `${sorted[0]}-${sorted[sorted.length - 1]}`;
-        results.push({ url: URL.createObjectURL(blob), name: `pages_${label}.pdf`, pages: `Pages: ${sorted.join(', ')}` });
+        results.push({ url: URL.createObjectURL(blob), name: `pages_${label}.pdf`, pages: `Pages: ${sorted.join(', ')}`, sizeLabel: formatSplitSize(blob.size) });
       } else if (splitMode === 'ranges') {
         const parts = ranges.split(',').map(r => r.trim()).filter(Boolean);
         for (let ri = 0; ri < parts.length; ri++) {
@@ -187,7 +191,7 @@ export default function SplitPDF() {
           copied.forEach(p => newPdf.addPage(p));
           const bytes = await newPdf.save();
           const blob = new Blob([bytes as any], { type: 'application/pdf' });
-          results.push({ url: URL.createObjectURL(blob), name: `split_${start}-${end}.pdf`, pages: `Pages ${start}–${end}` });
+          results.push({ url: URL.createObjectURL(blob), name: `split_${start}-${end}.pdf`, pages: `Pages ${start}–${end}`, sizeLabel: formatSplitSize(blob.size) });
         }
       } else if (splitMode === 'every') {
         const n = Math.max(1, everyN);
@@ -202,7 +206,7 @@ export default function SplitPDF() {
           copied.forEach(p => newPdf.addPage(p));
           const bytes = await newPdf.save();
           const blob = new Blob([bytes as any], { type: 'application/pdf' });
-          results.push({ url: URL.createObjectURL(blob), name: `part_${chunk}.pdf`, pages: `Pages ${start + 1}–${end + 1}` });
+          results.push({ url: URL.createObjectURL(blob), name: `part_${chunk}.pdf`, pages: `Pages ${start + 1}–${end + 1}`, sizeLabel: formatSplitSize(blob.size) });
         }
       } else if (splitMode === 'size') {
         const maxBytes = Math.max(0.2, targetSizeMB) * 1024 * 1024;
@@ -231,6 +235,7 @@ export default function SplitPDF() {
               url: URL.createObjectURL(blob),
               name: `part_${chunkIdx}_(${sizeLabel}MB_limit_${targetSizeMB}MB).pdf`,
               pages: `Pages ${pStart}–${pEnd} · ${sizeLabel} MB (Under ${targetSizeMB} MB limit)`,
+              sizeLabel: formatSplitSize(blob.size),
             });
             chunkIdx++;
             currentPages = [i];
@@ -252,6 +257,7 @@ export default function SplitPDF() {
             url: URL.createObjectURL(blob),
             name: `part_${chunkIdx}_(${sizeLabel}MB_limit_${targetSizeMB}MB).pdf`,
             pages: `Pages ${pStart}–${pEnd} · ${sizeLabel} MB (Under ${targetSizeMB} MB limit)`,
+            sizeLabel: formatSplitSize(blob.size),
           });
         }
       } else if (splitMode === 'keyword') {
@@ -302,6 +308,7 @@ export default function SplitPDF() {
             url: URL.createObjectURL(blob),
             name: `${safeKw}_part_${b + 1}_(p${start + 1}-p${end + 1}).pdf`,
             pages: `Pages ${start + 1}–${end + 1} (Matched "${splitKeyword}")`,
+            sizeLabel: formatSplitSize(blob.size),
           });
         }
       }
@@ -483,49 +490,126 @@ export default function SplitPDF() {
                       /* Results */
                       <div className="bg-white dark:bg-slate-900/90 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-800 p-6">
                         <div className="text-center mb-6">
-                          <div className="inline-flex items-center justify-center w-12 h-12 bg-green-100 dark:bg-green-950/50 rounded-full mb-3">
-                            <CheckSquare className="w-6 h-6 text-green-600 dark:text-green-400" />
+                          <div className="inline-flex items-center justify-center w-12 h-12 bg-emerald-100 dark:bg-emerald-950/60 rounded-full mb-3">
+                            <CheckSquare className="w-6 h-6 text-emerald-600 dark:text-emerald-400" />
                           </div>
                           <h3 className="text-2xl font-bold text-gray-900 dark:text-slate-100">Split Complete!</h3>
-                          <p className="text-gray-500 dark:text-slate-400 mt-1">{splitUrls.length} file{splitUrls.length > 1 ? 's' : ''} created</p>
+                          <p className="text-gray-500 dark:text-slate-400 mt-1">
+                            {splitUrls.length} PDF file{splitUrls.length > 1 ? 's' : ''} ready
+                          </p>
                         </div>
-                        {splitUrls.length > 1 && (
-                          <button
-                            onClick={downloadAll}
-                            disabled={isZipping}
-                            className="w-full mb-4 py-3 bg-orange-600 text-white font-bold rounded-xl hover:bg-orange-700 disabled:opacity-60 transition-colors flex items-center justify-center gap-2 shadow-sm"
-                          >
-                            {isZipping ? (
-                              <>
-                                <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                                Creating ZIP Archive...
-                              </>
-                            ) : (
-                              <>
-                                <Archive className="w-5 h-5" /> Download All as ZIP ({splitUrls.length} files)
-                              </>
-                            )}
-                          </button>
-                        )}
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                          {splitUrls.map((item, i) => (
-                            <a key={i} href={item.url} download={item.name}
-                              className="flex items-center gap-3 p-4 border border-gray-200 dark:border-slate-700 rounded-xl hover:border-orange-300 dark:hover:border-orange-600 hover:bg-orange-50 dark:hover:bg-orange-950/30 transition-all group">
-                              <div className="w-10 h-10 bg-red-50 dark:bg-red-950/50 rounded-lg flex items-center justify-center shrink-0">
+
+                        {splitUrls.length === 1 ? (
+                          <div className="max-w-lg mx-auto space-y-5 text-center">
+                            <div className="flex items-center gap-3.5 p-4 rounded-xl border border-gray-200 dark:border-slate-700 bg-gray-50/80 dark:bg-slate-800/60 text-left">
+                              <div className="w-11 h-11 bg-red-50 dark:bg-red-950/50 rounded-xl flex items-center justify-center shrink-0">
                                 <FileText className="w-5 h-5 text-red-500 dark:text-red-400" />
                               </div>
                               <div className="flex-1 min-w-0">
-                                <p className="font-semibold text-gray-900 dark:text-slate-100 text-sm truncate">{item.name}</p>
-                                <p className="text-xs text-gray-400 dark:text-slate-500">{item.pages}</p>
+                                <p className="font-bold text-gray-900 dark:text-slate-100 text-sm truncate">{splitUrls[0].name}</p>
+                                <p className="text-xs text-gray-500 dark:text-slate-400 mt-0.5">
+                                  {splitUrls[0].pages} · {splitUrls[0].sizeLabel}
+                                </p>
                               </div>
-                              <Download className="w-4 h-4 text-gray-400 dark:text-slate-500 group-hover:text-orange-600 dark:group-hover:text-orange-400 shrink-0" />
-                            </a>
-                          ))}
-                        </div>
-                        <button onClick={() => { setSplitUrls([]); setSelectedPages(new Set()); }}
-                          className="mt-6 w-full py-3 bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-slate-200 font-semibold rounded-xl hover:bg-gray-200 dark:hover:bg-slate-700 transition-colors">
-                          Split Again
-                        </button>
+                            </div>
+
+                            <div className="flex flex-wrap items-center justify-center gap-3">
+                              <a
+                                href={splitUrls[0].url}
+                                download={splitUrls[0].name}
+                                className="flex-1 min-w-[200px] py-3 px-6 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm rounded-xl inline-flex items-center justify-center gap-2 shadow-md transition-colors"
+                              >
+                                <Download className="w-4 h-4" /> Download Split PDF
+                              </a>
+                              <a
+                                href={splitUrls[0].url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="py-3 px-5 bg-white dark:bg-slate-800 hover:bg-gray-50 dark:hover:bg-slate-700 text-gray-700 dark:text-slate-200 border border-gray-200 dark:border-slate-700 font-semibold text-sm rounded-xl inline-flex items-center justify-center gap-2 transition-colors"
+                              >
+                                <Eye className="w-4 h-4" /> Preview
+                              </a>
+                            </div>
+
+                            <button
+                              onClick={() => {
+                                splitUrls.forEach((u) => URL.revokeObjectURL(u.url));
+                                setSplitUrls([]);
+                                setSelectedPages(new Set());
+                              }}
+                              className="text-sm text-gray-500 dark:text-slate-400 hover:text-orange-600 dark:hover:text-orange-400 font-medium underline underline-offset-4 transition-colors"
+                            >
+                              Split again or choose different pages
+                            </button>
+                          </div>
+                        ) : (
+                          <>
+                            <div className="flex flex-col sm:flex-row gap-3 mb-4">
+                              <button
+                                onClick={downloadAll}
+                                disabled={isZipping}
+                                className="flex-1 py-3 px-5 bg-orange-600 text-white font-bold rounded-xl hover:bg-orange-700 disabled:opacity-60 transition-colors flex items-center justify-center gap-2 shadow-md"
+                              >
+                                {isZipping ? (
+                                  <>
+                                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                    Creating ZIP Archive...
+                                  </>
+                                ) : (
+                                  <>
+                                    <Archive className="w-5 h-5" /> Download All as ZIP ({splitUrls.length} files)
+                                  </>
+                                )}
+                              </button>
+                              <button
+                                onClick={() => {
+                                  splitUrls.forEach((u) => URL.revokeObjectURL(u.url));
+                                  setSplitUrls([]);
+                                  setSelectedPages(new Set());
+                                }}
+                                className="px-5 py-3 bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-slate-200 font-semibold rounded-xl hover:bg-gray-200 dark:hover:bg-slate-700 transition-colors shrink-0"
+                              >
+                                Split Again
+                              </button>
+                            </div>
+
+                            <div className="max-h-[400px] overflow-y-auto pr-1 space-y-2.5">
+                              {splitUrls.map((item, i) => (
+                                <div
+                                  key={i}
+                                  className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 border border-gray-200 dark:border-slate-700 bg-gray-50/70 dark:bg-slate-800/50 rounded-xl hover:border-orange-300 dark:hover:border-orange-600 transition-colors"
+                                >
+                                  <div className="flex items-center gap-3 min-w-0 flex-1">
+                                    <div className="w-10 h-10 bg-red-50 dark:bg-red-950/50 rounded-lg flex items-center justify-center shrink-0">
+                                      <FileText className="w-5 h-5 text-red-500 dark:text-red-400" />
+                                    </div>
+                                    <div className="min-w-0 flex-1">
+                                      <p className="font-semibold text-gray-900 dark:text-slate-100 text-sm truncate">{item.name}</p>
+                                      <p className="text-xs text-gray-500 dark:text-slate-400">{item.pages} · {item.sizeLabel}</p>
+                                    </div>
+                                  </div>
+                                  <div className="flex items-center gap-2 shrink-0 justify-end">
+                                    <a
+                                      href={item.url}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="px-3 py-2 rounded-lg border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-gray-100 dark:hover:bg-slate-700 text-gray-700 dark:text-slate-200 text-xs font-semibold inline-flex items-center gap-1.5 transition-colors"
+                                    >
+                                      <Eye className="w-3.5 h-3.5" /> Preview
+                                    </a>
+                                    <a
+                                      href={item.url}
+                                      download={item.name}
+                                      className="px-3.5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold inline-flex items-center gap-1.5 shadow-sm transition-colors"
+                                    >
+                                      <Download className="w-3.5 h-3.5" /> Download
+                                    </a>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </>
+                        )}
                       </div>
                     ) : (
                       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

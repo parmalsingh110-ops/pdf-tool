@@ -262,7 +262,7 @@ export default function ExtractAllImages() {
                 {downloadingZip ? <Loader2 className="w-4 h-4 animate-spin" /> : <Package className="w-4 h-4" />}
                 Download All ({images.length}) as ZIP
               </button>
-              <button onClick={reset} className="text-xs text-slate-400 hover:text-slate-600 underline">Change File</button>
+              <button onClick={reset} className="text-xs text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 underline transition-colors">Change File</button>
             </div>
           </div>
 
@@ -296,9 +296,9 @@ export default function ExtractAllImages() {
                     <a
                       href={img.dataUrl}
                       download={img.name}
-                      className="py-1 px-3 bg-slate-100 hover:bg-blue-50 text-slate-700 hover:text-blue-600 text-xs font-bold rounded-lg border transition-colors flex items-center gap-1"
+                      className="py-1.5 px-3 bg-slate-100 dark:bg-slate-800 hover:bg-blue-600 dark:hover:bg-blue-600 text-slate-700 dark:text-slate-200 hover:text-white text-xs font-bold rounded-lg border border-slate-200 dark:border-slate-700 transition-colors flex items-center gap-1.5"
                     >
-                      <Download className="w-3 h-3" />
+                      <Download className="w-3.5 h-3.5" />
                       Save
                     </a>
                   </div>

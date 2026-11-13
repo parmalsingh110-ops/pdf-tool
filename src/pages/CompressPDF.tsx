@@ -308,36 +308,36 @@ export default function CompressPDF() {
       title: 'High Quality (Backend)', 
       desc: 'True compression. Retains text & quality perfectly.', 
       icon: Target,
-      color: 'text-purple-600',
-      bgColor: 'bg-purple-50',
-      borderColor: 'border-purple-200'
+      color: 'text-purple-600 dark:text-purple-400',
+      bgColor: 'bg-purple-50 dark:bg-purple-950/40',
+      borderColor: 'border-purple-200 dark:border-purple-800'
     },
     { 
       id: 'extreme', 
       title: 'Extreme Compression', 
       desc: 'Less quality, high compression', 
       icon: Zap,
-      color: 'text-amber-600',
-      bgColor: 'bg-amber-50',
-      borderColor: 'border-amber-200'
+      color: 'text-amber-600 dark:text-amber-400',
+      bgColor: 'bg-amber-50 dark:bg-amber-950/40',
+      borderColor: 'border-amber-200 dark:border-amber-800'
     },
     { 
       id: 'recommended', 
       title: 'Recommended Compression', 
       desc: 'Good quality, good compression', 
       icon: Gauge,
-      color: 'text-green-600',
-      bgColor: 'bg-green-50',
-      borderColor: 'border-green-200'
+      color: 'text-green-600 dark:text-green-400',
+      bgColor: 'bg-green-50 dark:bg-green-950/40',
+      borderColor: 'border-green-200 dark:border-green-800'
     },
     { 
       id: 'low', 
       title: 'Less Compression', 
       desc: 'High quality, less compression', 
       icon: Shield,
-      color: 'text-blue-600',
-      bgColor: 'bg-blue-50',
-      borderColor: 'border-blue-200'
+      color: 'text-blue-600 dark:text-blue-400',
+      bgColor: 'bg-blue-50 dark:bg-blue-950/40',
+      borderColor: 'border-blue-200 dark:border-blue-800'
     }
   ];
 
@@ -388,14 +388,14 @@ export default function CompressPDF() {
         <FileDropzone onDrop={handleDrop} multiple={false} title="Select PDF file" />
       ) : (
         <div className={`w-full ${compressedUrl ? 'max-w-6xl' : 'max-w-5xl'} flex flex-col lg:flex-row gap-8 transition-all`}>
-          <div className="flex-1 bg-white rounded-2xl shadow-sm border border-gray-200 p-8">
-            <div className="flex items-center gap-4 p-6 bg-gray-50 rounded-xl border border-gray-200 mb-8">
-              <div className="w-16 h-16 bg-green-100 text-green-600 rounded-xl flex items-center justify-center shrink-0">
+          <div className="flex-1 bg-white dark:bg-slate-900/90 rounded-2xl shadow-sm border border-gray-200 dark:border-slate-800 p-8">
+            <div className="flex items-center gap-4 p-6 bg-gray-50 dark:bg-slate-800/60 rounded-xl border border-gray-200 dark:border-slate-700 mb-8">
+              <div className="w-16 h-16 bg-green-100 dark:bg-green-950/50 text-green-600 dark:text-green-400 rounded-xl flex items-center justify-center shrink-0">
                 <FileText className="w-8 h-8" />
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-lg font-semibold text-gray-900 truncate">{file.name}</p>
-                <p className="text-sm text-gray-500">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
+                <p className="text-lg font-semibold text-gray-900 dark:text-slate-100 truncate">{file.name}</p>
+                <p className="text-sm text-gray-500 dark:text-slate-400">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
               </div>
             </div>
 
@@ -408,16 +408,16 @@ export default function CompressPDF() {
                       onClick={() => setCompressionLevel(level.id as CompressionLevel)}
                       className={`relative flex items-center gap-4 p-5 rounded-xl border-2 transition-all text-left ${
                         compressionLevel === level.id 
-                          ? `${level.borderColor} ${level.bgColor} ring-2 ring-green-500 ring-offset-2` 
-                          : 'border-gray-100 bg-gray-50 hover:border-gray-300'
+                          ? `${level.borderColor} ${level.bgColor} ring-2 ring-green-500 ring-offset-2 dark:ring-offset-slate-900` 
+                          : 'border-gray-100 dark:border-slate-800 bg-gray-50 dark:bg-slate-800/50 hover:border-gray-300 dark:hover:border-slate-600'
                       }`}
                     >
                       <div className={`w-12 h-12 rounded-lg flex items-center justify-center shrink-0 ${level.bgColor} ${level.color}`}>
                         <level.icon className="w-6 h-6" />
                       </div>
                       <div className="flex-1">
-                        <h3 className="font-bold text-gray-900">{level.title}</h3>
-                        <p className="text-sm text-gray-500">{level.desc}</p>
+                        <h3 className="font-bold text-gray-900 dark:text-slate-100">{level.title}</h3>
+                        <p className="text-sm text-gray-500 dark:text-slate-400">{level.desc}</p>
                       </div>
                       {compressionLevel === level.id && (
                         <div className="w-6 h-6 bg-green-500 text-white rounded-full flex items-center justify-center">
@@ -428,24 +428,24 @@ export default function CompressPDF() {
                   ))}
                 </div>
                 {compressionLevel !== 'low' && (
-                  <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 space-y-3">
-                    <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+                  <div className="rounded-xl border border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-800/60 p-4 space-y-3">
+                    <label className="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-slate-200">
                       <input
                         type="checkbox"
                         checked={useTargetSize}
                         onChange={(e) => setUseTargetSize(e.target.checked)}
-                        className="rounded border-gray-300"
+                        className="rounded border-gray-300 dark:border-slate-600 dark:bg-slate-800"
                       />
                       Use target size based compression
                     </label>
                     {useTargetSize && (
                       <div className="space-y-2">
                         <div className="flex items-center justify-between">
-                          <label className="block text-sm font-semibold text-gray-700">
+                          <label className="block text-sm font-semibold text-gray-700 dark:text-slate-200">
                             Target Size ({targetUnit})
                           </label>
                           {/* KB / MB Toggle */}
-                          <div className="inline-flex rounded-lg p-0.5 bg-gray-200 border border-gray-300">
+                          <div className="inline-flex rounded-lg p-0.5 bg-gray-200 dark:bg-slate-800 border border-gray-300 dark:border-slate-700">
                             <button
                               type="button"
                               onClick={() => {
@@ -456,8 +456,8 @@ export default function CompressPDF() {
                               }}
                               className={`px-2.5 py-1 text-xs font-bold rounded-md transition-all ${
                                 targetUnit === 'KB'
-                                  ? 'bg-white text-gray-900 shadow-xs'
-                                  : 'text-gray-600 hover:text-gray-900'
+                                  ? 'bg-white dark:bg-slate-700 text-gray-900 dark:text-slate-100 shadow-xs'
+                                  : 'text-gray-600 dark:text-slate-400 hover:text-gray-900 dark:hover:text-slate-200'
                               }`}
                             >
                               KB
@@ -472,8 +472,8 @@ export default function CompressPDF() {
                               }}
                               className={`px-2.5 py-1 text-xs font-bold rounded-md transition-all ${
                                 targetUnit === 'MB'
-                                  ? 'bg-white text-gray-900 shadow-xs'
-                                  : 'text-gray-600 hover:text-gray-900'
+                                  ? 'bg-white dark:bg-slate-700 text-gray-900 dark:text-slate-100 shadow-xs'
+                                  : 'text-gray-600 dark:text-slate-400 hover:text-gray-900 dark:hover:text-slate-200'
                               }`}
                             >
                               MB
@@ -483,7 +483,7 @@ export default function CompressPDF() {
 
                         <div className="relative">
                           <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                            <Target className="h-4 w-4 text-gray-400" />
+                            <Target className="h-4 w-4 text-gray-400 dark:text-slate-500" />
                           </div>
                           <input
                             type="number"
@@ -491,13 +491,13 @@ export default function CompressPDF() {
                             step={targetUnit === 'MB' ? '0.1' : '1'}
                             value={targetSizeKB}
                             onChange={(e) => setTargetSizeKB(Math.max(0.1, Number(e.target.value) || 1))}
-                            className="w-full pl-9 pr-14 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none text-sm font-bold"
+                            className="w-full pl-9 pr-14 py-2.5 rounded-lg border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-gray-900 dark:text-slate-100 focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none text-sm font-bold"
                           />
-                          <span className="absolute inset-y-0 right-0 pr-3 flex items-center text-xs font-bold text-gray-400 pointer-events-none">
+                          <span className="absolute inset-y-0 right-0 pr-3 flex items-center text-xs font-bold text-gray-400 dark:text-slate-500 pointer-events-none">
                             {targetUnit}
                           </span>
                         </div>
-                        <p className="text-xs text-gray-500">
+                        <p className="text-xs text-gray-500 dark:text-slate-400">
                           {targetUnit === 'MB'
                             ? `Tuning quality to stay under ~${(targetSizeKB * 1024).toLocaleString()} KB (${targetSizeKB} MB).`
                             : `Tuning quality to stay under ~${targetSizeKB} KB.`}
@@ -518,7 +518,7 @@ export default function CompressPDF() {
                   </button>
                   <button
                     onClick={() => { setFile(null); }}
-                    className="px-6 py-4 bg-gray-100 text-gray-700 text-lg font-semibold rounded-xl hover:bg-gray-200 transition-colors"
+                    className="px-6 py-4 bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-slate-200 text-lg font-semibold rounded-xl hover:bg-gray-200 dark:hover:bg-slate-700 transition-colors"
                   >
                     Cancel
                   </button>
@@ -526,21 +526,21 @@ export default function CompressPDF() {
               </div>
             ) : (
               <div className="space-y-6 text-center">
-                <div className="p-8 bg-green-50 rounded-xl border border-green-200">
-                  <h3 className="text-2xl font-bold text-green-800 mb-4">PDF compressed!</h3>
+                <div className="p-8 bg-green-50 dark:bg-green-950/40 rounded-xl border border-green-200 dark:border-green-800">
+                  <h3 className="text-2xl font-bold text-green-800 dark:text-green-200 mb-4">PDF compressed!</h3>
                   {stats && (
                     <div className="flex justify-center gap-8 mb-6 text-sm">
                       <div>
-                        <p className="text-gray-500">Original</p>
-                        <p className="font-semibold text-gray-900">{(stats.original / 1024 / 1024).toFixed(2)} MB</p>
+                        <p className="text-gray-500 dark:text-slate-400">Original</p>
+                        <p className="font-semibold text-gray-900 dark:text-slate-100">{(stats.original / 1024 / 1024).toFixed(2)} MB</p>
                       </div>
                       <div>
-                        <p className="text-gray-500">Compressed</p>
-                        <p className="font-semibold text-green-700">{(stats.compressed / 1024 / 1024).toFixed(2)} MB</p>
+                        <p className="text-gray-500 dark:text-slate-400">Compressed</p>
+                        <p className="font-semibold text-green-700 dark:text-green-400">{(stats.compressed / 1024 / 1024).toFixed(2)} MB</p>
                       </div>
                       <div>
-                        <p className="text-gray-500">Saved</p>
-                        <p className={`font-semibold ${stats.compressed < stats.original ? 'text-green-700' : 'text-amber-600'}`}>
+                        <p className="text-gray-500 dark:text-slate-400">Saved</p>
+                        <p className={`font-semibold ${stats.compressed < stats.original ? 'text-green-700 dark:text-green-400' : 'text-amber-600 dark:text-amber-400'}`}>
                           {stats.compressed < stats.original
                             ? `${Math.round((1 - stats.compressed / stats.original) * 100)}%`
                             : '—'}
@@ -549,7 +549,7 @@ export default function CompressPDF() {
                     </div>
                   )}
                   {usedFallback && (
-                    <div className="mb-4 px-4 py-2 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
+                    <div className="mb-4 px-4 py-2 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-lg text-sm text-amber-800 dark:text-amber-200">
                       ⚠️ PDF was already highly optimized — rasterization would have increased size, so lossless metadata cleanup was applied instead.
                     </div>
                   )}
@@ -568,7 +568,7 @@ export default function CompressPDF() {
                     if (compressedUrl) URL.revokeObjectURL(compressedUrl);
                     setFile(null); setCompressedUrl(null); setStats(null); setPreviewUrl(null); 
                   }}
-                  className="text-gray-600 hover:text-gray-900 font-medium"
+                  className="text-gray-600 dark:text-slate-400 hover:text-gray-900 dark:hover:text-slate-100 font-medium"
                 >
                   Compress another PDF
                 </button>
@@ -577,15 +577,15 @@ export default function CompressPDF() {
           </div>
 
           {/* Preview Area (Interactive Before & After Comparison) */}
-          <div className="flex-1 bg-gray-100 rounded-2xl border border-gray-200 overflow-hidden min-h-[520px] flex flex-col">
-            <div className="bg-white px-4 py-3 text-xs font-semibold text-gray-700 border-b border-gray-200 flex items-center justify-between">
+          <div className="flex-1 bg-gray-100 dark:bg-slate-900/90 rounded-2xl border border-gray-200 dark:border-slate-800 overflow-hidden min-h-[520px] flex flex-col">
+            <div className="bg-white dark:bg-slate-900 px-4 py-3 text-xs font-semibold text-gray-700 dark:text-slate-200 border-b border-gray-200 dark:border-slate-800 flex items-center justify-between">
               <span>{compressedUrl ? 'Quality Comparison' : 'PDF Preview'}</span>
               {compressedUrl && (
-                <div className="flex items-center gap-1 bg-gray-100 p-0.5 rounded-lg text-[11px]">
+                <div className="flex items-center gap-1 bg-gray-100 dark:bg-slate-800 p-0.5 rounded-lg text-[11px]">
                   <button
                     onClick={() => setComparisonView('side-by-side')}
                     className={`px-2.5 py-1 rounded-md font-semibold transition-colors ${
-                      comparisonView === 'side-by-side' ? 'bg-white shadow-xs text-green-700' : 'text-gray-500 hover:text-gray-800'
+                      comparisonView === 'side-by-side' ? 'bg-white dark:bg-slate-700 shadow-xs text-green-700 dark:text-emerald-400' : 'text-gray-500 dark:text-slate-400 hover:text-gray-800 dark:hover:text-slate-200'
                     }`}
                   >
                     Side-by-Side
@@ -593,7 +593,7 @@ export default function CompressPDF() {
                   <button
                     onClick={() => setComparisonView('compressed')}
                     className={`px-2.5 py-1 rounded-md font-semibold transition-colors ${
-                      comparisonView === 'compressed' ? 'bg-white shadow-xs text-green-700' : 'text-gray-500 hover:text-gray-800'
+                      comparisonView === 'compressed' ? 'bg-white dark:bg-slate-700 shadow-xs text-green-700 dark:text-emerald-400' : 'text-gray-500 dark:text-slate-400 hover:text-gray-800 dark:hover:text-slate-200'
                     }`}
                   >
                     Compressed
@@ -601,7 +601,7 @@ export default function CompressPDF() {
                   <button
                     onClick={() => setComparisonView('original')}
                     className={`px-2.5 py-1 rounded-md font-semibold transition-colors ${
-                      comparisonView === 'original' ? 'bg-white shadow-xs text-green-700' : 'text-gray-500 hover:text-gray-800'
+                      comparisonView === 'original' ? 'bg-white dark:bg-slate-700 shadow-xs text-green-700 dark:text-emerald-400' : 'text-gray-500 dark:text-slate-400 hover:text-gray-800 dark:hover:text-slate-200'
                     }`}
                   >
                     Original
@@ -610,12 +610,12 @@ export default function CompressPDF() {
               )}
             </div>
 
-            <div className="flex-1 relative bg-gray-200 min-h-[460px]">
+            <div className="flex-1 relative bg-gray-200 dark:bg-slate-950/60 min-h-[460px]">
               {compressedUrl ? (
                 comparisonView === 'side-by-side' ? (
-                  <div className="absolute inset-0 grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-gray-300">
+                  <div className="absolute inset-0 grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-gray-300 dark:divide-slate-700">
                     <div className="relative h-full flex flex-col">
-                      <div className="bg-white/95 backdrop-blur-xs px-3 py-1.5 text-[11px] font-bold text-gray-600 flex items-center justify-between border-b border-gray-200 z-10">
+                      <div className="bg-white/95 dark:bg-slate-900/95 backdrop-blur-xs px-3 py-1.5 text-[11px] font-bold text-gray-600 dark:text-slate-300 flex items-center justify-between border-b border-gray-200 dark:border-slate-800 z-10">
                         <span>Original</span>
                         <span>{stats ? `${(stats.original / 1024 / 1024).toFixed(2)} MB` : ''}</span>
                       </div>
@@ -627,9 +627,9 @@ export default function CompressPDF() {
                     </div>
 
                     <div className="relative h-full flex flex-col">
-                      <div className="bg-emerald-50 px-3 py-1.5 text-[11px] font-bold text-emerald-800 flex items-center justify-between border-b border-emerald-200 z-10">
+                      <div className="bg-emerald-50 dark:bg-emerald-950/50 px-3 py-1.5 text-[11px] font-bold text-emerald-800 dark:text-emerald-200 flex items-center justify-between border-b border-emerald-200 dark:border-emerald-800 z-10">
                         <span>Compressed</span>
-                        <span className="text-emerald-700">
+                        <span className="text-emerald-700 dark:text-emerald-400">
                           {stats ? `${(stats.compressed / 1024 / 1024).toFixed(2)} MB (${Math.round((1 - stats.compressed / stats.original) * 100)}% saved)` : ''}
                         </span>
                       </div>
