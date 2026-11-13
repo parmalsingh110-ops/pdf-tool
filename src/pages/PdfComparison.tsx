@@ -11,6 +11,7 @@ import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { dataUrlToBytes } from '../lib/utils';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 
 type ViewMode = 'slider' | 'side-by-side' | 'diff-overlay' | 'text-diff';
 
@@ -385,19 +386,15 @@ export default function PdfComparison() {
   const currentTextDiff = textDiffs[currentPage] || [];
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-start p-4 sm:p-8 max-w-6xl mx-auto w-full">
-      {/* Header */}
-      <div className="text-center mb-6">
-        <div className="w-16 h-16 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 rounded-2xl flex items-center justify-center mx-auto mb-3 shadow-sm border border-indigo-100 dark:border-indigo-900/50">
-          <GitCompare className="w-8 h-8" />
-        </div>
-        <h1 className="text-3xl sm:text-4xl font-extrabold text-slate-900 dark:text-white mb-2">
-          PDF Comparison & Diff Studio
-        </h1>
-        <p className="text-base text-slate-600 dark:text-slate-400 max-w-xl mx-auto">
-          Compare two PDF versions with interactive before/after swipe sliders, pixel difference overlays, and semantic text diffs.
-        </p>
-      </div>
+    <ToolWorkspaceShell
+      title="PDF Comparison & Diff Studio"
+      subtitle="Compare two PDF versions with interactive before/after swipe sliders, pixel difference overlays, and semantic text diffs."
+      categoryLabel="Precision Diff Engine · Browser-First"
+      icon={GitCompare}
+      microVariant="compare"
+      tone="indigo"
+    >
+      <div className="max-w-6xl mx-auto flex flex-col items-center">
 
       {!pagesA.length ? (
         <div className="w-full max-w-3xl space-y-6">
@@ -671,6 +668,7 @@ export default function PdfComparison() {
           )}
         </div>
       )}
-    </div>
+      </div>
+    </ToolWorkspaceShell>
   );
 }

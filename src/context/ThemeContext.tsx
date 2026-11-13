@@ -31,21 +31,12 @@ function safeWrite(v: Theme): void {
   }
 }
 
-function prefersDark(): boolean {
-  try {
-    return typeof window !== 'undefined' &&
-      typeof window.matchMedia === 'function' &&
-      window.matchMedia('(prefers-color-scheme: dark)').matches;
-  } catch {
-    return false;
-  }
-}
-
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
+  // Light-first Pearl Aurora default unless visitor explicitly switched and saved Dark mode
   const [theme, setThemeState] = useState<Theme>(() => {
     const stored = safeRead();
     if (stored) return stored;
-    return prefersDark() ? 'dark' : 'light';
+    return 'light';
   });
 
   useEffect(() => {

@@ -32,6 +32,7 @@ import { useSEO } from '../hooks/useSEO';
 import { usePageSEO } from '../lib/usePageSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
 import { escapeHtml } from '../lib/utils';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 
 // Color theme presets
 const COLOR_PRESETS = [
@@ -507,22 +508,15 @@ export default function QrCodeGenerator() {
   );
 
   return (
-    <div className="w-full min-h-screen bg-slate-50 dark:bg-slate-950 py-8 px-4 sm:px-6 lg:px-8">
+    <ToolWorkspaceShell
+      title="QR Code & Barcode Studio"
+      subtitle="Generate authentic, scannable QR codes and industrial barcodes for URLs, UPI payments, Wi-Fi, WhatsApp, Code 128, and EAN-13. Download in high-res PNG, SVG, or print A4 sticker sheets."
+      categoryLabel="100% Real Standard ISO/IEC Scannable Studio"
+      icon={QrCode}
+      microVariant="generic"
+      tone="indigo"
+    >
       <div className="max-w-6xl mx-auto space-y-8">
-
-        {/* ── Header ──────────────────────────────────────────────────────── */}
-        <div className="text-center space-y-2">
-          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-900 text-indigo-700 dark:text-indigo-300 text-xs font-bold shadow-xs">
-            <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
-            <span>100% Real Standard ISO/IEC Scannable Studio</span>
-          </div>
-          <h1 className="text-3xl sm:text-4xl font-black text-slate-900 dark:text-white">
-            QR Code &amp; Barcode Studio
-          </h1>
-          <p className="text-sm sm:text-base text-slate-600 dark:text-slate-400 max-w-2xl mx-auto">
-            Generate authentic, scannable QR codes and industrial barcodes for URLs, UPI payments, Wi-Fi, WhatsApp, Code 128, and EAN-13. Download in high-res PNG, SVG, or print A4 sticker sheets.
-          </p>
-        </div>
 
         {/* ── Mode Switcher ───────────────────────────────────────────────── */}
         <div className="flex items-center justify-center">
@@ -1340,6 +1334,6 @@ export default function QrCodeGenerator() {
           description="Create genuine, scannable QR codes and barcodes for websites, UPI payments, Wi-Fi networks, WhatsApp chats, Code 128, EAN-13, and retail price labels. 100% verified to work with phone cameras, Google Lens, Paytm, and red laser hardware scanners."
         />
       </div>
-    </div>
+    </ToolWorkspaceShell>
   );
 }

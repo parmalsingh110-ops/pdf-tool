@@ -6,6 +6,7 @@ import * as pdfjsLib from 'pdfjs-dist';
 import '../lib/pdfWorker';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 
 type NumberPosition = 'bottom-center' | 'bottom-right' | 'bottom-left' | 'top-center' | 'top-right' | 'top-left';
 type NumberFormat = 'page-n-of-total' | 'n-of-total' | 'page-n' | 'just-n' | 'dash-n-dash';
@@ -224,25 +225,26 @@ export default function PageNumbersPDF() {
   };
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-start p-6 md:p-8 min-h-screen bg-gradient-to-br from-pink-50/40 via-white to-slate-50">
-      <div className="text-center mb-10 max-w-2xl">
-        <div className="inline-flex items-center justify-center w-14 h-14 bg-pink-100 rounded-2xl mb-4">
-          <Hash className="w-7 h-7 text-pink-600" />
-        </div>
-        <h1 className="text-4xl font-extrabold text-gray-900 mb-3">Add Page Numbers to PDF</h1>
-        <p className="text-lg text-gray-500">Number PDF pages with live visual preview. Choose positions, formats, and skip cover pages.</p>
-      </div>
+    <ToolWorkspaceShell
+      title="Add Page Numbers to PDF"
+      subtitle="Number PDF pages with live visual preview. Choose positions, formats, and skip cover pages."
+      categoryLabel="PDF Pagination Studio"
+      icon={Hash}
+      microVariant="edit"
+      tone="rose"
+    >
+      <div className="flex flex-col items-center w-full">
 
       {!file ? (
         <FileDropzone onDrop={handleDrop} multiple={false} title="Drop PDF here or click to select" />
       ) : numberedUrl ? (
         /* Success Screen */
-        <div className="w-full max-w-lg bg-white rounded-2xl shadow-sm border border-gray-100 p-8 text-center">
-          <div className="w-16 h-16 bg-pink-100 text-pink-600 rounded-full flex items-center justify-center mx-auto mb-4">
+        <div className="w-full max-w-lg bg-white dark:bg-slate-900/90 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-800 p-8 text-center">
+          <div className="w-16 h-16 bg-pink-100 dark:bg-pink-950/50 text-pink-600 dark:text-pink-400 rounded-full flex items-center justify-center mx-auto mb-4">
             <Check className="w-8 h-8" />
           </div>
-          <h3 className="text-2xl font-bold text-gray-900 mb-1">Page Numbers Added!</h3>
-          <p className="text-gray-500 mb-6">{pageCount} pages numbered successfully.</p>
+          <h3 className="text-2xl font-bold text-gray-900 dark:text-slate-100 mb-1">Page Numbers Added!</h3>
+          <p className="text-gray-500 dark:text-slate-400 mb-6">{pageCount} pages numbered successfully.</p>
           <a
             href={numberedUrl}
             download={`numbered_${file.name}`}
@@ -253,7 +255,7 @@ export default function PageNumbersPDF() {
           <br />
           <button
             onClick={() => { setFile(null); setNumberedUrl(null); }}
-            className="text-gray-500 hover:text-gray-800 font-medium text-sm mt-2"
+            className="text-gray-500 dark:text-slate-400 hover:text-gray-800 dark:hover:text-slate-200 font-medium text-sm mt-2"
           >
             Number another PDF
           </button>
@@ -266,25 +268,25 @@ export default function PageNumbersPDF() {
           <div className="lg:col-span-7 space-y-6">
 
             {/* File info bar */}
-            <div className="flex items-center gap-4 p-4 bg-white rounded-2xl shadow-sm border border-gray-100">
-              <div className="w-12 h-12 bg-pink-100 text-pink-600 rounded-xl flex items-center justify-center shrink-0">
+            <div className="flex items-center gap-4 p-4 bg-white dark:bg-slate-900/90 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-800">
+              <div className="w-12 h-12 bg-pink-100 dark:bg-pink-950/50 text-pink-600 dark:text-pink-400 rounded-xl flex items-center justify-center shrink-0">
                 <FileText className="w-6 h-6" />
               </div>
               <div className="flex-1 min-w-0">
-                <p className="font-semibold text-gray-900 truncate">{file.name}</p>
-                <p className="text-xs text-gray-500">{pageCount} total pages · {(file.size / 1024 / 1024).toFixed(2)} MB</p>
+                <p className="font-semibold text-gray-900 dark:text-slate-100 truncate">{file.name}</p>
+                <p className="text-xs text-gray-500 dark:text-slate-400">{pageCount} total pages · {(file.size / 1024 / 1024).toFixed(2)} MB</p>
               </div>
               <button
                 onClick={() => { setFile(null); setPreviewThumb(null); }}
-                className="text-xs text-gray-400 hover:text-red-500 px-3 py-1.5 rounded-lg hover:bg-red-50 transition-colors shrink-0"
+                className="text-xs text-gray-400 dark:text-slate-500 hover:text-red-500 dark:hover:text-red-400 px-3 py-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/40 transition-colors shrink-0"
               >
                 Change
               </button>
             </div>
 
             {/* 1. Position Picker (6 positions) */}
-            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 space-y-3">
-              <label className="block text-sm font-bold text-gray-800">
+            <div className="bg-white dark:bg-slate-900/90 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-800 p-6 space-y-3">
+              <label className="block text-sm font-bold text-gray-800 dark:text-slate-200">
                 Placement Position on Page
               </label>
               <div className="grid grid-cols-3 gap-2.5">
@@ -294,8 +296,8 @@ export default function PageNumbersPDF() {
                     onClick={() => setPosition(p.id)}
                     className={`p-3 rounded-xl border text-center transition-all ${
                       position === p.id
-                        ? 'border-pink-600 bg-pink-50 text-pink-900 font-bold shadow-xs'
-                        : 'border-gray-200 text-gray-600 hover:border-gray-300'
+                        ? 'border-pink-600 bg-pink-50 dark:bg-pink-950/40 text-pink-900 dark:text-pink-200 font-bold shadow-xs'
+                        : 'border-gray-200 dark:border-slate-700 text-gray-600 dark:text-slate-300 hover:border-gray-300 dark:hover:border-slate-600'
                     }`}
                   >
                     <div className="text-xs">{p.label}</div>
@@ -305,8 +307,8 @@ export default function PageNumbersPDF() {
             </div>
 
             {/* 2. Format selector */}
-            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 space-y-3">
-              <label className="block text-sm font-bold text-gray-800">
+            <div className="bg-white dark:bg-slate-900/90 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-800 p-6 space-y-3">
+              <label className="block text-sm font-bold text-gray-800 dark:text-slate-200">
                 Numbering Format
               </label>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -316,27 +318,27 @@ export default function PageNumbersPDF() {
                     onClick={() => setFormat(f.id)}
                     className={`p-3 rounded-xl border text-left transition-all flex items-center justify-between ${
                       format === f.id
-                        ? 'border-pink-600 bg-pink-50 text-pink-900 font-semibold shadow-xs'
-                        : 'border-gray-200 text-gray-600 hover:border-gray-300'
+                        ? 'border-pink-600 bg-pink-50 dark:bg-pink-950/40 text-pink-900 dark:text-pink-200 font-semibold shadow-xs'
+                        : 'border-gray-200 dark:border-slate-700 text-gray-600 dark:text-slate-300 hover:border-gray-300 dark:hover:border-slate-600'
                     }`}
                   >
                     <div>
                       <div className="text-xs font-semibold">{f.label}</div>
-                      <div className="text-[11px] text-gray-400 mt-0.5 font-mono">{f.preview}</div>
+                      <div className="text-[11px] text-gray-400 dark:text-slate-500 mt-0.5 font-mono">{f.preview}</div>
                     </div>
-                    {format === f.id && <Check className="w-4 h-4 text-pink-600 shrink-0" />}
+                    {format === f.id && <Check className="w-4 h-4 text-pink-600 dark:text-pink-400 shrink-0" />}
                   </button>
                 ))}
               </div>
             </div>
 
             {/* 3. Page range & Cover page options */}
-            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 space-y-4">
-              <label className="block text-sm font-bold text-gray-800">
+            <div className="bg-white dark:bg-slate-900/90 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-800 p-6 space-y-4">
+              <label className="block text-sm font-bold text-gray-800 dark:text-slate-200">
                 Page Range & Cover Options
               </label>
               <div className="space-y-3">
-                <label className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl cursor-pointer hover:bg-gray-100/80 transition-colors">
+                <label className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-slate-800/60 rounded-xl cursor-pointer hover:bg-gray-100/80 dark:hover:bg-slate-800 transition-colors">
                   <input
                     type="checkbox"
                     checked={skipFirstPage}
@@ -344,34 +346,34 @@ export default function PageNumbersPDF() {
                     className="rounded text-pink-600 focus:ring-pink-500 w-4 h-4"
                   />
                   <div>
-                    <span className="text-xs font-semibold text-gray-800">Skip First Page (Cover Page)</span>
-                    <p className="text-[11px] text-gray-500">Do not print number on the title/cover page</p>
+                    <span className="text-xs font-semibold text-gray-800 dark:text-slate-200">Skip First Page (Cover Page)</span>
+                    <p className="text-[11px] text-gray-500 dark:text-slate-400">Do not print number on the title/cover page</p>
                   </div>
                 </label>
 
                 <div className="flex items-center justify-between pt-1">
-                  <span className="text-xs font-medium text-gray-700">Start counting from number:</span>
+                  <span className="text-xs font-medium text-gray-700 dark:text-slate-300">Start counting from number:</span>
                   <input
                     type="number"
                     min={1}
                     value={startNumber}
                     onChange={e => setStartNumber(Math.max(1, parseInt(e.target.value) || 1))}
-                    className="w-20 px-3 py-1.5 border border-gray-200 rounded-lg text-xs font-mono text-center focus:ring-2 focus:ring-pink-500 outline-none"
+                    className="w-20 px-3 py-1.5 bg-white dark:bg-slate-800/80 border border-gray-200 dark:border-slate-700 text-gray-900 dark:text-slate-100 rounded-lg text-xs font-mono text-center focus:ring-2 focus:ring-pink-500 outline-none"
                   />
                 </div>
               </div>
             </div>
 
             {/* 4. Font, Size, Color & Margin */}
-            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 space-y-4">
-              <label className="block text-sm font-bold text-gray-800">
+            <div className="bg-white dark:bg-slate-900/90 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-800 p-6 space-y-4">
+              <label className="block text-sm font-bold text-gray-800 dark:text-slate-200">
                 Styling & Typography
               </label>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {/* Font Size */}
                 <div>
-                  <div className="flex justify-between text-xs text-gray-600 mb-1">
+                  <div className="flex justify-between text-xs text-gray-600 dark:text-slate-400 mb-1">
                     <span>Font Size</span>
                     <span className="font-semibold">{fontSize} pt</span>
                   </div>
@@ -387,7 +389,7 @@ export default function PageNumbersPDF() {
 
                 {/* Margin from edge */}
                 <div>
-                  <div className="flex justify-between text-xs text-gray-600 mb-1">
+                  <div className="flex justify-between text-xs text-gray-600 dark:text-slate-400 mb-1">
                     <span>Margin from Edge</span>
                     <span className="font-semibold">{margin} pt</span>
                   </div>
@@ -403,13 +405,13 @@ export default function PageNumbersPDF() {
               </div>
 
               {/* Font Family & Color */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-gray-100">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-gray-100 dark:border-slate-800">
                 <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1.5">Font Style</label>
+                  <label className="block text-xs font-medium text-gray-700 dark:text-slate-300 mb-1.5">Font Style</label>
                   <select
                     value={fontFamily}
                     onChange={e => setFontFamily(e.target.value as FontFamily)}
-                    className="w-full px-3 py-2 border border-gray-200 rounded-xl text-xs bg-white text-gray-800 focus:ring-2 focus:ring-pink-500 outline-none"
+                    className="w-full px-3 py-2 border border-gray-200 dark:border-slate-700 rounded-xl text-xs bg-white dark:bg-slate-800 text-gray-800 dark:text-slate-100 focus:ring-2 focus:ring-pink-500 outline-none"
                   >
                     <option value="Helvetica">Helvetica (Standard Clean)</option>
                     <option value="TimesRoman">Times New Roman (Formal)</option>
@@ -418,7 +420,7 @@ export default function PageNumbersPDF() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1.5">Color</label>
+                  <label className="block text-xs font-medium text-gray-700 dark:text-slate-300 mb-1.5">Color</label>
                   <div className="flex items-center gap-2">
                     {COLOR_SWATCHES.map(c => (
                       <button
@@ -426,7 +428,7 @@ export default function PageNumbersPDF() {
                         onClick={() => setColorHex(c.hex)}
                         title={c.name}
                         className={`w-7 h-7 rounded-full border-2 transition-transform ${
-                          colorHex === c.hex ? 'scale-110 border-pink-500 ring-2 ring-pink-200' : 'border-gray-200'
+                          colorHex === c.hex ? 'scale-110 border-pink-500 ring-2 ring-pink-200 dark:ring-pink-900/60' : 'border-gray-200 dark:border-slate-700'
                         }`}
                         style={{ backgroundColor: c.hex }}
                       />
@@ -456,20 +458,20 @@ export default function PageNumbersPDF() {
 
           {/* Right: Live Interactive Canvas Preview (5 cols) */}
           <div className="lg:col-span-5 flex flex-col">
-            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 flex flex-col sticky top-24">
+            <div className="bg-white dark:bg-slate-900/90 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-800 p-5 flex flex-col sticky top-24">
               <div className="flex items-center justify-between mb-3">
-                <span className="text-xs font-bold text-gray-700 flex items-center gap-1.5 uppercase tracking-wider">
-                  <Eye className="w-4 h-4 text-pink-600" /> Live Page Preview
+                <span className="text-xs font-bold text-gray-700 dark:text-slate-200 flex items-center gap-1.5 uppercase tracking-wider">
+                  <Eye className="w-4 h-4 text-pink-600 dark:text-pink-400" /> Live Page Preview
                 </span>
-                <span className="text-[11px] text-pink-600 font-semibold bg-pink-50 px-2 py-0.5 rounded-full">
+                <span className="text-[11px] text-pink-600 dark:text-pink-300 font-semibold bg-pink-50 dark:bg-pink-950/50 px-2 py-0.5 rounded-full">
                   {skipFirstPage ? 'Previewing Page 2' : 'Previewing Page 1'}
                 </span>
               </div>
 
               {/* Canvas Preview Container */}
-              <div className="bg-slate-100 rounded-xl border border-gray-200 p-3 min-h-[460px] flex items-center justify-center relative overflow-hidden">
+              <div className="bg-slate-100 dark:bg-slate-800/80 rounded-xl border border-gray-200 dark:border-slate-700 p-3 min-h-[460px] flex items-center justify-center relative overflow-hidden">
                 {loadingPreview ? (
-                  <div className="flex flex-col items-center gap-2 text-gray-500">
+                  <div className="flex flex-col items-center gap-2 text-gray-500 dark:text-slate-400">
                     <div className="w-6 h-6 border-2 border-pink-500 border-t-transparent rounded-full animate-spin" />
                     <span className="text-xs">Updating preview...</span>
                   </div>
@@ -482,17 +484,18 @@ export default function PageNumbersPDF() {
                     />
                   </div>
                 ) : (
-                  <div className="text-xs text-gray-400">Loading page preview...</div>
+                  <div className="text-xs text-gray-400 dark:text-slate-500">Loading page preview...</div>
                 )}
               </div>
 
-              <p className="text-[11px] text-gray-400 text-center mt-3">
+              <p className="text-[11px] text-gray-400 dark:text-slate-500 text-center mt-3">
                 Preview reflects live placement, font size, margin, and format.
               </p>
             </div>
           </div>
         </div>
       )}
-    </div>
+      </div>
+    </ToolWorkspaceShell>
   );
 }

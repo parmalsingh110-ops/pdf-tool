@@ -22,6 +22,7 @@ import { usePageSEO } from '../lib/usePageSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
 import ShareQrModal from '../components/ShareQrModal';
 import { downloadBlob } from '../lib/utils';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 
 type BindingMode = 'single_sided' | 'double_sided' | 'top_binding';
 
@@ -307,21 +308,15 @@ export default function BindingMargin() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 py-10 px-4 sm:px-6">
-      <div className="max-w-6xl mx-auto space-y-8">
-        {/* Header */}
-        <div className="text-center space-y-3">
-          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 text-xs font-bold uppercase tracking-wider">
-            <BookMarked className="w-4 h-4" /> Thesis & Book Binding Special
-          </div>
-          <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight">
-            Thesis & Book Binding Gutter Margin Adder
-          </h1>
-          <p className="text-sm sm:text-base text-slate-500 dark:text-slate-400 max-w-2xl mx-auto">
-            Add extra margin for spiral binding, comb binding, or hard-book binding.
-            Supports single-sided and double-sided (mirrored) margins so text is never hidden in the binding.
-          </p>
-        </div>
+    <ToolWorkspaceShell
+      title="Thesis & Book Binding Gutter Margin Adder"
+      subtitle="Add extra margin for spiral binding, comb binding, or hard-book binding. Supports single-sided and double-sided (mirrored) margins so text is never hidden in the binding."
+      categoryLabel="Thesis & Book Binding Special"
+      icon={BookMarked}
+      microVariant="crop"
+      tone="sky"
+    >
+      <div className="max-w-6xl mx-auto space-y-8 text-slate-900 dark:text-slate-100">
 
         {/* Upload State */}
         {!pdfBytes ? (
@@ -595,6 +590,6 @@ export default function BindingMargin() {
           fileName="binding-margin.pdf"
         />
       </div>
-    </div>
+    </ToolWorkspaceShell>
   );
 }

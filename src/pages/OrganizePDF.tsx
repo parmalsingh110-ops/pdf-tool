@@ -6,6 +6,7 @@ import * as pdfjsLib from 'pdfjs-dist';
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 
 // Initialize pdf.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
@@ -238,19 +239,15 @@ export default function OrganizePDF() {
   };
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center p-6 md:p-8 max-w-7xl mx-auto w-full">
-      {/* Header */}
-      <div className="text-center mb-8">
-        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 text-xs font-bold tracking-widest uppercase mb-3 border border-blue-200 dark:border-blue-800">
-          <Sparkles className="w-3.5 h-3.5" /> Interactive Page Reorder
-        </div>
-        <h1 className="text-3xl md:text-5xl font-extrabold text-gray-900 dark:text-white tracking-tight mb-3">
-          Organize & Rearrange PDF Pages
-        </h1>
-        <p className="text-lg text-gray-600 dark:text-slate-400 max-w-2xl mx-auto">
-          Drag and drop pages into your desired order, rotate, duplicate, or delete them in seconds. 100% private in-browser.
-        </p>
-      </div>
+    <ToolWorkspaceShell
+      title="Organize & Rearrange PDF Pages"
+      subtitle="Drag and drop pages into your desired order, rotate, duplicate, or delete them in seconds. 100% private in-browser."
+      categoryLabel="PDF Organizer · Interactive Reorder"
+      icon={ArrowLeftRight}
+      microVariant="edit"
+      tone="blue"
+    >
+      <div className="flex flex-col items-center w-full">
 
       {!file ? (
         <div className="w-full max-w-4xl">
@@ -487,6 +484,7 @@ export default function OrganizePDF() {
           </div>
         </div>
       )}
-    </div>
+      </div>
+    </ToolWorkspaceShell>
   );
 }

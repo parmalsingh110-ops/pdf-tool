@@ -6,6 +6,7 @@ import '../lib/pdfWorker';
 import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 
 interface RenderedImage {
   pageNumber: number;
@@ -191,19 +192,15 @@ export default function PdfToImages() {
   };
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center p-6 md:p-8 max-w-6xl mx-auto w-full">
-      {/* Header */}
-      <div className="text-center mb-8">
-        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 text-xs font-bold tracking-widest uppercase mb-3 border border-emerald-200 dark:border-emerald-800">
-          <Images className="w-3.5 h-3.5" /> High-Resolution Page Image Extraction
-        </div>
-        <h1 className="text-3xl md:text-5xl font-extrabold text-gray-900 dark:text-white tracking-tight mb-3">
-          PDF to Images Converter & Gallery
-        </h1>
-        <p className="text-base md:text-lg text-gray-600 dark:text-slate-400 max-w-2xl mx-auto">
-          Convert every PDF page into crisp JPG, PNG, or WebP images. View in an interactive gallery, copy directly to your clipboard, or download everything as a ZIP.
-        </p>
-      </div>
+    <ToolWorkspaceShell
+      title="PDF to Images Converter & Gallery"
+      subtitle="Convert every PDF page into crisp JPG, PNG, or WebP images. View in an interactive gallery, copy directly to your clipboard, or download everything as a ZIP."
+      categoryLabel="High-Resolution Page Image Extraction"
+      icon={Images}
+      microVariant="convert"
+      tone="emerald"
+    >
+      <div className="flex flex-col items-center justify-center max-w-6xl mx-auto w-full">
 
       {!file ? (
         <div className="w-full max-w-2xl">
@@ -459,6 +456,7 @@ export default function PdfToImages() {
           )}
         </div>
       )}
-    </div>
+      </div>
+    </ToolWorkspaceShell>
   );
 }

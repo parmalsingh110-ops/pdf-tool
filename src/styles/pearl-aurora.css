@@ -1,0 +1,213 @@
+/* ============================================================
+   PDF Media Suite — Pearl Aurora Design System Tokens
+   Light-first editorial 3D & pastel aurora environment
+   ============================================================ */
+
+:root {
+  /* Core Brand & Accent Tokens */
+  --pms-rose: #E11D48;
+  --pms-rose-hover: #BE123C;
+  --pms-blue: #0284C7;
+  --pms-violet: #7C3AED;
+  --pms-ink: #17172F;
+
+  /* Pearl Surfaces & Pastels */
+  --pms-pearl: #FAF9FF;
+  --pms-white: #FFFFFF;
+  --pms-lavender-surface: #F4F1FF;
+  --pms-soft-rose: #FFE4ED;
+  --pms-soft-lavender: #EEE7FF;
+  --pms-soft-blue: #E1F5FF;
+  --pms-soft-mint: #DDF8EF;
+
+  /* Text & Hairlines */
+  --pms-muted: #5B647A;
+  --pms-subtle-text: #7A8299;
+  --pms-border: #E7E3F1;
+  --pms-border-strong: #D4CDE8;
+
+  /* Glass & Gradients */
+  --pms-glass-bg: rgba(255, 255, 255, 0.78);
+  --pms-glass-nav: rgba(250, 249, 255, 0.82);
+  --pms-hero-gradient: linear-gradient(135deg, var(--pms-rose) 0%, var(--pms-violet) 52%, var(--pms-blue) 100%);
+  --pms-cta-gradient: linear-gradient(135deg, #BE123C 0%, var(--pms-rose) 55%, #E11D48 100%);
+  --pms-aurora-hero: radial-gradient(65% 55% at 15% 15%, rgba(255, 228, 237, 0.72) 0%, transparent 70%),
+    radial-gradient(55% 55% at 85% 20%, rgba(225, 245, 255, 0.75) 0%, transparent 72%),
+    radial-gradient(60% 60% at 52% 85%, rgba(238, 231, 255, 0.85) 0%, transparent 75%);
+
+  /* Elevation Shadows */
+  --pms-shadow-sm: 0 2px 10px -2px rgba(23, 23, 47, 0.05), 0 1px 3px 0 rgba(124, 58, 237, 0.04);
+  --pms-shadow-card: 0 10px 30px -12px rgba(23, 23, 47, 0.08), 0 2px 8px -2px rgba(124, 58, 237, 0.05);
+  --pms-shadow-float: 0 24px 60px -18px rgba(23, 23, 47, 0.14), 0 10px 24px -10px rgba(124, 58, 237, 0.12);
+  --pms-shadow-rose: 0 14px 32px -10px rgba(225, 29, 72, 0.34);
+
+  /* Radii & Spacing */
+  --pms-radius-sm: 0.75rem;
+  --pms-radius-md: 1rem;
+  --pms-radius-lg: 1.5rem;
+  --pms-radius-xl: 2rem;
+  --pms-radius-pill: 9999px;
+
+  /* Motion Durations & Easings */
+  --pms-dur-fast: 160ms;
+  --pms-dur-med: 320ms;
+  --pms-dur-slow: 640ms;
+  --pms-ease-spring: cubic-bezier(0.22, 1, 0.36, 1);
+
+  /* Typography */
+  --pms-font-sans: 'Plus Jakarta Sans', 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+.dark {
+  --pms-ink: #F5F3FF;
+  --pms-pearl: #0B0B16;
+  --pms-white: #121224;
+  --pms-lavender-surface: #181830;
+  --pms-soft-rose: rgba(225, 29, 72, 0.16);
+  --pms-soft-lavender: rgba(124, 58, 237, 0.18);
+  --pms-soft-blue: rgba(2, 132, 199, 0.16);
+  --pms-soft-mint: rgba(16, 185, 129, 0.14);
+  --pms-muted: #A7AEC6;
+  --pms-subtle-text: #7D859F;
+  --pms-border: rgba(167, 174, 198, 0.14);
+  --pms-border-strong: rgba(167, 174, 198, 0.24);
+  --pms-glass-bg: rgba(18, 18, 36, 0.78);
+  --pms-glass-nav: rgba(11, 11, 22, 0.84);
+  --pms-shadow-sm: 0 2px 10px -2px rgba(0, 0, 0, 0.35);
+  --pms-shadow-card: 0 12px 32px -12px rgba(0, 0, 0, 0.45);
+  --pms-shadow-float: 0 28px 64px -18px rgba(0, 0, 0, 0.6);
+}
+
+@layer base {
+  html {
+    font-family: var(--pms-font-sans);
+    background-color: var(--pms-pearl);
+    color: var(--pms-ink);
+    scroll-behavior: smooth;
+  }
+
+  body {
+    background-color: var(--pms-pearl);
+    color: var(--pms-ink);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}
+
+/* Pearl Surface & Brand Utilities */
+.pms-pearl-surface {
+  background-color: var(--pms-pearl);
+  color: var(--pms-ink);
+}
+
+.pms-glass-panel {
+  background-color: var(--pms-glass-bg);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--pms-border);
+  box-shadow: var(--pms-shadow-card);
+}
+
+.pms-glass-header {
+  background-color: var(--pms-glass-nav);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  border-bottom: 1px solid var(--pms-border);
+  box-shadow: var(--pms-shadow-sm);
+}
+
+.pms-gradient-accent {
+  background-image: var(--pms-hero-gradient);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.pms-btn-primary {
+  background-image: var(--pms-cta-gradient);
+  color: #FFFFFF;
+  box-shadow: var(--pms-shadow-rose);
+  transition: transform var(--pms-dur-fast) var(--pms-ease-spring),
+              box-shadow var(--pms-dur-fast) var(--pms-ease-spring),
+              filter var(--pms-dur-fast) ease;
+}
+
+.pms-btn-primary:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.04);
+}
+
+.pms-btn-primary:active {
+  transform: translateY(0) scale(0.99);
+}
+
+.pms-paper-grid {
+  background-image:
+    linear-gradient(to right, rgba(124, 58, 237, 0.045) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(124, 58, 237, 0.045) 1px, transparent 1px);
+  background-size: 36px 36px;
+}
+
+.pms-checkerboard {
+  background-image:
+    linear-gradient(45deg, #e7e3f1 25%, transparent 25%),
+    linear-gradient(-45deg, #e7e3f1 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #e7e3f1 75%),
+    linear-gradient(-45deg, transparent 75%, #e7e3f1 75%);
+  background-size: 12px 12px;
+  background-position: 0 0, 0 6px, 6px -6px, -6px 0;
+}
+
+@keyframes pms-aurora-drift-a {
+  0%, 100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(28px, 18px, 0) scale(1.06);
+  }
+}
+
+@keyframes pms-aurora-drift-b {
+  0%, 100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(-24px, -20px, 0) scale(1.05);
+  }
+}
+
+@keyframes pms-scan-sweep {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(220%);
+  }
+}
+
+.pms-aurora-breathe-a {
+  animation: pms-aurora-drift-a 16s ease-in-out infinite;
+}
+
+.pms-aurora-breathe-b {
+  animation: pms-aurora-drift-b 19s ease-in-out infinite;
+}
+
+.pms-scan-bar {
+  animation: pms-scan-sweep 3.2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  .pms-aurora-breathe-a,
+  .pms-aurora-breathe-b,
+  .pms-scan-bar,
+  .pms-motion-safe-only {
+    animation: none !important;
+    transition: none !important;
+    transform: none !important;
+  }
+}
+

@@ -9,6 +9,7 @@ import { useSEO } from '../hooks/useSEO';
 import { dataUrlToBytes } from '../lib/utils';
 import { useToast } from '../components/Toast';
 import { embedSmartFont } from '../lib/pdfFontHelper';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 
 type WatermarkType = 'text' | 'image';
 type Position = 'center' | 'diagonal' | 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' | 'top-center' | 'bottom-center';
@@ -236,31 +237,32 @@ export default function WatermarkPDF() {
   };
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-start p-6 md:p-8 min-h-screen bg-gradient-to-br from-cyan-50/40 via-white to-slate-50">
-      <div className="text-center mb-10 max-w-2xl">
-        <div className="inline-flex items-center justify-center w-14 h-14 bg-cyan-100 rounded-2xl mb-4">
-          <Droplets className="w-7 h-7 text-cyan-600" />
-        </div>
-        <h1 className="text-4xl font-extrabold text-gray-900 mb-3">Add Watermark to PDF</h1>
-        <p className="text-lg text-gray-500">Text or image watermark with full opacity, position and color control.</p>
-      </div>
+    <ToolWorkspaceShell
+      title="Add Watermark to PDF"
+      subtitle="Text or image watermark with full opacity, position and color control."
+      categoryLabel="PDF Branding · Live Preview"
+      icon={Droplets}
+      microVariant="edit"
+      tone="sky"
+    >
+      <div className="flex flex-col items-center w-full">
 
       {!file ? (
         <FileDropzone onDrop={handleDrop} multiple={false} title="Drop PDF here or click to select" />
       ) : resultUrl ? (
-        <div className="w-full max-w-lg bg-white rounded-2xl shadow-sm border border-gray-100 p-8 text-center">
-          <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-            <Droplets className="w-8 h-8 text-green-600" />
+        <div className="w-full max-w-lg bg-white dark:bg-slate-900/90 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-800 p-8 text-center">
+          <div className="w-16 h-16 bg-green-100 dark:bg-green-950/50 rounded-full flex items-center justify-center mx-auto mb-4">
+            <Droplets className="w-8 h-8 text-green-600 dark:text-green-400" />
           </div>
-          <h3 className="text-2xl font-bold text-gray-900 mb-2">Watermark Added!</h3>
-          <p className="text-gray-500 mb-6">Your PDF is ready to download.</p>
+          <h3 className="text-2xl font-bold text-gray-900 dark:text-slate-100 mb-2">Watermark Added!</h3>
+          <p className="text-gray-500 dark:text-slate-400 mb-6">Your PDF is ready to download.</p>
           <a href={resultUrl} download={`watermarked_${file.name}`}
             className="inline-flex items-center gap-2 px-8 py-4 bg-cyan-600 text-white font-bold rounded-xl hover:bg-cyan-700 transition-colors shadow-md mb-4">
             <Download className="w-5 h-5" /> Download Watermarked PDF
           </a>
           <br />
           <button onClick={() => { setResultUrl(null); setFile(null); }}
-            className="text-gray-500 hover:text-gray-800 font-medium text-sm mt-2">
+            className="text-gray-500 dark:text-slate-400 hover:text-gray-800 dark:hover:text-slate-200 font-medium text-sm mt-2">
             Watermark another PDF
           </button>
         </div>
@@ -269,27 +271,27 @@ export default function WatermarkPDF() {
           {/* Controls */}
           <div className="lg:col-span-2 space-y-5">
             {/* File info */}
-            <div className="flex items-center gap-4 p-4 bg-white rounded-2xl shadow-sm border border-gray-100">
-              <div className="w-11 h-11 bg-cyan-50 rounded-xl flex items-center justify-center shrink-0">
-                <FileText className="w-5 h-5 text-cyan-600" />
+            <div className="flex items-center gap-4 p-4 bg-white dark:bg-slate-900/90 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-800">
+              <div className="w-11 h-11 bg-cyan-50 dark:bg-cyan-950/50 rounded-xl flex items-center justify-center shrink-0">
+                <FileText className="w-5 h-5 text-cyan-600 dark:text-cyan-400" />
               </div>
               <div className="flex-1 min-w-0">
-                <p className="font-semibold text-gray-900 truncate">{file.name}</p>
-                <p className="text-xs text-gray-400">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
+                <p className="font-semibold text-gray-900 dark:text-slate-100 truncate">{file.name}</p>
+                <p className="text-xs text-gray-400 dark:text-slate-500">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
               </div>
-              <button onClick={() => { setFile(null); setResultUrl(null); }} className="text-sm text-gray-400 hover:text-red-500">Change</button>
+              <button onClick={() => { setFile(null); setResultUrl(null); }} className="text-sm text-gray-400 dark:text-slate-500 hover:text-red-500 dark:hover:text-red-400">Change</button>
             </div>
 
             {/* Type toggle */}
-            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
-              <h3 className="font-bold text-gray-800 text-sm uppercase tracking-wider mb-4">Watermark Type</h3>
+            <div className="bg-white dark:bg-slate-900/90 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-800 p-5">
+              <h3 className="font-bold text-gray-800 dark:text-slate-200 text-sm uppercase tracking-wider mb-4">Watermark Type</h3>
               <div className="grid grid-cols-2 gap-3">
                 <button onClick={() => setType('text')}
-                  className={`flex items-center gap-3 p-4 rounded-xl border-2 transition-all ${type === 'text' ? 'border-cyan-500 bg-cyan-50 text-cyan-700' : 'border-gray-200 hover:border-gray-300'}`}>
+                  className={`flex items-center gap-3 p-4 rounded-xl border-2 transition-all ${type === 'text' ? 'border-cyan-500 bg-cyan-50 dark:bg-cyan-950/40 text-cyan-700 dark:text-cyan-300' : 'border-gray-200 dark:border-slate-700 text-gray-700 dark:text-slate-300 hover:border-gray-300 dark:hover:border-slate-600'}`}>
                   <Type className="w-5 h-5" /><span className="font-semibold">Text</span>
                 </button>
                 <button onClick={() => setType('image')}
-                  className={`flex items-center gap-3 p-4 rounded-xl border-2 transition-all ${type === 'image' ? 'border-cyan-500 bg-cyan-50 text-cyan-700' : 'border-gray-200 hover:border-gray-300'}`}>
+                  className={`flex items-center gap-3 p-4 rounded-xl border-2 transition-all ${type === 'image' ? 'border-cyan-500 bg-cyan-50 dark:bg-cyan-950/40 text-cyan-700 dark:text-cyan-300' : 'border-gray-200 dark:border-slate-700 text-gray-700 dark:text-slate-300 hover:border-gray-300 dark:hover:border-slate-600'}`}>
                   <ImageIcon className="w-5 h-5" /><span className="font-semibold">Image / Logo</span>
                 </button>
               </div>
@@ -297,36 +299,36 @@ export default function WatermarkPDF() {
 
             {/* Text options */}
             {type === 'text' && (
-              <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 space-y-5">
-                <h3 className="font-bold text-gray-800 text-sm uppercase tracking-wider">Text Options</h3>
+              <div className="bg-white dark:bg-slate-900/90 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-800 p-5 space-y-5">
+                <h3 className="font-bold text-gray-800 dark:text-slate-200 text-sm uppercase tracking-wider">Text Options</h3>
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">Watermark Text</label>
+                  <label className="block text-sm font-semibold text-gray-700 dark:text-slate-300 mb-2">Watermark Text</label>
                   <input type="text" value={watermarkText} onChange={e => setWatermarkText(e.target.value)}
-                    className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-cyan-400 outline-none text-lg font-bold tracking-wider"
+                    className="w-full px-4 py-3 bg-white dark:bg-slate-800/80 text-gray-900 dark:text-slate-100 placeholder-gray-400 dark:placeholder-slate-500 rounded-xl border border-gray-200 dark:border-slate-700 focus:ring-2 focus:ring-cyan-400 outline-none text-lg font-bold tracking-wider"
                     placeholder="CONFIDENTIAL" />
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">Font Size: <span className="text-cyan-600">{fontSize}pt</span></label>
+                    <label className="block text-sm font-semibold text-gray-700 dark:text-slate-300 mb-2">Font Size: <span className="text-cyan-600 dark:text-cyan-400">{fontSize}pt</span></label>
                     <input type="range" min={12} max={160} value={fontSize} onChange={e => setFontSize(Number(e.target.value))} className="w-full accent-cyan-500" />
                   </div>
                   <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">Opacity: <span className="text-cyan-600">{Math.round(opacity * 100)}%</span></label>
+                    <label className="block text-sm font-semibold text-gray-700 dark:text-slate-300 mb-2">Opacity: <span className="text-cyan-600 dark:text-cyan-400">{Math.round(opacity * 100)}%</span></label>
                     <input type="range" min={5} max={100} value={Math.round(opacity * 100)} onChange={e => setOpacity(Number(e.target.value) / 100)} className="w-full accent-cyan-500" />
                   </div>
                 </div>
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">Color</label>
-                  <div className="flex items-center gap-3">
-                    <input type="color" value={color} onChange={e => setColor(e.target.value)} className="w-12 h-10 rounded-lg border border-gray-200 cursor-pointer p-0.5" />
+                  <label className="block text-sm font-semibold text-gray-700 dark:text-slate-300 mb-2">Color</label>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <input type="color" value={color} onChange={e => setColor(e.target.value)} className="w-12 h-10 rounded-lg border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 cursor-pointer p-0.5" />
                     {['#e53e3e','#dd6b20','#d69e2e','#38a169','#3182ce','#805ad5','#667eea','#000000'].map(c => (
                       <button key={c} onClick={() => setColor(c)} style={{ backgroundColor: c }}
-                        className={`w-8 h-8 rounded-full border-2 transition-all ${color === c ? 'border-gray-800 scale-110' : 'border-white shadow-sm hover:scale-105'}`} />
+                        className={`w-8 h-8 rounded-full border-2 transition-all ${color === c ? 'border-gray-800 dark:border-white scale-110' : 'border-white dark:border-slate-700 shadow-sm hover:scale-105'}`} />
                     ))}
                   </div>
                 </div>
                 <div>
-                  <label className="flex items-center gap-2 text-sm font-semibold text-gray-700 cursor-pointer">
+                  <label className="flex items-center gap-2 text-sm font-semibold text-gray-700 dark:text-slate-300 cursor-pointer">
                     <input type="checkbox" checked={tileAll} onChange={e => setTileAll(e.target.checked)} className="rounded accent-cyan-500" />
                     Tile watermark across entire page
                   </label>
@@ -336,11 +338,11 @@ export default function WatermarkPDF() {
 
             {/* Image options */}
             {type === 'image' && (
-              <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 space-y-5">
-                <h3 className="font-bold text-gray-800 text-sm uppercase tracking-wider">Image Options</h3>
+              <div className="bg-white dark:bg-slate-900/90 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-800 p-5 space-y-5">
+                <h3 className="font-bold text-gray-800 dark:text-slate-200 text-sm uppercase tracking-wider">Image Options</h3>
                 <div>
                   <button onClick={() => imgInputRef.current?.click()}
-                    className="w-full py-3 border-2 border-dashed border-gray-300 rounded-xl text-gray-500 hover:border-cyan-400 hover:text-cyan-600 transition-colors flex items-center justify-center gap-2">
+                    className="w-full py-3 border-2 border-dashed border-gray-300 dark:border-slate-700 rounded-xl text-gray-500 dark:text-slate-400 hover:border-cyan-400 dark:hover:border-cyan-500 hover:text-cyan-600 dark:hover:text-cyan-400 transition-colors flex items-center justify-center gap-2">
                     <ImageIcon className="w-5 h-5" />
                     {wmImageName || 'Click to upload watermark image (PNG/JPG)'}
                   </button>
@@ -348,11 +350,11 @@ export default function WatermarkPDF() {
                 </div>
                 {wmImage && (
                   <div className="flex items-center gap-4">
-                    <img src={wmImage} alt="Watermark preview" className="w-24 h-24 object-contain border border-gray-200 rounded-xl bg-checkerboard" style={{ background: 'repeating-conic-gradient(#f0f0f0 0% 25%, white 0% 50%) 0 0 / 16px 16px' }} />
+                    <img src={wmImage} alt="Watermark preview" className="w-24 h-24 object-contain border border-gray-200 dark:border-slate-700 rounded-xl bg-checkerboard" style={{ background: 'repeating-conic-gradient(#f0f0f0 0% 25%, white 0% 50%) 0 0 / 16px 16px' }} />
                     <div className="flex-1">
-                      <label className="block text-sm font-semibold text-gray-700 mb-2">Scale: <span className="text-cyan-600">{Math.round(imgScale * 100)}%</span></label>
+                      <label className="block text-sm font-semibold text-gray-700 dark:text-slate-300 mb-2">Scale: <span className="text-cyan-600 dark:text-cyan-400">{Math.round(imgScale * 100)}%</span></label>
                       <input type="range" min={5} max={100} value={Math.round(imgScale * 100)} onChange={e => setImgScale(Number(e.target.value) / 100)} className="w-full accent-cyan-500" />
-                      <label className="block text-sm font-semibold text-gray-700 mb-2 mt-3">Opacity: <span className="text-cyan-600">{Math.round(opacity * 100)}%</span></label>
+                      <label className="block text-sm font-semibold text-gray-700 dark:text-slate-300 mb-2 mt-3">Opacity: <span className="text-cyan-600 dark:text-cyan-400">{Math.round(opacity * 100)}%</span></label>
                       <input type="range" min={5} max={100} value={Math.round(opacity * 100)} onChange={e => setOpacity(Number(e.target.value) / 100)} className="w-full accent-cyan-500" />
                     </div>
                   </div>
@@ -361,14 +363,14 @@ export default function WatermarkPDF() {
             )}
 
             {/* Position grid */}
-            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
-              <h3 className="font-bold text-gray-800 text-sm uppercase tracking-wider mb-4 flex items-center gap-2">
+            <div className="bg-white dark:bg-slate-900/90 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-800 p-5">
+              <h3 className="font-bold text-gray-800 dark:text-slate-200 text-sm uppercase tracking-wider mb-4 flex items-center gap-2">
                 <AlignCenter className="w-4 h-4" /> Position
               </h3>
               <div className="grid grid-cols-4 gap-2">
                 {POSITIONS.map(p => (
                   <button key={p.id} onClick={() => setPosition(p.id)}
-                    className={`py-2 px-2 rounded-xl text-xs font-semibold border-2 transition-all ${position === p.id ? 'border-cyan-500 bg-cyan-50 text-cyan-700' : 'border-gray-200 text-gray-600 hover:border-cyan-300'}`}>
+                    className={`py-2 px-2 rounded-xl text-xs font-semibold border-2 transition-all ${position === p.id ? 'border-cyan-500 bg-cyan-50 dark:bg-cyan-950/40 text-cyan-700 dark:text-cyan-300' : 'border-gray-200 dark:border-slate-700 text-gray-600 dark:text-slate-300 hover:border-cyan-300 dark:hover:border-cyan-700'}`}>
                     {p.label}
                   </button>
                 ))}
@@ -386,26 +388,27 @@ export default function WatermarkPDF() {
           </div>
 
           {/* Live preview */}
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
-            <h3 className="font-bold text-gray-800 text-sm uppercase tracking-wider mb-4 flex items-center gap-2">
-              <Eye className="w-4 h-4" /> Live Preview <span className="text-xs font-normal text-gray-400">(Page 1)</span>
+          <div className="bg-white dark:bg-slate-900/90 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-800 p-5">
+            <h3 className="font-bold text-gray-800 dark:text-slate-200 text-sm uppercase tracking-wider mb-4 flex items-center gap-2">
+              <Eye className="w-4 h-4" /> Live Preview <span className="text-xs font-normal text-gray-400 dark:text-slate-500">(Page 1)</span>
             </h3>
             {loadingPreview ? (
               <div className="flex flex-col items-center justify-center h-64 gap-3">
                 <div className="w-8 h-8 border-3 border-cyan-400 border-t-transparent rounded-full animate-spin" />
-                <p className="text-xs text-gray-400">Rendering preview...</p>
+                <p className="text-xs text-gray-400 dark:text-slate-500">Rendering preview...</p>
               </div>
             ) : previewThumb ? (
-              <div className="rounded-xl overflow-hidden border border-gray-200 shadow-sm">
+              <div className="rounded-xl overflow-hidden border border-gray-200 dark:border-slate-700 bg-white shadow-sm">
                 <img src={previewThumb} alt="Watermark preview" className="w-full" />
               </div>
             ) : (
-              <div className="flex items-center justify-center h-64 text-gray-300 text-sm">Preview loading…</div>
+              <div className="flex items-center justify-center h-64 text-gray-300 dark:text-slate-600 text-sm">Preview loading…</div>
             )}
-            <p className="text-xs text-gray-400 text-center mt-3">Preview updates with your settings</p>
+            <p className="text-xs text-gray-400 dark:text-slate-500 text-center mt-3">Preview updates with your settings</p>
           </div>
         </div>
       )}
-    </div>
+      </div>
+    </ToolWorkspaceShell>
   );
 }

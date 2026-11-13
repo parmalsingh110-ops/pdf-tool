@@ -19,7 +19,7 @@ import { useSEO } from '../hooks/useSEO';
 import { usePageSEO } from '../lib/usePageSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
 import ShareQrModal from '../components/ShareQrModal';
-import { downloadBlob } from '../lib/utils';
+import { dataUrlToBytes, downloadBlob } from '../lib/utils';
 
 interface CardItem {
   id: string;
@@ -244,7 +244,9 @@ export default function GangPrintSheet() {
       const pageHeight = paperType === 'photo_4x6' ? 288 : 841.89;
 
       const page = pdfDoc.addPage([pageWidth, pageHeight]);
-      const imageBytes = await fetch(previewDataUrl).then((r) => r.arrayBuffer());
+      const imageBytes = previewDataUrl.startsWith('data:')
+        ? dataUrlToBytes(previewDataUrl)
+        : await fetch(previewDataUrl).then((r) => r.arrayBuffer());
       const embeddedImg = await pdfDoc.embedJpg(imageBytes);
 
       page.drawImage(embeddedImg, {

@@ -21,7 +21,7 @@ import { useSEO } from '../hooks/useSEO';
 import { usePageSEO } from '../lib/usePageSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
 import ShareQrModal from '../components/ShareQrModal';
-import { downloadBlob } from '../lib/utils';
+import { dataUrlToBytes, downloadBlob } from '../lib/utils';
 
 type TemplateStyle = 'modern_accent' | 'classic_academic' | 'tech_engineering' | 'medical_science' | 'formal_border';
 
@@ -400,7 +400,7 @@ export default function AssignmentCoverPage() {
     try {
       const coverCanvas = canvasRef.current;
       const coverJpgData = coverCanvas.toDataURL('image/jpeg', 0.95);
-      const coverJpgBytes = await fetch(coverJpgData).then((r) => r.arrayBuffer());
+      const coverJpgBytes = dataUrlToBytes(coverJpgData);
 
       let finalPdfDoc: PDFDocument;
 

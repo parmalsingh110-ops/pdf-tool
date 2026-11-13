@@ -8,6 +8,7 @@ import '../lib/pdfWorker';
 import { useSEO } from '../hooks/useSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
 import { useToast } from '../components/Toast';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 
 const ORDER_KEY = 'mergePdfOrderV1';
 type OrderEntry = { name: string; size: number; lastModified: number };
@@ -407,23 +408,23 @@ export default function MergePDF() {
   };
 
   const renderSmartOptions = () => (
-    <div className="w-full bg-white rounded-2xl shadow-sm border border-gray-100 p-6 space-y-4">
+    <div className="w-full bg-white dark:bg-slate-900/90 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-800 p-6 space-y-4">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <Sparkles className="w-5 h-5 text-red-600" />
-          <h3 className="text-base font-bold text-gray-900">Smart Merge Enhancements</h3>
-          <span className="text-[10px] font-bold uppercase tracking-wider bg-red-100 text-red-700 px-2 py-0.5 rounded-full">Pro Features</span>
+          <Sparkles className="w-5 h-5 text-red-600 dark:text-red-400" />
+          <h3 className="text-base font-bold text-gray-900 dark:text-slate-100">Smart Merge Enhancements</h3>
+          <span className="text-[10px] font-bold uppercase tracking-wider bg-red-100 dark:bg-red-950/60 text-red-700 dark:text-red-300 px-2 py-0.5 rounded-full">Pro Features</span>
         </div>
-        <span className="text-xs text-gray-400">Configure before or after uploading</span>
+        <span className="text-xs text-gray-400 dark:text-slate-500">Configure before or after uploading</span>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {/* Option 1: Table of Contents */}
-        <label className={`flex flex-col justify-between p-4 rounded-xl border-2 cursor-pointer transition-all ${generateToc ? 'border-red-500 bg-red-50/40 shadow-xs' : 'border-gray-100 bg-gray-50/50 hover:border-gray-200'}`}>
+        <label className={`flex flex-col justify-between p-4 rounded-xl border-2 cursor-pointer transition-all ${generateToc ? 'border-red-500 bg-red-50/40 dark:bg-red-950/30 shadow-xs' : 'border-gray-100 dark:border-slate-800 bg-gray-50/50 dark:bg-slate-800/40 hover:border-gray-200 dark:hover:border-slate-700'}`}>
           <div className="flex items-start justify-between gap-2 mb-2">
             <div className="flex items-center gap-2">
-              <BookOpen className={`w-4 h-4 ${generateToc ? 'text-red-600' : 'text-gray-500'}`} />
-              <span className="text-sm font-bold text-gray-900">Clickable Index (TOC)</span>
+              <BookOpen className={`w-4 h-4 ${generateToc ? 'text-red-600 dark:text-red-400' : 'text-gray-500 dark:text-slate-400'}`} />
+              <span className="text-sm font-bold text-gray-900 dark:text-slate-100">Clickable Index (TOC)</span>
             </div>
             <input
               type="checkbox"
@@ -432,37 +433,37 @@ export default function MergePDF() {
               className="w-4 h-4 accent-red-600 rounded cursor-pointer mt-0.5"
             />
           </div>
-          <p className="text-xs text-gray-500 leading-relaxed">
+          <p className="text-xs text-gray-500 dark:text-slate-400 leading-relaxed">
             Adds a Page 1 Index with <strong>clickable links</strong> jumping directly to each document.
           </p>
         </label>
 
         {/* Option 2: Page Size Normalizer */}
-        <div className="flex flex-col justify-between p-4 rounded-xl border-2 border-gray-100 bg-gray-50/50">
+        <div className="flex flex-col justify-between p-4 rounded-xl border-2 border-gray-100 dark:border-slate-800 bg-gray-50/50 dark:bg-slate-800/40">
           <div className="flex items-center gap-2 mb-2">
-            <Maximize2 className="w-4 h-4 text-gray-700" />
-            <span className="text-sm font-bold text-gray-900">Page Dimensions</span>
+            <Maximize2 className="w-4 h-4 text-gray-700 dark:text-slate-300" />
+            <span className="text-sm font-bold text-gray-900 dark:text-slate-100">Page Dimensions</span>
           </div>
           <select
             value={pageSizeMode}
             onChange={e => setPageSizeMode(e.target.value as any)}
-            className="w-full text-xs font-semibold bg-white border border-gray-200 rounded-lg p-2 text-gray-800 focus:outline-none focus:border-red-500 cursor-pointer"
+            className="w-full text-xs font-semibold bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-lg p-2 text-gray-800 dark:text-slate-100 focus:outline-none focus:border-red-500 cursor-pointer"
           >
             <option value="original">Original Page Sizes (Keep as-is)</option>
             <option value="a4">Standardize to A4 (Proportional Center)</option>
             <option value="letter">Standardize to US Letter (Proportional)</option>
           </select>
-          <p className="text-[11px] text-gray-400 mt-2">
+          <p className="text-[11px] text-gray-400 dark:text-slate-500 mt-2">
             Fixes mismatched receipts & landscape scans.
           </p>
         </div>
 
         {/* Option 3: Auto-Purge Blank Pages */}
-        <label className={`flex flex-col justify-between p-4 rounded-xl border-2 cursor-pointer transition-all ${removeBlankPages ? 'border-red-500 bg-red-50/40 shadow-xs' : 'border-gray-100 bg-gray-50/50 hover:border-gray-200'}`}>
+        <label className={`flex flex-col justify-between p-4 rounded-xl border-2 cursor-pointer transition-all ${removeBlankPages ? 'border-red-500 bg-red-50/40 dark:bg-red-950/30 shadow-xs' : 'border-gray-100 dark:border-slate-800 bg-gray-50/50 dark:bg-slate-800/40 hover:border-gray-200 dark:hover:border-slate-700'}`}>
           <div className="flex items-start justify-between gap-2 mb-2">
             <div className="flex items-center gap-2">
-              <Trash2 className={`w-4 h-4 ${removeBlankPages ? 'text-red-600' : 'text-gray-500'}`} />
-              <span className="text-sm font-bold text-gray-900">Purge Blank Pages</span>
+              <Trash2 className={`w-4 h-4 ${removeBlankPages ? 'text-red-600 dark:text-red-400' : 'text-gray-500 dark:text-slate-400'}`} />
+              <span className="text-sm font-bold text-gray-900 dark:text-slate-100">Purge Blank Pages</span>
             </div>
             <input
               type="checkbox"
@@ -471,7 +472,7 @@ export default function MergePDF() {
               className="w-4 h-4 accent-red-600 rounded cursor-pointer mt-0.5"
             />
           </div>
-          <p className="text-xs text-gray-500 leading-relaxed">
+          <p className="text-xs text-gray-500 dark:text-slate-400 leading-relaxed">
             Scans & skips empty white scanner pages before merging.
           </p>
         </label>
@@ -480,31 +481,32 @@ export default function MergePDF() {
   );
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-start p-6 md:p-8 min-h-screen bg-gradient-to-br from-red-50/40 via-white to-slate-50">
-      <div className="text-center mb-8 max-w-3xl">
-        <div className="inline-flex items-center justify-center w-14 h-14 bg-red-100 rounded-2xl mb-4">
-          <Layers className="w-7 h-7 text-red-600" />
-        </div>
-        <h1 className="text-4xl font-extrabold text-gray-900 mb-3">Merge PDF Files</h1>
-        <p className="text-lg text-gray-500 mb-3">Combine multiple PDFs into one. See thumbnail previews, drag to reorder.</p>
-        <div className="flex flex-wrap items-center justify-center gap-2 mt-2">
-          <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold bg-red-100 text-red-800 shadow-xs">
+    <ToolWorkspaceShell
+      title="Merge PDF Files"
+      subtitle="Combine multiple PDFs into one. See thumbnail previews, drag to reorder."
+      categoryLabel="PDF Assembly · Browser Engine"
+      icon={Layers}
+      microVariant="merge"
+      tone="rose"
+    >
+      <div className="flex flex-col items-center">
+        <div className="flex flex-wrap items-center justify-center gap-2 mb-7">
+          <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold bg-rose-100/80 dark:bg-rose-950/50 text-rose-800 dark:text-rose-300 border border-rose-200/70 dark:border-rose-800/50">
             📑 Smart Clickable TOC Index
           </span>
-          <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-800 shadow-xs">
+          <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold bg-sky-100/80 dark:bg-sky-950/50 text-sky-800 dark:text-sky-300 border border-sky-200/70 dark:border-sky-800/50">
             📐 A4 / Letter Normalizer
           </span>
-          <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 shadow-xs">
+          <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-100/80 dark:bg-emerald-950/50 text-emerald-800 dark:text-emerald-300 border border-emerald-200/70 dark:border-emerald-800/50">
             🧹 Auto-Purge Blank Pages
           </span>
           <Link
             to="/alternate-mix"
-            className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-teal-100 text-teal-800 hover:bg-teal-200 transition-colors shadow-xs"
+            className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-violet-100/80 dark:bg-violet-950/50 text-violet-800 dark:text-violet-300 hover:bg-violet-200/80 dark:hover:bg-violet-900/60 transition-colors border border-violet-200/70 dark:border-violet-800/50"
           >
             🔀 Alternate & Mix →
           </Link>
         </div>
-      </div>
 
       {entries.length === 0 ? (
         <div className="w-full max-w-5xl space-y-6">
@@ -512,36 +514,36 @@ export default function MergePDF() {
           {renderSmartOptions()}
         </div>
       ) : mergedPdfUrl ? (
-        <div className="w-full max-w-md bg-white rounded-2xl shadow-sm border border-gray-100 p-8 text-center">
-          <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-            <Layers className="w-8 h-8 text-green-600" />
+        <div className="w-full max-w-md bg-white dark:bg-slate-900/90 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-800 p-8 text-center">
+          <div className="w-16 h-16 bg-green-100 dark:bg-green-950/50 rounded-full flex items-center justify-center mx-auto mb-4">
+            <Layers className="w-8 h-8 text-green-600 dark:text-green-400" />
           </div>
-          <h3 className="text-2xl font-bold text-gray-900 mb-1">Merged Successfully!</h3>
-          <p className="text-gray-500 mb-6">{entries.length} files · {totalPages} total pages</p>
+          <h3 className="text-2xl font-bold text-gray-900 dark:text-slate-100 mb-1">Merged Successfully!</h3>
+          <p className="text-gray-500 dark:text-slate-400 mb-6">{entries.length} files · {totalPages} total pages</p>
           <a href={mergedPdfUrl} download="merged.pdf"
             className="inline-flex items-center gap-2 px-8 py-4 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition-colors shadow-md mb-4">
             <Download className="w-5 h-5" /> Download merged.pdf
           </a>
           <br />
           <button onClick={() => { setEntries([]); setMergedPdfUrl(null); }}
-            className="text-gray-500 hover:text-gray-800 font-medium text-sm mt-2">
+            className="text-gray-500 dark:text-slate-400 hover:text-gray-800 dark:hover:text-slate-200 font-medium text-sm mt-2">
             Merge more PDFs
           </button>
         </div>
       ) : (
         <div className="w-full max-w-5xl space-y-5">
           {/* Stats bar */}
-          <div className="flex items-center justify-between p-4 bg-white rounded-2xl shadow-sm border border-gray-100">
+          <div className="flex items-center justify-between p-4 bg-white dark:bg-slate-900/90 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-800">
             <div className="flex items-center gap-4">
-              <span className="text-sm font-semibold text-gray-700">{entries.length} file{entries.length !== 1 ? 's' : ''}</span>
-              {totalPages > 0 && <span className="text-sm text-gray-400">· {totalPages} total pages</span>}
+              <span className="text-sm font-semibold text-gray-700 dark:text-slate-200">{entries.length} file{entries.length !== 1 ? 's' : ''}</span>
+              {totalPages > 0 && <span className="text-sm text-gray-400 dark:text-slate-500">· {totalPages} total pages</span>}
             </div>
             <div className="flex gap-2">
               <button onClick={restoreSavedOrder}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 text-indigo-700 rounded-lg text-xs font-semibold hover:bg-indigo-100 transition-colors border border-indigo-100">
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 rounded-lg text-xs font-semibold hover:bg-indigo-100 dark:hover:bg-indigo-900/60 transition-colors border border-indigo-100 dark:border-indigo-800/50">
                 <ListRestart className="w-3.5 h-3.5" /> Restore Order
               </button>
-              <label className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gray-50 text-gray-700 rounded-lg text-xs font-semibold hover:bg-gray-100 transition-colors border border-gray-200 cursor-pointer">
+              <label className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gray-50 dark:bg-slate-800 text-gray-700 dark:text-slate-200 rounded-lg text-xs font-semibold hover:bg-gray-100 dark:hover:bg-slate-700 transition-colors border border-gray-200 dark:border-slate-700 cursor-pointer">
                 <Plus className="w-3.5 h-3.5" /> Add More
                 <input type="file" accept=".pdf" multiple className="hidden" onChange={e => { if (e.target.files) addFiles(Array.from(e.target.files)); }} />
               </label>
@@ -549,7 +551,7 @@ export default function MergePDF() {
           </div>
 
           {orderHint && (
-            <p className="text-sm text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-xl px-4 py-2">{orderHint}</p>
+            <p className="text-sm text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-100 dark:border-indigo-800/50 rounded-xl px-4 py-2">{orderHint}</p>
           )}
 
           {/* File list with thumbnails */}
@@ -562,15 +564,15 @@ export default function MergePDF() {
                 onDragEnter={() => handleDragEnter(index)}
                 onDragEnd={handleDragEnd}
                 onDragOver={e => e.preventDefault()}
-                className={`flex items-center gap-4 p-4 bg-white rounded-2xl border-2 transition-all shadow-sm cursor-grab active:cursor-grabbing ${dragOver === index && dragIndex !== index ? 'border-red-400 bg-red-50' : 'border-gray-100 hover:border-gray-200'}`}
+                className={`flex items-center gap-4 p-4 bg-white dark:bg-slate-900/90 rounded-2xl border-2 transition-all shadow-sm cursor-grab active:cursor-grabbing ${dragOver === index && dragIndex !== index ? 'border-red-400 bg-red-50 dark:bg-red-950/30' : 'border-gray-100 dark:border-slate-800 hover:border-gray-200 dark:hover:border-slate-700'}`}
               >
                 {/* Drag handle */}
-                <div className="text-gray-300 hover:text-gray-500 transition-colors shrink-0">
+                <div className="text-gray-300 dark:text-slate-600 hover:text-gray-500 dark:hover:text-slate-400 transition-colors shrink-0">
                   <GripVertical className="w-5 h-5" />
                 </div>
 
                 {/* Page 1 thumbnail */}
-                <div className="w-16 h-20 bg-gray-100 rounded-lg overflow-hidden shrink-0 border border-gray-200 shadow-sm flex items-center justify-center">
+                <div className="w-16 h-20 bg-gray-100 dark:bg-slate-800 rounded-lg overflow-hidden shrink-0 border border-gray-200 dark:border-slate-700 shadow-sm flex items-center justify-center">
                   {entry.loadingThumb ? (
                     <div className="w-5 h-5 border-2 border-gray-300 border-t-red-500 rounded-full animate-spin" />
                   ) : entry.thumb ? (
@@ -582,30 +584,30 @@ export default function MergePDF() {
 
                 {/* File info */}
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-gray-900 truncate">{entry.file.name}</p>
+                  <p className="text-sm font-semibold text-gray-900 dark:text-slate-100 truncate">{entry.file.name}</p>
                   <div className="flex items-center gap-3 mt-0.5">
-                    <span className="text-xs text-gray-400">{(entry.file.size / 1024 / 1024).toFixed(2)} MB</span>
+                    <span className="text-xs text-gray-400 dark:text-slate-500">{(entry.file.size / 1024 / 1024).toFixed(2)} MB</span>
                     {entry.pageCount > 0 && (
-                      <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">{entry.pageCount} page{entry.pageCount !== 1 ? 's' : ''}</span>
+                      <span className="text-xs bg-gray-100 dark:bg-slate-800 text-gray-600 dark:text-slate-300 px-2 py-0.5 rounded-full">{entry.pageCount} page{entry.pageCount !== 1 ? 's' : ''}</span>
                     )}
                   </div>
                   {/* Merge order label */}
-                  <span className="text-xs text-red-500 font-semibold mt-1 inline-block"># {index + 1}</span>
+                  <span className="text-xs text-red-500 dark:text-red-400 font-semibold mt-1 inline-block"># {index + 1}</span>
                 </div>
 
                 {/* Up/Down + Delete */}
                 <div className="flex flex-col gap-1 shrink-0">
                   <button onClick={() => moveFile(index, 'up')} disabled={index === 0}
-                    className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-700 disabled:opacity-20 transition-colors">
+                    className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-slate-800 text-gray-400 dark:text-slate-500 hover:text-gray-700 dark:hover:text-slate-200 disabled:opacity-20 transition-colors">
                     <ChevronUp className="w-4 h-4" />
                   </button>
                   <button onClick={() => moveFile(index, 'down')} disabled={index === entries.length - 1}
-                    className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-700 disabled:opacity-20 transition-colors">
+                    className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-slate-800 text-gray-400 dark:text-slate-500 hover:text-gray-700 dark:hover:text-slate-200 disabled:opacity-20 transition-colors">
                     <ChevronDown className="w-4 h-4" />
                   </button>
                 </div>
                 <button onClick={() => removeFile(index)}
-                  className="p-2 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-xl transition-colors shrink-0">
+                  className="p-2 text-gray-300 dark:text-slate-600 hover:text-red-500 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 rounded-xl transition-colors shrink-0">
                   <Trash2 className="w-4 h-4" />
                 </button>
               </div>
@@ -616,9 +618,9 @@ export default function MergePDF() {
           {renderSmartOptions()}
 
           {/* Merge button */}
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+          <div className="bg-white dark:bg-slate-900/90 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-800 p-5">
             {entries.length < 2 && (
-              <p className="text-center text-sm text-amber-600 bg-amber-50 rounded-xl py-2 mb-4">Add at least 2 PDF files to merge.</p>
+              <p className="text-center text-sm text-amber-600 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 rounded-xl py-2 mb-4">Add at least 2 PDF files to merge.</p>
             )}
             <button onClick={mergePdfs} disabled={entries.length < 2 || isProcessing}
               className="w-full py-4 bg-red-600 text-white text-base font-bold rounded-xl hover:bg-red-700 transition-colors disabled:opacity-50 shadow-md flex items-center justify-center gap-2">
@@ -628,7 +630,7 @@ export default function MergePDF() {
                 <><Layers className="w-5 h-5" />Merge {entries.length} PDF{entries.length !== 1 ? 's' : ''} into One</>
               )}
             </button>
-            <p className="text-center text-xs text-gray-400 mt-3">Files are merged in the order shown above. Drag to reorder.</p>
+            <p className="text-center text-xs text-gray-400 dark:text-slate-500 mt-3">Files are merged in the order shown above. Drag to reorder.</p>
           </div>
         </div>
       )}
@@ -679,6 +681,7 @@ export default function MergePDF() {
           { name: 'PDF to Word', path: '/pdf-to-word', desc: 'Convert PDF to editable DOCX format' },
         ]}
       />
-    </div>
+      </div>
+    </ToolWorkspaceShell>
   );
 }

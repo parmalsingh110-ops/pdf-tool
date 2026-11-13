@@ -17,6 +17,7 @@ import { extractDocxContent, DocxElement, DocxParagraph, DocxTable as DTable, Do
 import { useSEO } from '../hooks/useSEO';
 import { dataUrlToBytes } from '../lib/utils';
 import { apiFetch } from '../lib/api';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
@@ -2134,21 +2135,16 @@ export default function UniversalConverter() {
   };
 
   return (
-
-    <div className="flex-1 flex flex-col items-center justify-center p-6 md:p-10">
-      {/* Header */}
-      <div className="text-center mb-8 max-w-2xl">
-        <div className="inline-flex items-center gap-2 mb-3 px-3 py-1 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 rounded-full text-xs font-bold uppercase tracking-wider">
-          <RefreshCw className="w-3.5 h-3.5" />
-          Universal Converter
-        </div>
-        <h1 className="text-3xl md:text-4xl font-extrabold text-slate-900 dark:text-white mb-3">
-          Convert Any Document
-        </h1>
-        <p className="text-slate-600 dark:text-slate-400">
-          PDF, Word, Excel, PowerPoint, Images, Text — convert to any format. Browser-first processing wherever supported; Office/layout conversions run ephemerally on our server with immediate auto-deletion.
-        </p>
-      </div>
+    <ToolWorkspaceShell
+      title="Convert Any Document"
+      subtitle="PDF, Word, Excel, PowerPoint, Images, Text — convert to any format. Browser-first processing wherever supported; Office/layout conversions run ephemerally on our server with immediate auto-deletion."
+      categoryLabel="Universal Converter"
+      icon={RefreshCw}
+      microVariant="convert"
+      tone="indigo"
+      trustNote="Browser-first processing + ephemeral Office conversions"
+    >
+      <div className="flex flex-col items-center w-full">
 
       {/* Supported format badges */}
       <div className="flex flex-wrap justify-center gap-2 mb-8">
@@ -2310,6 +2306,7 @@ export default function UniversalConverter() {
           )}
         </div>
       )}
-    </div>
+      </div>
+    </ToolWorkspaceShell>
   );
 }

@@ -19,7 +19,7 @@ import { useSEO } from '../hooks/useSEO';
 import { usePageSEO } from '../lib/usePageSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
 import ShareQrModal from '../components/ShareQrModal';
-import { downloadBlob } from '../lib/utils';
+import { dataUrlToBytes, downloadBlob } from '../lib/utils';
 
 type StampShape = 'round_seal' | 'rectangle_box' | 'oval_seal';
 
@@ -282,7 +282,7 @@ export default function RubberStampMaker() {
 
     try {
       const pdfDoc = await PDFDocument.load(pdfBytes);
-      const pngBytes = await fetch(stampCanvas.toDataURL('image/png')).then((r) => r.arrayBuffer());
+      const pngBytes = dataUrlToBytes(stampCanvas.toDataURL('image/png'));
       const pngImage = await pdfDoc.embedPng(pngBytes);
 
       const page = pdfDoc.getPage(0); // Page 1

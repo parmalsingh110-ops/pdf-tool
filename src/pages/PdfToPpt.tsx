@@ -11,6 +11,7 @@ import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { apiFetch } from '../lib/api';
 import '../lib/pdfWorker';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 
 type Stage = 'idle' | 'analyzing' | 'converting' | 'backend' | 'done' | 'error';
 type Method = 'auto' | 'frontend' | 'backend';
@@ -255,30 +256,35 @@ export default function PdfToPpt() {
   };
 
   return (
-    <div className="flex-1 w-full bg-gradient-to-br from-slate-50 via-orange-50/30 to-rose-50 dark:from-slate-950 dark:via-slate-900 dark:to-slate-900 min-h-screen">
-      <div className="max-w-3xl mx-auto px-4 py-10 space-y-6">
-
-        {/* Header */}
-        <div className="text-center">
-          <div className="w-16 h-16 bg-gradient-to-br from-orange-500 to-rose-600 rounded-2xl flex items-center justify-center shadow-lg shadow-orange-200 dark:shadow-orange-900/50 mx-auto mb-4">
-            <Presentation className="w-8 h-8 text-white" />
-          </div>
-          <h1 className="text-4xl font-extrabold text-slate-900 dark:text-white mb-2">PDF to PowerPoint</h1>
-          <p className="text-base text-slate-600 dark:text-slate-400 max-w-xl mx-auto">
-            Instant browser-side conversion. Each page becomes a crisp high-DPI slide. Choose image quality and slide style.
-          </p>
-          <div className="flex flex-wrap justify-center gap-2 mt-4">
-            {[
-              { icon: Zap, t: 'Instant in browser', color: 'text-amber-500' },
-              { icon: Image, t: 'HD slide images', color: 'text-orange-500' },
-              { icon: Layers, t: 'Image + text layer', color: 'text-blue-500' },
-              { icon: Cpu, t: 'OCR backend option', color: 'text-purple-500' },
-            ].map(({ icon: Icon, t, color }) => (
-              <span key={t} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-full text-xs font-semibold text-slate-700 dark:text-slate-200 shadow-sm">
-                <Icon className={`w-3.5 h-3.5 ${color}`} />{t}
-              </span>
-            ))}
-          </div>
+    <ToolWorkspaceShell
+      title="PDF to PowerPoint"
+      subtitle="Instant browser-side conversion. Each page becomes a crisp high-DPI slide. Choose image quality and slide style."
+      categoryLabel="Slide Deck Export · PPTX"
+      icon={Presentation}
+      microVariant="convert"
+      tone="amber"
+    >
+      <div className="max-w-3xl mx-auto space-y-6">
+        <div className="flex flex-wrap justify-center gap-2">
+          {[
+            { icon: Zap, t: 'Instant in browser', color: 'text-amber-500' },
+            { icon: Image, t: 'HD slide images', color: 'text-orange-500' },
+            { icon: Layers, t: 'Image + text layer', color: 'text-blue-500' },
+            { icon: Cpu, t: 'OCR backend option', color: 'text-purple-500' },
+          ].map(({ icon: Icon, t, color }) => (
+            <span
+              key={t}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 border rounded-full text-xs font-semibold"
+              style={{
+                backgroundColor: 'var(--pms-white)',
+                borderColor: 'var(--pms-border)',
+                color: 'var(--pms-ink)',
+                boxShadow: 'var(--pms-shadow-sm)',
+              }}
+            >
+              <Icon className={`w-3.5 h-3.5 ${color}`} />{t}
+            </span>
+          ))}
         </div>
 
         {stage === 'idle' && (
@@ -474,6 +480,6 @@ export default function PdfToPpt() {
           </div>
         )}
       </div>
-    </div>
+    </ToolWorkspaceShell>
   );
 }

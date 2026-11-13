@@ -5,6 +5,7 @@ import { useSEO } from '../hooks/useSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
 import { PDFDocument } from 'pdf-lib';
 import { dataUrlToBytes } from '../lib/utils';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 
 type LayoutMode = 'ssc_combo' | 'side_by_side' | 'photo_only' | 'sign_only';
 
@@ -380,19 +381,14 @@ export default function SarkariPhotoSignature() {
   };
 
   return (
-    <div className="flex-1 max-w-6xl mx-auto px-4 py-8 w-full">
-      {/* Title */}
-      <div className="text-center mb-8">
-        <div className="inline-flex items-center gap-2 px-3 py-1 bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 rounded-full text-xs font-semibold mb-3 border border-amber-200 dark:border-amber-800">
-          <Sparkles className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" /> SSC, UPSC, IBPS, Railway & State Exam Format
-        </div>
-        <h1 className="text-3xl sm:text-4xl font-extrabold text-gray-900 dark:text-white mb-3 tracking-tight">
-          Sarkari Photo & Signature Joiner (With Name & DOP)
-        </h1>
-        <p className="text-base sm:text-lg text-gray-600 dark:text-slate-300 max-w-2xl mx-auto">
-          Add Candidate Name & Date of Photo (DOP) at bottom of passport photo, join signature, and compress strictly within required file size (20 KB – 50 KB).
-        </p>
-      </div>
+    <ToolWorkspaceShell
+      title="Sarkari Photo & Signature Joiner (With Name & DOP)"
+      subtitle="Add Candidate Name & Date of Photo (DOP) at bottom of passport photo, join signature, and compress strictly within required file size (20 KB – 50 KB)."
+      categoryLabel="SSC · UPSC · IBPS · Railway Exam Format"
+      icon={User}
+      microVariant="crop"
+      tone="amber"
+    >
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
         {/* Left Column: Controls & Inputs (7 Cols) */}
@@ -405,12 +401,12 @@ export default function SarkariPhotoSignature() {
                 <span>1. Passport Photo</span>
                 {photoFile && <span className="text-emerald-600 dark:text-emerald-400 font-semibold lowercase">selected</span>}
               </label>
-              <label className="flex flex-col items-center justify-center border-2 border-dashed border-gray-300 dark:border-slate-700 hover:border-blue-500 rounded-xl p-4 cursor-pointer transition-colors bg-gray-50/50 dark:bg-slate-800/40 hover:bg-blue-50/20">
-                <Upload className="w-6 h-6 text-gray-400 mb-1" />
+              <label className="flex flex-col items-center justify-center border-2 border-dashed border-gray-300 dark:border-slate-700 hover:border-blue-500 rounded-xl p-4 cursor-pointer transition-colors bg-gray-50/50 dark:bg-slate-800/40 hover:bg-blue-50/20 dark:hover:bg-blue-950/30">
+                <Upload className="w-6 h-6 text-gray-400 dark:text-slate-500 mb-1" />
                 <span className="text-xs font-medium text-gray-600 dark:text-slate-300 text-center">
                   {photoFile ? photoFile.name : 'Upload Candidate Photo'}
                 </span>
-                <span className="text-[10px] text-gray-400 mt-0.5">JPG / PNG</span>
+                <span className="text-[10px] text-gray-400 dark:text-slate-500 mt-0.5">JPG / PNG</span>
                 <input type="file" accept="image/*" onChange={handlePhotoUpload} className="hidden" />
               </label>
             </div>
@@ -421,12 +417,12 @@ export default function SarkariPhotoSignature() {
                 <span>2. Signature</span>
                 {signFile && <span className="text-emerald-600 dark:text-emerald-400 font-semibold lowercase">selected</span>}
               </label>
-              <label className="flex flex-col items-center justify-center border-2 border-dashed border-gray-300 dark:border-slate-700 hover:border-blue-500 rounded-xl p-4 cursor-pointer transition-colors bg-gray-50/50 dark:bg-slate-800/40 hover:bg-blue-50/20">
-                <Upload className="w-6 h-6 text-gray-400 mb-1" />
+              <label className="flex flex-col items-center justify-center border-2 border-dashed border-gray-300 dark:border-slate-700 hover:border-blue-500 rounded-xl p-4 cursor-pointer transition-colors bg-gray-50/50 dark:bg-slate-800/40 hover:bg-blue-50/20 dark:hover:bg-blue-950/30">
+                <Upload className="w-6 h-6 text-gray-400 dark:text-slate-500 mb-1" />
                 <span className="text-xs font-medium text-gray-600 dark:text-slate-300 text-center">
                   {signFile ? signFile.name : 'Upload Candidate Sign'}
                 </span>
-                <span className="text-[10px] text-gray-400 mt-0.5">JPG / PNG</span>
+                <span className="text-[10px] text-gray-400 dark:text-slate-500 mt-0.5">JPG / PNG</span>
                 <input type="file" accept="image/*" onChange={handleSignUpload} className="hidden" />
               </label>
             </div>
@@ -436,9 +432,9 @@ export default function SarkariPhotoSignature() {
           <div className="p-5 bg-gradient-to-r from-amber-500/10 to-blue-500/10 dark:from-amber-950/30 dark:to-blue-950/30 border border-amber-200 dark:border-amber-800/60 rounded-2xl shadow-xs space-y-3">
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold uppercase tracking-wider text-amber-800 dark:text-amber-300 flex items-center gap-1.5">
-                <Sparkles className="w-4 h-4 text-amber-600" /> 1-Click Official Exam Portal Presets
+                <Sparkles className="w-4 h-4 text-amber-600 dark:text-amber-400" /> 1-Click Official Exam Portal Presets
               </span>
-              <span className="text-[11px] text-slate-500 font-medium">Auto-configures size & layout</span>
+              <span className="text-[11px] text-slate-500 dark:text-slate-400 font-medium">Auto-configures size & layout</span>
             </div>
 
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
@@ -461,7 +457,7 @@ export default function SarkariPhotoSignature() {
                   className={`py-2 px-2.5 rounded-xl border text-left text-xs font-semibold transition-all ${
                     layoutMode === preset.layout && targetSizeKb === preset.size
                       ? 'bg-amber-600 text-white border-amber-600 shadow-sm'
-                      : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-50'
+                      : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700'
                   }`}
                 >
                   <div className="truncate">{preset.label}</div>
@@ -472,14 +468,14 @@ export default function SarkariPhotoSignature() {
           </div>
 
           {/* Details Config Box */}
-          <div className="p-5 bg-white border border-gray-200 rounded-2xl shadow-xs space-y-4">
-            <h2 className="text-sm font-bold text-gray-900 flex items-center gap-2">
-              <User className="w-4 h-4 text-blue-600" /> Candidate Details on Photo
+          <div className="p-5 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xs space-y-4">
+            <h2 className="text-sm font-bold text-gray-900 dark:text-slate-100 flex items-center gap-2">
+              <User className="w-4 h-4 text-blue-600 dark:text-blue-400" /> Candidate Details on Photo
             </h2>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1">
+                <label className="block text-xs font-semibold text-gray-700 dark:text-slate-200 mb-1">
                   Candidate Full Name (in CAPITAL)
                 </label>
                 <input
@@ -487,13 +483,13 @@ export default function SarkariPhotoSignature() {
                   placeholder="e.g. ANURAG SHARMA"
                   value={candidateName}
                   onChange={(e) => setCandidateName(e.target.value.toUpperCase())}
-                  className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-300 rounded-xl text-sm font-semibold focus:ring-2 focus:ring-blue-500 outline-none uppercase"
+                  className="w-full px-3.5 py-2.5 bg-gray-50 dark:bg-slate-800 text-gray-900 dark:text-slate-100 border border-gray-300 dark:border-slate-700 rounded-xl text-sm font-semibold focus:ring-2 focus:ring-blue-500 outline-none uppercase"
                 />
               </div>
 
               <div>
                 <div className="flex items-center justify-between mb-1">
-                  <label className="text-xs font-semibold text-gray-700">
+                  <label className="text-xs font-semibold text-gray-700 dark:text-slate-200">
                     Date of Photo (DOP)
                   </label>
                   <button
@@ -505,7 +501,7 @@ export default function SarkariPhotoSignature() {
                       const yyyy = today.getFullYear();
                       setPhotoDate(`${dd}/${mm}/${yyyy}`);
                     }}
-                    className="text-[10px] font-bold text-blue-600 hover:text-blue-800"
+                    className="text-[10px] font-bold text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300"
                   >
                     Set Today
                   </button>
@@ -514,7 +510,7 @@ export default function SarkariPhotoSignature() {
                   <select
                     value={dopPrefix}
                     onChange={(e) => setDopPrefix(e.target.value)}
-                    className="px-2 py-2.5 bg-gray-50 border border-gray-300 rounded-xl text-xs font-medium focus:ring-2 focus:ring-blue-500 outline-none"
+                    className="px-2 py-2.5 bg-gray-50 dark:bg-slate-800 text-gray-900 dark:text-slate-100 border border-gray-300 dark:border-slate-700 rounded-xl text-xs font-medium focus:ring-2 focus:ring-blue-500 outline-none"
                   >
                     <option value="DOP : ">DOP :</option>
                     <option value="DATE : ">DATE :</option>
@@ -526,7 +522,7 @@ export default function SarkariPhotoSignature() {
                     placeholder="DD/MM/YYYY"
                     value={photoDate}
                     onChange={(e) => setPhotoDate(e.target.value)}
-                    className="flex-1 px-3 py-2.5 bg-gray-50 border border-gray-300 rounded-xl text-sm font-semibold focus:ring-2 focus:ring-blue-500 outline-none"
+                    className="flex-1 px-3 py-2.5 bg-gray-50 dark:bg-slate-800 text-gray-900 dark:text-slate-100 border border-gray-300 dark:border-slate-700 rounded-xl text-sm font-semibold focus:ring-2 focus:ring-blue-500 outline-none"
                   />
                 </div>
               </div>
@@ -534,7 +530,7 @@ export default function SarkariPhotoSignature() {
 
             {/* Layout Mode Selector */}
             <div>
-              <label className="block text-xs font-semibold text-gray-700 mb-1.5">
+              <label className="block text-xs font-semibold text-gray-700 dark:text-slate-200 mb-1.5">
                 Output Layout Style:
               </label>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
@@ -551,7 +547,7 @@ export default function SarkariPhotoSignature() {
                     className={`py-2 px-2.5 text-xs font-semibold rounded-xl border text-center transition-all ${
                       layoutMode === mode.id
                         ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
-                        : 'bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100'
+                        : 'bg-gray-50 dark:bg-slate-800 text-gray-700 dark:text-slate-200 border-gray-200 dark:border-slate-700 hover:bg-gray-100 dark:hover:bg-slate-700'
                     }`}
                   >
                     {mode.label}
@@ -561,8 +557,8 @@ export default function SarkariPhotoSignature() {
             </div>
 
             {/* Border Toggle */}
-            <div className="flex items-center justify-between pt-2 border-t border-gray-100">
-              <span className="text-xs font-medium text-gray-700">Official Black Border Outline</span>
+            <div className="flex items-center justify-between pt-2 border-t border-gray-100 dark:border-slate-800">
+              <span className="text-xs font-medium text-gray-700 dark:text-slate-200">Official Black Border Outline</span>
               <label className="relative inline-flex items-center cursor-pointer">
                 <input
                   type="checkbox"
@@ -570,18 +566,18 @@ export default function SarkariPhotoSignature() {
                   onChange={(e) => setShowBorder(e.target.checked)}
                   className="sr-only peer"
                 />
-                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                <div className="w-11 h-6 bg-gray-200 dark:bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
               </label>
             </div>
           </div>
 
           {/* Target File Size Slider */}
-          <div className="p-5 bg-white border border-gray-200 rounded-2xl shadow-xs space-y-4">
+          <div className="p-5 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xs space-y-4">
             <div className="flex items-center justify-between">
-              <h2 className="text-sm font-bold text-gray-900 flex items-center gap-2">
-                <Sliders className="w-4 h-4 text-emerald-600" /> Target File Size Controller
+              <h2 className="text-sm font-bold text-gray-900 dark:text-slate-100 flex items-center gap-2">
+                <Sliders className="w-4 h-4 text-emerald-600 dark:text-emerald-400" /> Target File Size Controller
               </h2>
-              <span className="text-xs font-bold px-2.5 py-1 bg-emerald-50 text-emerald-700 rounded-md border border-emerald-200 font-mono">
+              <span className="text-xs font-bold px-2.5 py-1 bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 rounded-md border border-emerald-200 dark:border-emerald-800 font-mono">
                 {targetSizeKb > 0 ? `Target: ~${targetSizeKb} KB` : 'Original Quality'}
               </span>
             </div>
@@ -602,7 +598,7 @@ export default function SarkariPhotoSignature() {
                   className={`text-xs px-3 py-1.5 rounded-lg border font-medium transition-all ${
                     targetSizeKb === preset.kb
                       ? 'bg-emerald-600 text-white border-emerald-600'
-                      : 'bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100'
+                      : 'bg-gray-50 dark:bg-slate-800 text-gray-700 dark:text-slate-200 border-gray-200 dark:border-slate-700 hover:bg-gray-100 dark:hover:bg-slate-700'
                   }`}
                 >
                   {preset.label}
@@ -621,7 +617,7 @@ export default function SarkariPhotoSignature() {
                 onChange={(e) => setTargetSizeKb(Number(e.target.value))}
                 className="w-full accent-emerald-600 cursor-pointer"
               />
-              <div className="flex justify-between text-[11px] text-gray-400 mt-1">
+              <div className="flex justify-between text-[11px] text-gray-400 dark:text-slate-500 mt-1">
                 <span>10 KB (Super Compressed)</span>
                 <span>50 KB (SSC)</span>
                 <span>100 KB (UPSC)</span>
@@ -633,20 +629,20 @@ export default function SarkariPhotoSignature() {
 
         {/* Right Column: Live Preview & Download (5 Cols) */}
         <div className="lg:col-span-5 space-y-5 lg:sticky lg:top-8">
-          <div className="p-5 bg-white border border-gray-200 rounded-2xl shadow-xs text-center">
+          <div className="p-5 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xs text-center">
             <div className="flex items-center justify-between mb-4">
-              <span className="text-xs font-bold text-gray-700 uppercase tracking-wider">
+              <span className="text-xs font-bold text-gray-700 dark:text-slate-200 uppercase tracking-wider">
                 Live Document Preview
               </span>
               {resultSizeKb !== null && (
-                <span className="text-xs font-mono font-bold px-2 py-0.5 bg-blue-50 text-blue-700 rounded-md border border-blue-200">
+                <span className="text-xs font-mono font-bold px-2 py-0.5 bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300 rounded-md border border-blue-200 dark:border-blue-800">
                   Size: ~{resultSizeKb} KB
                 </span>
               )}
             </div>
 
             {/* Canvas / Preview Container */}
-            <div className="bg-gray-100 p-4 rounded-xl flex items-center justify-center min-h-[360px] border border-gray-200 overflow-hidden">
+            <div className="bg-gray-100 dark:bg-slate-800/70 p-4 rounded-xl flex items-center justify-center min-h-[360px] border border-gray-200 dark:border-slate-700 overflow-hidden">
               {previewDataUrl ? (
                 <img
                   src={previewDataUrl}
@@ -654,10 +650,10 @@ export default function SarkariPhotoSignature() {
                   className="max-h-[380px] max-w-full object-contain shadow-md rounded-sm"
                 />
               ) : (
-                <div className="text-center text-gray-400 p-6">
+                <div className="text-center text-gray-400 dark:text-slate-500 p-6">
                   <User className="w-12 h-12 mx-auto mb-2 opacity-50" />
-                  <p className="text-sm font-semibold text-gray-600">No Photo Selected</p>
-                  <p className="text-xs text-gray-400 mt-1">Upload candidate photo and signature to see live joined preview</p>
+                  <p className="text-sm font-semibold text-gray-600 dark:text-slate-300">No Photo Selected</p>
+                  <p className="text-xs text-gray-400 dark:text-slate-500 mt-1">Upload candidate photo and signature to see live joined preview</p>
                 </div>
               )}
             </div>
@@ -678,7 +674,7 @@ export default function SarkariPhotoSignature() {
                   type="button"
                   onClick={() => downloadResult('png')}
                   disabled={!previewDataUrl}
-                  className="py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-800 text-xs font-semibold rounded-xl border border-gray-200 transition-colors disabled:opacity-40"
+                  className="py-2.5 bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700 text-gray-800 dark:text-slate-200 text-xs font-semibold rounded-xl border border-gray-200 dark:border-slate-700 transition-colors disabled:opacity-40"
                 >
                   Download PNG
                 </button>
@@ -686,7 +682,7 @@ export default function SarkariPhotoSignature() {
                   type="button"
                   onClick={() => downloadResult('pdf')}
                   disabled={!previewDataUrl}
-                  className="py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-800 text-xs font-semibold rounded-xl border border-gray-200 transition-colors disabled:opacity-40"
+                  className="py-2.5 bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700 text-gray-800 dark:text-slate-200 text-xs font-semibold rounded-xl border border-gray-200 dark:border-slate-700 transition-colors disabled:opacity-40"
                 >
                   Download PDF
                 </button>
@@ -694,8 +690,8 @@ export default function SarkariPhotoSignature() {
             </div>
 
             {/* Trust badge */}
-            <div className="mt-4 pt-3 border-t border-gray-100 flex items-center justify-center gap-1.5 text-[11px] text-gray-500">
-              <Shield className="w-3.5 h-3.5 text-emerald-600" />
+            <div className="mt-4 pt-3 border-t border-gray-100 dark:border-slate-800 flex items-center justify-center gap-1.5 text-[11px] text-gray-500 dark:text-slate-400">
+              <Shield className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
               <span>100% Private: Processed entirely in browser</span>
             </div>
           </div>
@@ -703,32 +699,32 @@ export default function SarkariPhotoSignature() {
       </div>
 
       {/* Competitive Exam Guidelines Guide */}
-      <div className="mt-16 border-t border-gray-200 pt-10 text-gray-800">
-        <h2 className="text-2xl font-bold mb-6 text-center text-gray-900">
+      <div className="mt-16 border-t border-gray-200 dark:border-slate-800 pt-10 text-gray-800 dark:text-slate-200">
+        <h2 className="text-2xl font-bold mb-6 text-center text-gray-900 dark:text-slate-100">
           Official Photo & Signature Rules for Sarkari Exams (SSC, UPSC, Railway)
         </h2>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-sm">
-          <div className="p-5 bg-white border border-gray-200 rounded-xl shadow-xs">
-            <h3 className="font-bold text-gray-900 mb-2">SSC CGL / CHSL / MTS / GD</h3>
-            <ul className="text-gray-600 text-xs space-y-1.5 list-disc pl-4">
+          <div className="p-5 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-xl shadow-xs">
+            <h3 className="font-bold text-gray-900 dark:text-slate-100 mb-2">SSC CGL / CHSL / MTS / GD</h3>
+            <ul className="text-gray-600 dark:text-slate-400 text-xs space-y-1.5 list-disc pl-4">
               <li>Photo size must be between <strong>20 KB to 50 KB</strong>.</li>
               <li>Photograph must not be more than 3 months old from notice date.</li>
               <li>Candidate name and Date of Photograph (DOP) printed clearly at the bottom.</li>
               <li>Signature must be <strong>10 KB to 20 KB</strong> in clear black ink.</li>
             </ul>
           </div>
-          <div className="p-5 bg-white border border-gray-200 rounded-xl shadow-xs">
-            <h3 className="font-bold text-gray-900 mb-2">UPSC (Civil Services / NDA / CDS)</h3>
-            <ul className="text-gray-600 text-xs space-y-1.5 list-disc pl-4">
+          <div className="p-5 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-xl shadow-xs">
+            <h3 className="font-bold text-gray-900 dark:text-slate-100 mb-2">UPSC (Civil Services / NDA / CDS)</h3>
+            <ul className="text-gray-600 dark:text-slate-400 text-xs space-y-1.5 list-disc pl-4">
               <li>Photo file size between <strong>50 KB to 100 KB</strong>.</li>
               <li>Must clearly display Candidate Name and Date of Taking Photograph.</li>
               <li>Background must be plain white or light colored.</li>
               <li>Spectacles or cap are strictly not allowed.</li>
             </ul>
           </div>
-          <div className="p-5 bg-white border border-gray-200 rounded-xl shadow-xs">
-            <h3 className="font-bold text-gray-900 mb-2">Railway RRB & State PSCs</h3>
-            <ul className="text-gray-600 text-xs space-y-1.5 list-disc pl-4">
+          <div className="p-5 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-xl shadow-xs">
+            <h3 className="font-bold text-gray-900 dark:text-slate-100 mb-2">Railway RRB & State PSCs</h3>
+            <ul className="text-gray-600 dark:text-slate-400 text-xs space-y-1.5 list-disc pl-4">
               <li>Rajasthan RSSB/RPSC, UPSSSC, BSSC accept both single combo or separate photo + sign.</li>
               <li>Signature must be on unlined plain white paper with dark ink.</li>
               <li>Final merged file must not exceed specified portal size limit.</li>
@@ -784,6 +780,6 @@ export default function SarkariPhotoSignature() {
           { name: 'Exact Image Size (KB)', path: '/exact-image-size', desc: 'Strict KB sizing (20KB, 50KB, 100KB) for government portals' },
         ]}
       />
-    </div>
+    </ToolWorkspaceShell>
   );
 }

@@ -18,7 +18,7 @@ import '../lib/pdfWorker';
 import { useSEO } from '../hooks/useSEO';
 import { usePageSEO } from '../lib/usePageSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
-import { downloadBlob } from '../lib/utils';
+import { dataUrlToBytes, downloadBlob } from '../lib/utils';
 
 type DarkenPreset = 'map_lines' | 'jamabandi_text' | 'deep_xerox' | 'extreme';
 
@@ -234,7 +234,7 @@ export default function LandRecordDarkener() {
               lineThicknessBoost
             );
             const jpgDataUrl = darkened.toDataURL('image/jpeg', 0.92);
-            const jpgBytes = await fetch(jpgDataUrl).then((r) => r.arrayBuffer());
+            const jpgBytes = dataUrlToBytes(jpgDataUrl);
             const embeddedImg = await pdfDoc.embedJpg(jpgBytes);
 
             const docPage = pdfDoc.addPage([ptWidth, ptHeight]);
@@ -252,7 +252,9 @@ export default function LandRecordDarkener() {
         }
       } else {
         const page = pdfDoc.addPage([ptWidth, ptHeight]);
-        const imgBytes = await fetch(processedDataUrl).then((r) => r.arrayBuffer());
+        const imgBytes = processedDataUrl.startsWith('data:')
+          ? dataUrlToBytes(processedDataUrl)
+          : await fetch(processedDataUrl).then((r) => r.arrayBuffer());
         const embeddedImg = await pdfDoc.embedJpg(imgBytes);
 
         const scale = Math.min(maxWidth / sourceCanvas.width, maxHeight / sourceCanvas.height);

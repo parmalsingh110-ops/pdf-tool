@@ -11,6 +11,7 @@ import BackendLoader from '../components/BackendLoader';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { apiFetch } from '../lib/api';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 import {
   preprocessCanvasForOcr,
   extractTesseractWords,
@@ -301,20 +302,15 @@ export default function SearchablePdf() {
   };
 
   return (
-    <div className="flex-1 w-full bg-gradient-to-br from-slate-50 to-blue-50 dark:from-slate-950 dark:to-slate-900 min-h-screen">
-      <div className="max-w-3xl mx-auto px-4 py-10">
-        {/* Header */}
-        <div className="text-center mb-8">
-          <div className="w-14 h-14 bg-blue-600 rounded-2xl flex items-center justify-center shadow-lg shadow-blue-200 dark:shadow-blue-900 mx-auto mb-4">
-            <Search className="w-7 h-7 text-white" />
-          </div>
-          <h1 className="text-3xl md:text-5xl font-extrabold text-slate-900 dark:text-white tracking-tight mb-3">
-            Make PDF Searchable
-          </h1>
-          <p className="text-base md:text-lg text-slate-600 dark:text-slate-400 max-w-xl mx-auto">
-            Add a hidden text layer to your scanned PDFs so you can search, select, and copy text freely.
-          </p>
-        </div>
+    <ToolWorkspaceShell
+      title="Make PDF Searchable"
+      subtitle="Add a hidden text layer to your scanned PDFs so you can search, select, and copy text freely."
+      categoryLabel="OCR Engine · Dual Browser & Pro AI"
+      icon={Search}
+      microVariant="ocr"
+      tone="blue"
+    >
+      <div className="max-w-3xl mx-auto">
 
         {stage === 'idle' && (
           <div className="space-y-6">
@@ -329,11 +325,10 @@ export default function SearchablePdf() {
                   <button
                     type="button"
                     onClick={() => setEngine('browser')}
-                    className={`p-3.5 rounded-xl border-2 text-left transition-all ${
-                      engine === 'browser'
+                    className={`p-3.5 rounded-xl border-2 text-left transition-all ${engine === 'browser'
                         ? 'border-blue-600 bg-blue-50/60 dark:bg-blue-950/40 text-blue-950 dark:text-blue-100 shadow-xs'
                         : 'border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:border-slate-300'
-                    }`}
+                      }`}
                   >
                     <div className="flex items-center gap-2 font-bold text-sm mb-1 text-blue-600 dark:text-blue-400">
                       <Cpu className="w-4 h-4" /> ⚡ Instant Browser OCR (Pixel-Lock 3-Tr)
@@ -347,11 +342,10 @@ export default function SearchablePdf() {
                   <button
                     type="button"
                     onClick={() => setEngine('cloud')}
-                    className={`p-3.5 rounded-xl border-2 text-left transition-all ${
-                      engine === 'cloud'
+                    className={`p-3.5 rounded-xl border-2 text-left transition-all ${engine === 'cloud'
                         ? 'border-blue-600 bg-blue-50/60 dark:bg-blue-950/40 text-blue-950 dark:text-blue-100 shadow-xs'
                         : 'border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:border-slate-300'
-                    }`}
+                      }`}
                   >
                     <div className="flex items-center gap-2 font-bold text-sm mb-1 text-indigo-600 dark:text-indigo-400">
                       <Cloud className="w-4 h-4" /> 🚀 Server Pro AI (RapidOCR + Denoise)
@@ -374,11 +368,10 @@ export default function SearchablePdf() {
                       key={l}
                       type="button"
                       onClick={() => setLang(l)}
-                      className={`px-4 py-1.5 text-xs font-bold rounded-lg capitalize transition-colors ${
-                        lang === l
+                      className={`px-4 py-1.5 text-xs font-bold rounded-lg capitalize transition-colors ${lang === l
                           ? 'bg-blue-600 text-white shadow-xs'
                           : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200'
-                      }`}
+                        }`}
                     >
                       {l === 'eng' ? 'English' : l === 'hin' ? 'Hindi' : 'Hindi + English'}
                     </button>
@@ -598,6 +591,6 @@ export default function SearchablePdf() {
           </div>
         )}
       </div>
-    </div>
+    </ToolWorkspaceShell>
   );
 }

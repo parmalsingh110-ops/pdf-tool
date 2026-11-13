@@ -7,6 +7,7 @@ import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 
 interface PageItem {
   num: number;
@@ -262,20 +263,14 @@ export default function DeskewPDF() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 py-12 px-4 transition-colors">
-      <div className="max-w-5xl mx-auto">
-        {/* Header */}
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 text-sm font-semibold mb-3">
-            <Compass className="w-4 h-4" /> Scanned Document Straightener
-          </div>
-          <h1 className="text-3xl md:text-5xl font-extrabold text-slate-900 dark:text-white tracking-tight mb-3">
-            Deskew PDF Pages
-          </h1>
-          <p className="text-base md:text-lg text-slate-600 dark:text-slate-400 max-w-2xl mx-auto">
-            Automatically straighten crooked or tilted scanned PDF pages with live alignment grid and precise angle controls.
-          </p>
-        </div>
+    <ToolWorkspaceShell
+      title="Deskew PDF Pages"
+      subtitle="Automatically straighten crooked or tilted scanned PDF pages with live alignment grid and precise angle controls."
+      categoryLabel="Scanned Document Straightener"
+      icon={Compass}
+      microVariant="edit"
+      tone="amber"
+    >
 
         {!file ? (
           <div className="max-w-2xl mx-auto">
@@ -539,7 +534,6 @@ export default function DeskewPDF() {
             },
           ]}
         />
-      </div>
-    </div>
+    </ToolWorkspaceShell>
   );
 }

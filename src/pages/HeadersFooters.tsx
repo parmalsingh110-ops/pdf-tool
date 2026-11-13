@@ -7,6 +7,7 @@ import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { embedSmartFont } from '../lib/pdfFontHelper';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 
 // Initialize pdf.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
@@ -247,19 +248,15 @@ export default function HeadersFooters() {
   };
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center p-6 md:p-8 max-w-7xl mx-auto w-full">
-      {/* Header */}
-      <div className="text-center mb-8">
-        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-teal-50 dark:bg-teal-950/40 text-teal-600 dark:text-teal-400 text-xs font-bold tracking-widest uppercase mb-3 border border-teal-200 dark:border-teal-800">
-          <Sparkles className="w-3.5 h-3.5" /> Professional Running Headers & Footers
-        </div>
-        <h1 className="text-3xl md:text-5xl font-extrabold text-gray-900 dark:text-white tracking-tight mb-3">
-          Add Headers & Footers to PDF
-        </h1>
-        <p className="text-lg text-gray-600 dark:text-slate-400 max-w-2xl mx-auto">
-          Add custom running headers, page numbers, title metadata, and dates with live document preview and cover page skip.
-        </p>
-      </div>
+    <ToolWorkspaceShell
+      title="Add Headers & Footers to PDF"
+      subtitle="Add custom running headers, page numbers, title metadata, and dates with live document preview and cover page skip."
+      categoryLabel="Professional Running Headers & Footers"
+      icon={Layers}
+      microVariant="edit"
+      tone="emerald"
+    >
+      <div className="flex flex-col items-center justify-center max-w-7xl mx-auto w-full">
 
       {!file ? (
         <div className="w-full max-w-4xl">
@@ -528,6 +525,7 @@ export default function HeadersFooters() {
           </div>
         </div>
       )}
-    </div>
+      </div>
+    </ToolWorkspaceShell>
   );
 }

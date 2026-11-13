@@ -1356,9 +1356,10 @@ export default function ImageTextEditor() {
                 <a
                   href={exportUrl}
                   download={`edited_${file?.name?.replace(/\.[^.]+$/, '') || 'image'}.${exportExt}`}
-                  className="block text-center text-sm text-sky-400 hover:underline"
+                  className="w-full py-2.5 px-4 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-semibold text-xs inline-flex items-center justify-center gap-2 transition-colors shadow-sm"
                 >
-                  Download last export
+                  <Download className="w-3.5 h-3.5" />
+                  Download Last Export
                 </a>
               )}
             </div>

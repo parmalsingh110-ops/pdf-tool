@@ -6,6 +6,7 @@ import ToolSEOSection from '../components/ToolSEOSection';
 import { PDFDocument } from 'pdf-lib';
 import { dataUrlToBytes } from '../lib/utils';
 import { useToast } from '../components/Toast';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 
 import * as pdfjsLib from 'pdfjs-dist';
 import '../lib/pdfWorker';
@@ -315,19 +316,14 @@ export default function MaskedAadhaar() {
   const selectedMask = masks.find((m) => m.id === selectedMaskId);
 
   return (
-    <div className="flex-1 max-w-6xl mx-auto px-4 py-8 w-full">
-      {/* Title */}
-      <div className="text-center mb-8">
-        <div className="inline-flex items-center gap-2 px-3 py-1 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 rounded-full text-xs font-semibold mb-3 border border-emerald-200 dark:border-emerald-800">
-          <Shield className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" /> UIDAI & RBI Compliant Masking
-        </div>
-        <h1 className="text-3xl sm:text-4xl font-extrabold text-gray-900 dark:text-white mb-3 tracking-tight">
-          Masked Aadhaar Card Maker (Mask First 8 Digits)
-        </h1>
-        <p className="text-base sm:text-lg text-gray-600 dark:text-slate-300 max-w-2xl mx-auto">
-          Hide first 8 digits (XXXX-XXXX-1234) and QR code on Aadhaar image or PDF. Safe for hotels, SIM verification, and exam KYC without exposing full Aadhaar number.
-        </p>
-      </div>
+    <ToolWorkspaceShell
+      title="Masked Aadhaar Card Maker (Mask First 8 Digits)"
+      subtitle="Hide first 8 digits (XXXX-XXXX-1234) and QR code on Aadhaar image or PDF. Safe for hotels, SIM verification, and exam KYC without exposing full Aadhaar number."
+      categoryLabel="UIDAI & RBI Compliant Masking"
+      icon={Shield}
+      microVariant="security"
+      tone="emerald"
+    >
 
       {!renderedImageUrl ? (
         <div className="max-w-xl mx-auto p-8 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xs text-center">
@@ -347,11 +343,11 @@ export default function MaskedAadhaar() {
             />
           </label>
 
-          <div className="mt-6 p-4 bg-emerald-50/70 border border-emerald-200 rounded-xl text-left text-xs text-emerald-950 flex items-start gap-2.5">
-            <Shield className="w-5 h-5 shrink-0 text-emerald-600 mt-0.5" />
+          <div className="mt-6 p-4 bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 rounded-xl text-left text-xs text-emerald-950 dark:text-emerald-100 flex items-start gap-2.5">
+            <Shield className="w-5 h-5 shrink-0 text-emerald-600 dark:text-emerald-400 mt-0.5" />
             <div>
               <p className="font-bold mb-0.5">UIDAI & RBI Advisory:</p>
-              <p className="text-emerald-800 leading-relaxed">
+              <p className="text-emerald-800 dark:text-emerald-300 leading-relaxed">
                 As per UIDAI guidelines, organizations cannot demand unmasked Aadhaar. You have the legal right to submit Masked Aadhaar where only the last 4 digits are visible.
               </p>
             </div>
@@ -364,7 +360,7 @@ export default function MaskedAadhaar() {
             {/* Quick Layout Presets */}
             <div className="p-3.5 bg-gradient-to-r from-emerald-500/10 to-blue-500/10 border border-emerald-200 dark:border-emerald-800/60 rounded-xl space-y-2">
               <span className="text-[11px] font-bold text-emerald-800 dark:text-emerald-300 uppercase tracking-wider flex items-center gap-1.5">
-                <Sparkles className="w-3.5 h-3.5 text-emerald-600" /> 1-Click Document Presets
+                <Sparkles className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" /> 1-Click Document Presets
               </span>
               <div className="flex flex-wrap gap-1.5">
                 {[
@@ -401,7 +397,7 @@ export default function MaskedAadhaar() {
                       setMasks(preset.masks);
                       setSelectedMaskId(preset.masks[0].id);
                     }}
-                    className="py-1 px-2.5 bg-white dark:bg-slate-800 hover:bg-emerald-50 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 text-xs font-semibold rounded-lg shadow-2xs transition-colors"
+                    className="py-1 px-2.5 bg-white dark:bg-slate-800 hover:bg-emerald-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 text-xs font-semibold rounded-lg shadow-2xs transition-colors"
                   >
                     {preset.label}
                   </button>
@@ -409,11 +405,11 @@ export default function MaskedAadhaar() {
               </div>
             </div>
 
-            <div className="flex items-center justify-between text-xs text-gray-600">
+            <div className="flex items-center justify-between text-xs text-gray-600 dark:text-slate-300">
               <span className="font-semibold flex items-center gap-1.5">
-                <Move className="w-4 h-4 text-emerald-600" /> Drag mask box over the 8 digits
+                <Move className="w-4 h-4 text-emerald-600 dark:text-emerald-400" /> Drag mask box over the 8 digits
               </span>
-              <span className="text-[11px] text-gray-400">Click mask box to select & resize</span>
+              <span className="text-[11px] text-gray-400 dark:text-slate-500">Click mask box to select & resize</span>
             </div>
 
             {/* Document Workspace with Draggable Overlays */}
@@ -421,7 +417,7 @@ export default function MaskedAadhaar() {
               ref={imageContainerRef}
               onPointerMove={handlePointerMove}
               onPointerUp={handlePointerUp}
-              className="relative border-2 border-dashed border-gray-300 rounded-2xl overflow-hidden bg-gray-100 select-none shadow-inner touch-none"
+              className="relative border-2 border-dashed border-gray-300 dark:border-slate-700 rounded-2xl overflow-hidden bg-gray-100 dark:bg-slate-800 select-none shadow-inner touch-none"
             >
               <img
                 src={renderedImageUrl}
@@ -463,35 +459,35 @@ export default function MaskedAadhaar() {
               ))}
             </div>
 
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <button
                 type="button"
                 onClick={addExtraMask}
-                className="px-3 py-2 bg-white border border-gray-300 hover:bg-gray-50 rounded-xl text-xs font-semibold text-gray-700 flex items-center gap-1.5 shadow-xs"
+                className="px-3 py-2 bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-700 hover:bg-gray-50 dark:hover:bg-slate-700 rounded-xl text-xs font-semibold text-gray-700 dark:text-slate-200 flex items-center gap-1.5 shadow-xs transition-colors"
               >
                 <Plus className="w-3.5 h-3.5" /> Add Another Mask Box
               </button>
               <button
                 type="button"
                 onClick={addQrMask}
-                className="px-3 py-2 bg-white border border-gray-300 hover:bg-gray-50 rounded-xl text-xs font-semibold text-gray-700 flex items-center gap-1.5 shadow-xs"
+                className="px-3 py-2 bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-700 hover:bg-gray-50 dark:hover:bg-slate-700 rounded-xl text-xs font-semibold text-gray-700 dark:text-slate-200 flex items-center gap-1.5 shadow-xs transition-colors"
               >
-                <EyeOff className="w-3.5 h-3.5 text-red-500" /> Redact QR Code
+                <EyeOff className="w-3.5 h-3.5 text-red-500 dark:text-red-400" /> Redact QR Code
               </button>
             </div>
           </div>
 
           {/* Mask Controls & Download (5 cols) */}
           <div className="lg:col-span-5 space-y-6 lg:sticky lg:top-8">
-            <div className="p-5 bg-white border border-gray-200 rounded-2xl shadow-xs space-y-5">
-              <h2 className="text-sm font-bold text-gray-900 flex items-center gap-2">
-                <Shield className="w-4 h-4 text-emerald-600" /> Mask Box Customization
+            <div className="p-5 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xs space-y-5">
+              <h2 className="text-sm font-bold text-gray-900 dark:text-slate-100 flex items-center gap-2">
+                <Shield className="w-4 h-4 text-emerald-600 dark:text-emerald-400" /> Mask Box Customization
               </h2>
 
               {selectedMask ? (
-                <div className="space-y-4 p-4 bg-gray-50 rounded-xl border border-gray-200">
+                <div className="space-y-4 p-4 bg-gray-50 dark:bg-slate-800/60 rounded-xl border border-gray-200 dark:border-slate-700">
                   <div>
-                    <label className="block text-xs font-semibold text-gray-700 mb-1.5">
+                    <label className="block text-xs font-semibold text-gray-700 dark:text-slate-200 mb-1.5">
                       Mask Appearance Style:
                     </label>
                     <div className="grid grid-cols-2 gap-2">
@@ -511,10 +507,10 @@ export default function MaskedAadhaar() {
                               )
                             )
                           }
-                          className={`p-2 text-xs font-medium rounded-lg border text-left ${
+                          className={`p-2 text-xs font-medium rounded-lg border text-left transition-colors ${
                             selectedMask.style === st.id
                               ? 'bg-emerald-600 text-white border-emerald-600'
-                              : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-100'
+                              : 'bg-white dark:bg-slate-800 text-gray-700 dark:text-slate-200 border-gray-200 dark:border-slate-700 hover:bg-gray-100 dark:hover:bg-slate-700'
                           }`}
                         >
                           {st.label}
@@ -526,9 +522,9 @@ export default function MaskedAadhaar() {
                   {/* Width & Height Sliders */}
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <div className="flex justify-between text-xs font-semibold text-gray-700 mb-1">
+                      <div className="flex justify-between text-xs font-semibold text-gray-700 dark:text-slate-200 mb-1">
                         <span>Width</span>
-                        <span className="font-mono text-gray-500">{Math.round(selectedMask.wPercent)}%</span>
+                        <span className="font-mono text-gray-500 dark:text-slate-400">{Math.round(selectedMask.wPercent)}%</span>
                       </div>
                       <input
                         type="range"
@@ -546,9 +542,9 @@ export default function MaskedAadhaar() {
                       />
                     </div>
                     <div>
-                      <div className="flex justify-between text-xs font-semibold text-gray-700 mb-1">
+                      <div className="flex justify-between text-xs font-semibold text-gray-700 dark:text-slate-200 mb-1">
                         <span>Height</span>
-                        <span className="font-mono text-gray-500">{Math.round(selectedMask.hPercent)}%</span>
+                        <span className="font-mono text-gray-500 dark:text-slate-400">{Math.round(selectedMask.hPercent)}%</span>
                       </div>
                       <input
                         type="range"
@@ -570,20 +566,20 @@ export default function MaskedAadhaar() {
                   <button
                     type="button"
                     onClick={() => removeMask(selectedMask.id)}
-                    className="text-xs text-red-600 hover:text-red-700 font-semibold flex items-center gap-1"
+                    className="text-xs text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 font-semibold flex items-center gap-1"
                   >
                     <Trash2 className="w-3.5 h-3.5" /> Remove this mask
                   </button>
                 </div>
               ) : (
-                <p className="text-xs text-gray-500">Select a mask on the preview to adjust.</p>
+                <p className="text-xs text-gray-500 dark:text-slate-400">Select a mask on the preview to adjust.</p>
               )}
 
               {/* KYC Purpose Watermark */}
-              <div className="p-4 bg-gray-50 rounded-xl border border-gray-200 space-y-3">
+              <div className="p-4 bg-gray-50 dark:bg-slate-800/60 rounded-xl border border-gray-200 dark:border-slate-700 space-y-3">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-gray-800 flex items-center gap-1.5">
-                    <Lock className="w-3.5 h-3.5 text-amber-600" /> Anti-Fraud KYC Watermark
+                  <span className="text-xs font-bold text-gray-800 dark:text-slate-100 flex items-center gap-1.5">
+                    <Lock className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" /> Anti-Fraud KYC Watermark
                   </span>
                   <label className="relative inline-flex items-center cursor-pointer">
                     <input
@@ -592,13 +588,13 @@ export default function MaskedAadhaar() {
                       onChange={(e) => setIncludeKycWatermark(e.target.checked)}
                       className="sr-only peer"
                     />
-                    <div className="w-9 h-5 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600"></div>
+                    <div className="w-9 h-5 bg-gray-200 dark:bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600"></div>
                   </label>
                 </div>
 
                 {includeKycWatermark && (
                   <div>
-                    <label className="block text-[11px] font-medium text-gray-600 mb-1">
+                    <label className="block text-[11px] font-medium text-gray-600 dark:text-slate-300 mb-1">
                       Custom Purpose Text:
                     </label>
                     <input
@@ -606,7 +602,7 @@ export default function MaskedAadhaar() {
                       value={kycPurposeText}
                       onChange={(e) => setKycPurposeText(e.target.value)}
                       placeholder="e.g. FOR HOTEL CHECK-IN ONLY"
-                      className="w-full px-3 py-1.5 bg-white border border-gray-300 rounded-lg text-xs font-medium focus:ring-2 focus:ring-emerald-500 outline-none uppercase"
+                      className="w-full px-3 py-1.5 bg-white dark:bg-slate-900 text-gray-900 dark:text-slate-100 border border-gray-300 dark:border-slate-700 rounded-lg text-xs font-medium focus:ring-2 focus:ring-emerald-500 outline-none uppercase"
                     />
                     <div className="flex flex-wrap gap-1 pt-1.5">
                       {[
@@ -619,7 +615,7 @@ export default function MaskedAadhaar() {
                           key={chip}
                           type="button"
                           onClick={() => setKycPurposeText(chip)}
-                          className="text-[10px] py-0.5 px-2 bg-white border border-slate-200 hover:border-emerald-500 rounded text-slate-600 font-medium transition-colors"
+                          className="text-[10px] py-0.5 px-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:border-emerald-500 rounded text-slate-600 dark:text-slate-300 font-medium transition-colors"
                         >
                           {chip}
                         </button>
@@ -643,7 +639,7 @@ export default function MaskedAadhaar() {
                   type="button"
                   onClick={() => generateMaskedOutput('jpg')}
                   disabled={isProcessing}
-                  className="w-full py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-800 text-xs font-semibold rounded-xl border border-gray-200 transition-colors"
+                  className="w-full py-2.5 bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700 text-gray-800 dark:text-slate-200 text-xs font-semibold rounded-xl border border-gray-200 dark:border-slate-700 transition-colors"
                 >
                   Download as Masked JPG
                 </button>
@@ -656,7 +652,7 @@ export default function MaskedAadhaar() {
                     setFile(null);
                     setRenderedImageUrl(null);
                   }}
-                  className="text-xs text-gray-500 hover:text-red-600 font-medium"
+                  className="text-xs text-gray-500 dark:text-slate-400 hover:text-red-600 dark:hover:text-red-400 font-medium"
                 >
                   ← Upload another document
                 </button>
@@ -667,26 +663,26 @@ export default function MaskedAadhaar() {
       )}
 
       {/* Compliance Information */}
-      <div className="mt-16 border-t border-gray-200 pt-10 text-gray-800">
-        <h2 className="text-2xl font-bold mb-6 text-center text-gray-900">
+      <div className="mt-16 border-t border-gray-200 dark:border-slate-800 pt-10 text-gray-800 dark:text-slate-200">
+        <h2 className="text-2xl font-bold mb-6 text-center text-gray-900 dark:text-slate-100">
           Why Should You Always Use Masked Aadhaar?
         </h2>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-sm">
-          <div className="p-5 bg-white border border-gray-200 rounded-xl shadow-xs">
-            <h3 className="font-bold text-gray-900 mb-2">1. Prevents Identity Fraud</h3>
-            <p className="text-gray-600 text-xs leading-relaxed">
+          <div className="p-5 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-xl shadow-xs">
+            <h3 className="font-bold text-gray-900 dark:text-slate-100 mb-2">1. Prevents Identity Fraud</h3>
+            <p className="text-gray-600 dark:text-slate-400 text-xs leading-relaxed">
               Sharing your full 12-digit Aadhaar number with unknown vendors, hotels, or rental agencies increases identity theft risk. Masked Aadhaar conceals the first 8 digits.
             </p>
           </div>
-          <div className="p-5 bg-white border border-gray-200 rounded-xl shadow-xs">
-            <h3 className="font-bold text-gray-900 mb-2">2. Legally Valid Everywhere</h3>
-            <p className="text-gray-600 text-xs leading-relaxed">
+          <div className="p-5 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-xl shadow-xs">
+            <h3 className="font-bold text-gray-900 dark:text-slate-100 mb-2">2. Legally Valid Everywhere</h3>
+            <p className="text-gray-600 dark:text-slate-400 text-xs leading-relaxed">
               Under RBI and UIDAI directives, all non-banking entities are mandated to accept Masked Aadhaar with the last 4 digits visible as valid photo ID proof.
             </p>
           </div>
-          <div className="p-5 bg-white border border-gray-200 rounded-xl shadow-xs">
-            <h3 className="font-bold text-gray-900 mb-2">3. Zero Data Storage</h3>
-            <p className="text-gray-600 text-xs leading-relaxed">
+          <div className="p-5 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-xl shadow-xs">
+            <h3 className="font-bold text-gray-900 dark:text-slate-100 mb-2">3. Zero Data Storage</h3>
+            <p className="text-gray-600 dark:text-slate-400 text-xs leading-relaxed">
               Our masking engine runs 100% locally in your web browser. Neither your Aadhaar image nor your demographic details ever leave your device.
             </p>
           </div>
@@ -740,6 +736,6 @@ export default function MaskedAadhaar() {
           { name: 'PDF Redact', path: '/redact', desc: 'Permanently black out sensitive text, account numbers, and phone numbers' },
         ]}
       />
-    </div>
+    </ToolWorkspaceShell>
   );
 }

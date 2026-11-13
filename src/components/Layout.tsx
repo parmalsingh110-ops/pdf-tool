@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback, useRef, Suspense } from 'react';
-import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
+import { Outlet, Link, useLocation } from 'react-router-dom';
+import { AnimatePresence, motion, useReducedMotion, useScroll, useSpring } from 'motion/react';
 import {
   FileText,
   Search,
@@ -48,7 +49,7 @@ import { getFavorites, toggleFavorite, type FavoriteItem } from '../lib/favorite
 import { wipeAllBrowserTraces } from '../lib/privacy';
 import KeyboardShortcutsModal from './KeyboardShortcutsModal';
 import ErrorBoundary from './ErrorBoundary';
-import GlobalSearch from './GlobalSearch';
+import GlobalSearch, { VERIFIED_TOOL_COUNT } from './GlobalSearch';
 import ToolFeedback from './ToolFeedback';
 import BrandLogo from './BrandLogo';
 
@@ -191,44 +192,67 @@ function NavDropdown({
         type="button"
         className={`inline-flex items-center gap-1.5 py-1.5 px-3 rounded-lg font-semibold text-sm transition-all duration-150 select-none ${
           isOpen
-            ? 'text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/40'
-            : 'text-slate-700 dark:text-slate-200 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+            ? 'text-[var(--pms-rose)] bg-[var(--pms-soft-rose)]'
+            : 'text-[var(--pms-ink)] hover:text-[var(--pms-rose)] hover:bg-[var(--pms-lavender-surface)]'
         }`}
       >
         {group.label}
         <ChevronDown
-          className={`w-3.5 h-3.5 transition-transform duration-200 ${isOpen ? 'rotate-180 text-rose-500' : ''}`}
+          className={`w-3.5 h-3.5 transition-transform duration-200 ${isOpen ? 'rotate-180 text-[var(--pms-rose)]' : ''}`}
         />
       </button>
 
-      {isOpen && (
-        <div className="absolute left-0 top-full pt-1 z-[60]">
-          <div className="w-64 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-2xl overflow-hidden flex flex-col">
-            <div className="max-h-[62vh] overflow-y-auto py-2">
-              {group.items.map((item) => (
-                <Link
-                  key={item.to}
-                  to={item.to}
-                  onClick={() => { onClose(); onNavigate(); }}
-                  className="flex items-center gap-3 px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-rose-50 dark:hover:bg-slate-800 hover:text-rose-600 dark:hover:text-rose-400 transition-colors"
-                >
-                  <span className="flex items-center justify-center w-7 h-7 rounded-lg bg-slate-100 dark:bg-slate-800 shrink-0">
-                    <item.icon className="w-3.5 h-3.5 text-rose-500 dark:text-rose-400" />
-                  </span>
-                  {item.label}
-                </Link>
-              ))}
-            </div>
-            <Link
-              to="/all-tools"
-              onClick={() => { onClose(); onNavigate(); }}
-              className="block px-4 py-2.5 text-xs font-bold text-rose-600 dark:text-rose-400 bg-slate-50 dark:bg-slate-800/60 border-t border-slate-100 dark:border-slate-800 hover:bg-rose-50 dark:hover:bg-slate-800 transition-colors"
+      <AnimatePresence>
+        {isOpen && (
+          <motion.div
+            initial={{ opacity: 0, y: 6, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 4, scale: 0.98 }}
+            transition={{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }}
+            className="absolute left-0 top-full pt-1.5 z-[60]"
+          >
+            <div
+              className="w-64 rounded-2xl border overflow-hidden flex flex-col"
+              style={{
+                backgroundColor: 'var(--pms-white)',
+                borderColor: 'var(--pms-border-strong)',
+                boxShadow: 'var(--pms-shadow-float)',
+              }}
             >
-              View All 100+ Tools &rarr;
-            </Link>
-          </div>
-        </div>
-      )}
+              <div className="max-h-[62vh] overflow-y-auto py-2">
+                {group.items.map((item) => (
+                  <Link
+                    key={item.to}
+                    to={item.to}
+                    onClick={() => { onClose(); onNavigate(); }}
+                    className="flex items-center gap-3 px-4 py-2 text-sm font-medium text-[var(--pms-ink)] hover:bg-[var(--pms-lavender-surface)] hover:text-[var(--pms-rose)] transition-colors"
+                  >
+                    <span
+                      className="flex items-center justify-center w-7 h-7 rounded-lg shrink-0"
+                      style={{ backgroundColor: 'var(--pms-soft-rose)', color: 'var(--pms-rose)' }}
+                    >
+                      <item.icon className="w-3.5 h-3.5" />
+                    </span>
+                    {item.label}
+                  </Link>
+                ))}
+              </div>
+              <Link
+                to="/all-tools"
+                onClick={() => { onClose(); onNavigate(); }}
+                className="block px-4 py-2.5 text-xs font-bold border-t transition-colors hover:opacity-90"
+                style={{
+                  backgroundColor: 'var(--pms-lavender-surface)',
+                  borderColor: 'var(--pms-border)',
+                  color: 'var(--pms-rose)',
+                }}
+              >
+                View All {VERIFIED_TOOL_COUNT}+ Tools &rarr;
+              </Link>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -315,13 +339,13 @@ function FooterLinkColumn({
 
   return (
     <div>
-      <h4 className="font-bold mb-4 text-slate-900 dark:text-white text-sm">{title}</h4>
-      <ul className="space-y-2.5 text-sm text-slate-500 dark:text-slate-400">
+      <h4 className="font-bold mb-4 text-sm" style={{ color: 'var(--pms-ink)' }}>{title}</h4>
+      <ul className="space-y-2.5 text-sm" style={{ color: 'var(--pms-muted)' }}>
         {visibleItems.map((item) => (
           <li key={item.to}>
             <Link
               to={item.to}
-              className={`hover:text-rose-600 dark:hover:text-rose-400 transition-colors ${
+              className={`hover:text-[var(--pms-rose)] transition-colors ${
                 item.bold ? 'font-semibold' : ''
               }`}
             >
@@ -334,7 +358,8 @@ function FooterLinkColumn({
         <button
           type="button"
           onClick={() => setExpanded((prev) => !prev)}
-          className="mt-3 inline-flex items-center gap-1 text-xs font-bold text-rose-600 dark:text-rose-400 hover:text-rose-700 dark:hover:text-rose-300 transition-colors cursor-pointer"
+          className="mt-3 inline-flex items-center gap-1 text-xs font-bold hover:opacity-80 transition-opacity cursor-pointer"
+          style={{ color: 'var(--pms-rose)' }}
         >
           {expanded ? (
             <>
@@ -352,7 +377,6 @@ function FooterLinkColumn({
 }
 
 export default function Layout() {
-  const navigate = useNavigate();
   const location = useLocation();
   const { theme, toggleTheme } = useTheme();
   const [recentOpen, setRecentOpen] = useState(false);
@@ -364,8 +388,19 @@ export default function Layout() {
   const [favOpen, setFavOpen] = useState(false);
   const [favorites, setFavorites] = useState<FavoriteItem[]>([]);
   const [tracesWiped, setTracesWiped] = useState(false);
+  const [scrolled, setScrolled] = useState(false);
   const recentRef = useRef<HTMLDivElement>(null);
   const favRef = useRef<HTMLDivElement>(null);
+  const prefersReduced = useReducedMotion();
+  const { scrollYProgress } = useScroll();
+  const scaleX = useSpring(scrollYProgress, { stiffness: 180, damping: 28, restDelta: 0.001 });
+
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 12);
+    onScroll();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
 
   const handleWipeTraces = useCallback(async () => {
     await wipeAllBrowserTraces();
@@ -426,21 +461,38 @@ export default function Layout() {
     setOpenDropdown((prev) => (prev === label ? null : label));
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100 flex flex-col transition-colors">
+    <div
+      className="min-h-screen flex flex-col transition-colors"
+      style={{ backgroundColor: 'var(--pms-pearl)', color: 'var(--pms-ink)' }}
+    >
       <KeyboardShortcutsModal open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
       <GlobalSearch open={searchOpen} onClose={() => setSearchOpen(false)} />
 
       {/* ── HEADER ── */}
-      <header className="fixed top-0 w-full z-50 bg-white/90 dark:bg-slate-900/90 backdrop-blur-xl border-b border-slate-200/60 dark:border-slate-700/80 shadow-sm">
+      <header
+        className={`fixed top-0 w-full z-50 pms-glass-header transition-shadow duration-200 ${
+          scrolled ? 'shadow-md' : 'shadow-none'
+        }`}
+      >
+        {!prefersReduced && (
+          <motion.div
+            aria-hidden="true"
+            className="absolute bottom-0 left-0 right-0 h-[2px] origin-left pointer-events-none"
+            style={{
+              scaleX,
+              background: 'var(--pms-hero-gradient)',
+            }}
+          />
+        )}
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-3">
 
           {/* Logo */}
           <Link to="/" className="flex items-center gap-2.5 shrink-0 group">
             <BrandLogo className="w-8 h-8 rounded-xl shadow-sm" />
-            <span className="font-extrabold tracking-tight text-slate-900 dark:text-white text-[15px] hidden sm:block">
+            <span className="font-extrabold tracking-tight text-[15px] hidden sm:block" style={{ color: 'var(--pms-ink)' }}>
               PDF Media Suite
             </span>
-            <span className="font-extrabold tracking-tight text-slate-900 dark:text-white text-[15px] sm:hidden">
+            <span className="font-extrabold tracking-tight text-[15px] sm:hidden" style={{ color: 'var(--pms-ink)' }}>
               PMS
             </span>
           </Link>
@@ -457,24 +509,34 @@ export default function Layout() {
                 onNavigate={() => setOpenDropdown(null)}
               />
             ))}
-            <Link
-              to="/all-tools"
-              className="inline-flex items-center py-1.5 px-3 rounded-lg font-semibold text-sm text-slate-700 dark:text-slate-200 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-all"
-            >
-              All Tools
-            </Link>
-            <Link
-              to="/pricing"
-              className="inline-flex items-center py-1.5 px-3 rounded-lg font-semibold text-sm text-slate-700 dark:text-slate-200 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-all"
-            >
-              Pricing
-            </Link>
-            <Link
-              to="/about"
-              className="inline-flex items-center py-1.5 px-3 rounded-lg font-semibold text-sm text-slate-700 dark:text-slate-200 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-all"
-            >
-              About & Team
-            </Link>
+            {[
+              { to: '/all-tools', label: 'All Tools' },
+              { to: '/pricing', label: 'Pricing' },
+              { to: '/about', label: 'About & Team' },
+            ].map((navLink) => {
+              const isActive = location.pathname === navLink.to;
+              return (
+                <Link
+                  key={navLink.to}
+                  to={navLink.to}
+                  className={`relative inline-flex items-center py-1.5 px-3 rounded-lg font-semibold text-sm transition-all ${
+                    isActive
+                      ? 'text-[var(--pms-rose)]'
+                      : 'text-[var(--pms-ink)] hover:text-[var(--pms-rose)] hover:bg-[var(--pms-lavender-surface)]'
+                  }`}
+                >
+                  {navLink.label}
+                  {isActive && (
+                    <motion.span
+                      layoutId="pms-nav-active"
+                      className="absolute inset-0 rounded-lg -z-10"
+                      style={{ backgroundColor: 'var(--pms-soft-rose)' }}
+                      transition={{ type: 'spring', stiffness: 420, damping: 32 }}
+                    />
+                  )}
+                </Link>
+              );
+            })}
           </nav>
 
           {/* Right actions */}
@@ -488,21 +550,28 @@ export default function Layout() {
                   setRecentOpen((o) => !o);
                   setRecent(readRecentTools());
                 }}
-                className="px-2.5 py-1.5 rounded-lg text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                className="px-2.5 py-1.5 rounded-lg text-xs font-bold text-[var(--pms-muted)] hover:text-[var(--pms-ink)] hover:bg-[var(--pms-lavender-surface)] transition-colors"
               >
                 Recent
               </button>
               {recentOpen && (
-                <div className="absolute right-0 top-full mt-2 w-56 max-h-72 overflow-y-auto rounded-xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 shadow-xl py-2 z-[60]">
+                <div
+                  className="absolute right-0 top-full mt-2 w-56 max-h-72 overflow-y-auto rounded-xl border py-2 z-[60]"
+                  style={{
+                    backgroundColor: 'var(--pms-white)',
+                    borderColor: 'var(--pms-border-strong)',
+                    boxShadow: 'var(--pms-shadow-float)',
+                  }}
+                >
                   {recent.length === 0 ? (
-                    <p className="px-3 py-2 text-xs text-slate-500">No recent tools yet.</p>
+                    <p className="px-3 py-2 text-xs" style={{ color: 'var(--pms-muted)' }}>No recent tools yet.</p>
                   ) : (
                     recent.map((r) => (
                       <Link
                         key={`${r.path}-${r.at}`}
                         to={r.path}
                         onClick={() => setRecentOpen(false)}
-                        className="block px-3 py-2 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 truncate"
+                        className="block px-3 py-2 text-sm text-[var(--pms-ink)] hover:bg-[var(--pms-lavender-surface)] truncate"
                         title={r.title}
                       >
                         {r.title}
@@ -523,24 +592,33 @@ export default function Layout() {
                   setFavorites(getFavorites());
                   setFavOpen((o) => !o);
                 }}
-                className="p-2 rounded-full text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                className="p-2 rounded-full text-[var(--pms-muted)] hover:text-[var(--pms-ink)] hover:bg-[var(--pms-lavender-surface)] transition-colors"
               >
                 <Star className="w-4 h-4" />
               </button>
               {favOpen && (
-                <div className="absolute right-0 top-full mt-2 w-64 rounded-xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 shadow-xl py-2 z-[60]">
-                  <p className="px-3 pb-1 text-[10px] font-bold uppercase tracking-widest text-slate-400">Favorites</p>
+                <div
+                  className="absolute right-0 top-full mt-2 w-64 rounded-xl border py-2 z-[60]"
+                  style={{
+                    backgroundColor: 'var(--pms-white)',
+                    borderColor: 'var(--pms-border-strong)',
+                    boxShadow: 'var(--pms-shadow-float)',
+                  }}
+                >
+                  <p className="px-3 pb-1 text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--pms-subtle-text)' }}>
+                    Favorites
+                  </p>
                   {favorites.length === 0 ? (
-                    <p className="px-3 py-3 text-xs text-slate-400">
+                    <p className="px-3 py-3 text-xs" style={{ color: 'var(--pms-muted)' }}>
                       No favorites yet. Click ⭐ on any tool in All Tools.
                     </p>
                   ) : (
                     favorites.map((f) => (
-                      <div key={f.path} className="flex items-center gap-2 px-3 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 group">
+                      <div key={f.path} className="flex items-center gap-2 px-3 py-1.5 hover:bg-[var(--pms-lavender-surface)] group">
                         <Link
                           to={f.path}
                           onClick={() => setFavOpen(false)}
-                          className="flex-1 text-sm text-slate-700 dark:text-slate-200 truncate"
+                          className="flex-1 text-sm text-[var(--pms-ink)] truncate"
                         >
                           {f.title}
                         </Link>
@@ -549,10 +627,10 @@ export default function Layout() {
                             toggleFavorite(f);
                             setFavorites(getFavorites());
                           }}
-                          className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-all"
+                          className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-[var(--pms-soft-rose)] transition-all"
                           title="Remove from favorites"
                         >
-                          <Trash2 className="w-3 h-3 text-rose-500" />
+                          <Trash2 className="w-3 h-3 text-[var(--pms-rose)]" />
                         </button>
                       </div>
                     ))
@@ -565,7 +643,7 @@ export default function Layout() {
               type="button"
               onClick={() => setShortcutsOpen(true)}
               title="Keyboard shortcuts (?)"
-              className="p-2 rounded-full text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+              className="p-2 rounded-full text-[var(--pms-muted)] hover:text-[var(--pms-ink)] hover:bg-[var(--pms-lavender-surface)] transition-colors"
             >
               <Keyboard className="w-4 h-4" />
             </button>
@@ -573,7 +651,7 @@ export default function Layout() {
               type="button"
               onClick={toggleTheme}
               title={theme === 'dark' ? 'Light mode' : 'Dark mode'}
-              className="p-2 rounded-full text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+              className="p-2 rounded-full text-[var(--pms-muted)] hover:text-[var(--pms-ink)] hover:bg-[var(--pms-lavender-surface)] transition-colors"
             >
               {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
             </button>
@@ -582,7 +660,7 @@ export default function Layout() {
               type="button"
               onClick={() => setSearchOpen(true)}
               title="Search tools (⌘K)"
-              className="p-2 rounded-full text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+              className="p-2 rounded-full text-[var(--pms-muted)] hover:text-[var(--pms-ink)] hover:bg-[var(--pms-lavender-surface)] transition-colors"
             >
               <Search className="w-4 h-4" />
             </button>
@@ -592,7 +670,7 @@ export default function Layout() {
               type="button"
               onClick={() => setMobileOpen((o) => !o)}
               aria-label="Toggle menu"
-              className="md:hidden p-2 rounded-full text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+              className="md:hidden p-2 rounded-full text-[var(--pms-muted)] hover:text-[var(--pms-ink)] hover:bg-[var(--pms-lavender-surface)] transition-colors"
             >
               {mobileOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
             </button>
@@ -600,30 +678,40 @@ export default function Layout() {
         </div>
 
         {/* ── MOBILE MENU ── */}
-        {mobileOpen && (
-          <div className="md:hidden border-t border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 max-h-[80vh] overflow-y-auto shadow-xl">
+        <AnimatePresence>
+          {mobileOpen && (
+            <motion.div
+              initial={prefersReduced ? false : { opacity: 0, y: -8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={prefersReduced ? undefined : { opacity: 0, y: -8 }}
+              transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
+              className="md:hidden border-t max-h-[80vh] overflow-y-auto shadow-xl"
+              style={{ backgroundColor: 'var(--pms-white)', borderColor: 'var(--pms-border)' }}
+            >
             {NAV_GROUPS.map((group) => (
-              <div key={group.label} className="border-b border-slate-100 dark:border-slate-800">
+              <div key={group.label} className="border-b" style={{ borderColor: 'var(--pms-border)' }}>
                 <button
                   type="button"
                   onClick={() => toggleDropdown(group.label)}
-                  className="w-full flex items-center justify-between px-5 py-3.5 text-sm font-bold text-slate-800 dark:text-white hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+                  className="w-full flex items-center justify-between px-5 py-3.5 text-sm font-bold hover:bg-[var(--pms-lavender-surface)] transition-colors"
+                  style={{ color: 'var(--pms-ink)' }}
                 >
                   {group.label}
                   <ChevronDown
-                    className={`w-4 h-4 text-slate-400 transition-transform duration-200 ${openDropdown === group.label ? 'rotate-180' : ''}`}
+                    className={`w-4 h-4 transition-transform duration-200 ${openDropdown === group.label ? 'rotate-180' : ''}`}
+                    style={{ color: 'var(--pms-muted)' }}
                   />
                 </button>
                 {openDropdown === group.label && (
-                  <div className="bg-slate-50 dark:bg-slate-950/50 pb-2">
+                  <div className="pb-2" style={{ backgroundColor: 'var(--pms-pearl)' }}>
                     {group.items.map((item) => (
                       <Link
                         key={item.to}
                         to={item.to}
                         onClick={() => { setMobileOpen(false); setOpenDropdown(null); }}
-                        className="flex items-center gap-3 px-7 py-2.5 text-sm font-medium text-slate-600 dark:text-slate-300 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-slate-800 transition-colors"
+                        className="flex items-center gap-3 px-7 py-2.5 text-sm font-medium text-[var(--pms-muted)] hover:text-[var(--pms-rose)] hover:bg-[var(--pms-lavender-surface)] transition-colors"
                       >
-                        <item.icon className="w-4 h-4 text-rose-500 shrink-0" />
+                        <item.icon className="w-4 h-4 text-[var(--pms-rose)] shrink-0" />
                         {item.label}
                       </Link>
                     ))}
@@ -642,21 +730,27 @@ export default function Layout() {
                   key={link.to}
                   to={link.to}
                   onClick={() => setMobileOpen(false)}
-                  className="flex items-center justify-center py-2.5 px-3 rounded-xl bg-slate-100 dark:bg-slate-800 font-semibold text-sm text-slate-700 dark:text-slate-200 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-950/40 dark:hover:text-rose-400 transition-colors"
+                  className="flex items-center justify-center py-2.5 px-3 rounded-xl font-semibold text-sm border transition-colors hover:border-rose-300"
+                  style={{
+                    backgroundColor: 'var(--pms-lavender-surface)',
+                    borderColor: 'var(--pms-border)',
+                    color: 'var(--pms-ink)',
+                  }}
                 >
                   {link.label}
                 </Link>
               ))}
             </div>
-          </div>
-        )}
+            </motion.div>
+          )}
+        </AnimatePresence>
       </header>
 
       <main className="flex-1 flex flex-col pt-16">
         <ErrorBoundary locationKey={location.pathname}>
           <Suspense
             fallback={
-              <div className="flex-1 flex items-center justify-center min-h-[40vh] text-slate-500 dark:text-slate-400 text-sm font-medium">
+              <div className="flex-1 flex items-center justify-center min-h-[40vh] text-sm font-medium" style={{ color: 'var(--pms-muted)' }}>
                 Loading tool…
               </div>
             }
@@ -668,14 +762,20 @@ export default function Layout() {
       </main>
 
       {/* ── FOOTER ── */}
-      <footer className="bg-slate-50 dark:bg-slate-900 py-12 border-t border-slate-200/70 dark:border-slate-800">
+      <footer
+        className="relative z-10 py-14 border-t transition-colors"
+        style={{
+          background: 'linear-gradient(180deg, var(--pms-pearl) 0%, var(--pms-lavender-surface) 100%)',
+          borderColor: 'var(--pms-border)',
+        }}
+      >
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 grid grid-cols-2 md:grid-cols-5 gap-8 sm:gap-10">
           <div className="col-span-2 md:col-span-1">
             <div className="flex items-center gap-2.5 mb-3">
               <BrandLogo className="w-7 h-7 rounded-lg shadow-sm" />
-              <h3 className="text-base font-bold text-slate-900 dark:text-white">PDF Media Suite</h3>
+              <h3 className="text-base font-bold" style={{ color: 'var(--pms-ink)' }}>PDF Media Suite</h3>
             </div>
-            <p className="text-sm text-slate-500 dark:text-slate-400 leading-relaxed">
+            <p className="text-sm leading-relaxed" style={{ color: 'var(--pms-muted)' }}>
               Fast, private PDF, OCR &amp; image tools right in your browser.
             </p>
           </div>
@@ -686,21 +786,25 @@ export default function Layout() {
         </div>
 
         {/* Bottom bar */}
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-8 pt-6 border-t border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-400 dark:text-slate-500">
+        <div
+          className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-10 pt-6 border-t flex flex-col sm:flex-row items-center justify-between gap-3 text-xs"
+          style={{ borderColor: 'var(--pms-border)', color: 'var(--pms-subtle-text)' }}
+        >
           <span>&copy; {new Date().getFullYear()} PDF Media Suite. All rights reserved.</span>
           <div className="flex flex-wrap items-center gap-5">
             <button
               type="button"
               onClick={handleWipeTraces}
               title="Clear recent tools, favorites, local print queues & browser cache on shared/cyber-cafe PCs"
-              className="inline-flex items-center gap-1.5 text-slate-500 hover:text-rose-600 dark:text-slate-400 dark:hover:text-rose-400 font-medium transition-colors cursor-pointer"
+              className="inline-flex items-center gap-1.5 hover:text-[var(--pms-rose)] font-medium transition-colors cursor-pointer"
+              style={{ color: 'var(--pms-muted)' }}
             >
               <Trash2 className="w-3.5 h-3.5" />
               {tracesWiped ? 'Traces Cleared ✓' : 'Clear Traces (Shared PC)'}
             </button>
-            <Link to="/privacy" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Privacy Policy</Link>
-            <Link to="/terms" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Terms of Service</Link>
-            <Link to="/contact" className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors">Contact</Link>
+            <Link to="/privacy" className="hover:text-[var(--pms-rose)] transition-colors">Privacy Policy</Link>
+            <Link to="/terms" className="hover:text-[var(--pms-rose)] transition-colors">Terms of Service</Link>
+            <Link to="/contact" className="hover:text-[var(--pms-rose)] transition-colors">Contact</Link>
           </div>
         </div>
       </footer>

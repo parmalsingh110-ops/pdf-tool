@@ -6,6 +6,7 @@ import '../lib/pdfWorker';
 import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 
 interface PageInfo {
   index: number; // 1-based
@@ -159,19 +160,15 @@ export default function DuplicatePages() {
   const remainingCount = pages.length - markedCount;
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center p-6 md:p-8 max-w-6xl mx-auto w-full">
-      {/* Header */}
-      <div className="text-center mb-8">
-        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 text-xs font-bold tracking-widest uppercase mb-3 border border-rose-200 dark:border-rose-800">
-          <Copy className="w-3.5 h-3.5" /> Intelligent Page Deduplication
-        </div>
-        <h1 className="text-3xl md:text-5xl font-extrabold text-gray-900 dark:text-white tracking-tight mb-3">
-          Find & Remove Duplicate PDF Pages
-        </h1>
-        <p className="text-base md:text-lg text-gray-600 dark:text-slate-400 max-w-2xl mx-auto">
-          Scan every page for visual clones and repeated scans. Review duplicate pairs side-by-side and prune redundant pages with 1 click.
-        </p>
-      </div>
+    <ToolWorkspaceShell
+      title="Find & Remove Duplicate PDF Pages"
+      subtitle="Scan every page for visual clones and repeated scans. Review duplicate pairs side-by-side and prune redundant pages with 1 click."
+      categoryLabel="Intelligent Page Deduplication"
+      icon={Copy}
+      microVariant="split"
+      tone="rose"
+    >
+      <div className="flex flex-col items-center justify-center max-w-6xl mx-auto w-full">
 
       {!file ? (
         <div className="w-full max-w-2xl">
@@ -380,6 +377,7 @@ export default function DuplicatePages() {
           </button>
         </div>
       )}
-    </div>
+      </div>
+    </ToolWorkspaceShell>
   );
 }

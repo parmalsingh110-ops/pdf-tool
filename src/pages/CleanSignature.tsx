@@ -5,6 +5,7 @@ import { useSEO } from '../hooks/useSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
 import { PDFDocument } from 'pdf-lib';
 import { dataUrlToBytes } from '../lib/utils';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 
 type InkColorChoice = 'original' | 'black' | 'royal_blue' | 'navy_blue';
 
@@ -303,19 +304,14 @@ export default function CleanSignature() {
   };
 
   return (
-    <div className="flex-1 max-w-6xl mx-auto px-4 py-8 w-full">
-      {/* Title */}
-      <div className="text-center mb-8">
-        <div className="inline-flex items-center gap-2 px-3 py-1 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 rounded-full text-xs font-semibold mb-3 border border-indigo-200 dark:border-indigo-800">
-          <Sparkles className="w-3.5 h-3.5" /> Paper Photo to Clean Digital Signature
-        </div>
-        <h1 className="text-3xl sm:text-4xl font-extrabold text-gray-900 dark:text-white mb-3 tracking-tight">
-          Clean Paper Signature (White / Transparent Sign)
-        </h1>
-        <p className="text-base sm:text-lg text-gray-600 dark:text-slate-300 max-w-2xl mx-auto">
-          Apne phone se kagaz par ki gayi signature ki photo upload karein — shadows, wrinkles aur yellow background hatakar pure white ya transparent digital sign banayein.
-        </p>
-      </div>
+    <ToolWorkspaceShell
+      title="Clean Paper Signature (White / Transparent Sign)"
+      subtitle="Apne phone se kagaz par ki gayi signature ki photo upload karein — shadows, wrinkles aur yellow background hatakar pure white ya transparent digital sign banayein."
+      categoryLabel="Paper Photo to Clean Digital Signature"
+      icon={Contrast}
+      microVariant="sign"
+      tone="indigo"
+    >
 
       {!imageUrl ? (
         <div className="max-w-xl mx-auto p-8 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xs text-center">
@@ -361,7 +357,7 @@ export default function CleanSignature() {
 
               {/* Background Format Toggle */}
               <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-2">
+                <label className="block text-xs font-semibold text-gray-700 dark:text-slate-200 mb-2">
                   Output Background Mode:
                 </label>
                 <div className="grid grid-cols-2 gap-2">
@@ -371,7 +367,7 @@ export default function CleanSignature() {
                     className={`py-2.5 px-3 rounded-xl text-xs font-bold transition-all border ${
                       makeTransparent
                         ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
-                        : 'bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100'
+                        : 'bg-gray-50 dark:bg-slate-800 text-gray-700 dark:text-slate-200 border-gray-200 dark:border-slate-700 hover:bg-gray-100 dark:hover:bg-slate-700'
                     }`}
                   >
                     Transparent PNG (No Background)
@@ -382,7 +378,7 @@ export default function CleanSignature() {
                     className={`py-2.5 px-3 rounded-xl text-xs font-bold transition-all border ${
                       !makeTransparent
                         ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
-                        : 'bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100'
+                        : 'bg-gray-50 dark:bg-slate-800 text-gray-700 dark:text-slate-200 border-gray-200 dark:border-slate-700 hover:bg-gray-100 dark:hover:bg-slate-700'
                     }`}
                   >
                     Pure White Background (#FFFFFF)
@@ -392,7 +388,7 @@ export default function CleanSignature() {
 
               {/* Ink Color Selector */}
               <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-2">
+                <label className="block text-xs font-semibold text-gray-700 dark:text-slate-200 mb-2">
                   Signature Ink Color:
                 </label>
                 <div className="grid grid-cols-4 gap-2">
@@ -408,8 +404,8 @@ export default function CleanSignature() {
                       onClick={() => setInkColor(c.id as InkColorChoice)}
                       className={`p-2 rounded-xl text-xs font-semibold border flex flex-col items-center gap-1.5 transition-all ${
                         inkColor === c.id
-                          ? 'border-indigo-600 bg-indigo-50/50 text-indigo-900'
-                          : 'border-gray-200 bg-gray-50 text-gray-700 hover:bg-gray-100'
+                          ? 'border-indigo-600 bg-indigo-50/50 dark:bg-indigo-950/50 text-indigo-900 dark:text-indigo-200'
+                          : 'border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-800 text-gray-700 dark:text-slate-200 hover:bg-gray-100 dark:hover:bg-slate-700'
                       }`}
                     >
                       <span className={`w-4 h-4 rounded-full ${c.color} shadow-xs`}></span>
@@ -422,10 +418,10 @@ export default function CleanSignature() {
               {/* Clean Paper Threshold Slider */}
               <div>
                 <div className="flex justify-between items-center mb-1">
-                  <label className="text-xs font-semibold text-gray-700 flex items-center gap-1">
-                    <Contrast className="w-3.5 h-3.5 text-indigo-600" /> Shadow & Background Eraser
+                  <label className="text-xs font-semibold text-gray-700 dark:text-slate-200 flex items-center gap-1">
+                    <Contrast className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" /> Shadow & Background Eraser
                   </label>
-                  <span className="text-xs font-mono text-gray-500">{threshold}</span>
+                  <span className="text-xs font-mono text-gray-500 dark:text-slate-400">{threshold}</span>
                 </div>
                 <input
                   type="range"
@@ -435,7 +431,7 @@ export default function CleanSignature() {
                   onChange={(e) => setThreshold(Number(e.target.value))}
                   className="w-full accent-indigo-600 cursor-pointer"
                 />
-                <div className="flex justify-between text-[10px] text-gray-400 mt-0.5">
+                <div className="flex justify-between text-[10px] text-gray-400 dark:text-slate-500 mt-0.5">
                   <span>Keep more ink strokes</span>
                   <span>Erase heavy paper shadows</span>
                 </div>
@@ -444,10 +440,10 @@ export default function CleanSignature() {
               {/* Ink Darkening / Sharpness */}
               <div>
                 <div className="flex justify-between items-center mb-1">
-                  <label className="text-xs font-semibold text-gray-700">
+                  <label className="text-xs font-semibold text-gray-700 dark:text-slate-200">
                     Ink Sharpness & Darkness
                   </label>
-                  <span className="text-xs font-mono text-gray-500">+{contrastBoost}%</span>
+                  <span className="text-xs font-mono text-gray-500 dark:text-slate-400">+{contrastBoost}%</span>
                 </div>
                 <input
                   type="range"
@@ -460,9 +456,9 @@ export default function CleanSignature() {
               </div>
 
               {/* Auto Crop Whitespace */}
-              <div className="flex items-center justify-between pt-2 border-t border-gray-100">
-                <span className="text-xs font-medium text-gray-700 flex items-center gap-1.5">
-                  <Crop className="w-4 h-4 text-gray-500" /> Auto-Crop Margins (Focus on Signature)
+              <div className="flex items-center justify-between pt-2 border-t border-gray-100 dark:border-slate-800">
+                <span className="text-xs font-medium text-gray-700 dark:text-slate-200 flex items-center gap-1.5">
+                  <Crop className="w-4 h-4 text-gray-500 dark:text-slate-400" /> Auto-Crop Margins (Focus on Signature)
                 </span>
                 <label className="relative inline-flex items-center cursor-pointer">
                   <input
@@ -471,14 +467,14 @@ export default function CleanSignature() {
                     onChange={(e) => setAutoCrop(e.target.checked)}
                     className="sr-only peer"
                   />
-                  <div className="w-10 h-5 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600"></div>
+                  <div className="w-10 h-5 bg-gray-200 dark:bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600"></div>
                 </label>
               </div>
 
               {/* Strip Notebook Ruled Lines */}
-              <div className="flex items-center justify-between pt-2 border-t border-gray-100">
-                <span className="text-xs font-medium text-gray-700 flex items-center gap-1.5">
-                  <Sparkles className="w-4 h-4 text-indigo-500" /> Strip Notebook Lines (Copy Ruled Paper)
+              <div className="flex items-center justify-between pt-2 border-t border-gray-100 dark:border-slate-800">
+                <span className="text-xs font-medium text-gray-700 dark:text-slate-200 flex items-center gap-1.5">
+                  <Sparkles className="w-4 h-4 text-indigo-500 dark:text-indigo-400" /> Strip Notebook Lines (Copy Ruled Paper)
                 </span>
                 <label className="relative inline-flex items-center cursor-pointer">
                   <input
@@ -487,17 +483,17 @@ export default function CleanSignature() {
                     onChange={(e) => setRemoveRuledLines(e.target.checked)}
                     className="sr-only peer"
                   />
-                  <div className="w-10 h-5 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600"></div>
+                  <div className="w-10 h-5 bg-gray-200 dark:bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600"></div>
                 </label>
               </div>
 
               {/* Target File Size Controls (Universal for Transparent PNG & White BG JPG) */}
-              <div className="pt-3 border-t border-gray-100 space-y-3">
+              <div className="pt-3 border-t border-gray-100 dark:border-slate-800 space-y-3">
                 <div className="flex items-center justify-between">
-                  <label className="text-xs font-bold text-gray-800 flex items-center gap-1.5">
-                    <Target className="w-3.5 h-3.5 text-indigo-600" /> Target File Size Limit:
+                  <label className="text-xs font-bold text-gray-800 dark:text-slate-100 flex items-center gap-1.5">
+                    <Target className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" /> Target File Size Limit:
                   </label>
-                  <span className="text-xs font-mono font-bold text-indigo-600">
+                  <span className="text-xs font-mono font-bold text-indigo-600 dark:text-indigo-400">
                     {targetKb === 0 ? 'Max Quality (No Limit)' : `≤ ${targetKb} KB`}
                   </span>
                 </div>
@@ -513,7 +509,7 @@ export default function CleanSignature() {
                     className={`text-xs px-2.5 py-1.5 rounded-lg border font-bold transition-all ${
                       targetKb === 0
                         ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
-                        : 'bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100'
+                        : 'bg-gray-50 dark:bg-slate-800 text-gray-700 dark:text-slate-200 border-gray-200 dark:border-slate-700 hover:bg-gray-100 dark:hover:bg-slate-700'
                     }`}
                   >
                     Original (No Limit)
@@ -531,7 +527,7 @@ export default function CleanSignature() {
                       className={`text-xs px-2.5 py-1.5 rounded-lg border font-bold transition-all ${
                         targetKb === kb && !isCustomKb
                           ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
-                          : 'bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100'
+                          : 'bg-gray-50 dark:bg-slate-800 text-gray-700 dark:text-slate-200 border-gray-200 dark:border-slate-700 hover:bg-gray-100 dark:hover:bg-slate-700'
                       }`}
                     >
                       {kb} KB
@@ -547,7 +543,7 @@ export default function CleanSignature() {
                     className={`text-xs px-2.5 py-1.5 rounded-lg border font-bold transition-all ${
                       isCustomKb
                         ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
-                        : 'bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100'
+                        : 'bg-gray-50 dark:bg-slate-800 text-gray-700 dark:text-slate-200 border-gray-200 dark:border-slate-700 hover:bg-gray-100 dark:hover:bg-slate-700'
                     }`}
                   >
                     Custom KB ✏️
@@ -556,9 +552,9 @@ export default function CleanSignature() {
 
                 {/* Custom Input & Slider when Custom KB is active */}
                 {isCustomKb && (
-                  <div className="p-3 bg-indigo-50/60 rounded-xl border border-indigo-100 space-y-2">
+                  <div className="p-3 bg-indigo-50/60 dark:bg-indigo-950/30 rounded-xl border border-indigo-100 dark:border-indigo-800/60 space-y-2">
                     <div className="flex items-center justify-between gap-3">
-                      <span className="text-xs font-semibold text-gray-700">Set Exact Size (KB):</span>
+                      <span className="text-xs font-semibold text-gray-700 dark:text-slate-200">Set Exact Size (KB):</span>
                       <div className="flex items-center gap-1.5">
                         <input
                           type="number"
@@ -570,9 +566,9 @@ export default function CleanSignature() {
                             const n = Number(e.target.value);
                             if (n > 0) setTargetKb(n);
                           }}
-                          className="w-20 px-2 py-1 text-xs font-black text-center bg-white border border-gray-300 rounded-lg focus:border-indigo-500 outline-none"
+                          className="w-20 px-2 py-1 text-xs font-black text-center bg-white dark:bg-slate-900 text-gray-900 dark:text-slate-100 border border-gray-300 dark:border-slate-700 rounded-lg focus:border-indigo-500 outline-none"
                         />
-                        <span className="text-xs font-bold text-gray-500">KB</span>
+                        <span className="text-xs font-bold text-gray-500 dark:text-slate-400">KB</span>
                       </div>
                     </div>
                     <input
@@ -587,7 +583,7 @@ export default function CleanSignature() {
                       }}
                       className="w-full accent-indigo-600 cursor-pointer"
                     />
-                    <div className="flex justify-between text-[10px] text-gray-400">
+                    <div className="flex justify-between text-[10px] text-gray-400 dark:text-slate-500">
                       <span>5 KB (Tiny)</span>
                       <span>50 KB</span>
                       <span>150 KB (High Res)</span>
@@ -597,7 +593,7 @@ export default function CleanSignature() {
 
                 {/* Official Exam Portals Shortcuts */}
                 <div className="pt-1">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block mb-1.5">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 dark:text-slate-500 block mb-1.5">
                     Official Exam Portal Shortcuts:
                   </span>
                   <div className="flex flex-wrap gap-1.5">
@@ -617,8 +613,8 @@ export default function CleanSignature() {
                         }}
                         className={`text-[11px] px-2 py-1 rounded-md border transition-all ${
                           targetKb === exam.kb && !isCustomKb
-                            ? 'bg-indigo-100 text-indigo-900 border-indigo-400 font-bold'
-                            : 'bg-white text-gray-600 border-gray-200 hover:border-indigo-300'
+                            ? 'bg-indigo-100 dark:bg-indigo-950/60 text-indigo-900 dark:text-indigo-200 border-indigo-400 dark:border-indigo-600 font-bold'
+                            : 'bg-white dark:bg-slate-800 text-gray-600 dark:text-slate-300 border-gray-200 dark:border-slate-700 hover:border-indigo-300 dark:hover:border-indigo-600'
                         }`}
                       >
                         {exam.name}
@@ -627,7 +623,7 @@ export default function CleanSignature() {
                   </div>
                 </div>
 
-                <p className="text-[11px] text-gray-500">
+                <p className="text-[11px] text-gray-500 dark:text-slate-400">
                   {makeTransparent
                     ? 'Transparent PNG dimensions will adapt smoothly to meet portal size limits.'
                     : 'White background JPG will dial in exact compression to fit portal guidelines.'}
@@ -642,7 +638,7 @@ export default function CleanSignature() {
                 setImageUrl(null);
                 setPreviewUrl(null);
               }}
-              className="text-xs text-gray-500 hover:text-red-600 font-semibold px-2"
+              className="text-xs text-gray-500 dark:text-slate-400 hover:text-red-600 dark:hover:text-red-400 font-semibold px-2"
             >
               ← Upload a different signature photo
             </button>
@@ -650,22 +646,22 @@ export default function CleanSignature() {
 
           {/* Preview & Download Column (6 cols) */}
           <div className="lg:col-span-6 space-y-5 lg:sticky lg:top-8">
-            <div className="p-5 bg-white border border-gray-200 rounded-2xl shadow-xs">
+            <div className="p-5 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xs">
               <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
-                <span className="text-xs font-bold text-gray-700 uppercase tracking-wider">
+                <span className="text-xs font-bold text-gray-700 dark:text-slate-200 uppercase tracking-wider">
                   Live Clean Signature Preview
                 </span>
                 <div className="flex items-center gap-2">
                   {fileSizeKb !== null && (
-                    <span className="text-xs font-mono font-bold px-2 py-0.5 bg-emerald-50 text-emerald-700 rounded-md border border-emerald-200">
+                    <span className="text-xs font-mono font-bold px-2 py-0.5 bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 rounded-md border border-emerald-200 dark:border-emerald-800">
                       ~{fileSizeKb} KB
                     </span>
                   )}
                   {targetKb > 0 && fileSizeKb !== null && (
                     <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md border flex items-center gap-1 ${
                       fileSizeKb <= targetKb + 3
-                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                        : 'bg-amber-50 text-amber-700 border-amber-200'
+                        ? 'bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800'
+                        : 'bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800'
                     }`}>
                       {fileSizeKb <= targetKb + 3 ? '✅ Within' : '⚠️ Target'} ≤ {targetKb} KB
                     </span>
@@ -673,9 +669,9 @@ export default function CleanSignature() {
                 </div>
               </div>
 
-              {/* Preview Container */}
+              {/* Preview Container (kept light so ink/paper preview remains true) */}
               <div
-                className={`p-6 rounded-xl flex items-center justify-center min-h-[260px] border border-gray-200 overflow-hidden ${
+                className={`p-6 rounded-xl flex items-center justify-center min-h-[260px] border border-gray-200 dark:border-slate-700 overflow-hidden ${
                   makeTransparent
                     ? 'bg-[radial-gradient(#cbd5e1_1px,transparent_1px)] [background-size:12px_12px] bg-slate-50'
                     : 'bg-white'
@@ -707,7 +703,7 @@ export default function CleanSignature() {
                     type="button"
                     onClick={() => downloadSignature('jpg')}
                     disabled={!previewUrl}
-                    className="py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-800 text-xs font-semibold rounded-xl border border-gray-200 transition-colors"
+                    className="py-2.5 bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700 text-gray-800 dark:text-slate-200 text-xs font-semibold rounded-xl border border-gray-200 dark:border-slate-700 transition-colors"
                   >
                     Download JPG
                   </button>
@@ -715,7 +711,7 @@ export default function CleanSignature() {
                     type="button"
                     onClick={() => downloadSignature('svg')}
                     disabled={!previewUrl}
-                    className="py-2.5 bg-gray-100 hover:bg-gray-200 text-indigo-700 text-xs font-semibold rounded-xl border border-indigo-200 transition-colors"
+                    className="py-2.5 bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700 text-indigo-700 dark:text-indigo-300 text-xs font-semibold rounded-xl border border-indigo-200 dark:border-indigo-800 transition-colors"
                   >
                     Vector SVG
                   </button>
@@ -723,7 +719,7 @@ export default function CleanSignature() {
                     type="button"
                     onClick={() => downloadSignature('pdf')}
                     disabled={!previewUrl}
-                    className="py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-800 text-xs font-semibold rounded-xl border border-gray-200 transition-colors"
+                    className="py-2.5 bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700 text-gray-800 dark:text-slate-200 text-xs font-semibold rounded-xl border border-gray-200 dark:border-slate-700 transition-colors"
                   >
                     Download PDF
                   </button>
@@ -731,8 +727,8 @@ export default function CleanSignature() {
               </div>
 
               {/* Trust badge */}
-              <div className="mt-4 pt-3 border-t border-gray-100 flex items-center justify-center gap-1.5 text-[11px] text-gray-500">
-                <Shield className="w-3.5 h-3.5 text-emerald-600" />
+              <div className="mt-4 pt-3 border-t border-gray-100 dark:border-slate-800 flex items-center justify-center gap-1.5 text-[11px] text-gray-500 dark:text-slate-400">
+                <Shield className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
                 <span>100% Private: Processed entirely on your phone/computer</span>
               </div>
             </div>
@@ -741,26 +737,26 @@ export default function CleanSignature() {
       )}
 
       {/* Guide Section */}
-      <div className="mt-16 border-t border-gray-200 pt-10 text-gray-800">
-        <h2 className="text-2xl font-bold mb-6 text-center text-gray-900">
+      <div className="mt-16 border-t border-gray-200 dark:border-slate-800 pt-10 text-gray-800 dark:text-slate-200">
+        <h2 className="text-2xl font-bold mb-6 text-center text-gray-900 dark:text-slate-100">
           How to Get the Best Clean Signature from Your Phone
         </h2>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-sm">
-          <div className="p-5 bg-white border border-gray-200 rounded-xl shadow-xs">
-            <h3 className="font-bold text-gray-900 mb-2">1. Use Plain White Paper</h3>
-            <p className="text-gray-600 text-xs leading-relaxed">
+          <div className="p-5 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-xl shadow-xs">
+            <h3 className="font-bold text-gray-900 dark:text-slate-100 mb-2">1. Use Plain White Paper</h3>
+            <p className="text-gray-600 dark:text-slate-400 text-xs leading-relaxed">
               Sign on unlined blank white paper using dark black or blue ballpoint/gel pen. Avoid ruled notebook lines for the sharpest scan.
             </p>
           </div>
-          <div className="p-5 bg-white border border-gray-200 rounded-xl shadow-xs">
-            <h3 className="font-bold text-gray-900 mb-2">2. Avoid Hand Shadows</h3>
-            <p className="text-gray-600 text-xs leading-relaxed">
+          <div className="p-5 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-xl shadow-xs">
+            <h3 className="font-bold text-gray-900 dark:text-slate-100 mb-2">2. Avoid Hand Shadows</h3>
+            <p className="text-gray-600 dark:text-slate-400 text-xs leading-relaxed">
               Keep the paper near a window or well-lit desk. Hold phone directly parallel over the signature without casting your body’s shadow.
             </p>
           </div>
-          <div className="p-5 bg-white border border-gray-200 rounded-xl shadow-xs">
-            <h3 className="font-bold text-gray-900 mb-2">3. Auto Background Removal</h3>
-            <p className="text-gray-600 text-xs leading-relaxed">
+          <div className="p-5 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-xl shadow-xs">
+            <h3 className="font-bold text-gray-900 dark:text-slate-100 mb-2">3. Auto Background Removal</h3>
+            <p className="text-gray-600 dark:text-slate-400 text-xs leading-relaxed">
               Our intelligent canvas engine automatically detects background pixels, erases shadows, and crops exactly around your ink strokes.
             </p>
           </div>
@@ -814,6 +810,6 @@ export default function CleanSignature() {
           { name: 'Exact Image Size (KB)', path: '/exact-image-size', desc: 'Compress signature to strict 10KB - 20KB portal limits' },
         ]}
       />
-    </div>
+    </ToolWorkspaceShell>
   );
 }

@@ -1,16 +1,27 @@
 import { Link } from 'react-router-dom';
 import { ArrowLeft, Mail, MessageSquare, MapPin, Linkedin, Clock, ShieldCheck, Building2, ExternalLink, Github } from 'lucide-react';
+import { motion, useReducedMotion } from 'motion/react';
 import { useSEO } from '../hooks/useSEO';
 import { FOUNDER_INFO, TEAM_MEMBERS } from '../config/founderInfo';
+import PearlAuroraBackground from '../components/pearl/PearlAuroraBackground';
 
 export default function Contact() {
+  const prefersReduced = useReducedMotion();
   useSEO(
     'Contact & Support | PDF Media Suite',
     'Get in touch with PDF Media Suite and founding leadership team: Parmal Singh Gurjar (Founder), Pankaj Meena (Co-founder), and Sachin Kumar Sain (Co-founder) for product support, bug reports, or business inquiries.'
   );
 
   return (
-    <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12 text-slate-700 dark:text-slate-300">
+    <div className="relative flex-1 transition-colors" style={{ backgroundColor: 'var(--pms-pearl)', color: 'var(--pms-ink)' }}>
+      <PearlAuroraBackground mode="workspace" />
+      <motion.div
+        initial={prefersReduced ? false : { opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.34, ease: [0.22, 1, 0.36, 1] }}
+        className="relative z-10 max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12"
+        style={{ color: 'var(--pms-muted)' }}
+      >
       <Link
         to="/"
         className="inline-flex items-center gap-2 text-sm font-semibold text-rose-600 dark:text-rose-400 hover:gap-3 transition-all mb-8 group"
@@ -165,13 +176,14 @@ export default function Contact() {
 
             <Link
               to="/all-tools"
-              className="inline-flex items-center justify-center px-5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900 font-bold text-xs shrink-0 transition-colors"
+              className="inline-flex items-center justify-center px-5 py-2.5 rounded-full pms-btn-primary font-bold text-xs shrink-0"
             >
               Browse All Tools
             </Link>
           </div>
         </section>
       </div>
+      </motion.div>
     </div>
   );
 }

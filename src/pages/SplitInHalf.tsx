@@ -7,6 +7,7 @@ import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 
 interface PreviewThumb {
   pageNum: number;
@@ -214,20 +215,14 @@ export default function SplitInHalf() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 py-12 px-4 transition-colors">
-      <div className="max-w-5xl mx-auto">
-        {/* Header */}
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 text-sm font-semibold mb-3">
-            <Scissors className="w-4 h-4" /> 2-Page Layout & Book Scan Splitter
-          </div>
-          <h1 className="text-3xl md:text-5xl font-extrabold text-slate-900 dark:text-white tracking-tight mb-3">
-            Split PDF in Half
-          </h1>
-          <p className="text-base md:text-lg text-slate-600 dark:text-slate-400 max-w-2xl mx-auto">
-            Split two-page layout scans, A3 to double A4, or A4 to double A5. Divide book spreads down the center into separate individual pages.
-          </p>
-        </div>
+    <ToolWorkspaceShell
+      title="Split PDF in Half"
+      subtitle="Split two-page layout scans, A3 to double A4, or A4 to double A5. Divide book spreads down the center into separate individual pages."
+      categoryLabel="2-Page Layout & Book Scan Splitter"
+      icon={Scissors}
+      microVariant="split"
+      tone="amber"
+    >
 
         {!file ? (
           <div className="max-w-2xl mx-auto">
@@ -511,7 +506,7 @@ export default function SplitInHalf() {
                 <p className="text-sm text-emerald-700 dark:text-emerald-300 mb-4">
                   Your two-page layout document has been split down the center into individual, correctly ordered pages.
                 </p>
-                <div className="flex items-center justify-center gap-3">
+                <div className="flex flex-wrap items-center justify-center gap-3">
                   <a
                     href={resultUrl}
                     download={resultName}
@@ -523,7 +518,7 @@ export default function SplitInHalf() {
                     href={resultUrl}
                     target="_blank"
                     rel="noreferrer"
-                    className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-emerald-800 dark:text-emerald-200 bg-white dark:bg-slate-800 border border-emerald-300 dark:border-emerald-700 hover:bg-emerald-100/50 transition-colors"
+                    className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-emerald-800 dark:text-emerald-200 bg-white dark:bg-slate-800 border border-emerald-300 dark:border-emerald-700 hover:bg-emerald-100/50 dark:hover:bg-slate-700 transition-colors"
                   >
                     <Eye className="w-4 h-4" /> Preview in Browser
                   </a>
@@ -552,7 +547,6 @@ export default function SplitInHalf() {
             },
           ]}
         />
-      </div>
-    </div>
+    </ToolWorkspaceShell>
   );
 }

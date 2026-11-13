@@ -1,7 +1,8 @@
-﻿import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Download, Eraser, ImageIcon, RefreshCw } from 'lucide-react';
 import FileDropzone from '../components/FileDropzone';
 import { useSEO } from '../hooks/useSEO';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 
 // â”€â”€â”€ CDN fallback chain â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // staticimgly.com often has CORS / availability issues.
@@ -148,7 +149,7 @@ export default function RemoveBackground() {
       if (!outBlob) throw new Error('Failed to export output image');
 
       setResultUrl(URL.createObjectURL(outBlob));
-      setProgressText('Done âœ“');
+      setProgressText('Done ✓');
     } catch (e: any) {
       console.error(e);
       setError(e?.message || 'Background removal failed. Please try again.');
@@ -159,38 +160,39 @@ export default function RemoveBackground() {
   };
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center p-8">
-      <div className="text-center mb-8">
-        <h1 className="text-4xl font-bold text-gray-900 mb-4">Remove Background</h1>
-        <p className="text-xl text-gray-600">
-          AI-powered background removal â€” runs entirely in your browser.
-        </p>
-      </div>
-
-      {/* Model loading banner */}
-      {!modelReady && (
-        <div className="w-full max-w-xl mb-6">
-          {loadingModel && (
-            <div className="bg-blue-50 border border-blue-200 rounded-xl p-5">
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-sm font-semibold text-blue-800">Loading AI Modelâ€¦</p>
-                <span className="text-sm font-bold text-blue-700">{loadProgress}%</span>
+    <ToolWorkspaceShell
+      title="Remove Background"
+      subtitle="AI-powered background removal — runs entirely in your browser."
+      categoryLabel="Image Studio · On-Device Segmentation"
+      icon={Eraser}
+      microVariant="remove-bg"
+      tone="rose"
+    >
+      <div className="flex flex-col items-center">
+        {/* Model loading banner */}
+        {!modelReady && (
+          <div className="w-full max-w-xl mb-6">
+            {loadingModel && (
+              <div className="bg-blue-50 border border-blue-200 rounded-xl p-5">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-sm font-semibold text-blue-800">Loading AI Model…</p>
+                  <span className="text-sm font-bold text-blue-700">{loadProgress}%</span>
+                </div>
+                <div className="w-full bg-blue-100 rounded-full h-2.5">
+                  <div
+                    className="bg-blue-600 h-2.5 rounded-full transition-all duration-300"
+                    style={{ width: `${loadProgress}%` }}
+                  />
+                </div>
+                <p className="text-xs text-blue-600 mt-2">{progressText}</p>
+                <p className="text-xs text-blue-500 mt-1">
+                  First time only (~25 MB). Cached in browser for instant future use.
+                </p>
               </div>
-              <div className="w-full bg-blue-100 rounded-full h-2.5">
-                <div
-                  className="bg-blue-600 h-2.5 rounded-full transition-all duration-300"
-                  style={{ width: `${loadProgress}%` }}
-                />
-              </div>
-              <p className="text-xs text-blue-600 mt-2">{progressText}</p>
-              <p className="text-xs text-blue-500 mt-1">
-                First time only (~25 MB). Cached in browser for instant future use.
-              </p>
-            </div>
-          )}
-          {error && !loadingModel && (
-            <div className="bg-red-50 border border-red-200 rounded-xl p-5 space-y-3">
-              <p className="text-sm font-semibold text-red-700">âš  Model failed to load</p>
+            )}
+            {error && !loadingModel && (
+              <div className="bg-red-50 border border-red-200 rounded-xl p-5 space-y-3">
+                <p className="text-sm font-semibold text-red-700">⚠ Model failed to load</p>
               <p className="text-xs text-red-600">{error}</p>
               <button
                 type="button"
@@ -214,11 +216,11 @@ export default function RemoveBackground() {
           accept={{ 'image/*': ['.jpg', '.jpeg', '.png', '.webp', '.bmp', '.gif'] }}
         />
       ) : (
-        <div className="w-full max-w-4xl bg-white rounded-2xl shadow-sm border border-gray-200 p-8">
+        <div className="w-full max-w-4xl bg-white dark:bg-slate-900 rounded-2xl shadow-sm border border-gray-200 dark:border-slate-800 p-8">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
             <div>
-              <p className="font-semibold text-gray-800 mb-3">Original</p>
-              <div className="rounded-xl border border-gray-200 overflow-hidden bg-gray-50">
+              <p className="font-semibold text-gray-800 dark:text-slate-200 mb-3">Original</p>
+              <div className="rounded-xl border border-gray-200 dark:border-slate-700 overflow-hidden bg-gray-50 dark:bg-slate-800/60">
                 {filePreview && (
                   <img src={filePreview} alt="Original" className="w-full h-auto object-contain max-h-[420px]" />
                 )}
@@ -227,44 +229,44 @@ export default function RemoveBackground() {
 
             <div className="space-y-4">
               <div className="flex items-center gap-3">
-                <div className="w-12 h-12 bg-pink-50 text-pink-600 rounded-xl flex items-center justify-center">
+                <div className="w-12 h-12 bg-pink-50 dark:bg-pink-950/40 text-pink-600 dark:text-pink-400 rounded-xl flex items-center justify-center">
                   <ImageIcon className="w-6 h-6" />
                 </div>
                 <div>
-                  <p className="font-semibold text-gray-900 truncate max-w-[240px]">{file.name}</p>
-                  <p className="text-xs text-gray-500">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
+                  <p className="font-semibold text-gray-900 dark:text-white truncate max-w-[240px]">{file.name}</p>
+                  <p className="text-xs text-gray-500 dark:text-slate-400">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
                 </div>
               </div>
 
               {format !== 'png' && (
                 <>
-                  <label className="block text-sm font-medium text-gray-700">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-slate-300">
                     Background Color
                     <input
                       type="color"
                       value={bgColor}
                       onChange={(e) => setBgColor(e.target.value)}
-                      className="mt-2 w-full h-11 p-1 border border-gray-300 rounded-lg"
+                      className="mt-2 w-full h-11 p-1 border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-800 rounded-lg"
                     />
                   </label>
                   <div className="flex gap-2">
-                    <button type="button" onClick={() => setBgColor('#ffffff')} className="px-3 py-2 bg-gray-100 rounded-lg text-sm font-medium">Passport White</button>
-                    <button type="button" onClick={() => setBgColor('#d6e7ff')} className="px-3 py-2 bg-gray-100 rounded-lg text-sm font-medium">Light Blue</button>
+                    <button type="button" onClick={() => setBgColor('#ffffff')} className="px-3 py-2 bg-gray-100 dark:bg-slate-800 text-gray-800 dark:text-slate-200 hover:bg-gray-200 dark:hover:bg-slate-700 rounded-lg text-sm font-medium transition-colors">Passport White</button>
+                    <button type="button" onClick={() => setBgColor('#d6e7ff')} className="px-3 py-2 bg-gray-100 dark:bg-slate-800 text-gray-800 dark:text-slate-200 hover:bg-gray-200 dark:hover:bg-slate-700 rounded-lg text-sm font-medium transition-colors">Light Blue</button>
                   </div>
                 </>
               )}
 
-              <label className="block text-sm font-medium text-gray-700">
+              <label className="block text-sm font-medium text-gray-700 dark:text-slate-300">
                 Quality ({Math.round(quality * 100)}%)
                 <input type="range" min={0.6} max={1} step={0.01} value={quality}
                   onChange={(e) => setQuality(Number(e.target.value))}
                   className="mt-2 w-full" />
               </label>
 
-              <label className="block text-sm font-medium text-gray-700">
+              <label className="block text-sm font-medium text-gray-700 dark:text-slate-300">
                 Output Format
                 <select value={format} onChange={(e) => setFormat(e.target.value as any)}
-                  className="mt-2 w-full px-3 py-2 border border-gray-300 rounded-lg">
+                  className="mt-2 w-full px-3 py-2 border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-900 dark:text-slate-100 rounded-lg">
                   <option value="png">PNG (transparent background)</option>
                   <option value="jpg">JPG</option>
                   <option value="jpeg">JPEG</option>
@@ -273,7 +275,7 @@ export default function RemoveBackground() {
               </label>
 
               {error && (
-                <div className="p-3 bg-red-50 text-red-700 text-sm rounded-lg border border-red-200 space-y-2">
+                <div className="p-3 bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-300 text-sm rounded-lg border border-red-200 dark:border-red-900/50 space-y-2">
                   <p>{error}</p>
                   {!modelReady && (
                     <button type="button" onClick={loadModel}
@@ -284,13 +286,13 @@ export default function RemoveBackground() {
                 </div>
               )}
               {progressText && (
-                <div className="p-3 bg-blue-50 text-blue-700 text-sm rounded-lg border border-blue-200">
+                <div className="p-3 bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 text-sm rounded-lg border border-blue-200 dark:border-blue-900/50">
                   {progressText}
                 </div>
               )}
               {!modelReady && !error && loadingModel && (
-                <div className="p-3 bg-amber-50 text-amber-800 text-sm rounded-lg border border-amber-200">
-                  â³ Waiting for AI model to finish loadingâ€¦
+                <div className="p-3 bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 text-sm rounded-lg border border-amber-200 dark:border-amber-900/50">
+                  ⏳ Waiting for AI model to finish loading…
                 </div>
               )}
 
@@ -305,7 +307,7 @@ export default function RemoveBackground() {
                 </button>
                 <button
                   onClick={() => { setFile(null); setResultUrl(null); setError(null); setProgressText(''); }}
-                  className="px-5 py-3 bg-gray-100 text-gray-700 font-semibold rounded-xl hover:bg-gray-200 transition-colors"
+                  className="px-5 py-3 bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-slate-200 font-semibold rounded-xl hover:bg-gray-200 dark:hover:bg-slate-700 transition-colors"
                 >
                   Reset
                 </button>
@@ -313,7 +315,7 @@ export default function RemoveBackground() {
 
               {resultUrl && (
                 <div className="mt-2 space-y-3">
-                  <p className="text-sm font-semibold text-gray-800">Result Preview</p>
+                  <p className="text-sm font-semibold text-gray-800 dark:text-slate-200">Result Preview</p>
                   <div
                     className="rounded-xl border border-gray-200 overflow-hidden"
                     style={{
@@ -338,6 +340,7 @@ export default function RemoveBackground() {
           </div>
         </div>
       )}
-    </div>
+      </div>
+    </ToolWorkspaceShell>
   );
 }

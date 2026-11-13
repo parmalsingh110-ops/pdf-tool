@@ -6,6 +6,7 @@ import * as pdfjsLib from 'pdfjs-dist';
 import '../lib/pdfWorker';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 
 type PrintPermission = 'none' | 'low' | 'high';
 
@@ -141,29 +142,30 @@ export default function ProtectPDF() {
   };
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-start p-6 md:p-8 min-h-screen bg-gradient-to-br from-purple-50/40 via-white to-slate-50">
-      <div className="text-center mb-10 max-w-2xl">
-        <div className="inline-flex items-center justify-center w-14 h-14 bg-purple-100 rounded-2xl mb-4">
-          <ShieldCheck className="w-7 h-7 text-purple-600" />
-        </div>
-        <h1 className="text-4xl font-extrabold text-gray-900 mb-3">Protect PDF with Password</h1>
-        <p className="text-lg text-gray-500">Encrypt your PDF with standard AES encryption. Restrict printing, text copying, and editing.</p>
-      </div>
+    <ToolWorkspaceShell
+      title="Protect PDF with Password"
+      subtitle="Encrypt your PDF with standard AES encryption. Restrict printing, text copying, and editing."
+      categoryLabel="Security Vault · Client-Side Encryption"
+      icon={ShieldCheck}
+      microVariant="security"
+      tone="violet"
+    >
+      <div className="flex flex-col items-center">
 
       {!file ? (
         <FileDropzone onDrop={handleDrop} multiple={false} title="Drop PDF here or click to select" />
       ) : protectedUrl ? (
         /* Success Screen */
-        <div className="w-full max-w-lg bg-white rounded-2xl shadow-sm border border-gray-100 p-8 text-center">
-          <div className="w-16 h-16 bg-purple-100 text-purple-600 rounded-full flex items-center justify-center mx-auto mb-4">
+        <div className="w-full max-w-lg bg-white dark:bg-slate-900 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-800 p-8 text-center">
+          <div className="w-16 h-16 bg-purple-100 dark:bg-purple-950/60 text-purple-600 dark:text-purple-400 rounded-full flex items-center justify-center mx-auto mb-4">
             <Lock className="w-8 h-8" />
           </div>
-          <h3 className="text-2xl font-bold text-gray-900 mb-1">PDF Successfully Protected!</h3>
-          <p className="text-gray-500 mb-6">Your file is encrypted with standard AES security.</p>
+          <h3 className="text-2xl font-bold text-gray-900 dark:text-white mb-1">PDF Successfully Protected!</h3>
+          <p className="text-gray-500 dark:text-slate-400 mb-6">Your file is encrypted with standard AES security.</p>
 
-          <div className="p-4 bg-purple-50 rounded-xl border border-purple-100 mb-6 text-left space-y-1.5 text-xs text-purple-900">
-            <div className="font-semibold text-sm text-purple-950 mb-1">Security Summary:</div>
-            <div>• Open Password: <span className="font-mono bg-purple-100 px-1.5 py-0.5 rounded text-purple-800">Protected</span></div>
+          <div className="p-4 bg-purple-50 dark:bg-purple-950/40 rounded-xl border border-purple-100 dark:border-purple-900/50 mb-6 text-left space-y-1.5 text-xs text-purple-900 dark:text-purple-200">
+            <div className="font-semibold text-sm text-purple-950 dark:text-purple-100 mb-1">Security Summary:</div>
+            <div>• Open Password: <span className="font-mono bg-purple-100 dark:bg-purple-900/60 px-1.5 py-0.5 rounded text-purple-800 dark:text-purple-200">Protected</span></div>
             <div>• Printing: <span className="font-semibold capitalize">{printPerm === 'none' ? 'Disallowed' : `${printPerm} Resolution`}</span></div>
             <div>• Text Copying: <span className="font-semibold">{allowCopying ? 'Allowed' : 'Disabled'}</span></div>
             <div>• Modifying: <span className="font-semibold">{allowModifying ? 'Allowed' : 'Disabled'}</span></div>
@@ -179,7 +181,7 @@ export default function ProtectPDF() {
           <br />
           <button
             onClick={() => { setFile(null); setProtectedUrl(null); setUserPassword(''); setConfirmPassword(''); }}
-            className="text-gray-500 hover:text-gray-800 font-medium text-sm mt-2"
+            className="text-gray-500 dark:text-slate-400 hover:text-gray-800 dark:hover:text-white font-medium text-sm mt-2"
           >
             Protect another file
           </button>
@@ -189,40 +191,40 @@ export default function ProtectPDF() {
         <div className="w-full max-w-3xl space-y-6">
 
           {/* File Card */}
-          <div className="flex items-center gap-4 p-4 bg-white rounded-2xl shadow-sm border border-gray-100">
-            <div className="w-16 h-20 bg-gray-100 rounded-xl overflow-hidden shrink-0 border border-gray-200 shadow-sm flex items-center justify-center">
+          <div className="flex items-center gap-4 p-4 bg-white dark:bg-slate-900 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-800">
+            <div className="w-16 h-20 bg-gray-100 dark:bg-slate-800 rounded-xl overflow-hidden shrink-0 border border-gray-200 dark:border-slate-700 shadow-sm flex items-center justify-center">
               {thumb ? (
                 <img src={thumb} alt={file.name} className="w-full h-full object-cover" />
               ) : (
-                <FileText className="w-7 h-7 text-purple-600" />
+                <FileText className="w-7 h-7 text-purple-600 dark:text-purple-400" />
               )}
             </div>
             <div className="flex-1 min-w-0">
-              <p className="font-semibold text-gray-900 truncate">{file.name}</p>
-              <div className="flex items-center gap-3 mt-1 text-xs text-gray-500">
+              <p className="font-semibold text-gray-900 dark:text-white truncate">{file.name}</p>
+              <div className="flex items-center gap-3 mt-1 text-xs text-gray-500 dark:text-slate-400">
                 <span>{(file.size / 1024 / 1024).toFixed(2)} MB</span>
                 {pageCount > 0 && <span>• {pageCount} pages</span>}
-                <span className="text-emerald-600 font-medium">• Unprotected</span>
+                <span className="text-emerald-600 dark:text-emerald-400 font-medium">• Unprotected</span>
               </div>
             </div>
             <button
               onClick={() => { setFile(null); setThumb(null); }}
-              className="text-xs text-gray-400 hover:text-red-500 px-3 py-1.5 rounded-lg hover:bg-red-50 transition-colors shrink-0"
+              className="text-xs text-gray-400 hover:text-red-500 px-3 py-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/40 transition-colors shrink-0"
             >
               Change file
             </button>
           </div>
 
           {/* Password Setup Card */}
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 space-y-5">
-            <div className="flex items-center gap-2 border-b border-gray-100 pb-3">
-              <KeyRound className="w-5 h-5 text-purple-600" />
-              <h2 className="text-lg font-bold text-gray-900">Document Password</h2>
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-800 p-6 space-y-5">
+            <div className="flex items-center gap-2 border-b border-gray-100 dark:border-slate-800 pb-3">
+              <KeyRound className="w-5 h-5 text-purple-600 dark:text-purple-400" />
+              <h2 className="text-lg font-bold text-gray-900 dark:text-white">Document Password</h2>
             </div>
 
             {/* Password input */}
             <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-2">
+              <label className="block text-sm font-semibold text-gray-700 dark:text-slate-300 mb-2">
                 Set Document Open Password <span className="text-red-500">*</span>
               </label>
               <div className="relative">
@@ -231,12 +233,12 @@ export default function ProtectPDF() {
                   value={userPassword}
                   onChange={e => setUserPassword(e.target.value)}
                   placeholder="Enter a secure password"
-                  className="w-full pl-4 pr-11 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent outline-none text-gray-900 font-mono text-sm placeholder:font-sans"
+                  className="w-full pl-4 pr-11 py-3 border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent outline-none text-gray-900 dark:text-white font-mono text-sm placeholder:font-sans"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-1"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-slate-200 p-1"
                 >
                   {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
@@ -246,14 +248,14 @@ export default function ProtectPDF() {
               {userPassword.length > 0 && (
                 <div className="mt-2.5 space-y-1.5">
                   <div className="flex items-center justify-between text-xs">
-                    <span className="text-gray-500">Strength: <span className="font-semibold text-gray-800">{pwdStrength.label}</span></span>
+                    <span className="text-gray-500 dark:text-slate-400">Strength: <span className="font-semibold text-gray-800 dark:text-slate-200">{pwdStrength.label}</span></span>
                     <span className="text-gray-400">{pwdStrength.feedback}</span>
                   </div>
                   <div className="grid grid-cols-4 gap-1.5 h-1.5">
                     {[1, 2, 3, 4].map(step => (
                       <div
                         key={step}
-                        className={`rounded-full transition-all duration-300 ${step <= pwdStrength.score ? pwdStrength.color : 'bg-gray-100'}`}
+                        className={`rounded-full transition-all duration-300 ${step <= pwdStrength.score ? pwdStrength.color : 'bg-gray-100 dark:bg-slate-800'}`}
                       />
                     ))}
                   </div>
@@ -263,7 +265,7 @@ export default function ProtectPDF() {
 
             {/* Confirm password */}
             <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-2">
+              <label className="block text-sm font-semibold text-gray-700 dark:text-slate-300 mb-2">
                 Confirm Password
               </label>
               <div className="relative">
@@ -272,29 +274,29 @@ export default function ProtectPDF() {
                   value={confirmPassword}
                   onChange={e => setConfirmPassword(e.target.value)}
                   placeholder="Re-type your password"
-                  className={`w-full pl-4 pr-11 py-3 border rounded-xl focus:ring-2 outline-none text-gray-900 font-mono text-sm placeholder:font-sans ${
+                  className={`w-full pl-4 pr-11 py-3 border bg-white dark:bg-slate-800 rounded-xl focus:ring-2 outline-none text-gray-900 dark:text-white font-mono text-sm placeholder:font-sans ${
                     passwordsMatch
-                      ? 'border-emerald-300 focus:ring-emerald-500'
+                      ? 'border-emerald-300 dark:border-emerald-700 focus:ring-emerald-500'
                       : passwordsMismatch
-                      ? 'border-red-300 focus:ring-red-500 bg-red-50/20'
-                      : 'border-gray-200 focus:ring-purple-500 focus:border-transparent'
+                      ? 'border-red-300 dark:border-red-700 focus:ring-red-500 bg-red-50/20 dark:bg-red-950/20'
+                      : 'border-gray-200 dark:border-slate-700 focus:ring-purple-500 focus:border-transparent'
                   }`}
                 />
                 <button
                   type="button"
                   onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-1"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-slate-200 p-1"
                 >
                   {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
               </div>
               {passwordsMatch && (
-                <p className="mt-1.5 text-xs text-emerald-600 flex items-center gap-1">
+                <p className="mt-1.5 text-xs text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
                   <CheckCircle2 className="w-3.5 h-3.5" /> Passwords match
                 </p>
               )}
               {passwordsMismatch && (
-                <p className="mt-1.5 text-xs text-red-500 flex items-center gap-1">
+                <p className="mt-1.5 text-xs text-red-500 dark:text-red-400 flex items-center gap-1">
                   <AlertCircle className="w-3.5 h-3.5" /> Passwords do not match
                 </p>
               )}
@@ -305,7 +307,7 @@ export default function ProtectPDF() {
               <button
                 type="button"
                 onClick={() => setShowAdvanced(!showAdvanced)}
-                className="inline-flex items-center gap-2 text-sm font-semibold text-purple-700 hover:text-purple-800 transition-colors"
+                className="inline-flex items-center gap-2 text-sm font-semibold text-purple-700 dark:text-purple-400 hover:text-purple-800 dark:hover:text-purple-300 transition-colors"
               >
                 <Settings2 className="w-4 h-4" />
                 {showAdvanced ? 'Hide Advanced Security & Permissions' : 'Configure Advanced Permissions (Printing, Copying, Owner Password)'}
@@ -314,11 +316,11 @@ export default function ProtectPDF() {
 
             {/* Advanced Section */}
             {showAdvanced && (
-              <div className="p-5 bg-slate-50 rounded-xl border border-slate-200/80 space-y-5 mt-3">
+              <div className="p-5 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200/80 dark:border-slate-700 space-y-5 mt-3">
                 {/* Printing permission */}
                 <div>
-                  <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                    <Printer className="w-4 h-4 text-purple-600" /> Printing Permission
+                  <label className="block text-xs font-bold text-gray-700 dark:text-slate-300 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                    <Printer className="w-4 h-4 text-purple-600 dark:text-purple-400" /> Printing Permission
                   </label>
                   <div className="grid grid-cols-3 gap-2">
                     {[
@@ -332,8 +334,8 @@ export default function ProtectPDF() {
                         onClick={() => setPrintPerm(opt.id as PrintPermission)}
                         className={`p-3 rounded-xl border text-left transition-all ${
                           printPerm === opt.id
-                            ? 'border-purple-600 bg-purple-50 text-purple-900 font-semibold shadow-sm'
-                            : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'
+                            ? 'border-purple-600 bg-purple-50 dark:bg-purple-950/60 text-purple-900 dark:text-purple-200 font-semibold shadow-sm'
+                            : 'border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-gray-600 dark:text-slate-300 hover:border-gray-300 dark:hover:border-slate-600'
                         }`}
                       >
                         <div className="text-xs font-bold">{opt.label}</div>
@@ -345,11 +347,11 @@ export default function ProtectPDF() {
 
                 {/* Checkboxes for permissions */}
                 <div>
-                  <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                    <Shield className="w-4 h-4 text-purple-600" /> Reader Restrictions
+                  <label className="block text-xs font-bold text-gray-700 dark:text-slate-300 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                    <Shield className="w-4 h-4 text-purple-600 dark:text-purple-400" /> Reader Restrictions
                   </label>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <label className="flex items-center gap-3 p-3 bg-white border border-gray-200 rounded-xl cursor-pointer hover:border-purple-300 transition-colors">
+                    <label className="flex items-center gap-3 p-3 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-700 rounded-xl cursor-pointer hover:border-purple-300 dark:hover:border-purple-600 transition-colors">
                       <input
                         type="checkbox"
                         checked={allowCopying}
@@ -357,12 +359,12 @@ export default function ProtectPDF() {
                         className="rounded text-purple-600 focus:ring-purple-500 w-4 h-4"
                       />
                       <div>
-                        <div className="text-xs font-semibold text-gray-800">Allow Content Copying</div>
+                        <div className="text-xs font-semibold text-gray-800 dark:text-slate-200">Allow Content Copying</div>
                         <div className="text-[10px] text-gray-400">Extract text and graphics</div>
                       </div>
                     </label>
 
-                    <label className="flex items-center gap-3 p-3 bg-white border border-gray-200 rounded-xl cursor-pointer hover:border-purple-300 transition-colors">
+                    <label className="flex items-center gap-3 p-3 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-700 rounded-xl cursor-pointer hover:border-purple-300 dark:hover:border-purple-600 transition-colors">
                       <input
                         type="checkbox"
                         checked={allowModifying}
@@ -370,12 +372,12 @@ export default function ProtectPDF() {
                         className="rounded text-purple-600 focus:ring-purple-500 w-4 h-4"
                       />
                       <div>
-                        <div className="text-xs font-semibold text-gray-800">Allow Modifying Document</div>
+                        <div className="text-xs font-semibold text-gray-800 dark:text-slate-200">Allow Modifying Document</div>
                         <div className="text-[10px] text-gray-400">Page rotation, deletion, insertion</div>
                       </div>
                     </label>
 
-                    <label className="flex items-center gap-3 p-3 bg-white border border-gray-200 rounded-xl cursor-pointer hover:border-purple-300 transition-colors">
+                    <label className="flex items-center gap-3 p-3 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-700 rounded-xl cursor-pointer hover:border-purple-300 dark:hover:border-purple-600 transition-colors">
                       <input
                         type="checkbox"
                         checked={allowFillingForms}
@@ -383,12 +385,12 @@ export default function ProtectPDF() {
                         className="rounded text-purple-600 focus:ring-purple-500 w-4 h-4"
                       />
                       <div>
-                        <div className="text-xs font-semibold text-gray-800">Allow Form Filling</div>
+                        <div className="text-xs font-semibold text-gray-800 dark:text-slate-200">Allow Form Filling</div>
                         <div className="text-[10px] text-gray-400">Fill in existing form fields</div>
                       </div>
                     </label>
 
-                    <label className="flex items-center gap-3 p-3 bg-white border border-gray-200 rounded-xl cursor-pointer hover:border-purple-300 transition-colors">
+                    <label className="flex items-center gap-3 p-3 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-700 rounded-xl cursor-pointer hover:border-purple-300 dark:hover:border-purple-600 transition-colors">
                       <input
                         type="checkbox"
                         checked={allowAnnotating}
@@ -396,7 +398,7 @@ export default function ProtectPDF() {
                         className="rounded text-purple-600 focus:ring-purple-500 w-4 h-4"
                       />
                       <div>
-                        <div className="text-xs font-semibold text-gray-800">Allow Comments & Annotations</div>
+                        <div className="text-xs font-semibold text-gray-800 dark:text-slate-200">Allow Comments & Annotations</div>
                         <div className="text-[10px] text-gray-400">Add notes and highlights</div>
                       </div>
                     </label>
@@ -404,7 +406,7 @@ export default function ProtectPDF() {
                 </div>
 
                 {/* Optional Owner Password */}
-                <div className="pt-2 border-t border-slate-200">
+                <div className="pt-2 border-t border-slate-200 dark:border-slate-700">
                   <label className="flex items-center gap-2 cursor-pointer mb-2">
                     <input
                       type="checkbox"
@@ -412,7 +414,7 @@ export default function ProtectPDF() {
                       onChange={e => setUseOwnerPassword(e.target.checked)}
                       className="rounded text-purple-600 focus:ring-purple-500 w-4 h-4"
                     />
-                    <span className="text-xs font-bold text-gray-800">Set Separate Master / Owner Password</span>
+                    <span className="text-xs font-bold text-gray-800 dark:text-slate-200">Set Separate Master / Owner Password</span>
                   </label>
                   {useOwnerPassword && (
                     <div className="relative mt-2">
@@ -421,12 +423,12 @@ export default function ProtectPDF() {
                         value={ownerPassword}
                         onChange={e => setOwnerPassword(e.target.value)}
                         placeholder="Owner password (for full master control)"
-                        className="w-full pl-4 pr-11 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-purple-500 outline-none text-xs font-mono"
+                        className="w-full pl-4 pr-11 py-2.5 bg-white dark:bg-slate-800/80 border border-gray-200 dark:border-slate-700 text-gray-900 dark:text-slate-100 placeholder-gray-400 dark:placeholder-slate-500 rounded-xl focus:ring-2 focus:ring-purple-500 outline-none text-xs font-mono"
                       />
                       <button
                         type="button"
                         onClick={() => setShowOwnerPassword(!showOwnerPassword)}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-1"
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-slate-500 hover:text-gray-600 dark:hover:text-slate-300 p-1"
                       >
                         {showOwnerPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
                       </button>
@@ -437,7 +439,7 @@ export default function ProtectPDF() {
             )}
 
             {errorMsg && (
-              <div className="p-3 bg-red-50 text-red-700 text-xs rounded-xl border border-red-200 flex items-center gap-2">
+              <div className="p-3 bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-300 text-xs rounded-xl border border-red-200 dark:border-red-800/60 flex items-center gap-2">
                 <AlertCircle className="w-4 h-4 shrink-0" />
                 <span>{errorMsg}</span>
               </div>
@@ -461,12 +463,13 @@ export default function ProtectPDF() {
                 </>
               )}
             </button>
-            <p className="text-center text-xs text-gray-400">
+            <p className="text-center text-xs text-gray-400 dark:text-slate-400">
               Files are processed entirely inside your browser. No files or passwords are ever uploaded to a server.
             </p>
           </div>
         </div>
       )}
-    </div>
+      </div>
+    </ToolWorkspaceShell>
   );
 }

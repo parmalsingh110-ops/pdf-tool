@@ -10,6 +10,7 @@ import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { dataUrlToBytes } from '../lib/utils';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 
 interface ExtractedAcroField {
   name: string;
@@ -262,19 +263,15 @@ export default function PdfFormFiller() {
   const currentPageCustomFields = customFields.filter(f => f.pageIndex === currentPage);
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-start p-4 sm:p-8 max-w-6xl mx-auto w-full">
-      {/* Header */}
-      <div className="text-center mb-6">
-        <div className="w-16 h-16 bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 rounded-2xl flex items-center justify-center mx-auto mb-3 shadow-sm border border-blue-100 dark:border-blue-900/50">
-          <FileText className="w-8 h-8" />
-        </div>
-        <h1 className="text-3xl sm:text-4xl font-extrabold text-slate-900 dark:text-white mb-2">
-          PDF Form Filler & AcroForm Studio
-        </h1>
-        <p className="text-base text-slate-600 dark:text-slate-400 max-w-xl mx-auto">
-          Fill official PDF forms effortlessly. Auto-detects interactive AcroForm text fields and checkboxes, or click to add custom text anywhere.
-        </p>
-      </div>
+    <ToolWorkspaceShell
+      title="PDF Form Filler & AcroForm Studio"
+      subtitle="Fill official PDF forms effortlessly. Auto-detects interactive AcroForm text fields and checkboxes, or click to add custom text anywhere."
+      categoryLabel="AcroForm & Field Editor"
+      icon={FileText}
+      microVariant="edit"
+      tone="blue"
+    >
+      <div className="flex flex-col items-center justify-start max-w-6xl mx-auto w-full">
 
       {!file ? (
         <div className="w-full max-w-2xl space-y-6">
@@ -534,6 +531,7 @@ export default function PdfFormFiller() {
           </div>
         </div>
       )}
-    </div>
+      </div>
+    </ToolWorkspaceShell>
   );
 }

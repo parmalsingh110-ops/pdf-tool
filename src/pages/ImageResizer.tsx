@@ -6,6 +6,7 @@ import FileDropzone from '../components/FileDropzone';
 import { encodeCanvasUnderByteBudget, type RasterMime } from '../lib/imageByteBudget';
 import { useSEO } from '../hooks/useSEO';
 import { dataUrlToBytes } from '../lib/utils';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 
 const RESIZER_IMAGE_ACCEPT: Record<string, string[]> = {
   'image/png': ['.png'],
@@ -570,7 +571,9 @@ export default function ImageResizer() {
       key={mode}
       onClick={() => setResizeMode(mode)}
       className={`flex-1 px-2 py-2 text-xs sm:text-sm font-semibold rounded-lg transition-colors ${
-        resizeMode === mode ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'
+        resizeMode === mode
+          ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 shadow-sm'
+          : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
       }`}
     >
       {label}
@@ -578,7 +581,14 @@ export default function ImageResizer() {
   );
 
   return (
-    <div className="flex-1 flex flex-col bg-slate-100 min-h-[calc(100vh-4rem)]">
+    <ToolWorkspaceShell
+      title="Image Resizer (Forms & Portals)"
+      subtitle="Resize for government and job portals: By size (px, in, cm, mm), percentage, or social presets with optional max KB limit and custom DPI."
+      categoryLabel="Precision Image Utility"
+      icon={Ruler}
+      microVariant="crop"
+      tone="sky"
+    >
       <input
         ref={fileInputRef}
         type="file"
@@ -590,27 +600,14 @@ export default function ImageResizer() {
           e.target.value = '';
         }}
       />
-      <div className="max-w-6xl mx-auto w-full px-4 py-8 flex flex-col gap-6">
-        <div className="flex items-start gap-4">
-          <div className="p-3 rounded-2xl bg-sky-100 text-sky-700">
-            <Ruler className="w-8 h-8" />
-          </div>
-          <div>
-            <h1 className="text-3xl font-extrabold text-slate-900">Image resizer (forms)</h1>
-            <p className="mt-2 text-slate-600 max-w-2xl">
-              Resize for government and job portals: <strong>By size</strong> (width/height + pixel, inch, cm, mm),{' '}
-              <strong>as %</strong>, or <strong>social presets</strong>. Optional max file size for JPEG/WebP. Set DPI
-              when using physical units (96 screen, 300 print).
-            </p>
-          </div>
-        </div>
+      <div className="w-full flex flex-col gap-6">
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:items-start">
           <div className="lg:col-span-4 space-y-4 relative z-[5] min-w-0 [contain:layout]">
-            <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4">
-              <h2 className="text-sm font-bold text-slate-800 uppercase tracking-wide">Resize settings</h2>
+            <div className="bg-white dark:bg-slate-900/90 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 shadow-sm space-y-4">
+              <h2 className="text-sm font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wide">Resize settings</h2>
 
-              <div className="flex rounded-xl bg-slate-100 p-1 gap-1">
+              <div className="flex rounded-xl bg-slate-100 dark:bg-slate-800 p-1 gap-1">
                 {tabBtn('size', 'By size')}
                 {tabBtn('percent', 'As %')}
                 {tabBtn('social', 'Social')}
@@ -631,35 +628,35 @@ export default function ImageResizer() {
                     subtitle="Drag & drop or click — JPG, PNG, WebP, GIF"
                     buttonLabel="Choose image"
                   />
-                  {dropHint && <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2">{dropHint}</p>}
+                  {dropHint && <p className="text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 rounded-lg p-2">{dropHint}</p>}
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
-                    className="w-full py-2.5 rounded-xl border-2 border-slate-200 text-slate-700 font-semibold text-sm hover:bg-slate-50"
+                    className="w-full py-2.5 rounded-xl border-2 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold text-sm hover:bg-slate-50 dark:hover:bg-slate-800"
                   >
                     Browse files…
                   </button>
-                  <p className="text-xs text-slate-500">
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
                     Width/height unlock after you pick an image. Units apply to output size.
                   </p>
                 </div>
               ) : (
                 <div className="space-y-4">
-                  <div className="flex items-center justify-between gap-2 text-xs text-slate-500">
+                  <div className="flex items-center justify-between gap-2 text-xs text-slate-500 dark:text-slate-400">
                     <span className="truncate" title={file.name}>
                       {file.name}
                     </span>
                     <div className="flex gap-2 shrink-0">
                       <button
                         type="button"
-                        className="text-sky-600 font-semibold"
+                        className="text-sky-600 dark:text-sky-400 font-semibold"
                         onClick={() => fileInputRef.current?.click()}
                       >
                         Change
                       </button>
                       <button
                         type="button"
-                        className="text-rose-600 font-semibold"
+                        className="text-rose-600 dark:text-rose-400 font-semibold"
                         onClick={() => {
                           if (objectUrl) URL.revokeObjectURL(objectUrl);
                           if (resultUrl) URL.revokeObjectURL(resultUrl);
@@ -685,28 +682,28 @@ export default function ImageResizer() {
                     <>
                       <div className="space-y-3">
                         <div>
-                          <label className="text-xs font-medium text-slate-600">Width</label>
+                          <label className="text-xs font-medium text-slate-600 dark:text-slate-400">Width</label>
                           <input
                             placeholder="Enter width"
-                            className="mt-1 w-full min-h-[2.75rem] border border-slate-200 rounded-lg px-3 py-2.5 text-base tabular-nums"
+                            className="mt-1 w-full min-h-[2.75rem] bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 rounded-lg px-3 py-2.5 text-base tabular-nums"
                             value={widthIn}
                             onChange={(e) => onWidthChange(e.target.value)}
                             disabled={!natural}
                           />
                         </div>
                         <div>
-                          <label className="text-xs font-medium text-slate-600">Height</label>
+                          <label className="text-xs font-medium text-slate-600 dark:text-slate-400">Height</label>
                           <input
                             placeholder="Enter height"
-                            className="mt-1 w-full min-h-[2.75rem] border border-slate-200 rounded-lg px-3 py-2.5 text-base tabular-nums"
+                            className="mt-1 w-full min-h-[2.75rem] bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 rounded-lg px-3 py-2.5 text-base tabular-nums"
                             value={heightIn}
                             onChange={(e) => onHeightChange(e.target.value)}
                             disabled={!natural}
                           />
                         </div>
                         <div>
-                          <label className="text-xs font-medium text-slate-600">Unit</label>
-                          <div className="mt-1 flex flex-wrap gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1">
+                          <label className="text-xs font-medium text-slate-600 dark:text-slate-400">Unit</label>
+                          <div className="mt-1 flex flex-wrap gap-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-1">
                             {(
                               [
                                 ['px', 'px'],
@@ -720,7 +717,9 @@ export default function ImageResizer() {
                                 type="button"
                                 onClick={() => setUnit(u)}
                                 className={`flex-1 min-w-[2.5rem] rounded-md px-2 py-2 text-xs font-bold ${
-                                  unit === u ? 'bg-white text-sky-700 shadow' : 'text-slate-600 hover:bg-white/80'
+                                  unit === u
+                                    ? 'bg-white dark:bg-slate-900 text-sky-700 dark:text-sky-300 shadow'
+                                    : 'text-slate-600 dark:text-slate-400 hover:bg-white/80 dark:hover:bg-slate-700/70'
                                 }`}
                               >
                                 {lab}
@@ -731,12 +730,12 @@ export default function ImageResizer() {
                       </div>
                       {unit !== 'px' && (
                         <div>
-                          <label className="text-xs font-medium text-slate-600">DPI (for cm/mm/in → px)</label>
+                          <label className="text-xs font-medium text-slate-600 dark:text-slate-400">DPI (for cm/mm/in → px)</label>
                           <input
                             type="number"
                             min={36}
                             max={600}
-                            className="mt-1 w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"
+                            className="mt-1 w-full bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg px-3 py-2 text-sm"
                             value={dpi}
                             onChange={(e) => setDpi(Math.max(1, parseInt(e.target.value, 10) || 96))}
                           />
@@ -749,7 +748,7 @@ export default function ImageResizer() {
                                 className={`px-2 py-1 rounded-md text-[11px] font-bold border ${
                                   dpi === d
                                     ? 'bg-sky-600 text-white border-sky-600'
-                                    : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                                    : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'
                                 }`}
                               >
                                 {d}
@@ -758,7 +757,7 @@ export default function ImageResizer() {
                           </div>
                         </div>
                       )}
-                      <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+                      <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300 cursor-pointer">
                         <input
                           type="checkbox"
                           checked={lockAspect}
@@ -771,17 +770,17 @@ export default function ImageResizer() {
 
                   {resizeMode === 'percent' && natural && (
                     <div>
-                      <label className="text-xs font-medium text-slate-600">Scale (% of original)</label>
+                      <label className="text-xs font-medium text-slate-600 dark:text-slate-400">Scale (% of original)</label>
                       <input
                         type="number"
                         min={1}
                         max={500}
                         step={1}
-                        className="mt-1 w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"
+                        className="mt-1 w-full bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg px-3 py-2 text-sm"
                         value={percentStr}
                         onChange={(e) => setPercentStr(e.target.value)}
                       />
-                      <p className="text-xs text-slate-500 mt-1">
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
                         From {natural.w}×{natural.h}px →{' '}
                         {Math.max(1, Math.round((natural.w * parseFloat(percentStr || '0')) / 100))}×
                         {Math.max(1, Math.round((natural.h * parseFloat(percentStr || '0')) / 100))}px
@@ -791,7 +790,7 @@ export default function ImageResizer() {
 
                   {resizeMode === 'social' && (
                     <div className="space-y-2">
-                      <p className="text-xs text-slate-500">Preset output (pixels)</p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">Preset output (pixels)</p>
                       <div className="grid grid-cols-1 gap-1.5 max-h-48 overflow-y-auto">
                         {SOCIAL_PRESETS.map((p) => (
                           <button
@@ -800,12 +799,12 @@ export default function ImageResizer() {
                             onClick={() => applySocialPreset(p.id)}
                             className={`text-left px-3 py-2 rounded-lg text-sm border transition-colors ${
                               socialId === p.id
-                                ? 'border-sky-500 bg-sky-50 text-sky-900'
-                                : 'border-slate-200 hover:bg-slate-50'
+                                ? 'border-sky-500 bg-sky-50 dark:bg-sky-950/40 text-sky-900 dark:text-sky-200'
+                                : 'border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800'
                             }`}
                           >
                             <span className="font-medium">{p.label}</span>
-                            <span className="text-slate-500 text-xs ml-2">
+                            <span className="text-slate-500 dark:text-slate-400 text-xs ml-2">
                               {p.w}×{p.h}
                             </span>
                           </button>
@@ -814,11 +813,11 @@ export default function ImageResizer() {
                     </div>
                   )}
 
-                  <div className="border-t border-slate-200 pt-4 mt-1 space-y-3">
-                    <label className="flex items-start gap-2 text-sm text-slate-700 cursor-pointer">
+                  <div className="border-t border-slate-200 dark:border-slate-800 pt-4 mt-1 space-y-3">
+                    <label className="flex items-start gap-2 text-sm text-slate-700 dark:text-slate-300 cursor-pointer">
                       <input
                         type="checkbox"
-                        className="mt-1 rounded border-slate-300"
+                        className="mt-1 rounded border-slate-300 dark:border-slate-600"
                         checked={changeBgPanel}
                         onChange={(e) => {
                           setChangeBgPanel(e.target.checked);
@@ -827,24 +826,24 @@ export default function ImageResizer() {
                       />
                       <span>
                         <span className="font-semibold">Change background</span>
-                        <span className="block text-xs text-slate-500 font-normal mt-0.5">
+                        <span className="block text-xs text-slate-500 dark:text-slate-400 font-normal mt-0.5">
                           Remove or replace the background, then set size and export here — no re-upload.
                         </span>
                       </span>
                     </label>
 
                     {changeBgPanel && (
-                      <div className="rounded-xl border border-slate-200 bg-slate-50/90 p-4 space-y-3 text-sm">
+                      <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/90 dark:bg-slate-800/60 p-4 space-y-3 text-sm">
                         {!bgModelReady && (
-                          <p className="text-xs text-slate-600">{bgPreloadText || 'Preparing model…'}</p>
+                          <p className="text-xs text-slate-600 dark:text-slate-400">{bgPreloadText || 'Preparing model…'}</p>
                         )}
                         {bgError && (
-                          <p className="text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-lg p-2">
+                          <p className="text-xs text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800/60 rounded-lg p-2">
                             {bgError}
                           </p>
                         )}
 
-                        <label className="flex items-center gap-2 text-slate-700 cursor-pointer">
+                        <label className="flex items-center gap-2 text-slate-700 dark:text-slate-300 cursor-pointer">
                           <input
                             type="checkbox"
                             checked={bgTransparent}
@@ -862,16 +861,16 @@ export default function ImageResizer() {
 
                         {!bgTransparent && (
                           <div>
-                            <label className="text-xs font-medium text-slate-600">Background color</label>
+                            <label className="text-xs font-medium text-slate-600 dark:text-slate-400">Background color</label>
                             <div className="mt-1 flex gap-2 items-center">
                               <input
                                 type="color"
                                 value={bgFillColor}
                                 onChange={(e) => setBgFillColor(e.target.value)}
-                                className="h-10 w-14 rounded border border-slate-200 cursor-pointer shrink-0"
+                                className="h-10 w-14 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 cursor-pointer shrink-0"
                               />
                               <input
-                                className="flex-1 min-w-0 border border-slate-200 rounded-lg px-2 py-2 text-sm font-mono"
+                                className="flex-1 min-w-0 bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg px-2 py-2 text-sm font-mono"
                                 value={bgFillColor}
                                 onChange={(e) => setBgFillColor(e.target.value)}
                               />
@@ -880,8 +879,8 @@ export default function ImageResizer() {
                         )}
 
                         <div>
-                          <label className="text-xs font-medium text-slate-600">Background image (optional)</label>
-                          <p className="text-[11px] text-slate-500 mt-0.5">
+                          <label className="text-xs font-medium text-slate-600 dark:text-slate-400">Background image (optional)</label>
+                          <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
                             Fills behind the cutout (cover). Turn off Transparent to use it.
                           </p>
                           <input
@@ -907,7 +906,7 @@ export default function ImageResizer() {
                             <button
                               type="button"
                               onClick={() => bgImageInputRef.current?.click()}
-                              className="px-3 py-2 rounded-lg border border-slate-200 bg-white text-xs font-semibold hover:bg-slate-50"
+                              className="px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 text-xs font-semibold hover:bg-slate-50 dark:hover:bg-slate-700"
                             >
                               Choose image…
                             </button>
@@ -919,7 +918,7 @@ export default function ImageResizer() {
                                   setBgImageFile(null);
                                   setBgImageUrl(null);
                                 }}
-                                className="text-xs font-semibold text-rose-600"
+                                className="text-xs font-semibold text-rose-600 dark:text-rose-400"
                               >
                                 Clear
                               </button>
@@ -931,7 +930,7 @@ export default function ImageResizer() {
                           type="button"
                           disabled={bgBusy || !bgModelReady || !natural}
                           onClick={() => void applyRemoveBackground()}
-                          className="w-full inline-flex items-center justify-center gap-2 py-2.5 rounded-xl bg-slate-800 text-white text-sm font-bold hover:bg-slate-900 disabled:opacity-50"
+                          className="w-full inline-flex items-center justify-center gap-2 py-2.5 rounded-xl bg-slate-800 dark:bg-slate-700 text-white text-sm font-bold hover:bg-slate-900 dark:hover:bg-slate-600 disabled:opacity-50"
                         >
                           <Eraser className="w-4 h-4 shrink-0" />
                           {bgBusy ? 'Processing…' : 'Remove / apply background'}
@@ -941,7 +940,7 @@ export default function ImageResizer() {
                           <button
                             type="button"
                             onClick={revertToOriginalImage}
-                            className="w-full inline-flex items-center justify-center gap-2 py-2 text-xs font-semibold text-slate-600 hover:text-slate-900"
+                            className="w-full inline-flex items-center justify-center gap-2 py-2 text-xs font-semibold text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200"
                           >
                             <RotateCcw className="w-3.5 h-3.5 shrink-0" />
                             Revert to original upload
@@ -954,13 +953,13 @@ export default function ImageResizer() {
               )}
             </div>
 
-            <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
-              <h2 className="text-sm font-bold text-slate-800 uppercase tracking-wide mb-3">Export settings</h2>
+            <div className="bg-white dark:bg-slate-900/90 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 shadow-sm">
+              <h2 className="text-sm font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wide mb-3">Export settings</h2>
               <div className="space-y-3">
                 <div>
-                  <label className="text-xs font-medium text-slate-600">Save image as</label>
+                  <label className="text-xs font-medium text-slate-600 dark:text-slate-400">Save image as</label>
                   <select
-                    className="mt-1 w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"
+                    className="mt-1 w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg px-3 py-2 text-sm"
                     value={exportFormat}
                     onChange={(e) => setExportFormat(e.target.value as ExportFormat)}
                   >
@@ -971,16 +970,16 @@ export default function ImageResizer() {
                   </select>
                 </div>
                 <div>
-                  <label className="text-xs font-medium text-slate-600">Target file size (optional)</label>
+                  <label className="text-xs font-medium text-slate-600 dark:text-slate-400">Target file size (optional)</label>
                   <div className="flex gap-2 mt-1">
                     <input
-                      className="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-sm"
+                      className="flex-1 bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 rounded-lg px-3 py-2 text-sm"
                       placeholder="e.g. 50"
                       value={targetKb}
                       onChange={(e) => setTargetKb(e.target.value)}
                     />
                     <select
-                      className="border border-slate-200 rounded-lg px-2 text-sm"
+                      className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg px-2 text-sm"
                       value={targetUnit}
                       onChange={(e) => setTargetUnit(e.target.value as 'KB' | 'MB')}
                     >
@@ -988,7 +987,7 @@ export default function ImageResizer() {
                       <option value="MB">MB</option>
                     </select>
                   </div>
-                  <p className="text-xs text-slate-500 mt-1">
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
                     Best-effort for JPEG/WebP. Use JPEG for strict form limits.
                   </p>
                 </div>
@@ -1003,11 +1002,11 @@ export default function ImageResizer() {
               </div>
             </div>
 
-            <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-3">
-              <h2 className="text-sm font-bold text-slate-800 uppercase tracking-wide">Batch (ZIP)</h2>
-              <p className="text-xs text-slate-500">
+            <div className="bg-white dark:bg-slate-900/90 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 shadow-sm space-y-3">
+              <h2 className="text-sm font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wide">Batch (ZIP)</h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
                 Queue more images with the same resize rules (great for % or social presets). Export downloads a{' '}
-                <code className="text-[10px] bg-slate-100 px-1 rounded">.zip</code>.
+                <code className="text-[10px] bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 px-1 rounded">.zip</code>.
               </p>
               <input
                 ref={batchInputRef}
@@ -1024,18 +1023,18 @@ export default function ImageResizer() {
               <button
                 type="button"
                 onClick={() => batchInputRef.current?.click()}
-                className="w-full py-2.5 rounded-xl border-2 border-dashed border-slate-200 text-slate-700 font-semibold text-sm hover:bg-slate-50"
+                className="w-full py-2.5 rounded-xl border-2 border-dashed border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold text-sm hover:bg-slate-50 dark:hover:bg-slate-800"
               >
                 Add images to queue…
               </button>
               {batchQueue.length > 0 && (
-                <ul className="max-h-32 overflow-y-auto text-xs space-y-1 border border-slate-100 rounded-lg p-2">
+                <ul className="max-h-32 overflow-y-auto text-xs space-y-1 border border-slate-100 dark:border-slate-800 rounded-lg p-2 text-slate-700 dark:text-slate-300">
                   {batchQueue.map((f, i) => (
                     <li key={`${f.name}-${i}`} className="flex justify-between gap-2 truncate">
                       <span className="truncate">{f.name}</span>
                       <button
                         type="button"
-                        className="text-rose-600 font-semibold shrink-0"
+                        className="text-rose-600 dark:text-rose-400 font-semibold shrink-0"
                         onClick={() => setBatchQueue((q) => q.filter((_, j) => j !== i))}
                       >
                         ×
@@ -1057,12 +1056,12 @@ export default function ImageResizer() {
           </div>
 
           <div className="lg:col-span-8 space-y-4 relative z-0 min-w-0 isolate">
-            <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm min-h-[320px] flex flex-col items-center justify-center overflow-hidden">
+            <div className="bg-white dark:bg-slate-900/90 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 shadow-sm min-h-[320px] flex flex-col items-center justify-center overflow-hidden">
               {objectUrl && natural ? (
                 <div className="w-full space-y-4">
-                  <div className="flex flex-wrap items-center gap-3 text-sm text-slate-600">
+                  <div className="flex flex-wrap items-center gap-3 text-sm text-slate-600 dark:text-slate-300">
                     <ImageIcon className="w-4 h-4" />
-                    <span className="font-mono bg-slate-100 px-2 py-1 rounded">
+                    <span className="font-mono bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded">
                       {natural.w} × {natural.h} px
                       {resultMeta
                         ? ` → ${resultMeta.w} × ${resultMeta.h} px`
@@ -1071,12 +1070,12 @@ export default function ImageResizer() {
                           : ''}
                     </span>
                   </div>
-                  <p className="text-xs text-slate-500">
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
                     {editPreviewUrl
                       ? 'Preview uses your edited image (background changes apply here before resize).'
                       : 'Showing your file as uploaded.'}
                   </p>
-                  <div className="rounded-xl border border-slate-200 bg-slate-100 flex justify-center items-center max-h-[min(520px,65vh)] overflow-hidden">
+                  <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800/80 flex justify-center items-center max-h-[min(520px,65vh)] overflow-hidden">
                     {resultUrl ? (
                       <div className="w-full space-y-3 p-3">
                         <div className="relative inline-block max-w-full mx-auto select-none">
@@ -1095,7 +1094,7 @@ export default function ImageResizer() {
                           />
                         </div>
                         <div>
-                          <div className="flex justify-between text-[10px] font-bold text-slate-500 uppercase tracking-wide">
+                          <div className="flex justify-between text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wide">
                             <span>Before</span>
                             <span>After</span>
                           </div>
@@ -1132,12 +1131,12 @@ export default function ImageResizer() {
                     </div>
                   )}
                   {note && (
-                    <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3">{note}</p>
+                    <p className="text-sm text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 rounded-lg p-3">{note}</p>
                   )}
                 </div>
               ) : (
                 <div className="w-full max-w-md text-center space-y-3">
-                  <p className="text-slate-500">Preview appears here after you add an image.</p>
+                  <p className="text-slate-500 dark:text-slate-400">Preview appears here after you add an image.</p>
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
@@ -1154,8 +1153,8 @@ export default function ImageResizer() {
       <canvas ref={canvasRef} className="hidden" />
 
       {resultUrl && resultMeta && (
-        <div className="lg:hidden fixed bottom-0 inset-x-0 z-40 border-t border-slate-200 bg-white/95 backdrop-blur px-4 py-3 flex items-center justify-between gap-3 shadow-[0_-8px_24px_rgba(0,0,0,0.08)]">
-          <span className="text-xs text-slate-600 truncate">
+        <div className="lg:hidden fixed bottom-0 inset-x-0 z-40 border-t border-slate-200 dark:border-slate-800 bg-white/95 dark:bg-slate-900/95 backdrop-blur px-4 py-3 flex items-center justify-between gap-3 shadow-[0_-8px_24px_rgba(0,0,0,0.08)]">
+          <span className="text-xs text-slate-600 dark:text-slate-300 truncate">
             {(resultMeta.bytes / 1024).toFixed(1)} KB · {resultMeta.w}×{resultMeta.h}
           </span>
           <a
@@ -1168,6 +1167,6 @@ export default function ImageResizer() {
           </a>
         </div>
       )}
-    </div>
+    </ToolWorkspaceShell>
   );
 }

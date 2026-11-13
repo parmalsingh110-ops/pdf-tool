@@ -1,5 +1,6 @@
 @custom-variant dark (&:where(.dark, .dark *));
 @import "tailwindcss";
+@import "./styles/pearl-aurora.css";
 
 @keyframes toast-in {
   from { opacity: 0; transform: translateX(110%) scale(0.95); }
@@ -16,4 +17,3 @@
 .animate-search-in {
   animation: search-in 0.18s ease-out both;
 }
-

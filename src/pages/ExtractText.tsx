@@ -6,6 +6,7 @@ import '../lib/pdfWorker';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { useToast } from '../components/Toast';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 
 interface PageTextItem {
   pageNumber: number;
@@ -184,31 +185,32 @@ export default function ExtractText() {
   };
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-start p-6 md:p-8 min-h-screen bg-gradient-to-br from-violet-50/40 via-white to-slate-50">
-      <div className="text-center mb-10 max-w-2xl">
-        <div className="inline-flex items-center justify-center w-14 h-14 bg-violet-100 rounded-2xl mb-4">
-          <FileType className="w-7 h-7 text-violet-600" />
-        </div>
-        <h1 className="text-4xl font-extrabold text-gray-900 mb-3">Extract Text from PDF</h1>
-        <p className="text-lg text-gray-500">Extract clean text content with per-page browsing, instant search, and export to TXT, Markdown, or JSON.</p>
-      </div>
+    <ToolWorkspaceShell
+      title="Extract Text from PDF"
+      subtitle="Extract clean text content with per-page browsing, instant search, and export to TXT, Markdown, or JSON."
+      categoryLabel="Text Extraction & Export"
+      icon={FileType}
+      microVariant="ocr"
+      tone="violet"
+    >
+      <div className="flex flex-col items-center justify-start">
 
       {!file ? (
         <FileDropzone onDrop={handleDrop} multiple={false} title="Drop PDF here or click to select" />
       ) : pages.length === 0 ? (
         /* Uploaded & Ready to Extract */
-        <div className="w-full max-w-2xl bg-white rounded-2xl shadow-sm border border-gray-100 p-8">
-          <div className="flex items-center gap-4 p-5 bg-violet-50/50 rounded-2xl border border-violet-100 mb-8">
-            <div className="w-14 h-14 bg-violet-100 text-violet-600 rounded-xl flex items-center justify-center shrink-0">
+        <div className="w-full max-w-2xl bg-white dark:bg-slate-900/90 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-800 p-8">
+          <div className="flex items-center gap-4 p-5 bg-violet-50/50 dark:bg-violet-950/30 rounded-2xl border border-violet-100 dark:border-violet-800/50 mb-8">
+            <div className="w-14 h-14 bg-violet-100 dark:bg-violet-950/60 text-violet-600 dark:text-violet-400 rounded-xl flex items-center justify-center shrink-0">
               <FileText className="w-7 h-7" />
             </div>
             <div className="flex-1 min-w-0">
-              <p className="font-semibold text-gray-900 truncate">{file.name}</p>
-              <p className="text-xs text-gray-500 mt-0.5">{(file.size / 1024 / 1024).toFixed(2)} MB · Ready for extraction</p>
+              <p className="font-semibold text-gray-900 dark:text-slate-100 truncate">{file.name}</p>
+              <p className="text-xs text-gray-500 dark:text-slate-400 mt-0.5">{(file.size / 1024 / 1024).toFixed(2)} MB · Ready for extraction</p>
             </div>
             <button
               onClick={() => setFile(null)}
-              className="text-xs text-gray-400 hover:text-red-500 px-3 py-1.5 rounded-lg hover:bg-red-50 transition-colors"
+              className="text-xs text-gray-400 dark:text-slate-500 hover:text-red-500 dark:hover:text-red-400 px-3 py-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/40 transition-colors"
             >
               Change
             </button>
@@ -230,7 +232,7 @@ export default function ExtractText() {
                 </>
               )}
             </button>
-            <p className="text-center text-xs text-gray-400">
+            <p className="text-center text-xs text-gray-400 dark:text-slate-500">
               100% private. Text extraction runs entirely locally in your browser.
             </p>
           </div>
@@ -240,42 +242,42 @@ export default function ExtractText() {
         <div className="w-full max-w-6xl space-y-6">
 
           {/* Stats Header Bar */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-white p-4 rounded-2xl shadow-sm border border-gray-100">
-            <div className="p-3 bg-violet-50/50 rounded-xl border border-violet-100/60 text-center">
-              <div className="text-xs font-semibold text-gray-500">Pages</div>
-              <div className="text-xl font-bold text-violet-700 mt-0.5">{stats.totalPages}</div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-white dark:bg-slate-900/90 p-4 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-800">
+            <div className="p-3 bg-violet-50/50 dark:bg-violet-950/30 rounded-xl border border-violet-100/60 dark:border-violet-800/40 text-center">
+              <div className="text-xs font-semibold text-gray-500 dark:text-slate-400">Pages</div>
+              <div className="text-xl font-bold text-violet-700 dark:text-violet-300 mt-0.5">{stats.totalPages}</div>
             </div>
-            <div className="p-3 bg-violet-50/50 rounded-xl border border-violet-100/60 text-center">
-              <div className="text-xs font-semibold text-gray-500">Total Words</div>
-              <div className="text-xl font-bold text-violet-700 mt-0.5">{stats.totalWords.toLocaleString()}</div>
+            <div className="p-3 bg-violet-50/50 dark:bg-violet-950/30 rounded-xl border border-violet-100/60 dark:border-violet-800/40 text-center">
+              <div className="text-xs font-semibold text-gray-500 dark:text-slate-400">Total Words</div>
+              <div className="text-xl font-bold text-violet-700 dark:text-violet-300 mt-0.5">{stats.totalWords.toLocaleString()}</div>
             </div>
-            <div className="p-3 bg-violet-50/50 rounded-xl border border-violet-100/60 text-center">
-              <div className="text-xs font-semibold text-gray-500">Characters</div>
-              <div className="text-xl font-bold text-violet-700 mt-0.5">{stats.totalChars.toLocaleString()}</div>
+            <div className="p-3 bg-violet-50/50 dark:bg-violet-950/30 rounded-xl border border-violet-100/60 dark:border-violet-800/40 text-center">
+              <div className="text-xs font-semibold text-gray-500 dark:text-slate-400">Characters</div>
+              <div className="text-xl font-bold text-violet-700 dark:text-violet-300 mt-0.5">{stats.totalChars.toLocaleString()}</div>
             </div>
-            <div className="p-3 bg-violet-50/50 rounded-xl border border-violet-100/60 text-center">
-              <div className="text-xs font-semibold text-gray-500">Reading Time</div>
-              <div className="text-xl font-bold text-violet-700 mt-0.5">~{stats.readingTimeMin} min</div>
+            <div className="p-3 bg-violet-50/50 dark:bg-violet-950/30 rounded-xl border border-violet-100/60 dark:border-violet-800/40 text-center">
+              <div className="text-xs font-semibold text-gray-500 dark:text-slate-400">Reading Time</div>
+              <div className="text-xl font-bold text-violet-700 dark:text-violet-300 mt-0.5">~{stats.readingTimeMin} min</div>
             </div>
           </div>
 
           {/* Controls Bar: Search, Page Tabs, Font Size */}
-          <div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 space-y-3">
+          <div className="bg-white dark:bg-slate-900/90 p-4 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-800 space-y-3">
             <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
               {/* Search Bar */}
               <div className="relative w-full sm:w-80">
-                <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <Search className="w-4 h-4 text-gray-400 dark:text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
                   value={searchQuery}
                   onChange={e => setSearchQuery(e.target.value)}
                   placeholder="Search in extracted text..."
-                  className="w-full pl-9 pr-8 py-2 border border-gray-200 rounded-xl text-xs focus:ring-2 focus:ring-violet-500 outline-none"
+                  className="w-full pl-9 pr-8 py-2 bg-white dark:bg-slate-800/80 border border-gray-200 dark:border-slate-700 text-gray-900 dark:text-slate-100 placeholder-gray-400 dark:placeholder-slate-500 rounded-xl text-xs focus:ring-2 focus:ring-violet-500 outline-none"
                 />
                 {searchQuery && (
                   <button
                     onClick={() => setSearchQuery('')}
-                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-slate-300"
                   >
                     <X className="w-3.5 h-3.5" />
                   </button>
@@ -284,14 +286,14 @@ export default function ExtractText() {
 
               {/* Search results badge */}
               {searchQuery && (
-                <span className="text-xs bg-amber-50 text-amber-800 border border-amber-200 px-3 py-1.5 rounded-lg font-medium shrink-0">
+                <span className="text-xs bg-amber-50 dark:bg-amber-950/50 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800/50 px-3 py-1.5 rounded-lg font-medium shrink-0">
                   {searchMatchCount} match{searchMatchCount !== 1 ? 'es' : ''} found
                 </span>
               )}
 
               {/* Font Size controls */}
               <div className="flex items-center gap-1.5 ml-auto">
-                <span className="text-xs text-gray-400 mr-1">Size:</span>
+                <span className="text-xs text-gray-400 dark:text-slate-500 mr-1">Size:</span>
                 {(['sm', 'base', 'lg'] as const).map(s => (
                   <button
                     key={s}
@@ -299,7 +301,7 @@ export default function ExtractText() {
                     className={`px-2.5 py-1 text-xs rounded-lg font-semibold transition-colors ${
                       fontSize === s
                         ? 'bg-violet-600 text-white'
-                        : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                        : 'bg-gray-100 dark:bg-slate-800 text-gray-600 dark:text-slate-300 hover:bg-gray-200 dark:hover:bg-slate-700'
                     }`}
                   >
                     {s === 'sm' ? 'S' : s === 'base' ? 'M' : 'L'}
@@ -309,13 +311,13 @@ export default function ExtractText() {
             </div>
 
             {/* Page Tabs */}
-            <div className="flex items-center gap-2 overflow-x-auto pb-1 pt-1 border-t border-gray-100">
+            <div className="flex items-center gap-2 overflow-x-auto pb-1 pt-1 border-t border-gray-100 dark:border-slate-800">
               <button
                 onClick={() => setSelectedTab('all')}
                 className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-colors ${
                   selectedTab === 'all'
                     ? 'bg-violet-600 text-white shadow-xs'
-                    : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
+                    : 'bg-gray-50 dark:bg-slate-800/80 text-gray-600 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-700'
                 }`}
               >
                 All Pages ({pages.length})
@@ -327,7 +329,7 @@ export default function ExtractText() {
                   className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-colors ${
                     selectedTab === p.pageNumber
                       ? 'bg-violet-600 text-white shadow-xs'
-                      : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
+                      : 'bg-gray-50 dark:bg-slate-800/80 text-gray-600 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-700'
                   }`}
                 >
                   Page {p.pageNumber} <span className="text-[10px] opacity-70">({p.wordCount}w)</span>
@@ -337,17 +339,17 @@ export default function ExtractText() {
           </div>
 
           {/* Text Content Box */}
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+          <div className="bg-white dark:bg-slate-900/90 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-800 overflow-hidden">
             {/* Box Header */}
-            <div className="flex items-center justify-between p-3.5 bg-slate-50 border-b border-gray-100 text-xs">
-              <span className="font-bold text-gray-700">
+            <div className="flex items-center justify-between p-3.5 bg-slate-50 dark:bg-slate-800/70 border-b border-gray-100 dark:border-slate-800 text-xs">
+              <span className="font-bold text-gray-700 dark:text-slate-200">
                 {selectedTab === 'all' ? 'Complete Extracted Text' : `Page ${selectedTab} Content`}
               </span>
               <div className="flex items-center gap-2">
                 {selectedTab !== 'all' ? (
                   <button
                     onClick={() => copyText(currentText, false)}
-                    className="inline-flex items-center gap-1 px-3 py-1 bg-white text-gray-700 border border-gray-200 rounded-lg hover:bg-gray-50 font-semibold"
+                    className="inline-flex items-center gap-1 px-3 py-1 bg-white dark:bg-slate-800 text-gray-700 dark:text-slate-200 border border-gray-200 dark:border-slate-700 rounded-lg hover:bg-gray-50 dark:hover:bg-slate-700 font-semibold"
                   >
                     {copiedPage ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
                     {copiedPage ? 'Copied Page!' : 'Copy This Page'}
@@ -355,7 +357,7 @@ export default function ExtractText() {
                 ) : (
                   <button
                     onClick={() => copyText(currentText, true)}
-                    className="inline-flex items-center gap-1 px-3 py-1 bg-white text-gray-700 border border-gray-200 rounded-lg hover:bg-gray-50 font-semibold"
+                    className="inline-flex items-center gap-1 px-3 py-1 bg-white dark:bg-slate-800 text-gray-700 dark:text-slate-200 border border-gray-200 dark:border-slate-700 rounded-lg hover:bg-gray-50 dark:hover:bg-slate-700 font-semibold"
                   >
                     {copiedAll ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
                     {copiedAll ? 'Copied All!' : 'Copy All Text'}
@@ -365,19 +367,19 @@ export default function ExtractText() {
             </div>
 
             {/* Main Pre Box */}
-            <div className="p-6 max-h-[500px] overflow-y-auto bg-white font-mono text-gray-800">
+            <div className="p-6 max-h-[500px] overflow-y-auto bg-white dark:bg-slate-950/60 font-mono text-gray-800 dark:text-slate-200">
               {currentText ? (
                 <div className={`whitespace-pre-wrap ${fontSizeClasses[fontSize]}`}>
                   {renderHighlightedText(currentText)}
                 </div>
               ) : (
-                <p className="text-gray-400 italic text-sm">No text detected on this page (page may contain scanned images).</p>
+                <p className="text-gray-400 dark:text-slate-500 italic text-sm">No text detected on this page (page may contain scanned images).</p>
               )}
             </div>
           </div>
 
           {/* Export Action Bar */}
-          <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 flex flex-wrap items-center justify-between gap-4">
+          <div className="bg-white dark:bg-slate-900/90 p-5 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-800 flex flex-wrap items-center justify-between gap-4">
             <div className="flex flex-wrap items-center gap-2.5">
               <button
                 onClick={downloadAsTxt}
@@ -387,27 +389,28 @@ export default function ExtractText() {
               </button>
               <button
                 onClick={downloadAsMarkdown}
-                className="inline-flex items-center gap-2 px-4 py-3 bg-slate-100 text-slate-700 font-semibold rounded-xl hover:bg-slate-200 transition-colors text-sm"
+                className="inline-flex items-center gap-2 px-4 py-3 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 font-semibold rounded-xl hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors text-sm"
               >
-                <FileCode2 className="w-4 h-4 text-violet-600" /> Export as Markdown
+                <FileCode2 className="w-4 h-4 text-violet-600 dark:text-violet-400" /> Export as Markdown
               </button>
               <button
                 onClick={downloadAsJson}
-                className="inline-flex items-center gap-2 px-4 py-3 bg-slate-100 text-slate-700 font-semibold rounded-xl hover:bg-slate-200 transition-colors text-sm"
+                className="inline-flex items-center gap-2 px-4 py-3 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 font-semibold rounded-xl hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors text-sm"
               >
-                <FileJson className="w-4 h-4 text-violet-600" /> Export as JSON
+                <FileJson className="w-4 h-4 text-violet-600 dark:text-violet-400" /> Export as JSON
               </button>
             </div>
 
             <button
               onClick={() => { setFile(null); setPages([]); }}
-              className="text-xs text-gray-500 hover:text-gray-800 font-medium px-4 py-2"
+              className="text-xs text-gray-500 dark:text-slate-400 hover:text-gray-800 dark:hover:text-slate-200 font-medium px-4 py-2"
             >
               Extract another PDF
             </button>
           </div>
         </div>
       )}
-    </div>
+      </div>
+    </ToolWorkspaceShell>
   );
 }

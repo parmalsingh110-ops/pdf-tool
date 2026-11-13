@@ -51,7 +51,7 @@ export function initDomResilience(): void {
     }
 
     try {
-      return originalInsertBefore.call(this, newNode, referenceNode);
+      return originalInsertBefore.call(this, newNode, referenceNode) as T;
     } catch (err: any) {
       if (isDomMutationError(err)) {
         try {
@@ -79,7 +79,7 @@ export function initDomResilience(): void {
     }
 
     try {
-      return originalRemoveChild.call(this, child);
+      return originalRemoveChild.call(this, child) as T;
     } catch (err: any) {
       if (isDomMutationError(err)) {
         return child;
@@ -106,7 +106,7 @@ export function initDomResilience(): void {
     }
 
     try {
-      return originalReplaceChild.call(this, newChild, oldChild);
+      return originalReplaceChild.call(this, newChild, oldChild) as T;
     } catch (err: any) {
       if (isDomMutationError(err)) {
         try {

@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { ShieldCheck, Zap, Lock, HelpCircle, CheckCircle2, ArrowRight } from 'lucide-react';
+import { HelpCircle, CheckCircle2, ArrowRight } from 'lucide-react';
 
 export interface SEOStep {
   step: string;
@@ -74,13 +74,19 @@ export default function ToolSEOSection({
   const effectiveFeatures = features || defaultFeatures;
 
   return (
-    <section className="mt-16 pt-12 border-t border-slate-200/80 dark:border-slate-800/80 max-w-5xl mx-auto px-4 text-slate-700 dark:text-slate-300">
+    <section
+      className="mt-16 pt-12 border-t max-w-5xl mx-auto px-4"
+      style={{ borderColor: 'var(--pms-border)', color: 'var(--pms-muted)' }}
+    >
       {/* ── Headline & Overview ── */}
       <div className="text-center max-w-3xl mx-auto mb-12">
-        <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight">
+        <h2
+          className="text-2xl sm:text-3xl font-extrabold tracking-tight"
+          style={{ color: 'var(--pms-ink)' }}
+        >
           {headline || `How to Use ${toolName} Online`}
         </h2>
-        <p className="mt-3 text-sm sm:text-base text-slate-600 dark:text-slate-400 leading-relaxed">
+        <p className="mt-3 text-sm sm:text-base leading-relaxed" style={{ color: 'var(--pms-muted)' }}>
           {description}
         </p>
       </div>
@@ -90,34 +96,54 @@ export default function ToolSEOSection({
         {effectiveSteps.map((s, idx) => (
           <div
             key={idx}
-            className="p-6 rounded-2xl bg-white dark:bg-slate-900/70 border border-slate-200/80 dark:border-slate-800 shadow-sm relative overflow-hidden"
+            className="p-6 rounded-2xl border relative overflow-hidden"
+            style={{
+              backgroundColor: 'var(--pms-white)',
+              borderColor: 'var(--pms-border)',
+              boxShadow: 'var(--pms-shadow-sm)',
+            }}
           >
-            <span className="text-4xl font-black text-rose-500/20 dark:text-rose-400/15 absolute right-4 top-3 select-none">
+            <span
+              className="text-4xl font-black absolute right-4 top-3 select-none opacity-15"
+              style={{ color: 'var(--pms-violet)' }}
+            >
               {s.step}
             </span>
-            <div className="w-8 h-8 rounded-xl bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 flex items-center justify-center font-bold text-sm mb-4">
+            <div
+              className="w-8 h-8 rounded-xl flex items-center justify-center font-bold text-sm mb-4"
+              style={{ backgroundColor: 'var(--pms-soft-rose)', color: 'var(--pms-rose)' }}
+            >
               {idx + 1}
             </div>
-            <h3 className="text-base font-bold text-slate-900 dark:text-white mb-2">{s.title}</h3>
-            <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-400 leading-relaxed">{s.desc}</p>
+            <h3 className="text-base font-bold mb-2" style={{ color: 'var(--pms-ink)' }}>{s.title}</h3>
+            <p className="text-xs sm:text-sm leading-relaxed" style={{ color: 'var(--pms-muted)' }}>{s.desc}</p>
           </div>
         ))}
       </div>
 
       {/* ── Core Value Props ── */}
-      <div className="p-8 rounded-3xl bg-gradient-to-br from-slate-50 to-slate-100/60 dark:from-slate-900/50 dark:to-slate-900/20 border border-slate-200 dark:border-slate-800 mb-14">
-        <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-6 text-center sm:text-left">
+      <div
+        className="p-8 rounded-3xl border mb-14"
+        style={{
+          backgroundColor: 'var(--pms-lavender-surface)',
+          borderColor: 'var(--pms-border)',
+        }}
+      >
+        <h3 className="text-lg font-bold mb-6 text-center sm:text-left" style={{ color: 'var(--pms-ink)' }}>
           Why Choose PDF Media Suite?
         </h3>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
           {effectiveFeatures.map((f, i) => (
             <div key={i} className="flex gap-3.5">
-              <div className="w-5 h-5 rounded-full bg-emerald-100 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0 mt-0.5">
+              <div
+                className="w-5 h-5 rounded-full flex items-center justify-center shrink-0 mt-0.5"
+                style={{ backgroundColor: 'var(--pms-soft-mint)', color: '#047857' }}
+              >
                 <CheckCircle2 className="w-3.5 h-3.5" />
               </div>
               <div>
-                <h4 className="text-sm font-bold text-slate-900 dark:text-white mb-1">{f.title}</h4>
-                <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">{f.desc}</p>
+                <h4 className="text-sm font-bold mb-1" style={{ color: 'var(--pms-ink)' }}>{f.title}</h4>
+                <p className="text-xs leading-relaxed" style={{ color: 'var(--pms-muted)' }}>{f.desc}</p>
               </div>
             </div>
           ))}
@@ -128,8 +154,8 @@ export default function ToolSEOSection({
       {faqs && faqs.length > 0 && (
         <div className="mb-14">
           <div className="flex items-center gap-2 mb-6">
-            <HelpCircle className="w-5 h-5 text-rose-600 dark:text-rose-400" />
-            <h3 className="text-xl font-bold text-slate-900 dark:text-white">
+            <HelpCircle className="w-5 h-5" style={{ color: 'var(--pms-rose)' }} />
+            <h3 className="text-xl font-bold" style={{ color: 'var(--pms-ink)' }}>
               Frequently Asked Questions
             </h3>
           </div>
@@ -137,10 +163,11 @@ export default function ToolSEOSection({
             {faqs.map((faq, i) => (
               <div
                 key={i}
-                className="p-5 rounded-2xl bg-white dark:bg-slate-900/70 border border-slate-200/80 dark:border-slate-800"
+                className="p-5 rounded-2xl border"
+                style={{ backgroundColor: 'var(--pms-white)', borderColor: 'var(--pms-border)' }}
               >
-                <h4 className="text-sm font-bold text-slate-900 dark:text-white mb-2">{faq.q}</h4>
-                <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-400 leading-relaxed">{faq.a}</p>
+                <h4 className="text-sm font-bold mb-2" style={{ color: 'var(--pms-ink)' }}>{faq.q}</h4>
+                <p className="text-xs sm:text-sm leading-relaxed" style={{ color: 'var(--pms-muted)' }}>{faq.a}</p>
               </div>
             ))}
           </div>
@@ -149,8 +176,8 @@ export default function ToolSEOSection({
 
       {/* ── Related Tools Internal Linking ── */}
       {relatedTools && relatedTools.length > 0 && (
-        <div className="pt-6 border-t border-slate-200 dark:border-slate-800/60">
-          <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400 mb-4">
+        <div className="pt-6 border-t" style={{ borderColor: 'var(--pms-border)' }}>
+          <h3 className="text-sm font-bold uppercase tracking-wider mb-4" style={{ color: 'var(--pms-subtle-text)' }}>
             Explore Related Tools
           </h3>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -158,13 +185,17 @@ export default function ToolSEOSection({
               <Link
                 key={i}
                 to={t.path}
-                className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-900/50 border border-slate-200/60 dark:border-slate-800 hover:border-rose-300 dark:hover:border-rose-700 transition-colors group"
+                className="p-3.5 rounded-xl border hover:border-rose-300 dark:hover:border-rose-700 transition-colors group"
+                style={{ backgroundColor: 'var(--pms-white)', borderColor: 'var(--pms-border)' }}
               >
-                <p className="text-xs font-bold text-slate-800 dark:text-slate-200 group-hover:text-rose-600 dark:group-hover:text-rose-400 flex items-center justify-between">
+                <p
+                  className="text-xs font-bold group-hover:text-rose-600 dark:group-hover:text-rose-400 flex items-center justify-between"
+                  style={{ color: 'var(--pms-ink)' }}
+                >
                   {t.name}
                   <ArrowRight className="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 transition-opacity" />
                 </p>
-                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 line-clamp-1">{t.desc}</p>
+                <p className="text-[11px] mt-0.5 line-clamp-1" style={{ color: 'var(--pms-muted)' }}>{t.desc}</p>
               </Link>
             ))}
           </div>

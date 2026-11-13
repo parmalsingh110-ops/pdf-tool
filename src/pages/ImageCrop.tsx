@@ -2,6 +2,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { Crop, Download, RotateCw } from 'lucide-react';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 
 const PRESETS = [
   { label: 'Free', ratio: 0 },
@@ -117,11 +118,15 @@ export default function ImageCrop() {
   };
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center p-8">
-      <div className="text-center mb-8">
-        <h1 className="text-4xl font-bold text-gray-900 dark:text-white mb-4">Image Cropper</h1>
-        <p className="text-xl text-gray-600 dark:text-slate-400">Interactive crop with preset ratios — 1:1, 16:9, A4, Passport, and more.</p>
-      </div>
+    <ToolWorkspaceShell
+      title="Image Cropper"
+      subtitle="Interactive crop with preset ratios — 1:1, 16:9, A4, Passport, and more."
+      categoryLabel="Image Studio · Client-Side Crop"
+      icon={Crop}
+      microVariant="crop"
+      tone="emerald"
+    >
+      <div className="flex flex-col items-center">
       {!file ? (
         <label className="w-full max-w-3xl flex flex-col items-center justify-center h-72 border-4 border-dashed border-gray-300 dark:border-slate-700 rounded-2xl cursor-pointer bg-white dark:bg-slate-900 hover:border-emerald-400 transition-colors">
           <Crop className="w-16 h-16 text-gray-400 dark:text-slate-500 mb-4" />
@@ -176,6 +181,7 @@ export default function ImageCrop() {
           </div>
         </div>
       )}
-    </div>
+      </div>
+    </ToolWorkspaceShell>
   );
 }

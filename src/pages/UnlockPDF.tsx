@@ -6,6 +6,7 @@ import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { dataUrlToBytes } from '../lib/utils';
 import { apiFetch } from '../lib/api';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 
 interface DocPreset {
   id: string;
@@ -564,59 +565,55 @@ export default function UnlockPDF() {
   };
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center p-4 sm:p-8 max-w-5xl mx-auto w-full">
-      {/* Page Title & Intro */}
-      <div className="text-center mb-8">
-        <div className="inline-flex items-center gap-2 px-3 py-1 bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 rounded-full text-xs font-semibold mb-3 border border-purple-200 dark:border-purple-800">
-          <Sparkles className="w-3.5 h-3.5" /> Smart Document Password Helper Included
-        </div>
-        <h1 className="text-3xl sm:text-4xl font-extrabold text-gray-900 dark:text-white mb-3 tracking-tight">
-          Unlock PDF & Remove Password
-        </h1>
-        <p className="text-base sm:text-lg text-gray-600 dark:text-slate-300 max-w-2xl mx-auto">
-          Direct password pata hai ya nahi? Select your document (Aadhaar, SBI, HDFC, Jan Aadhaar, Form 16) aur hamara smart helper khud password banakar unlock karega!
-        </p>
-      </div>
+    <ToolWorkspaceShell
+      title="Unlock PDF & Remove Password"
+      subtitle="Direct password pata hai ya nahi? Select your document (Aadhaar, SBI, HDFC, Jan Aadhaar, Form 16) aur hamara smart helper khud password banakar unlock karega!"
+      categoryLabel="PDF Security · Smart Password Helper"
+      icon={Unlock}
+      microVariant="security"
+      tone="violet"
+    >
+      <div className="flex flex-col items-center w-full">
 
       {!file ? (
         <div className="w-full max-w-2xl">
           <FileDropzone onDrop={handleDrop} multiple={false} title="Select Password-Protected PDF File" />
 
           {/* Quick Info Grid for Common Formats */}
-          <div className="mt-8 bg-white border border-gray-200 rounded-2xl p-6 shadow-xs">
-            <h2 className="text-sm font-bold text-gray-700 uppercase tracking-wider mb-4 flex items-center gap-2">
-              <Key className="w-4 h-4 text-purple-600" /> Supported Indian Document Password Formats
+          <div className="mt-8 bg-white dark:bg-slate-900/90 border border-gray-200 dark:border-slate-800 rounded-2xl p-6 shadow-xs">
+            <h2 className="text-sm font-bold text-gray-700 dark:text-slate-200 uppercase tracking-wider mb-4 flex items-center gap-2">
+              <Key className="w-4 h-4 text-purple-600 dark:text-purple-400" /> Supported Indian Document Password Formats
             </h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-              <div className="p-3 bg-purple-50/50 rounded-xl border border-purple-100">
-                <p className="font-semibold text-purple-900">e-Aadhaar PDF</p>
-                <p className="text-gray-600 text-xs mt-1">Name ke first 4 letters (CAPITAL) + Birth Year (YYYY) e.g. <span className="font-mono font-medium text-purple-800">SURE1995</span></p>
+              <div className="p-3 bg-purple-50/50 dark:bg-purple-950/30 rounded-xl border border-purple-100 dark:border-purple-800/50">
+                <p className="font-semibold text-purple-900 dark:text-purple-200">e-Aadhaar PDF</p>
+                <p className="text-gray-600 dark:text-slate-300 text-xs mt-1">Name ke first 4 letters (CAPITAL) + Birth Year (YYYY) e.g. <span className="font-mono font-medium text-purple-800 dark:text-purple-300">SURE1995</span></p>
               </div>
-              <div className="p-3 bg-blue-50/50 rounded-xl border border-blue-100">
-                <p className="font-semibold text-blue-900">Rajasthan Jan Aadhaar</p>
-                <p className="text-gray-600 text-xs mt-1">Mukhiya Name (4 letters CAPITAL) + DDMM e.g. <span className="font-mono font-medium text-blue-800">ANIT1402</span></p>
+              <div className="p-3 bg-blue-50/50 dark:bg-blue-950/30 rounded-xl border border-blue-100 dark:border-blue-800/50">
+                <p className="font-semibold text-blue-900 dark:text-blue-200">Rajasthan Jan Aadhaar</p>
+                <p className="text-gray-600 dark:text-slate-300 text-xs mt-1">Mukhiya Name (4 letters CAPITAL) + DDMM e.g. <span className="font-mono font-medium text-blue-800 dark:text-blue-300">ANIT1402</span></p>
               </div>
-              <div className="p-3 bg-emerald-50/50 rounded-xl border border-emerald-100">
-                <p className="font-semibold text-emerald-900">Income Tax AIS / 26AS</p>
-                <p className="text-gray-600 text-xs mt-1">PAN Card (lowercase) + DOB (DDMMYYYY) e.g. <span className="font-mono font-medium text-emerald-800">abcde1234f05081995</span></p>
+              <div className="p-3 bg-emerald-50/50 dark:bg-emerald-950/30 rounded-xl border border-emerald-100 dark:border-emerald-800/50">
+                <p className="font-semibold text-emerald-900 dark:text-emerald-200">Income Tax AIS / 26AS</p>
+                <p className="text-gray-600 dark:text-slate-300 text-xs mt-1">PAN Card (lowercase) + DOB (DDMMYYYY) e.g. <span className="font-mono font-medium text-emerald-800 dark:text-emerald-300">abcde1234f05081995</span></p>
               </div>
-              <div className="p-3 bg-amber-50/50 rounded-xl border border-amber-100">
-                <p className="font-semibold text-amber-900">SBI YONO Statement</p>
-                <p className="text-gray-600 text-xs mt-1">Mobile ke last 5 digits + DOB (DDMMYY) e.g. <span className="font-mono font-medium text-amber-800">43210050895</span></p>
+              <div className="p-3 bg-amber-50/50 dark:bg-amber-950/30 rounded-xl border border-amber-100 dark:border-amber-800/50">
+                <p className="font-semibold text-amber-900 dark:text-amber-200">SBI YONO Statement</p>
+                <p className="text-gray-600 dark:text-slate-300 text-xs mt-1">Mobile ke last 5 digits + DOB (DDMMYY) e.g. <span className="font-mono font-medium text-amber-800 dark:text-amber-300">43210050895</span></p>
               </div>
             </div>
           </div>
         </div>
       ) : (
-        <div className="w-full max-w-3xl bg-white rounded-2xl shadow-sm border border-gray-200 p-6 sm:p-8">
+        <div className="w-full max-w-3xl bg-white dark:bg-slate-900/90 rounded-2xl shadow-sm border border-gray-200 dark:border-slate-800 p-6 sm:p-8">
           {/* File Card */}
-          <div className="flex items-center gap-4 p-4 sm:p-5 bg-gray-50 rounded-xl border border-gray-200 mb-6">
-            <div className="w-12 h-12 bg-purple-100 text-purple-600 rounded-xl flex items-center justify-center shrink-0">
+          <div className="flex items-center gap-4 p-4 sm:p-5 bg-gray-50 dark:bg-slate-800/70 rounded-xl border border-gray-200 dark:border-slate-700 mb-6">
+            <div className="w-12 h-12 bg-purple-100 dark:bg-purple-950/60 text-purple-600 dark:text-purple-400 rounded-xl flex items-center justify-center shrink-0">
               <FileText className="w-6 h-6" />
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-base font-bold text-gray-900 truncate">{file.name}</p>
-              <p className="text-xs text-gray-500">{(file.size / 1024 / 1024).toFixed(2)} MB • Encrypted PDF</p>
+              <p className="text-base font-bold text-gray-900 dark:text-slate-100 truncate">{file.name}</p>
+              <p className="text-xs text-gray-500 dark:text-slate-400">{(file.size / 1024 / 1024).toFixed(2)} MB • Encrypted PDF</p>
             </div>
             <button
               onClick={() => {
@@ -624,7 +621,7 @@ export default function UnlockPDF() {
                 setUnlockedUrl(null);
                 setErrorMsg(null);
               }}
-              className="text-xs font-semibold text-gray-500 hover:text-red-600 px-3 py-1.5 rounded-lg border border-gray-200 bg-white"
+              className="text-xs font-semibold text-gray-500 dark:text-slate-300 hover:text-red-600 dark:hover:text-red-400 px-3 py-1.5 rounded-lg border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800"
             >
               Change File
             </button>
@@ -633,19 +630,19 @@ export default function UnlockPDF() {
           {!unlockedUrl ? (
             <div className="space-y-6">
               {/* Mode Toggle Bar */}
-              <div className="grid grid-cols-2 p-1 bg-gray-100 rounded-xl gap-1">
+              <div className="grid grid-cols-2 p-1 bg-gray-100 dark:bg-slate-800 rounded-xl gap-1">
                 <button
                   type="button"
                   onClick={() => setUnlockMode('smart')}
                   className={`py-2.5 px-4 rounded-lg text-sm font-bold transition-all flex items-center justify-center gap-2 ${
                     unlockMode === 'smart'
-                      ? 'bg-white text-purple-700 shadow-xs border border-purple-200'
-                      : 'text-gray-600 hover:text-gray-900'
+                      ? 'bg-white dark:bg-slate-900 text-purple-700 dark:text-purple-300 shadow-xs border border-purple-200 dark:border-purple-700/60'
+                      : 'text-gray-600 dark:text-slate-400 hover:text-gray-900 dark:hover:text-slate-200'
                   }`}
                 >
-                  <Sparkles className="w-4 h-4 text-purple-600" />
+                  <Sparkles className="w-4 h-4 text-purple-600 dark:text-purple-400" />
                   Smart Document Helper
-                  <span className="hidden sm:inline text-xs font-normal bg-purple-100 text-purple-800 px-2 py-0.5 rounded-full">
+                  <span className="hidden sm:inline text-xs font-normal bg-purple-100 dark:bg-purple-950/60 text-purple-800 dark:text-purple-300 px-2 py-0.5 rounded-full">
                     Auto
                   </span>
                 </button>
@@ -654,34 +651,34 @@ export default function UnlockPDF() {
                   onClick={() => setUnlockMode('direct')}
                   className={`py-2.5 px-4 rounded-lg text-sm font-bold transition-all flex items-center justify-center gap-2 ${
                     unlockMode === 'direct'
-                      ? 'bg-white text-gray-900 shadow-xs border border-gray-200'
-                      : 'text-gray-600 hover:text-gray-900'
+                      ? 'bg-white dark:bg-slate-900 text-gray-900 dark:text-slate-100 shadow-xs border border-gray-200 dark:border-slate-700'
+                      : 'text-gray-600 dark:text-slate-400 hover:text-gray-900 dark:hover:text-slate-200'
                   }`}
                 >
-                  <Key className="w-4 h-4 text-gray-500" />
+                  <Key className="w-4 h-4 text-gray-500 dark:text-slate-400" />
                   Direct Password
                 </button>
               </div>
 
               {/* Mode A: Smart Document Helper */}
               {unlockMode === 'smart' && (
-                <div className="space-y-5 p-5 bg-purple-50/40 rounded-2xl border border-purple-100">
+                <div className="space-y-5 p-5 bg-purple-50/40 dark:bg-purple-950/20 rounded-2xl border border-purple-100 dark:border-purple-800/40">
                   <div>
-                    <label className="block text-sm font-bold text-gray-900 mb-2">
+                    <label className="block text-sm font-bold text-gray-900 dark:text-slate-100 mb-2">
                       Choose Your Document Type:
                     </label>
                     <div className="relative mb-3">
-                      <Search className="w-4 h-4 text-gray-400 absolute left-3.5 top-3.5" />
+                      <Search className="w-4 h-4 text-gray-400 dark:text-slate-500 absolute left-3.5 top-3.5" />
                       <input
                         type="text"
                         placeholder="Search document (e.g. Aadhaar, SBI, AIS, Jan Aadhaar)..."
                         value={docSearch}
                         onChange={(e) => setDocSearch(e.target.value)}
-                        className="w-full pl-10 pr-4 py-2.5 bg-white border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-purple-500 outline-none"
+                        className="w-full pl-10 pr-4 py-2.5 bg-white dark:bg-slate-800/80 border border-gray-300 dark:border-slate-700 text-gray-900 dark:text-slate-100 placeholder-gray-400 dark:placeholder-slate-500 rounded-xl text-sm focus:ring-2 focus:ring-purple-500 outline-none"
                       />
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-52 overflow-y-auto p-1 bg-white border border-gray-200 rounded-xl">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-52 overflow-y-auto p-1 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-700 rounded-xl">
                       {filteredPresets.map((preset) => (
                         <button
                           key={preset.id}
@@ -694,11 +691,11 @@ export default function UnlockPDF() {
                           className={`text-left p-3 rounded-lg text-xs transition-all flex flex-col justify-between ${
                             selectedPresetId === preset.id
                               ? 'bg-purple-600 text-white shadow-xs font-semibold'
-                              : 'bg-gray-50 text-gray-800 hover:bg-gray-100 border border-transparent'
+                              : 'bg-gray-50 dark:bg-slate-800/70 text-gray-800 dark:text-slate-200 hover:bg-gray-100 dark:hover:bg-slate-800 border border-transparent'
                           }`}
                         >
                           <span className="font-bold text-sm mb-1">{preset.name}</span>
-                          <span className={`text-[11px] ${selectedPresetId === preset.id ? 'text-purple-100' : 'text-gray-500'}`}>
+                          <span className={`text-[11px] ${selectedPresetId === preset.id ? 'text-purple-100' : 'text-gray-500 dark:text-slate-400'}`}>
                             {preset.category}
                           </span>
                         </button>
@@ -707,12 +704,12 @@ export default function UnlockPDF() {
                   </div>
 
                   {/* Preset Guidance Alert */}
-                  <div className="p-3.5 bg-white rounded-xl border border-purple-200 text-xs text-gray-700 flex flex-col gap-1">
-                    <div className="flex items-center gap-1.5 font-bold text-purple-900">
-                      <HelpCircle className="w-4 h-4 text-purple-600" />
+                  <div className="p-3.5 bg-white dark:bg-slate-900/80 rounded-xl border border-purple-200 dark:border-purple-800/50 text-xs text-gray-700 dark:text-slate-300 flex flex-col gap-1">
+                    <div className="flex items-center gap-1.5 font-bold text-purple-900 dark:text-purple-200">
+                      <HelpCircle className="w-4 h-4 text-purple-600 dark:text-purple-400" />
                       Password Rule: {selectedPreset.formulaDesc}
                     </div>
-                    <div className="text-gray-500 font-mono text-[11px]">
+                    <div className="text-gray-500 dark:text-slate-400 font-mono text-[11px]">
                       Example: {selectedPreset.example}
                     </div>
                   </div>
@@ -721,7 +718,7 @@ export default function UnlockPDF() {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     {selectedPreset.fields.map((f) => (
                       <div key={f.key}>
-                        <label className="block text-xs font-bold text-gray-700 mb-1">
+                        <label className="block text-xs font-bold text-gray-700 dark:text-slate-300 mb-1">
                           {f.label}
                         </label>
                         <input
@@ -730,7 +727,7 @@ export default function UnlockPDF() {
                           placeholder={f.placeholder}
                           value={formValues[f.key] || ''}
                           onChange={(e) => handleFieldChange(f.key, e.target.value)}
-                          className="w-full px-3.5 py-2.5 bg-white border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-purple-500 outline-none"
+                          className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-800/80 border border-gray-300 dark:border-slate-700 text-gray-900 dark:text-slate-100 placeholder-gray-400 dark:placeholder-slate-500 rounded-xl text-sm focus:ring-2 focus:ring-purple-500 outline-none"
                         />
                       </div>
                     ))}
@@ -738,11 +735,11 @@ export default function UnlockPDF() {
 
                   {/* Live Password Generator Preview */}
                   {computedPasswordInfo.primary && (
-                    <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center justify-between text-xs text-emerald-900">
+                    <div className="p-3 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/50 rounded-xl flex items-center justify-between text-xs text-emerald-900 dark:text-emerald-200">
                       <span className="font-medium flex items-center gap-1.5">
-                        <CheckCircle2 className="w-4 h-4 text-emerald-600" /> Expected Password:
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" /> Expected Password:
                       </span>
-                      <span className="font-mono font-bold text-sm bg-white px-3 py-1 rounded-md border border-emerald-300 text-emerald-700">
+                      <span className="font-mono font-bold text-sm bg-white dark:bg-slate-900 px-3 py-1 rounded-md border border-emerald-300 dark:border-emerald-700 text-emerald-700 dark:text-emerald-300">
                         {computedPasswordInfo.primary}
                       </span>
                     </div>
@@ -753,19 +750,19 @@ export default function UnlockPDF() {
               {/* Mode B: Direct Password */}
               {unlockMode === 'direct' && (
                 <div className="space-y-3">
-                  <label className="block text-sm font-bold text-gray-700">
+                  <label className="block text-sm font-bold text-gray-700 dark:text-slate-300">
                     Enter Known PDF Password
                   </label>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                      <Key className="h-5 w-5 text-gray-400" />
+                      <Key className="h-5 w-5 text-gray-400 dark:text-slate-500" />
                     </div>
                     <input
                       type="password"
                       value={directPassword}
                       onChange={(e) => setDirectPassword(e.target.value)}
                       onKeyDown={(e) => e.key === 'Enter' && directPassword && !isProcessing && handleUnlockClick()}
-                      className="w-full pl-11 pr-4 py-3 rounded-xl border border-gray-300 focus:ring-2 focus:ring-purple-500 focus:border-purple-500 outline-none transition-shadow text-base"
+                      className="w-full pl-11 pr-4 py-3 bg-white dark:bg-slate-800/80 text-gray-900 dark:text-slate-100 placeholder-gray-400 dark:placeholder-slate-500 rounded-xl border border-gray-300 dark:border-slate-700 focus:ring-2 focus:ring-purple-500 focus:border-purple-500 outline-none transition-shadow text-base"
                       placeholder="Enter the password..."
                       autoFocus
                     />
@@ -775,33 +772,33 @@ export default function UnlockPDF() {
 
               {/* Error Message */}
               {errorMsg && (
-                <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700 flex items-start gap-2.5">
-                  <AlertTriangle className="w-5 h-5 shrink-0 text-red-500 mt-0.5" />
+                <div className="p-4 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800/60 rounded-xl text-sm text-red-700 dark:text-red-300 flex items-start gap-2.5">
+                  <AlertTriangle className="w-5 h-5 shrink-0 text-red-500 dark:text-red-400 mt-0.5" />
                   <div className="leading-relaxed">{errorMsg}</div>
                 </div>
               )}
 
               {/* Processing Progress */}
               {isProcessing && progress && (
-                <div className="p-4 bg-purple-50 border border-purple-200 rounded-xl">
+                <div className="p-4 bg-purple-50 dark:bg-purple-950/40 border border-purple-200 dark:border-purple-800/50 rounded-xl">
                   <div className="flex items-center gap-3">
-                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-purple-600 shrink-0"></div>
-                    <p className="text-sm text-purple-700 font-medium">{progress}</p>
+                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-purple-600 dark:border-purple-400 shrink-0"></div>
+                    <p className="text-sm text-purple-700 dark:text-purple-300 font-medium">{progress}</p>
                   </div>
                 </div>
               )}
 
               {/* Strict 100% Offline Privacy Toggle */}
-              <label className="flex items-start gap-3 p-3.5 rounded-xl bg-emerald-50/70 border border-emerald-200 cursor-pointer select-none">
+              <label className="flex items-start gap-3 p-3.5 rounded-xl bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/50 cursor-pointer select-none">
                 <input
                   type="checkbox"
                   checked={offlineOnly}
                   onChange={(e) => setOfflineOnly(e.target.checked)}
                   className="mt-0.5 h-4 w-4 rounded border-emerald-400 text-emerald-600 focus:ring-emerald-500"
                 />
-                <div className="text-xs text-emerald-900 leading-relaxed">
+                <div className="text-xs text-emerald-900 dark:text-emerald-200 leading-relaxed">
                   <span className="font-bold block">Strict 100% Offline Browser Mode (Sensitive Docs / Aadhaar / Bank)</span>
-                  <span className="text-emerald-700">
+                  <span className="text-emerald-700 dark:text-emerald-300">
                     Never sends the file to our ephemeral lossless unlock API — rebuilds clean PDF pages 100% locally in your browser (high-res raster output).
                   </span>
                 </div>
@@ -836,15 +833,15 @@ export default function UnlockPDF() {
                     setErrorMsg(null);
                     setProgress('');
                   }}
-                  className="px-6 py-4 bg-gray-100 text-gray-700 text-sm font-semibold rounded-xl hover:bg-gray-200 transition-colors"
+                  className="px-6 py-4 bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-slate-200 text-sm font-semibold rounded-xl hover:bg-gray-200 dark:hover:bg-slate-700 transition-colors"
                 >
                   Cancel
                 </button>
               </div>
 
               {/* Trust Badge */}
-              <div className="flex items-center justify-center gap-2 text-xs text-gray-500 pt-2 border-t border-gray-100 text-center">
-                <Shield className="w-4 h-4 text-emerald-600 shrink-0" />
+              <div className="flex items-center justify-center gap-2 text-xs text-gray-500 dark:text-slate-400 pt-2 border-t border-gray-100 dark:border-slate-800 text-center">
+                <Shield className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
                 <span>
                   <strong>Browser-First Privacy:</strong> Password verification runs 100% in your browser. By default, verified PDFs use our ephemeral lossless unlock API (deleted immediately after response) to keep text selectable — enable Strict Offline Mode above to keep files strictly on your device.
                 </span>
@@ -853,12 +850,12 @@ export default function UnlockPDF() {
           ) : (
             /* Success Screen */
             <div className="space-y-6 text-center py-6">
-              <div className="p-8 bg-green-50 rounded-2xl border border-green-200">
-                <div className="w-16 h-16 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto mb-4">
+              <div className="p-8 bg-green-50 dark:bg-green-950/30 rounded-2xl border border-green-200 dark:border-green-800/50">
+                <div className="w-16 h-16 bg-green-100 dark:bg-green-950/60 text-green-600 dark:text-green-400 rounded-full flex items-center justify-center mx-auto mb-4">
                   <CheckCircle2 className="w-8 h-8" />
                 </div>
-                <h3 className="text-2xl font-extrabold text-green-900 mb-2">PDF Unlocked Successfully!</h3>
-                <p className="text-green-700 mb-6 text-sm max-w-md mx-auto">
+                <h3 className="text-2xl font-extrabold text-green-900 dark:text-green-200 mb-2">PDF Unlocked Successfully!</h3>
+                <p className="text-green-700 dark:text-green-300 mb-6 text-sm max-w-md mx-auto">
                   All passwords and restrictions have been permanently removed. Your new PDF is completely clean and ready to view, print, or share.
                 </p>
                 <div className="flex flex-wrap items-center justify-center gap-3">
@@ -874,7 +871,7 @@ export default function UnlockPDF() {
                     href={unlockedUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center justify-center gap-2 px-5 py-3.5 bg-white hover:bg-gray-50 text-gray-700 font-semibold rounded-xl border border-gray-300 transition-all shadow-xs"
+                    className="inline-flex items-center justify-center gap-2 px-5 py-3.5 bg-white dark:bg-slate-800 hover:bg-gray-50 dark:hover:bg-slate-700 text-gray-700 dark:text-slate-200 font-semibold rounded-xl border border-gray-300 dark:border-slate-700 transition-all shadow-xs"
                   >
                     <ExternalLink className="w-4 h-4" />
                     Open in New Tab
@@ -882,7 +879,7 @@ export default function UnlockPDF() {
                   <button
                     type="button"
                     onClick={() => setShowPreview(!showPreview)}
-                    className="inline-flex items-center justify-center gap-2 px-5 py-3.5 bg-white hover:bg-gray-50 text-gray-700 font-semibold rounded-xl border border-gray-300 transition-all shadow-xs"
+                    className="inline-flex items-center justify-center gap-2 px-5 py-3.5 bg-white dark:bg-slate-800 hover:bg-gray-50 dark:hover:bg-slate-700 text-gray-700 dark:text-slate-200 font-semibold rounded-xl border border-gray-300 dark:border-slate-700 transition-all shadow-xs"
                   >
                     <Eye className="w-4 h-4" />
                     {showPreview ? 'Hide Preview' : 'Show Live Preview'}
@@ -891,8 +888,8 @@ export default function UnlockPDF() {
 
                 {showPreview && (
                   <div className="mt-6 text-left">
-                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Live Document Preview</p>
-                    <div className="w-full h-[550px] rounded-xl border border-gray-200 overflow-hidden bg-gray-100 shadow-inner">
+                    <p className="text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wider mb-2">Live Document Preview</p>
+                    <div className="w-full h-[550px] rounded-xl border border-gray-200 dark:border-slate-700 overflow-hidden bg-gray-100 dark:bg-slate-800 shadow-inner">
                       <iframe
                         src={unlockedUrl}
                         title="Unlocked PDF Document Preview"
@@ -911,7 +908,7 @@ export default function UnlockPDF() {
                   setFormValues({});
                   setProgress('');
                 }}
-                className="text-sm text-gray-600 hover:text-gray-900 font-semibold"
+                className="text-sm text-gray-600 dark:text-slate-400 hover:text-gray-900 dark:hover:text-slate-200 font-semibold"
               >
                 ← Unlock another document
               </button>
@@ -921,37 +918,38 @@ export default function UnlockPDF() {
       )}
 
       {/* SEO / FAQs Section */}
-      <div className="mt-16 w-full max-w-4xl border-t border-gray-200 pt-10 text-gray-800">
-        <h2 className="text-2xl font-bold mb-6 text-center text-gray-900">
+      <div className="mt-16 w-full max-w-4xl border-t border-gray-200 dark:border-slate-800 pt-10 text-gray-800 dark:text-slate-200">
+        <h2 className="text-2xl font-bold mb-6 text-center text-gray-900 dark:text-slate-100">
           Frequently Asked Questions About PDF Passwords
         </h2>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-sm">
-          <div className="p-5 bg-white border border-gray-200 rounded-xl shadow-xs">
-            <h3 className="font-bold text-gray-900 mb-2">What is the e-Aadhaar PDF password format?</h3>
-            <p className="text-gray-600 leading-relaxed">
-              UIDAI e-Aadhaar PDF password consists of the <strong>first 4 letters of your name in CAPITAL</strong> followed by your <strong>4-digit birth year (YYYY)</strong>. For example, if your name is ANITA KUMARI born in 1993, the password is <code className="bg-gray-100 px-1 py-0.5 rounded font-mono">ANIT1993</code>.
+          <div className="p-5 bg-white dark:bg-slate-900/90 border border-gray-200 dark:border-slate-800 rounded-xl shadow-xs">
+            <h3 className="font-bold text-gray-900 dark:text-slate-100 mb-2">What is the e-Aadhaar PDF password format?</h3>
+            <p className="text-gray-600 dark:text-slate-400 leading-relaxed">
+              UIDAI e-Aadhaar PDF password consists of the <strong>first 4 letters of your name in CAPITAL</strong> followed by your <strong>4-digit birth year (YYYY)</strong>. For example, if your name is ANITA KUMARI born in 1993, the password is <code className="bg-gray-100 dark:bg-slate-800 px-1 py-0.5 rounded font-mono text-gray-800 dark:text-slate-200">ANIT1993</code>.
             </p>
           </div>
-          <div className="p-5 bg-white border border-gray-200 rounded-xl shadow-xs">
-            <h3 className="font-bold text-gray-900 mb-2">What is the Rajasthan Jan Aadhaar password format?</h3>
-            <p className="text-gray-600 leading-relaxed">
-              Jan Aadhaar e-Cards are protected using the <strong>first 4 letters of the Head of the Family (Mukhiya)</strong> in capital letters followed by the date and month of birth (DDMM). Example: <code className="bg-gray-100 px-1 py-0.5 rounded font-mono">ANIT1402</code>.
+          <div className="p-5 bg-white dark:bg-slate-900/90 border border-gray-200 dark:border-slate-800 rounded-xl shadow-xs">
+            <h3 className="font-bold text-gray-900 dark:text-slate-100 mb-2">What is the Rajasthan Jan Aadhaar password format?</h3>
+            <p className="text-gray-600 dark:text-slate-400 leading-relaxed">
+              Jan Aadhaar e-Cards are protected using the <strong>first 4 letters of the Head of the Family (Mukhiya)</strong> in capital letters followed by the date and month of birth (DDMM). Example: <code className="bg-gray-100 dark:bg-slate-800 px-1 py-0.5 rounded font-mono text-gray-800 dark:text-slate-200">ANIT1402</code>.
             </p>
           </div>
-          <div className="p-5 bg-white border border-gray-200 rounded-xl shadow-xs">
-            <h3 className="font-bold text-gray-900 mb-2">How to open Income Tax AIS / 26AS PDF?</h3>
-            <p className="text-gray-600 leading-relaxed">
-              Income tax Annual Information Statement (AIS) and 26AS files use your <strong>10-character PAN in lowercase</strong> followed by your date of birth in <strong>DDMMYYYY</strong>. Example: <code className="bg-gray-100 px-1 py-0.5 rounded font-mono">abcde1234f15081990</code>.
+          <div className="p-5 bg-white dark:bg-slate-900/90 border border-gray-200 dark:border-slate-800 rounded-xl shadow-xs">
+            <h3 className="font-bold text-gray-900 dark:text-slate-100 mb-2">How to open Income Tax AIS / 26AS PDF?</h3>
+            <p className="text-gray-600 dark:text-slate-400 leading-relaxed">
+              Income tax Annual Information Statement (AIS) and 26AS files use your <strong>10-character PAN in lowercase</strong> followed by your date of birth in <strong>DDMMYYYY</strong>. Example: <code className="bg-gray-100 dark:bg-slate-800 px-1 py-0.5 rounded font-mono text-gray-800 dark:text-slate-200">abcde1234f15081990</code>.
             </p>
           </div>
-          <div className="p-5 bg-white border border-gray-200 rounded-xl shadow-xs">
-            <h3 className="font-bold text-gray-900 mb-2">Is it safe to unlock confidential PDFs here?</h3>
-            <p className="text-gray-600 leading-relaxed">
+          <div className="p-5 bg-white dark:bg-slate-900/90 border border-gray-200 dark:border-slate-800 rounded-xl shadow-xs">
+            <h3 className="font-bold text-gray-900 dark:text-slate-100 mb-2">Is it safe to unlock confidential PDFs here?</h3>
+            <p className="text-gray-600 dark:text-slate-400 leading-relaxed">
               Yes, 100%! All decryption and re-rendering is executed strictly inside your device’s browser via WebAssembly and HTML5 Canvas. Your confidential identity numbers and financial statements are never transmitted to any external server.
             </p>
           </div>
         </div>
       </div>
-    </div>
+      </div>
+    </ToolWorkspaceShell>
   );
 }

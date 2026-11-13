@@ -7,6 +7,7 @@ import '../lib/pdfWorker';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { dataUrlToBytes } from '../lib/utils';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 
 export default function GrayscalePDF() {
   useSEO(
@@ -247,19 +248,15 @@ export default function GrayscalePDF() {
   };
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center p-6 md:p-8 max-w-6xl mx-auto w-full">
-      {/* Header */}
-      <div className="text-center mb-8">
-        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200 text-xs font-bold tracking-widest uppercase mb-3 border border-zinc-200 dark:border-zinc-700">
-          <Droplet className="w-3.5 h-3.5" /> Monochrome & Print Optimizer
-        </div>
-        <h1 className="text-3xl md:text-5xl font-extrabold text-gray-900 dark:text-white tracking-tight mb-3">
-          Convert PDF to Grayscale & B&W
-        </h1>
-        <p className="text-base md:text-lg text-gray-600 dark:text-slate-400 max-w-2xl mx-auto">
-          Transform color documents into smooth grayscale or high-contrast photocopy black & white with live preview and custom tone tuning.
-        </p>
-      </div>
+    <ToolWorkspaceShell
+      title="Convert PDF to Grayscale & B&W"
+      subtitle="Transform color documents into smooth grayscale or high-contrast photocopy black & white with live preview and custom tone tuning."
+      categoryLabel="Monochrome & Print Optimizer"
+      icon={Droplet}
+      microVariant="convert"
+      tone="sky"
+    >
+      <div className="flex flex-col items-center justify-center max-w-6xl mx-auto w-full">
 
       {!file ? (
         <div className="w-full max-w-2xl">
@@ -577,6 +574,7 @@ export default function GrayscalePDF() {
           )}
         </div>
       )}
-    </div>
+      </div>
+    </ToolWorkspaceShell>
   );
 }
