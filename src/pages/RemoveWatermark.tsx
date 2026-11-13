@@ -1,11 +1,11 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { 
-  Eraser, Download, Loader2, Sparkles, Sliders, Check, 
-  ChevronLeft, ChevronRight, Eye, ShieldCheck, FileText, Trash2, ArrowRight,
-  Server, Cpu, Layers
+import {
+  Eraser, Download, Loader2, Sparkles, Sliders, Check,
+  ChevronLeft, ChevronRight, ShieldCheck, Trash2, Layers
 } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
 import { PDFDocument, rgb } from 'pdf-lib';
+import { motion, useReducedMotion } from 'motion/react';
 import '../lib/pdfWorker';
 import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
@@ -13,6 +13,8 @@ import { useSEO } from '../hooks/useSEO';
 import { dataUrlToBytes } from '../lib/utils';
 import { apiFetch } from '../lib/api';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { PearlScanOverlay } from '../components/pearl/PearlMotion';
+import { toArrayBufferBytes } from '../lib/blobUrl';
 
 type RemovalMode = 'bottom-crop' | 'box-erase' | 'contrast-cleaner' | 'backend-vector';
 
@@ -56,6 +58,7 @@ export default function RemoveWatermark() {
   const [engineUsed, setEngineUsed] = useState<'backend' | 'client-vector' | 'client-raster'>('backend');
 
   const imgRef = useRef<HTMLImageElement>(null);
+  const prefersReduced = useReducedMotion();
 
   useEffect(() => {
     return () => {
@@ -214,7 +217,7 @@ export default function RemoveWatermark() {
         }
 
         const cleanPdfBytes = await pdfDoc.save();
-        const blob = new Blob([cleanPdfBytes as any], { type: 'application/pdf' });
+        const blob = new Blob([toArrayBufferBytes(cleanPdfBytes)], { type: 'application/pdf' });
         setResultUrl(URL.createObjectURL(blob));
         setResultFileName(`${file.name.replace(/\.pdf$/i, '')}_Watermark_Removed.pdf`);
         setEngineUsed('client-vector');
@@ -268,7 +271,7 @@ export default function RemoveWatermark() {
       }
 
       const finalBytes = await newDoc.save();
-      const blob = new Blob([finalBytes as any], { type: 'application/pdf' });
+      const blob = new Blob([toArrayBufferBytes(finalBytes)], { type: 'application/pdf' });
       setResultUrl(URL.createObjectURL(blob));
       setResultFileName(`${file.name.replace(/\.pdf$/i, '')}_Cleaned_Scan.pdf`);
       setEngineUsed('client-raster');
@@ -298,47 +301,70 @@ export default function RemoveWatermark() {
       <div className="flex flex-col items-center justify-start max-w-6xl mx-auto w-full">
 
       {!file ? (
-        <div className="w-full max-w-2xl space-y-6">
-          <FileDropzone 
-            onDrop={handleDrop} 
-            multiple={false} 
-            title="Select PDF Document to Remove Watermark" 
-          />
+        <motion.div
+          initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+          className="w-full max-w-2xl space-y-6"
+        >
+          <div className="pms-glass-panel rounded-3xl p-4 sm:p-5">
+            <FileDropzone
+              onDrop={handleDrop}
+              multiple={false}
+              title="Select PDF Document to Remove Watermark"
+            />
+          </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
-            <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 text-center">
-              <Sparkles className="w-6 h-6 text-rose-600 dark:text-rose-400 mx-auto mb-2" />
-              <h3 className="font-bold text-sm text-slate-800 dark:text-slate-200">Vector Precision Wipe</h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Cleans footer tags without turning pages into blurry images.</p>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="pms-glass-panel p-4 rounded-2xl text-center">
+              <div className="w-10 h-10 rounded-xl bg-[var(--pms-soft-rose)] text-[var(--pms-rose)] flex items-center justify-center mx-auto mb-2.5">
+                <Sparkles className="w-5 h-5" />
+              </div>
+              <h3 className="font-bold text-sm text-[var(--pms-ink)]">Vector Precision Wipe</h3>
+              <p className="text-xs text-[var(--pms-muted)] mt-1">Cleans footer tags without turning pages into blurry images.</p>
             </div>
-            <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 text-center">
-              <Sliders className="w-6 h-6 text-blue-600 dark:text-blue-400 mx-auto mb-2" />
-              <h3 className="font-bold text-sm text-slate-800 dark:text-slate-200">Interactive Eraser Box</h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Draw custom eraser rectangles across all pages at once.</p>
+            <div className="pms-glass-panel p-4 rounded-2xl text-center">
+              <div className="w-10 h-10 rounded-xl bg-[var(--pms-soft-blue)] text-[var(--pms-blue)] flex items-center justify-center mx-auto mb-2.5">
+                <Sliders className="w-5 h-5" />
+              </div>
+              <h3 className="font-bold text-sm text-[var(--pms-ink)]">Interactive Eraser Box</h3>
+              <p className="text-xs text-[var(--pms-muted)] mt-1">Draw custom eraser rectangles across all pages at once.</p>
             </div>
-            <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 text-center">
-              <ShieldCheck className="w-6 h-6 text-emerald-600 dark:text-emerald-400 mx-auto mb-2" />
-              <h3 className="font-bold text-sm text-slate-800 dark:text-slate-200">Annotation Stripper</h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Deletes built-in PDF watermark layers and draft stamps cleanly.</p>
+            <div className="pms-glass-panel p-4 rounded-2xl text-center">
+              <div className="w-10 h-10 rounded-xl bg-[var(--pms-soft-mint)] text-emerald-600 dark:text-emerald-400 flex items-center justify-center mx-auto mb-2.5">
+                <ShieldCheck className="w-5 h-5" />
+              </div>
+              <h3 className="font-bold text-sm text-[var(--pms-ink)]">Annotation Stripper</h3>
+              <p className="text-xs text-[var(--pms-muted)] mt-1">Deletes built-in PDF watermark layers and draft stamps cleanly.</p>
             </div>
           </div>
-        </div>
+        </motion.div>
       ) : resultUrl ? (
         /* Result Screen */
-        <div className="w-full max-w-xl bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-8 shadow-xl text-center space-y-6">
-          <div className="w-20 h-20 bg-emerald-100 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400 rounded-full flex items-center justify-center mx-auto shadow-inner">
+        <motion.div
+          initial={prefersReduced ? false : { opacity: 0, scale: 0.98, y: 12 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+          className="w-full max-w-xl pms-glass-panel rounded-3xl border border-emerald-200/80 dark:border-emerald-800/70 p-8 text-center space-y-6"
+        >
+          <motion.div
+            initial={prefersReduced ? false : { scale: 0.45, rotate: -10 }}
+            animate={{ scale: 1, rotate: 0 }}
+            transition={{ type: 'spring', stiffness: 420, damping: 20 }}
+            className="w-20 h-20 bg-emerald-100/90 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 rounded-2xl flex items-center justify-center mx-auto shadow-inner border border-emerald-200/70 dark:border-emerald-800/60"
+          >
             <Check className="w-10 h-10" />
-          </div>
+          </motion.div>
 
           <div>
-            <span className="inline-block px-3 py-1 bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 rounded-full text-xs font-bold uppercase tracking-wider mb-2">
+            <span className="inline-block px-3 py-1 bg-[var(--pms-soft-mint)] text-emerald-700 dark:text-emerald-300 rounded-full text-xs font-bold uppercase tracking-wider mb-2">
               Watermark Removed Successfully
             </span>
-            <h2 className="text-2xl font-extrabold text-slate-900 dark:text-white">
+            <h2 className="text-2xl font-extrabold text-[var(--pms-ink)]">
               Clean PDF Ready!
             </h2>
-            <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-400 mt-1">
-              {engineUsed === 'backend' 
+            <p className="text-xs sm:text-sm text-[var(--pms-muted)] mt-1.5">
+              {engineUsed === 'backend'
                 ? 'Processed with PyMuPDF High-Precision Vector Engine (Vector quality 100% preserved).'
                 : engineUsed === 'client-vector'
                 ? 'Processed with Lossless Vector Whiteout (Original text sharpness 100% intact).'
@@ -347,28 +373,37 @@ export default function RemoveWatermark() {
           </div>
 
           <div className="flex flex-col sm:flex-row gap-3 pt-2">
-            <a
+            <motion.a
+              whileHover={prefersReduced ? undefined : { scale: 1.015 }}
+              whileTap={prefersReduced ? undefined : { scale: 0.985 }}
               href={resultUrl}
               download={resultFileName}
-              className="flex-1 py-3 px-6 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl flex items-center justify-center gap-2 shadow-lg transition-all"
+              className="pms-btn-primary flex-1 py-3.5 px-6 font-bold rounded-2xl flex items-center justify-center gap-2"
             >
               <Download className="w-4 h-4" /> Download Clean PDF
-            </a>
-            <button
+            </motion.a>
+            <motion.button
+              whileHover={prefersReduced ? undefined : { scale: 1.015 }}
+              whileTap={prefersReduced ? undefined : { scale: 0.985 }}
               onClick={reset}
-              className="py-3 px-6 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-semibold rounded-xl transition-colors"
+              className="py-3.5 px-6 bg-[var(--pms-pearl)] hover:bg-[var(--pms-soft-lavender)] dark:bg-slate-800/90 dark:hover:bg-slate-700 text-[var(--pms-ink)] font-semibold rounded-2xl border border-[var(--pms-border)] transition-colors text-sm"
             >
               Clean Another PDF
-            </button>
+            </motion.button>
           </div>
-        </div>
+        </motion.div>
       ) : (
         /* Editor Controls & Preview */
-        <div className="w-full flex flex-col lg:flex-row gap-6">
+        <motion.div
+          initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+          className="w-full flex flex-col lg:flex-row gap-6"
+        >
           {/* Sidebar Controls */}
           <div className="w-full lg:w-80 shrink-0 space-y-5">
-            <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 shadow-sm space-y-4">
-              <h3 className="text-sm font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+            <div className="pms-glass-panel rounded-3xl p-5 sm:p-6 space-y-4">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-[var(--pms-subtle-text)]">
                 Removal Strategy
               </h3>
 
@@ -376,16 +411,16 @@ export default function RemoveWatermark() {
                 <button
                   type="button"
                   onClick={() => setMode('backend-vector')}
-                  className={`w-full p-3 rounded-xl border text-left text-xs transition-all ${
+                  className={`w-full p-3.5 rounded-2xl border text-left text-xs transition-all ${
                     mode === 'backend-vector'
-                      ? 'border-rose-500 bg-rose-50/50 dark:bg-rose-950/20 text-rose-700 dark:text-rose-300 ring-2 ring-rose-500/20'
-                      : 'border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50'
+                      ? 'border-[var(--pms-rose)] bg-[var(--pms-soft-rose)]/75 text-[var(--pms-ink)] ring-2 ring-[var(--pms-rose)]/20'
+                      : 'border-[var(--pms-border)] bg-[var(--pms-pearl)]/50 dark:bg-slate-800/40 text-[var(--pms-ink)] hover:border-[var(--pms-border-strong)]'
                   }`}
                 >
-                  <div className="font-bold flex items-center gap-2">
-                    <Sparkles className="w-4 h-4 text-rose-500" /> Smart Vector Clean (Recommended)
+                  <div className="font-bold flex items-center gap-2 text-[var(--pms-rose)]">
+                    <Sparkles className="w-4 h-4 shrink-0" /> Smart Vector Clean (Recommended)
                   </div>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+                  <p className="text-[11px] text-[var(--pms-muted)] mt-1">
                     Erases footers and watermark annotations without losing crisp vector text.
                   </p>
                 </button>
@@ -393,33 +428,33 @@ export default function RemoveWatermark() {
                 <button
                   type="button"
                   onClick={() => setMode('bottom-crop')}
-                  className={`w-full p-3 rounded-xl border text-left text-xs transition-all ${
+                  className={`w-full p-3.5 rounded-2xl border text-left text-xs transition-all ${
                     mode === 'bottom-crop'
-                      ? 'border-rose-500 bg-rose-50/50 dark:bg-rose-950/20 text-rose-700 dark:text-rose-300 ring-2 ring-rose-500/20'
-                      : 'border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50'
+                      ? 'border-[var(--pms-rose)] bg-[var(--pms-soft-rose)]/75 text-[var(--pms-ink)] ring-2 ring-[var(--pms-rose)]/20'
+                      : 'border-[var(--pms-border)] bg-[var(--pms-pearl)]/50 dark:bg-slate-800/40 text-[var(--pms-ink)] hover:border-[var(--pms-border-strong)]'
                   }`}
                 >
-                  <div className="font-bold flex items-center gap-2">
-                    <Eraser className="w-4 h-4 text-rose-500" /> Scanner Footer Wipe
+                  <div className="font-bold flex items-center gap-2 text-[var(--pms-rose)]">
+                    <Eraser className="w-4 h-4 shrink-0" /> Scanner Footer Wipe
                   </div>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
-                    Specifically removes bottom "Scanned with CamScanner / Oken Scanner" tags.
+                  <p className="text-[11px] text-[var(--pms-muted)] mt-1">
+                    Specifically removes bottom &quot;Scanned with CamScanner / Oken Scanner&quot; tags.
                   </p>
                 </button>
 
                 <button
                   type="button"
                   onClick={() => setMode('box-erase')}
-                  className={`w-full p-3 rounded-xl border text-left text-xs transition-all ${
+                  className={`w-full p-3.5 rounded-2xl border text-left text-xs transition-all ${
                     mode === 'box-erase'
-                      ? 'border-rose-500 bg-rose-50/50 dark:bg-rose-950/20 text-rose-700 dark:text-rose-300 ring-2 ring-rose-500/20'
-                      : 'border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50'
+                      ? 'border-[var(--pms-rose)] bg-[var(--pms-soft-rose)]/75 text-[var(--pms-ink)] ring-2 ring-[var(--pms-rose)]/20'
+                      : 'border-[var(--pms-border)] bg-[var(--pms-pearl)]/50 dark:bg-slate-800/40 text-[var(--pms-ink)] hover:border-[var(--pms-border-strong)]'
                   }`}
                 >
-                  <div className="font-bold flex items-center gap-2">
-                    <Sliders className="w-4 h-4 text-rose-500" /> Custom Box Eraser
+                  <div className="font-bold flex items-center gap-2 text-[var(--pms-rose)]">
+                    <Sliders className="w-4 h-4 shrink-0" /> Custom Box Eraser
                   </div>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+                  <p className="text-[11px] text-[var(--pms-muted)] mt-1">
                     Click and drag a box directly on the preview to erase any watermark.
                   </p>
                 </button>
@@ -427,16 +462,16 @@ export default function RemoveWatermark() {
                 <button
                   type="button"
                   onClick={() => setMode('contrast-cleaner')}
-                  className={`w-full p-3 rounded-xl border text-left text-xs transition-all ${
+                  className={`w-full p-3.5 rounded-2xl border text-left text-xs transition-all ${
                     mode === 'contrast-cleaner'
-                      ? 'border-rose-500 bg-rose-50/50 dark:bg-rose-950/20 text-rose-700 dark:text-rose-300 ring-2 ring-rose-500/20'
-                      : 'border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50'
+                      ? 'border-[var(--pms-rose)] bg-[var(--pms-soft-rose)]/75 text-[var(--pms-ink)] ring-2 ring-[var(--pms-rose)]/20'
+                      : 'border-[var(--pms-border)] bg-[var(--pms-pearl)]/50 dark:bg-slate-800/40 text-[var(--pms-ink)] hover:border-[var(--pms-border-strong)]'
                   }`}
                 >
-                  <div className="font-bold flex items-center gap-2">
-                    <Layers className="w-4 h-4 text-rose-500" /> Scanned Contrast Washout
+                  <div className="font-bold flex items-center gap-2 text-[var(--pms-rose)]">
+                    <Layers className="w-4 h-4 shrink-0" /> Scanned Contrast Washout
                   </div>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+                  <p className="text-[11px] text-[var(--pms-muted)] mt-1">
                     For photo/scanned pages with faded gray diagonal stamps in the background.
                   </p>
                 </button>
@@ -444,10 +479,10 @@ export default function RemoveWatermark() {
 
               {/* Strategy Parameters */}
               {(mode === 'bottom-crop' || mode === 'backend-vector') && (
-                <div className="pt-3 border-t border-slate-100 dark:border-slate-800 space-y-2">
-                  <div className="flex justify-between text-xs font-semibold text-slate-700 dark:text-slate-300">
+                <div className="pt-3 border-t border-[var(--pms-border)] space-y-2">
+                  <div className="flex justify-between text-xs font-semibold text-[var(--pms-ink)]">
                     <span>Footer Wipe Height</span>
-                    <span className="text-rose-600 font-bold">{bottomCropPercent}%</span>
+                    <span className="text-[var(--pms-rose)] font-bold tabular-nums">{bottomCropPercent}%</span>
                   </div>
                   <input
                     type="range"
@@ -458,31 +493,31 @@ export default function RemoveWatermark() {
                     onChange={(e) => setBottomCropPercent(parseFloat(e.target.value))}
                     className="w-full accent-rose-600"
                   />
-                  <p className="text-[11px] text-slate-400">
-                    Typically 5% to 7% cleanly covers CamScanner & TapScanner footer lines.
+                  <p className="text-[11px] text-[var(--pms-subtle-text)]">
+                    Typically 5% to 7% cleanly covers CamScanner &amp; TapScanner footer lines.
                   </p>
                 </div>
               )}
 
               {mode === 'backend-vector' && (
                 <div className="pt-2">
-                  <label className="flex items-center gap-2 text-xs font-medium text-slate-700 dark:text-slate-300 cursor-pointer">
+                  <label className="flex items-center gap-2 text-xs font-medium text-[var(--pms-ink)] cursor-pointer">
                     <input
                       type="checkbox"
                       checked={removeBackgroundAnnots}
                       onChange={(e) => setRemoveBackgroundAnnots(e.target.checked)}
                       className="rounded accent-rose-600"
                     />
-                    <span>Delete Watermark Annotations & Layers</span>
+                    <span>Delete Watermark Annotations &amp; Layers</span>
                   </label>
                 </div>
               )}
 
               {mode === 'contrast-cleaner' && (
-                <div className="pt-3 border-t border-slate-100 dark:border-slate-800 space-y-2">
-                  <div className="flex justify-between text-xs font-semibold text-slate-700 dark:text-slate-300">
+                <div className="pt-3 border-t border-[var(--pms-border)] space-y-2">
+                  <div className="flex justify-between text-xs font-semibold text-[var(--pms-ink)]">
                     <span>Threshold Filter</span>
-                    <span className="text-rose-600 font-bold">{contrastThreshold}</span>
+                    <span className="text-[var(--pms-rose)] font-bold tabular-nums">{contrastThreshold}</span>
                   </div>
                   <input
                     type="range"
@@ -492,67 +527,76 @@ export default function RemoveWatermark() {
                     onChange={(e) => setContrastThreshold(parseInt(e.target.value))}
                     className="w-full accent-rose-600"
                   />
-                  <p className="text-[11px] text-slate-400">
+                  <p className="text-[11px] text-[var(--pms-subtle-text)]">
                     Higher threshold washes out fainter light-gray background stamps.
                   </p>
                 </div>
               )}
 
               {mode === 'box-erase' && boxes.length > 0 && (
-                <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex justify-between items-center">
-                  <span className="text-xs text-slate-600 dark:text-slate-400">
+                <div className="pt-3 border-t border-[var(--pms-border)] flex justify-between items-center">
+                  <span className="text-xs text-[var(--pms-muted)]">
                     {boxes.length} Eraser Box{boxes.length > 1 ? 'es' : ''} defined
                   </span>
                   <button
                     onClick={() => setBoxes([])}
-                    className="text-xs text-red-600 hover:text-red-700 flex items-center gap-1 font-semibold"
+                    className="text-xs text-[var(--pms-rose)] hover:opacity-80 flex items-center gap-1 font-semibold"
                   >
                     <Trash2 className="w-3.5 h-3.5" /> Clear All
                   </button>
                 </div>
               )}
 
-              <button
+              <motion.button
+                whileHover={prefersReduced ? undefined : { scale: 1.015 }}
+                whileTap={prefersReduced ? undefined : { scale: 0.985 }}
                 onClick={executeRemoval}
                 disabled={busy}
-                className="w-full py-3 px-4 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-rose-600/20 disabled:opacity-50 transition-all text-sm"
+                className="pms-btn-primary w-full py-3.5 px-4 font-bold rounded-2xl flex items-center justify-center gap-2 disabled:opacity-50 text-sm"
               >
                 {busy ? (
                   <>
-                    <Loader2 className="w-4 h-4 animate-spin" /> Cleaning Watermark...
+                    <Loader2 className="w-4 h-4 animate-spin" /> Cleaning Watermark…
                   </>
                 ) : (
                   <>
-                    <Check className="w-4 h-4" /> Apply & Download PDF
+                    <Check className="w-4 h-4" /> Apply &amp; Download PDF
                   </>
                 )}
-              </button>
+              </motion.button>
             </div>
           </div>
 
           {/* Interactive Document Preview */}
-          <div className="flex-1 flex flex-col items-center">
+          <div className="relative flex-1 pms-glass-panel rounded-3xl p-4 sm:p-6 flex flex-col items-center overflow-hidden min-h-[420px]">
+            <PearlScanOverlay
+              active={loading || busy}
+              label={loading ? 'Rendering PDF pages…' : 'Cleaning watermark…'}
+            />
+
             {/* Page Navigation */}
-            <div className="flex items-center gap-3 mb-3 text-xs font-semibold text-slate-600 dark:text-slate-400">
+            <div className="flex items-center gap-3 mb-3 text-xs font-semibold text-[var(--pms-muted)]">
               <button
                 onClick={() => setCurrentPage(p => Math.max(p - 1, 0))}
                 disabled={currentPage === 0}
-                className="p-1.5 rounded-lg border hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-30"
+                className="p-1.5 rounded-xl border border-[var(--pms-border)] bg-[var(--pms-white)] dark:bg-slate-900 hover:bg-[var(--pms-soft-lavender)] disabled:opacity-30 transition-colors"
               >
-                <ChevronLeft className="w-4 h-4" />
+                <ChevronLeft className="w-4 h-4 text-[var(--pms-ink)]" />
               </button>
-              <span>Page {currentPage + 1} of {pageImages.length}</span>
+              <span className="text-[var(--pms-ink)]">
+                Page {currentPage + 1} of {Math.max(1, pageImages.length)}
+              </span>
               <button
                 onClick={() => setCurrentPage(p => Math.min(p + 1, pageImages.length - 1))}
-                disabled={currentPage === pageImages.length - 1}
-                className="p-1.5 rounded-lg border hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-30"
+                disabled={currentPage >= pageImages.length - 1}
+                className="p-1.5 rounded-xl border border-[var(--pms-border)] bg-[var(--pms-white)] dark:bg-slate-900 hover:bg-[var(--pms-soft-lavender)] disabled:opacity-30 transition-colors"
               >
-                <ChevronRight className="w-4 h-4" />
+                <ChevronRight className="w-4 h-4 text-[var(--pms-ink)]" />
               </button>
             </div>
 
             <div
-              className={`relative border shadow-xl bg-white select-none overflow-hidden rounded-xl max-w-full ${
+              className={`relative border border-[var(--pms-border-strong)] shadow-xl bg-white select-none overflow-hidden rounded-xl max-w-full ${
                 mode === 'box-erase' ? 'cursor-crosshair' : ''
               }`}
               onMouseDown={onMouseDown}
@@ -560,13 +604,17 @@ export default function RemoveWatermark() {
             >
               <img
                 ref={imgRef}
-                src={pageImages[currentPage]}
+                src={pageImages[currentPage] || undefined}
                 alt={`Page ${currentPage + 1}`}
-                className="max-h-[75vh] object-contain mx-auto block pointer-events-none"
+                className={
+                  pageImages[currentPage]
+                    ? 'max-h-[75vh] object-contain mx-auto block pointer-events-none'
+                    : 'hidden'
+                }
               />
 
               {/* Bottom crop preview overlay */}
-              {(mode === 'bottom-crop' || mode === 'backend-vector') && (
+              {(mode === 'bottom-crop' || mode === 'backend-vector') && pageImages[currentPage] && (
                 <div
                   className="absolute bottom-0 left-0 right-0 bg-rose-500/30 border-t-2 border-rose-500 flex items-center justify-center text-[11px] font-bold text-rose-900 pointer-events-none transition-all"
                   style={{ height: `${bottomCropPercent}%` }}
@@ -592,7 +640,7 @@ export default function RemoveWatermark() {
               ))}
             </div>
           </div>
-        </div>
+        </motion.div>
       )}
       </div>
     </ToolWorkspaceShell>

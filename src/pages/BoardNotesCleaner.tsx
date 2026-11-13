@@ -2,25 +2,26 @@ import React, { useState, useRef, useEffect } from 'react';
 import {
   Upload,
   Download,
-  Printer,
   Sparkles,
-  Maximize2,
-  Sliders,
-  CheckCircle2,
-  RefreshCw,
   Sun,
-  Layers,
-  FileCheck2,
+  SlidersHorizontal,
+  Eye,
 } from 'lucide-react';
+import { motion, AnimatePresence, useReducedMotion } from 'motion/react';
 import { PDFDocument } from 'pdf-lib';
 import { useSEO } from '../hooks/useSEO';
 import { usePageSEO } from '../lib/usePageSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { AnimatedNumber, PearlScanOverlay } from '../components/pearl/PearlMotion';
+import { toArrayBufferBytes } from '../lib/blobUrl';
 import { dataUrlToBytes, downloadBlob } from '../lib/utils';
 
 type CleanMode = 'whiteboard_clean' | 'blackboard_invert' | 'color_boost' | 'high_contrast';
 
 export default function BoardNotesCleaner() {
+  const prefersReduced = useReducedMotion();
+
   useSEO(
     'Classroom Blackboard & Whiteboard De-Glare & Deskew Online — Notes Cleaner',
     'Straighten tilted photos of classroom whiteboards and blackboards. Remove tube-light glare, invert chalk to black ink, and convert to clean PDF notes. 100% free.'
@@ -184,7 +185,7 @@ export default function BoardNotesCleaner() {
       });
 
       const pdfBytes = await pdfDoc.save();
-      const blob = new Blob([pdfBytes as any], { type: 'application/pdf' });
+      const blob = new Blob([toArrayBufferBytes(pdfBytes)], { type: 'application/pdf' });
       downloadBlob(blob, 'clean_board_notes.pdf');
     } catch (err) {
       alert('Error creating PDF.');
@@ -194,44 +195,69 @@ export default function BoardNotesCleaner() {
   };
 
   return (
-    <div className="w-full min-h-screen bg-slate-50 dark:bg-slate-950 py-8 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-7xl mx-auto space-y-8">
-        {/* Header */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-50 dark:bg-cyan-950/60 border border-cyan-200 dark:border-cyan-900 text-cyan-700 dark:text-cyan-300 text-xs font-bold mb-2">
-              <Sparkles className="w-3.5 h-3.5" /> Lecture Notes Enhancer
-            </div>
-            <h1 className="text-3xl sm:text-4xl font-extrabold text-slate-900 dark:text-white">
-              Classroom Board Notes Cleaner
-            </h1>
-            <p className="text-sm text-slate-600 dark:text-slate-400 mt-1 max-w-2xl">
-              Turn tilted, glare-filled smartphone photos of whiteboards and blackboards into clean, high-contrast, printable PDF notes. Saves 90% printer toner!
-            </p>
+    <ToolWorkspaceShell
+      title="Classroom Board Notes Cleaner"
+      subtitle="Turn tilted, glare-filled smartphone photos of whiteboards and blackboards into clean, high-contrast, printable PDF notes. Saves 90% printer toner!"
+      categoryLabel="Lecture Notes Enhancer"
+      icon={Sparkles}
+      microVariant="ocr"
+      tone="sky"
+      trustNote="Client-side chalkboard inversion & glare filter · 100% private"
+    >
+      <div className="space-y-6">
+        {/* Top Action Bar */}
+        <motion.div
+          initial={prefersReduced ? false : { opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="pms-glass-panel rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3"
+        >
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <span
+              className="px-3 py-1 rounded-full font-bold text-[var(--pms-ink)] border border-[var(--pms-border)]"
+              style={{ background: 'var(--pms-soft-blue)' }}
+            >
+              Chalk Inversion &amp; De-Glare
+            </span>
+            {sourceImg && (
+              <span
+                className="px-3 py-1 rounded-full font-bold text-[var(--pms-ink)] border border-[var(--pms-border)]"
+                style={{ background: 'var(--pms-soft-mint)' }}
+              >
+                <AnimatedNumber value={sourceImg.width} />×<AnimatedNumber value={sourceImg.height} /> px
+              </span>
+            )}
           </div>
 
-          <div className="flex items-center gap-3">
-            <button
-              onClick={handleDownloadPdf}
-              disabled={!previewDataUrl || isProcessing}
-              className="px-5 py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-700 text-white font-bold text-xs shadow-md disabled:opacity-40 flex items-center gap-2 transition-all"
-            >
-              <Download className="w-4 h-4" /> Download Clean Notes PDF
-            </button>
-          </div>
-        </div>
+          <button
+            onClick={handleDownloadPdf}
+            disabled={!previewDataUrl || isProcessing}
+            className="pms-btn-primary px-5 py-2.5 rounded-xl font-bold text-xs disabled:opacity-40 flex items-center gap-2 transition-all cursor-pointer"
+          >
+            <Download className="w-4 h-4" /> Download Clean Notes PDF
+          </button>
+        </motion.div>
 
         {/* Workspace Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
           {/* Controls (5 Cols) */}
-          <div className="lg:col-span-5 space-y-6">
-            <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200/90 dark:border-slate-800 p-6 shadow-sm space-y-5">
-              <label className="border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-2xl p-6 text-center block cursor-pointer hover:border-cyan-500 transition-colors">
-                <Upload className="w-8 h-8 mx-auto text-cyan-600 mb-2" />
-                <span className="font-bold text-sm text-slate-700 dark:text-slate-200 block">
+          <motion.div
+            initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.04 }}
+            className="lg:col-span-5 space-y-6"
+          >
+            <div className="pms-glass-panel rounded-3xl p-6 space-y-5">
+              <label className="border-2 border-dashed border-[var(--pms-border-strong)] hover:border-sky-500 rounded-2xl p-6 text-center block cursor-pointer bg-[var(--pms-white)] transition-colors">
+                <div
+                  className="w-12 h-12 rounded-2xl mx-auto mb-3 flex items-center justify-center border border-[var(--pms-border)]"
+                  style={{ background: 'var(--pms-soft-blue)' }}
+                >
+                  <Upload className="w-6 h-6 text-sky-600 dark:text-sky-400" />
+                </div>
+                <span className="font-bold text-sm text-[var(--pms-ink)] block truncate">
                   {file ? file.name : 'Upload Whiteboard / Blackboard Photo'}
                 </span>
-                <span className="text-xs text-slate-400 mt-1 block">
+                <span className="text-xs text-[var(--pms-muted)] mt-1 block">
                   Supports JPG, PNG, phone camera photos
                 </span>
                 <input
@@ -244,7 +270,8 @@ export default function BoardNotesCleaner() {
 
               {/* Cleaning Modes */}
               <div className="space-y-2">
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider block">
+                <label className="text-xs font-bold text-[var(--pms-muted)] uppercase tracking-wider flex items-center gap-1.5">
+                  <SlidersHorizontal className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" />
                   Enhancement Mode
                 </label>
                 <div className="grid grid-cols-2 gap-2">
@@ -257,25 +284,25 @@ export default function BoardNotesCleaner() {
                     <button
                       key={m.id}
                       onClick={() => setCleanMode(m.id as CleanMode)}
-                      className={`p-3 rounded-2xl border text-left transition-all ${
+                      className={`p-3 rounded-2xl border text-left transition-all cursor-pointer ${
                         cleanMode === m.id
-                          ? 'bg-cyan-50 dark:bg-cyan-950/60 border-cyan-500 text-cyan-900 dark:text-cyan-100 font-bold'
-                          : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400'
+                          ? 'bg-[var(--pms-soft-blue)] border-sky-500 text-[var(--pms-ink)] font-bold shadow-sm'
+                          : 'bg-[var(--pms-white)] border-[var(--pms-border)] text-[var(--pms-muted)] hover:text-[var(--pms-ink)]'
                       }`}
                     >
                       <p className="text-xs font-bold">{m.label}</p>
-                      <p className="text-[10px] text-slate-400 mt-0.5">{m.desc}</p>
+                      <p className="text-[10px] opacity-75 mt-0.5">{m.desc}</p>
                     </button>
                   ))}
                 </div>
               </div>
 
               {/* Sliders */}
-              <div className="space-y-4 pt-3 border-t border-slate-100 dark:border-slate-800">
+              <div className="space-y-4 pt-4 border-t border-[var(--pms-border)]">
                 <div>
-                  <div className="flex justify-between text-xs font-bold text-slate-600 dark:text-slate-300 mb-1">
+                  <div className="flex justify-between text-xs font-bold text-[var(--pms-ink)] mb-1">
                     <span>Marker Contrast</span>
-                    <span>{contrast}%</span>
+                    <span className="font-mono text-sky-600 dark:text-sky-400">{contrast}%</span>
                   </div>
                   <input
                     type="range"
@@ -283,14 +310,14 @@ export default function BoardNotesCleaner() {
                     max="260"
                     value={contrast}
                     onChange={(e) => setContrast(Number(e.target.value))}
-                    className="w-full accent-cyan-600"
+                    className="w-full accent-sky-600"
                   />
                 </div>
 
                 <div>
-                  <div className="flex justify-between text-xs font-bold text-slate-600 dark:text-slate-300 mb-1">
+                  <div className="flex justify-between text-xs font-bold text-[var(--pms-ink)] mb-1">
                     <span>Tube-light Glare Suppression</span>
-                    <span>{glareReduction}%</span>
+                    <span className="font-mono text-sky-600 dark:text-sky-400">{glareReduction}%</span>
                   </div>
                   <input
                     type="range"
@@ -298,36 +325,51 @@ export default function BoardNotesCleaner() {
                     max="100"
                     value={glareReduction}
                     onChange={(e) => setGlareReduction(Number(e.target.value))}
-                    className="w-full accent-cyan-600"
+                    className="w-full accent-sky-600"
                   />
                 </div>
               </div>
             </div>
-          </div>
+          </motion.div>
 
           {/* Real-time Preview (7 Cols) */}
-          <div className="lg:col-span-7 bg-white dark:bg-slate-900 rounded-3xl border border-slate-200/90 dark:border-slate-800 p-6 shadow-sm space-y-4">
-            <div className="flex items-center justify-between">
-              <h2 className="text-sm font-bold uppercase tracking-wider text-slate-500">
-                Cleaned Note Preview
+          <motion.div
+            initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.08 }}
+            className="lg:col-span-7 pms-glass-panel rounded-3xl p-6 space-y-4 relative overflow-hidden"
+          >
+            <PearlScanOverlay active={isProcessing} label="Building clean A4 lecture notes PDF..." />
+
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <h2 className="text-xs font-bold uppercase tracking-wider text-[var(--pms-muted)] flex items-center gap-1.5">
+                <Eye className="w-4 h-4 text-sky-600 dark:text-sky-400" /> Cleaned Note Preview
               </h2>
-              {previewDataUrl && (
-                <span className="text-xs font-bold text-cyan-700 dark:text-cyan-300 bg-cyan-50 dark:bg-cyan-950/60 px-3 py-1 rounded-full border border-cyan-200">
-                  Ready for Print
-                </span>
-              )}
+              <AnimatePresence>
+                {previewDataUrl && (
+                  <motion.span
+                    initial={prefersReduced ? false : { opacity: 0, scale: 0.94 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={prefersReduced ? undefined : { opacity: 0, scale: 0.94 }}
+                    className="text-xs font-bold text-[var(--pms-ink)] px-3 py-1 rounded-full border border-[var(--pms-border)]"
+                    style={{ background: 'var(--pms-soft-mint)' }}
+                  >
+                    Ready for Print
+                  </motion.span>
+                )}
+              </AnimatePresence>
             </div>
 
-            <div className="w-full bg-slate-100 dark:bg-slate-950/80 rounded-2xl p-4 flex items-center justify-center min-h-[460px] border border-slate-200/70 dark:border-slate-800 overflow-auto">
+            <div className="w-full pms-paper-grid rounded-2xl p-4 flex items-center justify-center min-h-[460px] border border-[var(--pms-border)] overflow-auto">
               {previewDataUrl ? (
                 <img
                   src={previewDataUrl}
                   alt="Cleaned Board Notes Preview"
-                  className="max-h-[580px] w-auto shadow-2xl rounded-sm border border-slate-300"
+                  className="max-h-[580px] w-auto bg-white shadow-2xl rounded-sm border border-[var(--pms-border-strong)]"
                 />
               ) : (
-                <div className="text-center space-y-3 text-slate-400">
-                  <Sun className="w-12 h-12 mx-auto opacity-30 text-cyan-500" />
+                <div className="text-center space-y-3 text-[var(--pms-muted)] max-w-sm">
+                  <Sun className="w-12 h-12 mx-auto opacity-35 text-sky-500" />
                   <p className="text-xs font-semibold">
                     Upload a lecture photo to remove glare, shadows, and invert blackboard chalk.
                   </p>
@@ -335,7 +377,7 @@ export default function BoardNotesCleaner() {
               )}
             </div>
             <canvas ref={canvasRef} className="hidden" />
-          </div>
+          </motion.div>
         </div>
 
         {/* SEO Guide Section */}
@@ -363,6 +405,6 @@ export default function BoardNotesCleaner() {
           ]}
         />
       </div>
-    </div>
+    </ToolWorkspaceShell>
   );
 }

@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { FileText, Download, Loader2, Check, ExternalLink, Eye, CheckCircle2, Sparkles, Filter, Archive, Layers } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { motion, useReducedMotion } from 'motion/react';
+import { FileText, Download, Loader2, Check, ExternalLink, Eye, CheckCircle2, Filter, Archive, Layers } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
 import { PDFDocument } from 'pdf-lib';
 import JSZip from 'jszip';
@@ -8,7 +9,9 @@ import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { useToast } from '../components/Toast';
+import { toArrayBufferBytes } from '../lib/blobUrl';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { AnimatedNumber, PearlScanOverlay, PearlStageSwitch } from '../components/pearl/PearlMotion';
 
 interface PageThumb {
   index: number; // 1-based
@@ -41,6 +44,7 @@ export default function ExtractPages() {
   const [showPreview, setShowPreview] = useState(true);
 
   const toast = useToast();
+  const prefersReduced = useReducedMotion();
 
   useEffect(() => {
     return () => {
@@ -158,7 +162,7 @@ export default function ExtractPages() {
         const copied = await newDoc.copyPages(srcDoc, selectedIndices);
         copied.forEach((p) => newDoc.addPage(p));
         const bytes = await newDoc.save();
-        const blob = new Blob([bytes as any], { type: 'application/pdf' });
+        const blob = new Blob([toArrayBufferBytes(bytes)], { type: 'application/pdf' });
         setResultUrl(URL.createObjectURL(blob));
         setResultIsZip(false);
       } else {
@@ -215,98 +219,120 @@ export default function ExtractPages() {
     >
       <div className="flex flex-col items-center w-full">
 
+      <PearlStageSwitch
+        stageKey={!file ? 'upload' : loadingThumbs ? 'loading' : !resultUrl ? 'configure' : 'result'}
+        className="w-full max-w-6xl"
+      >
       {!file ? (
-        <div className="w-full max-w-2xl">
+        <div className="w-full max-w-2xl mx-auto">
           <FileDropzone onDrop={handleDrop} multiple={false} title="Select PDF to Extract Pages" />
         </div>
       ) : loadingThumbs ? (
-        <div className="w-full max-w-2xl bg-white dark:bg-slate-900 rounded-3xl p-12 border border-gray-200 dark:border-slate-800 text-center space-y-4">
-          <Loader2 className="w-10 h-10 animate-spin text-violet-600 mx-auto" />
+        <div className="relative overflow-hidden w-full max-w-2xl mx-auto pms-glass-panel rounded-3xl p-12 text-center space-y-4">
+          <PearlScanOverlay active label="Generating interactive page thumbnails..." />
+          <Loader2 className="w-10 h-10 animate-spin text-[var(--pms-violet)] mx-auto" />
           <h3 className="text-lg font-bold text-gray-900 dark:text-white">Generating Page Thumbnails...</h3>
           <p className="text-sm text-gray-500 dark:text-slate-400">Loading document structure for visual selection</p>
         </div>
       ) : !resultUrl ? (
-        <div className="w-full bg-white dark:bg-slate-900 rounded-3xl shadow-xl border border-gray-200 dark:border-slate-800 p-6 md:p-8 space-y-6">
+        <div className="relative overflow-hidden w-full pms-glass-panel rounded-3xl p-6 md:p-8 space-y-6">
+          <PearlScanOverlay active={busy} label={progressMsg || 'Extracting selected pages...'} />
           {/* Top Bar: File Details & Export Mode */}
-          <div className="flex flex-col md:flex-row items-center justify-between gap-4 p-4 bg-gray-50 dark:bg-slate-800/60 rounded-2xl border border-gray-200 dark:border-slate-700">
+          <div className="flex flex-col md:flex-row items-center justify-between gap-4 p-4 bg-white/75 dark:bg-slate-900/75 rounded-2xl border border-[var(--pms-border)]">
             <div className="flex items-center gap-3 min-w-0 w-full md:w-auto">
-              <div className="w-10 h-10 bg-violet-100 dark:bg-violet-950/50 text-violet-600 dark:text-violet-400 rounded-xl flex items-center justify-center shrink-0">
+              <div className="w-10 h-10 bg-[var(--pms-soft-lavender)] text-[var(--pms-violet)] border border-[var(--pms-border)] rounded-xl flex items-center justify-center shrink-0">
                 <FileText className="w-5 h-5" />
               </div>
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-bold text-gray-900 dark:text-white truncate">{file.name}</p>
-                <p className="text-xs text-gray-500 dark:text-slate-400">
-                  {pages.length} total pages • <span className="text-violet-600 dark:text-violet-400 font-bold">{selectedCount} selected</span>
+                <p className="text-xs text-gray-500 dark:text-slate-400 tabular-nums">
+                  {pages.length} total pages • <span className="text-[var(--pms-violet)] font-bold">{selectedCount} selected</span>
                 </p>
               </div>
             </div>
 
             {/* Export Mode Toggle */}
-            <div className="flex items-center gap-1.5 p-1 bg-gray-200/80 dark:bg-slate-700/80 rounded-xl text-xs font-bold w-full md:w-auto justify-center">
+            <div className="flex items-center gap-1 p-1 bg-white/80 dark:bg-slate-800/80 border border-[var(--pms-border)] rounded-xl text-xs font-bold w-full md:w-auto justify-center">
               <button
                 type="button"
                 onClick={() => setExportMode('single')}
-                className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 ${
+                className={`relative overflow-hidden px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 ${
                   exportMode === 'single'
-                    ? 'bg-white dark:bg-slate-900 text-violet-600 dark:text-violet-400 shadow-xs'
-                    : 'text-gray-600 dark:text-slate-300 hover:text-gray-900'
+                    ? 'text-purple-900 dark:text-purple-100'
+                    : 'text-gray-600 dark:text-slate-300 hover:text-gray-900 dark:hover:text-white'
                 }`}
               >
-                <Layers className="w-3.5 h-3.5" /> Single Combined PDF
+                {exportMode === 'single' && (
+                  <motion.span
+                    layoutId="extract-export-pill"
+                    transition={{ type: 'spring', stiffness: 450, damping: 32 }}
+                    className="absolute inset-0 bg-[var(--pms-soft-lavender)] rounded-lg pointer-events-none"
+                  />
+                )}
+                <Layers className="relative z-10 w-3.5 h-3.5" />
+                <span className="relative z-10">Single Combined PDF</span>
               </button>
               <button
                 type="button"
                 onClick={() => setExportMode('zip')}
-                className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 ${
+                className={`relative overflow-hidden px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 ${
                   exportMode === 'zip'
-                    ? 'bg-white dark:bg-slate-900 text-violet-600 dark:text-violet-400 shadow-xs'
-                    : 'text-gray-600 dark:text-slate-300 hover:text-gray-900'
+                    ? 'text-purple-900 dark:text-purple-100'
+                    : 'text-gray-600 dark:text-slate-300 hover:text-gray-900 dark:hover:text-white'
                 }`}
               >
-                <Archive className="w-3.5 h-3.5" /> Separate Files (ZIP)
+                {exportMode === 'zip' && (
+                  <motion.span
+                    layoutId="extract-export-pill"
+                    transition={{ type: 'spring', stiffness: 450, damping: 32 }}
+                    className="absolute inset-0 bg-[var(--pms-soft-lavender)] rounded-lg pointer-events-none"
+                  />
+                )}
+                <Archive className="relative z-10 w-3.5 h-3.5" />
+                <span className="relative z-10">Separate Files (ZIP)</span>
               </button>
             </div>
           </div>
 
           {/* Quick Selection Toolbar */}
-          <div className="p-4 bg-violet-50/50 dark:bg-violet-950/20 rounded-2xl border border-violet-100 dark:border-violet-900/40 flex flex-wrap items-center justify-between gap-4">
+          <div className="p-4 bg-[var(--pms-soft-lavender)] rounded-2xl border border-[var(--pms-border)] flex flex-wrap items-center justify-between gap-4">
             {/* Quick Action Chips */}
             <div className="flex flex-wrap items-center gap-2">
-              <span className="text-xs font-bold text-gray-700 dark:text-slate-300 uppercase tracking-wider flex items-center gap-1 mr-1">
-                <Filter className="w-3 h-3 text-violet-500" /> Filter:
+              <span className="text-xs font-bold text-gray-800 dark:text-slate-200 uppercase tracking-wider flex items-center gap-1 mr-1">
+                <Filter className="w-3 h-3 text-[var(--pms-violet)]" /> Filter:
               </span>
               <button
                 type="button"
                 onClick={selectAll}
-                className="px-2.5 py-1 text-xs font-semibold bg-white dark:bg-slate-800 text-gray-700 dark:text-slate-200 border border-gray-200 dark:border-slate-700 rounded-lg hover:border-violet-400"
+                className="px-2.5 py-1 text-xs font-semibold bg-white/85 dark:bg-slate-800/85 text-gray-700 dark:text-slate-200 border border-[var(--pms-border)] rounded-lg hover:border-[var(--pms-violet)] transition-colors"
               >
                 Select All
               </button>
               <button
                 type="button"
                 onClick={deselectAll}
-                className="px-2.5 py-1 text-xs font-semibold bg-white dark:bg-slate-800 text-gray-700 dark:text-slate-200 border border-gray-200 dark:border-slate-700 rounded-lg hover:border-violet-400"
+                className="px-2.5 py-1 text-xs font-semibold bg-white/85 dark:bg-slate-800/85 text-gray-700 dark:text-slate-200 border border-[var(--pms-border)] rounded-lg hover:border-[var(--pms-violet)] transition-colors"
               >
                 Deselect All
               </button>
               <button
                 type="button"
                 onClick={selectOdd}
-                className="px-2.5 py-1 text-xs font-semibold bg-white dark:bg-slate-800 text-gray-700 dark:text-slate-200 border border-gray-200 dark:border-slate-700 rounded-lg hover:border-violet-400"
+                className="px-2.5 py-1 text-xs font-semibold bg-white/85 dark:bg-slate-800/85 text-gray-700 dark:text-slate-200 border border-[var(--pms-border)] rounded-lg hover:border-[var(--pms-violet)] transition-colors"
               >
                 Odd Pages
               </button>
               <button
                 type="button"
                 onClick={selectEven}
-                className="px-2.5 py-1 text-xs font-semibold bg-white dark:bg-slate-800 text-gray-700 dark:text-slate-200 border border-gray-200 dark:border-slate-700 rounded-lg hover:border-violet-400"
+                className="px-2.5 py-1 text-xs font-semibold bg-white/85 dark:bg-slate-800/85 text-gray-700 dark:text-slate-200 border border-[var(--pms-border)] rounded-lg hover:border-[var(--pms-violet)] transition-colors"
               >
                 Even Pages
               </button>
               <button
                 type="button"
                 onClick={invertSelection}
-                className="px-2.5 py-1 text-xs font-semibold bg-white dark:bg-slate-800 text-gray-700 dark:text-slate-200 border border-gray-200 dark:border-slate-700 rounded-lg hover:border-violet-400"
+                className="px-2.5 py-1 text-xs font-semibold bg-white/85 dark:bg-slate-800/85 text-gray-700 dark:text-slate-200 border border-[var(--pms-border)] rounded-lg hover:border-[var(--pms-violet)] transition-colors"
               >
                 Invert
               </button>
@@ -320,12 +346,12 @@ export default function ExtractPages() {
                 value={rangeInput}
                 onChange={(e) => setRangeInput(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter') applyRangeString(); }}
-                className="px-3 py-1.5 text-xs bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-700 rounded-lg w-36 font-mono focus:outline-hidden focus:border-violet-500"
+                className="px-3 py-1.5 text-xs bg-white/90 dark:bg-slate-800/90 border border-[var(--pms-border)] rounded-lg w-36 font-mono focus:outline-hidden focus:border-[var(--pms-violet)]"
               />
               <button
                 type="button"
                 onClick={applyRangeString}
-                className="px-3 py-1.5 text-xs font-bold bg-violet-600 hover:bg-violet-700 text-white rounded-lg transition-colors shrink-0"
+                className="px-3 py-1.5 text-xs font-bold bg-violet-600 hover:bg-violet-700 text-white rounded-lg transition-colors shrink-0 shadow-xs"
               >
                 Apply Range
               </button>
@@ -333,19 +359,19 @@ export default function ExtractPages() {
           </div>
 
           {/* Visual Thumbnails Grid */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-3 max-h-[440px] overflow-y-auto p-4 bg-gray-50 dark:bg-slate-950 rounded-2xl border border-gray-200 dark:border-slate-800 shadow-inner">
+          <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-3 max-h-[440px] overflow-y-auto p-4 bg-white/55 dark:bg-slate-950/60 rounded-2xl border border-[var(--pms-border)] shadow-inner">
             {pages.map((pg, i) => (
               <button
                 key={pg.index}
                 type="button"
                 onClick={() => togglePage(i)}
-                className={`group relative rounded-xl overflow-hidden border-2 transition-all cursor-pointer flex flex-col p-1.5 bg-white dark:bg-slate-900 text-left ${
+                className={`group relative rounded-xl overflow-hidden border-2 transition-all cursor-pointer flex flex-col p-1.5 bg-white/85 dark:bg-slate-900/85 text-left ${
                   pg.selected
-                    ? 'border-violet-600 ring-2 ring-violet-200 dark:ring-violet-900 shadow-md scale-[1.02]'
-                    : 'border-gray-200 dark:border-slate-800 hover:border-gray-300 dark:hover:border-slate-700 opacity-70 hover:opacity-100'
+                    ? 'border-[var(--pms-violet)] ring-2 ring-purple-200/70 dark:ring-purple-900 shadow-md scale-[1.02]'
+                    : 'border-[var(--pms-border)] hover:border-[var(--pms-border-strong)] opacity-75 hover:opacity-100'
                 }`}
               >
-                <div className="relative aspect-[3/4] w-full overflow-hidden rounded bg-gray-100 dark:bg-slate-800 flex items-center justify-center">
+                <div className="relative aspect-[3/4] w-full overflow-hidden rounded-lg bg-white border border-gray-200 flex items-center justify-center">
                   <img
                     src={pg.url}
                     alt={`Page ${pg.index}`}
@@ -357,7 +383,7 @@ export default function ExtractPages() {
                     className={`absolute top-1.5 right-1.5 w-5 h-5 rounded-md flex items-center justify-center transition-all ${
                       pg.selected
                         ? 'bg-violet-600 text-white shadow-xs'
-                        : 'bg-white/80 dark:bg-slate-800/80 border border-gray-300 dark:border-slate-600 text-transparent'
+                        : 'bg-white/90 dark:bg-slate-800/80 border border-gray-300 dark:border-slate-600 text-transparent'
                     }`}
                   >
                     <Check className="w-3.5 h-3.5 stroke-[3]" />
@@ -367,7 +393,7 @@ export default function ExtractPages() {
                 <div className="mt-1.5 flex items-center justify-between text-[11px] px-1">
                   <span className="font-bold text-gray-700 dark:text-slate-300">Page {pg.index}</span>
                   {pg.selected && (
-                    <span className="text-[10px] font-bold text-violet-600 dark:text-violet-400 uppercase">
+                    <span className="text-[10px] font-bold text-[var(--pms-violet)] uppercase">
                       Selected
                     </span>
                   )}
@@ -378,11 +404,14 @@ export default function ExtractPages() {
 
           {/* Action Footer */}
           <div className="flex flex-col sm:flex-row gap-3 pt-2">
-            <button
+            <motion.button
+              whileHover={prefersReduced || busy || selectedCount === 0 ? undefined : { scale: 1.01 }}
+              whileTap={prefersReduced || busy || selectedCount === 0 ? undefined : { scale: 0.99 }}
               onClick={extract}
               disabled={busy || selectedCount === 0}
-              className="flex-1 py-4 bg-violet-600 hover:bg-violet-700 text-white font-bold rounded-2xl transition-all shadow-md hover:shadow-lg disabled:opacity-50 flex items-center justify-center gap-2 text-base"
+              className="pms-btn-primary relative overflow-hidden flex-1 py-4 font-bold rounded-2xl shadow-md hover:shadow-lg disabled:opacity-50 flex items-center justify-center gap-2 text-base"
             >
+              <span className="pms-shimmer pointer-events-none" />
               {busy ? (
                 <>
                   <Loader2 className="w-5 h-5 animate-spin" />
@@ -396,11 +425,11 @@ export default function ExtractPages() {
                     : `Extract ${selectedCount} Page(s) as ZIP Archive`}
                 </>
               )}
-            </button>
+            </motion.button>
             <button
               onClick={resetAll}
               disabled={busy}
-              className="px-6 py-4 bg-gray-100 hover:bg-gray-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-gray-700 dark:text-slate-300 font-semibold rounded-2xl transition-all text-sm"
+              className="px-6 py-4 bg-white/80 dark:bg-slate-800/80 hover:bg-white dark:hover:bg-slate-700 border border-[var(--pms-border)] text-gray-700 dark:text-slate-200 font-semibold rounded-2xl transition-all text-sm"
             >
               Cancel
             </button>
@@ -408,33 +437,41 @@ export default function ExtractPages() {
         </div>
       ) : (
         /* Success Screen */
-        <div className="w-full max-w-4xl bg-white dark:bg-slate-900 rounded-3xl shadow-xl border border-gray-200 dark:border-slate-800 p-8 text-center space-y-6">
-          <div className="p-8 bg-green-50 dark:bg-green-950/30 rounded-3xl border border-green-200 dark:border-green-800">
-            <div className="w-16 h-16 bg-green-100 dark:bg-green-900/50 text-green-600 dark:text-green-400 rounded-full flex items-center justify-center mx-auto mb-4">
+        <div className="w-full max-w-4xl mx-auto pms-glass-panel rounded-3xl p-8 text-center space-y-6">
+          <div className="p-8 rounded-3xl bg-gradient-to-br from-emerald-500/12 via-white/75 to-teal-500/12 dark:from-emerald-950/50 dark:via-slate-900/80 dark:to-teal-950/40 border border-emerald-200/80 dark:border-emerald-800/60">
+            <motion.div
+              initial={prefersReduced ? false : { scale: 0.6, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              transition={{ type: 'spring', stiffness: 420, damping: 24 }}
+              className="w-16 h-16 bg-gradient-to-br from-emerald-400 to-teal-500 text-white rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-emerald-500/25"
+            >
               <CheckCircle2 className="w-8 h-8" />
-            </div>
-            <h3 className="text-2xl md:text-3xl font-extrabold text-green-900 dark:text-green-200 mb-2">
-              Extracted {selectedCount} Page(s) Successfully!
+            </motion.div>
+            <h3 className="text-2xl md:text-3xl font-extrabold text-gray-900 dark:text-white mb-2 tabular-nums">
+              Extracted <AnimatedNumber value={selectedCount} /> Page(s) Successfully!
             </h3>
-            <p className="text-green-700 dark:text-green-400 mb-6 text-sm max-w-md mx-auto">
+            <p className="text-gray-600 dark:text-slate-300 mb-6 text-sm max-w-md mx-auto">
               {resultIsZip
                 ? 'Your selected pages have been packaged into individual PDF files inside a compressed ZIP archive.'
                 : 'Your selected pages have been combined into a new clean PDF document.'}
             </p>
 
             <div className="flex flex-wrap items-center justify-center gap-3">
-              <a
+              <motion.a
+                whileHover={prefersReduced ? undefined : { scale: 1.02 }}
+                whileTap={prefersReduced ? undefined : { scale: 0.98 }}
                 href={resultUrl}
                 download={
                   resultIsZip
                     ? `extracted_${file.name.replace(/\.[^/.]+$/, '')}_pages.zip`
                     : `extracted_${file.name}`
                 }
-                className="inline-flex items-center justify-center gap-2 px-8 py-3.5 bg-green-600 hover:bg-green-700 text-white font-bold rounded-2xl transition-all shadow-md hover:shadow-lg text-base"
+                className="pms-btn-primary relative overflow-hidden inline-flex items-center justify-center gap-2 px-8 py-3.5 font-bold rounded-2xl shadow-md hover:shadow-lg text-base"
               >
+                <span className="pms-shimmer pointer-events-none" />
                 <Download className="w-5 h-5" />
                 {resultIsZip ? 'Download Pages (ZIP)' : 'Download Extracted PDF'}
-              </a>
+              </motion.a>
 
               {!resultIsZip && (
                 <>
@@ -442,7 +479,7 @@ export default function ExtractPages() {
                     href={resultUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center justify-center gap-2 px-5 py-3.5 bg-white dark:bg-slate-800 hover:bg-gray-50 dark:hover:bg-slate-700 text-gray-700 dark:text-slate-200 font-semibold rounded-2xl border border-gray-300 dark:border-slate-700 transition-all text-sm shadow-xs"
+                    className="inline-flex items-center justify-center gap-2 px-5 py-3.5 bg-white/85 dark:bg-slate-800/85 hover:bg-white dark:hover:bg-slate-700 text-gray-700 dark:text-slate-200 font-semibold rounded-2xl border border-[var(--pms-border)] transition-all text-sm shadow-xs"
                   >
                     <ExternalLink className="w-4 h-4" />
                     Open in New Tab
@@ -450,7 +487,7 @@ export default function ExtractPages() {
                   <button
                     type="button"
                     onClick={() => setShowPreview(!showPreview)}
-                    className="inline-flex items-center justify-center gap-2 px-5 py-3.5 bg-white dark:bg-slate-800 hover:bg-gray-50 dark:hover:bg-slate-700 text-gray-700 dark:text-slate-200 font-semibold rounded-2xl border border-gray-300 dark:border-slate-700 transition-all text-sm shadow-xs"
+                    className="inline-flex items-center justify-center gap-2 px-5 py-3.5 bg-white/85 dark:bg-slate-800/85 hover:bg-white dark:hover:bg-slate-700 text-gray-700 dark:text-slate-200 font-semibold rounded-2xl border border-[var(--pms-border)] transition-all text-sm shadow-xs"
                   >
                     <Eye className="w-4 h-4" />
                     {showPreview ? 'Hide Preview' : 'Show Live Preview'}
@@ -464,7 +501,7 @@ export default function ExtractPages() {
                 <p className="text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wider mb-2">
                   Extracted PDF Document Preview
                 </p>
-                <div className="w-full h-[550px] rounded-2xl border border-gray-200 dark:border-slate-700 overflow-hidden bg-gray-100 dark:bg-slate-950 shadow-inner">
+                <div className="w-full h-[550px] rounded-2xl border border-[var(--pms-border)] overflow-hidden bg-white dark:bg-slate-950 shadow-inner">
                   <iframe
                     src={resultUrl}
                     title="Extracted PDF Preview"
@@ -484,6 +521,7 @@ export default function ExtractPages() {
           </button>
         </div>
       )}
+      </PearlStageSwitch>
       </div>
     </ToolWorkspaceShell>
   );

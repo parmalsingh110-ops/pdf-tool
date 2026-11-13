@@ -1,13 +1,16 @@
-import React, { useState, useEffect } from 'react';
-import { Download, FileText, ArrowUpDown, CheckCircle2, RotateCw, ExternalLink, Eye, Loader2, Sparkles } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Download, FileText, ArrowUpDown, CheckCircle2, ExternalLink, Eye, Loader2, Sparkles } from 'lucide-react';
+import { motion, useReducedMotion } from 'motion/react';
 import FileDropzone from '../components/FileDropzone';
 import { PDFDocument } from 'pdf-lib';
 import * as pdfjsLib from 'pdfjs-dist';
 import '../lib/pdfWorker';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
+import { toArrayBufferBytes } from '../lib/blobUrl';
 import { useToast } from '../components/Toast';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { AnimatedNumber, PearlScanOverlay, PearlStageSwitch } from '../components/pearl/PearlMotion';
 
 interface PageThumbnail {
   originalIndex: number; // 1-based
@@ -40,6 +43,7 @@ export default function ReversePDF() {
   const [showPreview, setShowPreview] = useState(true);
 
   const toast = useToast();
+  const prefersReduced = useReducedMotion();
 
   useEffect(() => {
     return () => {
@@ -135,7 +139,7 @@ export default function ReversePDF() {
       copiedPages.forEach((page) => newPdf.addPage(page));
 
       const pdfBytes = await newPdf.save();
-      const blob = new Blob([pdfBytes as any], { type: 'application/pdf' });
+      const blob = new Blob([toArrayBufferBytes(pdfBytes)], { type: 'application/pdf' });
       if (reversedUrl) URL.revokeObjectURL(reversedUrl);
       setReversedUrl(URL.createObjectURL(blob));
       toast.success('PDF page order reversed successfully!');
@@ -167,245 +171,263 @@ export default function ReversePDF() {
       tone="indigo"
     >
       <div className="flex flex-col items-center justify-center max-w-6xl mx-auto w-full">
-
-      {!file ? (
-        <div className="w-full max-w-2xl">
-          <FileDropzone onDrop={handleDrop} multiple={false} title="Select PDF to Reverse" />
-        </div>
-      ) : (
-        <div className="w-full bg-white dark:bg-slate-900 rounded-3xl shadow-xl border border-gray-200 dark:border-slate-800 p-6 md:p-8">
-          {!reversedUrl ? (
-            <div className="space-y-8">
-              {/* Top Info Bar */}
-              <div className="flex flex-col sm:flex-row items-center justify-between gap-4 p-5 bg-gray-50 dark:bg-slate-800/60 rounded-2xl border border-gray-200 dark:border-slate-700">
-                <div className="flex items-center gap-4 min-w-0 w-full sm:w-auto">
-                  <div className="w-12 h-12 bg-indigo-100 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400 rounded-xl flex items-center justify-center shrink-0">
-                    <FileText className="w-6 h-6" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-bold text-gray-900 dark:text-white truncate">{file.name}</p>
-                    <p className="text-xs text-gray-500 dark:text-slate-400">
-                      {(file.size / 1024 / 1024).toFixed(2)} MB • {totalPages > 0 ? `${totalPages} page(s) loaded` : 'Loading pages...'}
-                    </p>
-                  </div>
-                </div>
-
-                {/* Mode Selector Tabs */}
-                <div className="flex flex-wrap items-center gap-1.5 p-1.5 bg-gray-200/80 dark:bg-slate-700/80 rounded-xl text-xs font-bold">
-                  <button
-                    type="button"
-                    onClick={() => setReverseMode('all')}
-                    className={`px-3 py-1.5 rounded-lg transition-all ${
-                      reverseMode === 'all'
-                        ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs'
-                        : 'text-gray-600 dark:text-slate-300 hover:text-gray-900'
-                    }`}
-                  >
-                    Reverse All Pages
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setReverseMode('keepCover')}
-                    className={`px-3 py-1.5 rounded-lg transition-all ${
-                      reverseMode === 'keepCover'
-                        ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs'
-                        : 'text-gray-600 dark:text-slate-300 hover:text-gray-900'
-                    }`}
-                  >
-                    Keep Cover Page (1)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setReverseMode('range')}
-                    className={`px-3 py-1.5 rounded-lg transition-all ${
-                      reverseMode === 'range'
-                        ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs'
-                        : 'text-gray-600 dark:text-slate-300 hover:text-gray-900'
-                    }`}
-                  >
-                    Custom Range
-                  </button>
-                </div>
-              </div>
-
-              {/* Range Controls (if active) */}
-              {reverseMode === 'range' && (
-                <div className="p-4 bg-indigo-50/50 dark:bg-indigo-950/20 rounded-2xl border border-indigo-200 dark:border-indigo-900/50 flex flex-wrap items-center gap-4 text-xs">
-                  <span className="font-bold text-indigo-900 dark:text-indigo-300">Reverse page range:</span>
-                  <div className="flex items-center gap-2">
-                    <span className="text-gray-600 dark:text-slate-400">From page:</span>
-                    <input
-                      type="number"
-                      min={1}
-                      max={totalPages || 999}
-                      value={rangeStart}
-                      onChange={(e) => setRangeStart(Math.max(1, parseInt(e.target.value) || 1))}
-                      className="w-16 px-2 py-1 bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-700 rounded-lg text-center font-bold"
-                    />
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-gray-600 dark:text-slate-400">To page:</span>
-                    <input
-                      type="number"
-                      min={1}
-                      max={totalPages || 999}
-                      value={rangeEnd}
-                      onChange={(e) => setRangeEnd(Math.max(1, parseInt(e.target.value) || 1))}
-                      className="w-16 px-2 py-1 bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-700 rounded-lg text-center font-bold"
-                    />
-                  </div>
-                  <span className="text-gray-500 italic">(Other pages will retain their original sequence)</span>
-                </div>
-              )}
-
-              {/* Visual Thumbnail Grid */}
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-bold text-gray-900 dark:text-white uppercase tracking-wider flex items-center gap-2">
-                    <Sparkles className="w-4 h-4 text-indigo-500" />
-                    New Page Sequence Preview
-                  </h3>
-                  <span className="text-xs text-gray-500 dark:text-slate-400 font-medium">
-                    Badges indicate new position in resulting PDF
-                  </span>
-                </div>
-
-                {isLoadingPages ? (
-                  <div className="py-16 flex flex-col items-center justify-center gap-3 text-gray-500 dark:text-slate-400 border border-dashed border-gray-200 dark:border-slate-800 rounded-2xl">
-                    <Loader2 className="w-8 h-8 animate-spin text-indigo-600" />
-                    <p className="text-sm font-medium">Rendering page thumbnails...</p>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-3 max-h-[360px] overflow-y-auto p-3 bg-gray-50 dark:bg-slate-950 rounded-2xl border border-gray-200 dark:border-slate-800">
-                    {simulatedSequence.map((origIdx, slotIdx) => {
-                      const thumb = thumbnails[origIdx];
-                      return (
-                        <div
-                          key={slotIdx}
-                          className="relative group rounded-xl overflow-hidden border border-gray-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-2xs hover:shadow-md transition-all flex flex-col items-center p-2"
-                        >
-                          {thumb ? (
-                            <img
-                              src={thumb.dataUrl}
-                              alt={`Page ${origIdx + 1}`}
-                              className="w-full h-24 object-contain rounded"
-                            />
-                          ) : (
-                            <div className="w-full h-24 flex items-center justify-center bg-gray-100 dark:bg-slate-800 text-xs text-gray-400">
-                              P.{origIdx + 1}
-                            </div>
-                          )}
-
-                          <div className="mt-2 w-full flex items-center justify-between px-1 text-[11px]">
-                            <span className="text-gray-400 font-mono">#{slotIdx + 1}</span>
-                            <span className="font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/40 px-1.5 py-0.2 rounded text-[10px]">
-                              Was P.{origIdx + 1}
-                            </span>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-
-              {/* Action Buttons */}
-              <div className="flex flex-col sm:flex-row gap-3 pt-2">
-                <button
-                  onClick={reversePdf}
-                  disabled={isProcessing || isLoadingPages}
-                  className="flex-1 py-4 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-2xl transition-all shadow-md hover:shadow-lg disabled:opacity-50 flex items-center justify-center gap-2 text-base"
-                >
-                  {isProcessing ? (
-                    <>
-                      <Loader2 className="w-5 h-5 animate-spin" />
-                      Reversing Document...
-                    </>
-                  ) : (
-                    <>
-                      <ArrowUpDown className="w-5 h-5" />
-                      Apply Reversal & Download
-                    </>
-                  )}
-                </button>
-                <button
-                  onClick={resetState}
-                  disabled={isProcessing}
-                  className="px-6 py-4 bg-gray-100 hover:bg-gray-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-gray-700 dark:text-slate-300 font-semibold rounded-2xl transition-all text-sm"
-                >
-                  Cancel
-                </button>
-              </div>
+        <PearlStageSwitch stageKey={!file ? 'upload' : 'workspace'} className="w-full">
+          {!file ? (
+            <div className="w-full max-w-2xl mx-auto">
+              <FileDropzone onDrop={handleDrop} multiple={false} title="Select PDF to Reverse" />
             </div>
           ) : (
-            /* Success Screen with Live Preview */
-            <div className="space-y-6 text-center py-4">
-              <div className="p-8 bg-green-50 dark:bg-green-950/30 rounded-3xl border border-green-200 dark:border-green-800">
-                <div className="w-16 h-16 bg-green-100 dark:bg-green-900/50 text-green-600 dark:text-green-400 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <CheckCircle2 className="w-8 h-8" />
-                </div>
-                <h3 className="text-2xl md:text-3xl font-extrabold text-green-900 dark:text-green-200 mb-2">
-                  PDF Pages Reversed Successfully!
-                </h3>
-                <p className="text-green-700 dark:text-green-400 mb-6 text-sm max-w-md mx-auto">
-                  Your document sequence has been successfully rearranged according to your chosen flow.
-                </p>
+            <div className="w-full pms-glass-panel rounded-3xl p-6 md:p-8 relative overflow-hidden">
+              <PearlScanOverlay
+                active={isProcessing || isLoadingPages}
+                label={isLoadingPages ? 'Rendering page thumbnails...' : 'Reversing document page order...'}
+              />
 
-                <div className="flex flex-wrap items-center justify-center gap-3">
-                  <a
-                    href={reversedUrl}
-                    download={`reversed_${file.name}`}
-                    className="inline-flex items-center justify-center gap-2 px-8 py-3.5 bg-green-600 hover:bg-green-700 text-white font-bold rounded-2xl transition-all shadow-md hover:shadow-lg text-base"
-                  >
-                    <Download className="w-5 h-5" />
-                    Download Reversed PDF
-                  </a>
-                  <a
-                    href={reversedUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center justify-center gap-2 px-5 py-3.5 bg-white dark:bg-slate-800 hover:bg-gray-50 dark:hover:bg-slate-700 text-gray-700 dark:text-slate-200 font-semibold rounded-2xl border border-gray-300 dark:border-slate-700 transition-all text-sm shadow-xs"
-                  >
-                    <ExternalLink className="w-4 h-4" />
-                    Open in New Tab
-                  </a>
-                  <button
-                    type="button"
-                    onClick={() => setShowPreview(!showPreview)}
-                    className="inline-flex items-center justify-center gap-2 px-5 py-3.5 bg-white dark:bg-slate-800 hover:bg-gray-50 dark:hover:bg-slate-700 text-gray-700 dark:text-slate-200 font-semibold rounded-2xl border border-gray-300 dark:border-slate-700 transition-all text-sm shadow-xs"
-                  >
-                    <Eye className="w-4 h-4" />
-                    {showPreview ? 'Hide Preview' : 'Show Live Preview'}
-                  </button>
-                </div>
+              <PearlStageSwitch stageKey={!reversedUrl ? 'configure' : 'result'}>
+                {!reversedUrl ? (
+                  <div className="space-y-8">
+                    {/* Top Info Bar */}
+                    <div className="flex flex-col sm:flex-row items-center justify-between gap-4 p-5 bg-white/75 dark:bg-slate-900/75 rounded-2xl border border-[var(--pms-border)]">
+                      <div className="flex items-center gap-4 min-w-0 w-full sm:w-auto">
+                        <div className="w-12 h-12 bg-[var(--pms-soft-lavender)] text-[var(--pms-violet)] border border-[var(--pms-border)] rounded-xl flex items-center justify-center shrink-0">
+                          <FileText className="w-6 h-6" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-bold text-slate-900 dark:text-white truncate">{file.name}</p>
+                          <p className="text-xs text-slate-500 dark:text-slate-400">
+                            {(file.size / 1024 / 1024).toFixed(2)} MB •{' '}
+                            {totalPages > 0 ? (
+                              <>
+                                <AnimatedNumber value={totalPages} /> page(s) loaded
+                              </>
+                            ) : (
+                              'Loading pages...'
+                            )}
+                          </p>
+                        </div>
+                      </div>
 
-                {showPreview && (
-                  <div className="mt-6 text-left">
-                    <p className="text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wider mb-2">
-                      Reversed Document Preview
-                    </p>
-                    <div className="w-full h-[550px] rounded-2xl border border-gray-200 dark:border-slate-700 overflow-hidden bg-gray-100 dark:bg-slate-950 shadow-inner">
-                      <iframe
-                        src={reversedUrl}
-                        title="Reversed PDF Preview"
-                        className="w-full h-full border-0"
-                      />
+                      {/* Mode Selector Tabs */}
+                      <div className="flex flex-wrap items-center gap-1.5 p-1.5 bg-white/70 dark:bg-slate-950/60 border border-[var(--pms-border)] rounded-2xl text-xs font-bold">
+                        {[
+                          { id: 'all' as const, label: 'Reverse All Pages' },
+                          { id: 'keepCover' as const, label: 'Keep Cover Page (1)' },
+                          { id: 'range' as const, label: 'Custom Range' },
+                        ].map((tab) => (
+                          <button
+                            key={tab.id}
+                            type="button"
+                            onClick={() => setReverseMode(tab.id)}
+                            className={`relative px-3.5 py-2 rounded-xl transition-colors ${
+                              reverseMode === tab.id
+                                ? 'text-white'
+                                : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
+                            }`}
+                          >
+                            {reverseMode === tab.id && (
+                              <motion.span
+                                layoutId="reverse-mode-pill"
+                                transition={prefersReduced ? { duration: 0 } : { type: 'spring', stiffness: 380, damping: 30 }}
+                                className="pms-btn-primary absolute inset-0 rounded-xl"
+                              />
+                            )}
+                            <span className="relative z-10">{tab.label}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Range Controls (if active) */}
+                    {reverseMode === 'range' && (
+                      <div className="p-4 bg-[var(--pms-soft-lavender)] rounded-2xl border border-[var(--pms-border-strong)] flex flex-wrap items-center gap-4 text-xs">
+                        <span className="font-bold text-slate-900 dark:text-indigo-200">Reverse page range:</span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-slate-600 dark:text-slate-400">From page:</span>
+                          <input
+                            type="number"
+                            min={1}
+                            max={totalPages || 999}
+                            value={rangeStart}
+                            onChange={(e) => setRangeStart(Math.max(1, parseInt(e.target.value) || 1))}
+                            className="w-16 px-2 py-1 bg-white/85 dark:bg-slate-800/85 border border-[var(--pms-border)] rounded-lg text-center font-bold"
+                          />
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-slate-600 dark:text-slate-400">To page:</span>
+                          <input
+                            type="number"
+                            min={1}
+                            max={totalPages || 999}
+                            value={rangeEnd}
+                            onChange={(e) => setRangeEnd(Math.max(1, parseInt(e.target.value) || 1))}
+                            className="w-16 px-2 py-1 bg-white/85 dark:bg-slate-800/85 border border-[var(--pms-border)] rounded-lg text-center font-bold"
+                          />
+                        </div>
+                        <span className="text-slate-500 dark:text-slate-400 italic">(Other pages will retain their original sequence)</span>
+                      </div>
+                    )}
+
+                    {/* Visual Thumbnail Grid */}
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <h3 className="text-sm font-bold text-slate-900 dark:text-white uppercase tracking-wider flex items-center gap-2">
+                          <Sparkles className="w-4 h-4 text-[var(--pms-violet)]" />
+                          New Page Sequence Preview
+                        </h3>
+                        <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">
+                          Badges indicate new position in resulting PDF
+                        </span>
+                      </div>
+
+                      {isLoadingPages ? (
+                        <div className="py-16 flex flex-col items-center justify-center gap-3 text-slate-500 dark:text-slate-400 border border-dashed border-[var(--pms-border)] bg-white/50 dark:bg-slate-900/40 rounded-2xl">
+                          <Loader2 className="w-8 h-8 animate-spin text-[var(--pms-violet)]" />
+                          <p className="text-sm font-medium">Rendering page thumbnails...</p>
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-3 max-h-[360px] overflow-y-auto p-3 bg-white/60 dark:bg-slate-950/60 rounded-2xl border border-[var(--pms-border)]">
+                          {simulatedSequence.map((origIdx, slotIdx) => {
+                            const thumb = thumbnails[origIdx];
+                            return (
+                              <div
+                                key={slotIdx}
+                                className="relative group rounded-xl overflow-hidden border border-[var(--pms-border)] bg-white/85 dark:bg-slate-900/85 shadow-2xs hover:shadow-md hover:border-[var(--pms-border-strong)] transition-all flex flex-col items-center p-2"
+                              >
+                                <div className="w-full h-24 bg-white rounded-lg border border-slate-200/80 flex items-center justify-center overflow-hidden">
+                                  {thumb ? (
+                                    <img
+                                      src={thumb.dataUrl}
+                                      alt={`Page ${origIdx + 1}`}
+                                      className="w-full h-full object-contain"
+                                    />
+                                  ) : (
+                                    <span className="text-xs text-slate-400 font-medium">P.{origIdx + 1}</span>
+                                  )}
+                                </div>
+
+                                <div className="mt-2 w-full flex items-center justify-between px-1 text-[11px]">
+                                  <span className="text-slate-400 font-mono">#{slotIdx + 1}</span>
+                                  <span className="font-bold text-[var(--pms-violet)] bg-[var(--pms-soft-lavender)] px-1.5 py-0.5 rounded text-[10px]">
+                                    Was P.{origIdx + 1}
+                                  </span>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Action Buttons */}
+                    <div className="flex flex-col sm:flex-row gap-3 pt-2">
+                      <motion.button
+                        whileHover={prefersReduced ? undefined : { scale: 1.01 }}
+                        whileTap={prefersReduced ? undefined : { scale: 0.99 }}
+                        onClick={reversePdf}
+                        disabled={isProcessing || isLoadingPages}
+                        className="pms-btn-primary relative overflow-hidden flex-1 py-4 text-white font-bold rounded-2xl disabled:opacity-50 flex items-center justify-center gap-2 text-base"
+                      >
+                        <span className="pms-shimmer" aria-hidden="true" />
+                        {isProcessing ? (
+                          <>
+                            <Loader2 className="w-5 h-5 animate-spin relative z-10" />
+                            <span className="relative z-10">Reversing Document...</span>
+                          </>
+                        ) : (
+                          <>
+                            <ArrowUpDown className="w-5 h-5 relative z-10" />
+                            <span className="relative z-10">Apply Reversal & Download</span>
+                          </>
+                        )}
+                      </motion.button>
+                      <button
+                        onClick={resetState}
+                        disabled={isProcessing}
+                        className="px-6 py-4 bg-white/80 hover:bg-white dark:bg-slate-900/80 dark:hover:bg-slate-800 border border-[var(--pms-border)] text-slate-700 dark:text-slate-300 font-semibold rounded-2xl transition-all text-sm"
+                      >
+                        Cancel
+                      </button>
                     </div>
                   </div>
-                )}
-              </div>
+                ) : (
+                  /* Success Screen with Live Preview */
+                  <div className="space-y-6 text-center py-4">
+                    <div className="p-8 bg-gradient-to-br from-emerald-50/90 via-white/85 to-teal-50/80 dark:from-emerald-950/45 dark:via-slate-900/85 dark:to-teal-950/35 rounded-3xl border border-emerald-200/80 dark:border-emerald-800/70 backdrop-blur-md shadow-lg">
+                      <motion.div
+                        initial={prefersReduced ? false : { scale: 0.6, opacity: 0 }}
+                        animate={{ scale: 1, opacity: 1 }}
+                        transition={prefersReduced ? { duration: 0 } : { type: 'spring', stiffness: 260, damping: 18 }}
+                        className="w-16 h-16 bg-emerald-100/90 dark:bg-emerald-900/50 text-emerald-600 dark:text-emerald-400 rounded-full flex items-center justify-center mx-auto mb-4 shadow-sm"
+                      >
+                        <CheckCircle2 className="w-8 h-8" />
+                      </motion.div>
+                      <h3 className="text-2xl md:text-3xl font-extrabold text-emerald-950 dark:text-emerald-100 mb-2">
+                        PDF Pages Reversed Successfully!
+                      </h3>
+                      <p className="text-emerald-700 dark:text-emerald-300 mb-6 text-sm max-w-md mx-auto">
+                        All <AnimatedNumber value={totalPages} /> pages have been rearranged according to your chosen flow.
+                      </p>
 
-              <button
-                type="button"
-                onClick={resetState}
-                className="text-sm text-gray-600 dark:text-slate-400 hover:text-gray-900 dark:hover:text-white font-semibold"
-              >
-                ← Reverse another document
-              </button>
+                      <div className="flex flex-wrap items-center justify-center gap-3">
+                        <motion.a
+                          whileHover={prefersReduced ? undefined : { scale: 1.02 }}
+                          whileTap={prefersReduced ? undefined : { scale: 0.98 }}
+                          href={reversedUrl}
+                          download={`reversed_${file.name}`}
+                          className="pms-btn-primary relative overflow-hidden inline-flex items-center justify-center gap-2 px-8 py-3.5 text-white font-bold rounded-2xl text-base"
+                        >
+                          <span className="pms-shimmer" aria-hidden="true" />
+                          <Download className="w-5 h-5 relative z-10" />
+                          <span className="relative z-10">Download Reversed PDF</span>
+                        </motion.a>
+                        <a
+                          href={reversedUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center justify-center gap-2 px-5 py-3.5 bg-white/85 dark:bg-slate-800/85 hover:bg-white dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 font-semibold rounded-2xl border border-[var(--pms-border)] transition-all text-sm shadow-xs"
+                        >
+                          <ExternalLink className="w-4 h-4" />
+                          Open in New Tab
+                        </a>
+                        <button
+                          type="button"
+                          onClick={() => setShowPreview(!showPreview)}
+                          className="inline-flex items-center justify-center gap-2 px-5 py-3.5 bg-white/85 dark:bg-slate-800/85 hover:bg-white dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 font-semibold rounded-2xl border border-[var(--pms-border)] transition-all text-sm shadow-xs"
+                        >
+                          <Eye className="w-4 h-4" />
+                          {showPreview ? 'Hide Preview' : 'Show Live Preview'}
+                        </button>
+                      </div>
+
+                      {showPreview && (
+                        <div className="mt-6 text-left">
+                          <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">
+                            Reversed Document Preview
+                          </p>
+                          <div className="w-full h-[550px] rounded-2xl border border-[var(--pms-border)] overflow-hidden bg-white dark:bg-slate-950 shadow-inner">
+                            <iframe
+                              src={reversedUrl}
+                              title="Reversed PDF Preview"
+                              className="w-full h-full border-0"
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={resetState}
+                      className="text-sm text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white font-semibold"
+                    >
+                      ← Reverse another document
+                    </button>
+                  </div>
+                )}
+              </PearlStageSwitch>
             </div>
           )}
-        </div>
-      )}
+        </PearlStageSwitch>
       </div>
     </ToolWorkspaceShell>
   );

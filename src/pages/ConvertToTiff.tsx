@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
+import { motion, AnimatePresence, useReducedMotion } from 'motion/react';
 import { FileImage, Download, Loader2, Package, ArrowRightLeft, FileType2 } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
 import '../lib/pdfWorker';
@@ -7,7 +8,9 @@ import * as UTIF from 'utif';
 import { PDFDocument } from 'pdf-lib';
 import FileDropzone from '../components/FileDropzone';
 import { useSEO } from '../hooks/useSEO';
-import { useAutoRevokeUrl } from '../lib/blobUrl';
+import { toArrayBufferBytes, useAutoRevokeUrl } from '../lib/blobUrl';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { AnimatedNumber, PearlScanOverlay, PearlStageSwitch } from '../components/pearl/PearlMotion';
 
 type Mode = 'pdf-to-images' | 'tiff-to-pdf';
 
@@ -23,12 +26,17 @@ export default function ConvertToTiff() {
   const [scale, setScale] = useState(2.0);
 
   useAutoRevokeUrl(resultUrl);
+  const prefersReduced = useReducedMotion();
 
   const handleDrop = (files: File[]) => {
-    if (files[0]) { setFile(files[0]); setResultUrl(null); setProgress(''); }
+    if (files[0]) {
+      setFile(files[0]);
+      setResultUrl(null);
+      setProgress('');
+    }
   };
 
-  // PDF → High-quality PNG images (TIFF-equivalent)
+  // PDF → Genuine TIFF images packed in ZIP
   const processPdfToImages = async () => {
     if (!file) return;
     setBusy(true);
@@ -49,7 +57,6 @@ export default function ConvertToTiff() {
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         await page.render({ canvasContext: ctx, viewport: vp, canvas }).promise;
 
-        // Export as real, lossless standard TIFF format
         const imgData = ctx.getImageData(0, 0, vp.width, vp.height);
         const tiffBytes = UTIF.encodeImage(imgData.data, vp.width, vp.height);
         zip.file(`page_${p}.tiff`, new Uint8Array(tiffBytes));
@@ -113,8 +120,8 @@ export default function ConvertToTiff() {
       }
 
       setProgress('Finalizing PDF…');
-      const pdfBytes = await pdfDoc.save();
-      const pdfBlob = new Blob([pdfBytes as any], { type: 'application/pdf' });
+      const pdfBytes = toArrayBufferBytes(await pdfDoc.save());
+      const pdfBlob = new Blob([pdfBytes], { type: 'application/pdf' });
       setResultUrl(URL.createObjectURL(pdfBlob));
       setResultName(`${file.name.replace(/\.[^/.]+$/, '')}.pdf`);
       setProgress(`Done! ${ifds.length} TIFF page(s) converted to PDF.`);
@@ -125,148 +132,178 @@ export default function ConvertToTiff() {
     }
   };
 
-  const process = () => mode === 'tiff-to-pdf' ? processTiffToPdf() : processPdfToImages();
+  const process = () => (mode === 'tiff-to-pdf' ? processTiffToPdf() : processPdfToImages());
 
   const acceptedTypes = mode === 'tiff-to-pdf'
     ? { 'image/tiff': ['.tiff', '.tif'] }
     : { 'application/pdf': ['.pdf'] };
 
+  const stageKey = !file ? `upload-${mode}` : 'workspace';
+
   return (
-    <div className="flex-1 flex flex-col items-center justify-start p-8 min-h-screen">
-      {/* Header */}
-      <div className="text-center mb-8 max-w-2xl">
-        <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-600 shadow-lg mb-4">
-          <FileImage className="w-8 h-8 text-white" />
-        </div>
-        <h1 className="text-4xl font-bold text-gray-900 dark:text-white mb-3">TIFF Image Converter</h1>
-        <p className="text-lg text-gray-600 dark:text-slate-400">
-          Convert PDF pages to high-quality images — or convert TIFF images (including multi-page) to PDF.
-        </p>
-      </div>
-
-      {/* Mode Toggle */}
-      <div className="flex gap-2 mb-8 p-1.5 bg-white dark:bg-slate-900 rounded-2xl shadow-sm border border-gray-200 dark:border-slate-700">
-        <button
-          onClick={() => { setMode('pdf-to-images'); setFile(null); setResultUrl(null); setProgress(''); }}
-          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-sm transition-all ${
-            mode === 'pdf-to-images'
-              ? 'bg-indigo-600 text-white shadow-md'
-              : 'text-gray-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/40'
-          }`}
-        >
-          <FileType2 className="w-4 h-4" />
-          PDF → Images (TIFF-quality)
-        </button>
-        <button
-          onClick={() => { setMode('tiff-to-pdf'); setFile(null); setResultUrl(null); setProgress(''); }}
-          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-sm transition-all ${
-            mode === 'tiff-to-pdf'
-              ? 'bg-violet-600 text-white shadow-md'
-              : 'text-gray-600 dark:text-slate-300 hover:text-violet-600 dark:hover:text-violet-400 hover:bg-violet-50 dark:hover:bg-violet-950/40'
-          }`}
-        >
-          <ArrowRightLeft className="w-4 h-4" />
-          TIFF → PDF
-        </button>
-      </div>
-
-      {/* Info chip */}
-      <div className={`mb-6 px-4 py-2 rounded-full text-sm font-medium ${
-        mode === 'tiff-to-pdf'
-          ? 'bg-violet-100 dark:bg-violet-950/50 text-violet-700 dark:text-violet-300'
-          : 'bg-indigo-100 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300'
-      }`}>
-        {mode === 'tiff-to-pdf'
-          ? '✦ Supports multi-page TIFF — each frame becomes a PDF page'
-          : '✦ Exports as lossless PNG (TIFF-equivalent quality) — browsers cannot generate real TIFF'}
-      </div>
-
-      {!file ? (
-        <div className="w-full max-w-xl">
-          <FileDropzone
-            onDrop={handleDrop}
-            multiple={false}
-            title={mode === 'tiff-to-pdf' ? 'Drop your TIFF file here' : 'Drop your PDF file here'}
-          />
-        </div>
-      ) : (
-        <div className="w-full max-w-2xl bg-white dark:bg-slate-900 rounded-2xl shadow-sm border border-gray-200 dark:border-slate-700 p-8">
-          {/* File info */}
-          <div className="flex items-center gap-3 mb-6 p-4 bg-gray-50 dark:bg-slate-800 rounded-xl border border-gray-100 dark:border-slate-700">
-            <FileImage className="w-8 h-8 text-indigo-500 dark:text-indigo-400 flex-shrink-0" />
-            <div className="min-w-0">
-              <p className="font-semibold text-gray-900 dark:text-white truncate">{file.name}</p>
-              <p className="text-sm text-gray-500 dark:text-slate-400">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
-            </div>
-            <button
-              onClick={() => { setFile(null); setResultUrl(null); setProgress(''); }}
-              className="ml-auto text-sm text-gray-500 dark:text-slate-400 hover:text-red-500 dark:hover:text-red-400 font-medium transition-colors"
-            >
-              Remove
-            </button>
-          </div>
-
-          {/* Render quality (PDF → images only) */}
-          {mode === 'pdf-to-images' && (
-            <div className="mb-6">
-              <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">Render Quality</label>
-              <select
-                value={scale}
-                onChange={e => setScale(Number(e.target.value))}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-gray-900 dark:text-white rounded-lg focus:ring-2 focus:ring-indigo-300 outline-none"
+    <ToolWorkspaceShell
+      title="TIFF Image Converter"
+      subtitle="Convert PDF pages to high-resolution TIFF image archives — or convert multi-page TIFF images directly into PDF."
+      categoryLabel="Archival Raster & TIFF Studio"
+      icon={FileImage}
+      microVariant="convert"
+      tone="indigo"
+      trustNote="100% browser-only UTIF & PDF engine · Multi-page TIFF supported"
+    >
+      <div className="flex flex-col items-center gap-4 mb-7">
+        {/* Mode Toggle */}
+        <div className="pms-glass-panel flex gap-1.5 p-1.5 rounded-2xl">
+          {[
+            { id: 'pdf-to-images', label: 'PDF → TIFF Archive', icon: FileType2 },
+            { id: 'tiff-to-pdf', label: 'TIFF → PDF', icon: ArrowRightLeft },
+          ].map(opt => {
+            const active = mode === opt.id;
+            return (
+              <button
+                key={opt.id}
+                type="button"
+                onClick={() => { setMode(opt.id as Mode); setFile(null); setResultUrl(null); setProgress(''); }}
+                className={`relative flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-xs sm:text-sm transition-colors cursor-pointer ${
+                  active ? 'text-white' : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
+                }`}
               >
-                <option value={1.0}>Standard (72 DPI equivalent)</option>
-                <option value={1.5}>Good (108 DPI)</option>
-                <option value={2.0}>High (150 DPI)</option>
-                <option value={3.0}>Ultra (216 DPI)</option>
-                <option value={4.0}>Maximum (300 DPI)</option>
-              </select>
-            </div>
-          )}
-
-          {progress && (
-            <p className="text-sm text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/40 rounded-lg px-4 py-2 mb-4">{progress}</p>
-          )}
-
-          <div className="flex gap-3">
-            <button
-              onClick={process}
-              disabled={busy}
-              className={`flex-1 py-3 text-white font-bold rounded-xl disabled:opacity-50 flex items-center justify-center gap-2 transition-all ${
-                mode === 'tiff-to-pdf'
-                  ? 'bg-violet-600 hover:bg-violet-700'
-                  : 'bg-indigo-600 hover:bg-indigo-700'
-              }`}
-            >
-              {busy ? <Loader2 className="w-5 h-5 animate-spin" /> : <ArrowRightLeft className="w-5 h-5" />}
-              {busy
-                ? 'Converting…'
-                : mode === 'tiff-to-pdf' ? 'Convert TIFF to PDF' : 'Convert to Images'}
-            </button>
-            <button
-              onClick={() => { setFile(null); setResultUrl(null); setProgress(''); }}
-              className="px-5 py-3 bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-slate-300 font-semibold rounded-xl hover:bg-gray-200 dark:hover:bg-slate-700 transition-colors"
-            >
-              Cancel
-            </button>
-          </div>
-
-          {resultUrl && (
-            <div className="mt-6 p-6 bg-green-50 dark:bg-green-950/30 rounded-xl border border-green-200 dark:border-green-800 text-center">
-              <p className="text-green-700 dark:text-green-300 font-medium mb-3">✓ Conversion complete!</p>
-              <a
-                href={resultUrl}
-                download={resultName}
-                className="inline-flex items-center gap-2 px-6 py-3 bg-green-600 text-white font-bold rounded-xl hover:bg-green-700 transition-colors"
-              >
-                {mode === 'tiff-to-pdf'
-                  ? <><Download className="w-5 h-5" /> Download PDF</>
-                  : <><Package className="w-5 h-5" /> Download Images ZIP</>}
-              </a>
-            </div>
-          )}
+                {active && (
+                  <motion.span
+                    layoutId="tiff-mode-pill"
+                    transition={{ type: 'spring', stiffness: 420, damping: 32 }}
+                    className="absolute inset-0 rounded-xl bg-violet-600 shadow-sm"
+                  />
+                )}
+                <opt.icon className="relative z-10 w-4 h-4" />
+                <span className="relative z-10">{opt.label}</span>
+              </button>
+            );
+          })}
         </div>
-      )}
-    </div>
+
+        <span className="px-4 py-1.5 rounded-full text-xs font-semibold bg-[var(--pms-soft-lavender)] text-[var(--pms-violet)] border border-[var(--pms-border)]">
+          {mode === 'tiff-to-pdf'
+            ? '✦ Supports multi-page TIFF — each frame becomes a PDF page'
+            : '✦ Encodes lossless TIFF frames bundled cleanly into a single ZIP archive'}
+        </span>
+      </div>
+
+      <PearlStageSwitch stageKey={stageKey}>
+        {!file ? (
+          <div className="w-full max-w-xl mx-auto">
+            <FileDropzone
+              onDrop={handleDrop}
+              accept={acceptedTypes}
+              multiple={false}
+              title={mode === 'tiff-to-pdf' ? 'Drop your TIFF file here' : 'Drop your PDF file here'}
+              subtitle={mode === 'tiff-to-pdf' ? 'or click to select .tif / .tiff' : 'or click to select a PDF'}
+            />
+          </div>
+        ) : (
+          <div className="relative w-full max-w-2xl mx-auto pms-glass-panel rounded-3xl p-6 sm:p-8 space-y-5 overflow-hidden">
+            <PearlScanOverlay active={busy} label={progress || 'Converting document frames…'} />
+
+            {/* File info */}
+            <div className="flex items-center gap-3.5 p-4 bg-white/75 dark:bg-slate-900/75 rounded-2xl border border-[var(--pms-border)]">
+              <div className="w-11 h-11 rounded-xl bg-[var(--pms-soft-lavender)] text-[var(--pms-violet)] flex items-center justify-center shrink-0">
+                <FileImage className="w-6 h-6" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="font-bold text-slate-900 dark:text-white truncate">{file.name}</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  <AnimatedNumber value={file.size / 1024 / 1024} decimals={2} suffix=" MB" />
+                </p>
+              </div>
+              <button
+                onClick={() => { setFile(null); setResultUrl(null); setProgress(''); }}
+                disabled={busy}
+                className="text-xs font-semibold text-slate-500 dark:text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 cursor-pointer disabled:opacity-40"
+              >
+                Remove
+              </button>
+            </div>
+
+            {/* Render quality (PDF → TIFF only) */}
+            {mode === 'pdf-to-images' && (
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300 mb-2">
+                  Render Quality
+                </label>
+                <select
+                  value={scale}
+                  onChange={e => setScale(Number(e.target.value))}
+                  className="w-full px-3.5 py-2.5 border border-[var(--pms-border)] bg-white/80 dark:bg-slate-900/80 text-slate-900 dark:text-white rounded-xl focus:ring-2 focus:ring-violet-400/50 outline-none text-sm font-medium"
+                >
+                  <option value={1.0}>Standard (72 DPI equivalent)</option>
+                  <option value={1.5}>Good (108 DPI)</option>
+                  <option value={2.0}>High (150 DPI)</option>
+                  <option value={3.0}>Ultra (216 DPI)</option>
+                  <option value={4.0}>Maximum (300 DPI)</option>
+                </select>
+              </div>
+            )}
+
+            <AnimatePresence initial={false}>
+              {progress && (
+                <motion.p
+                  initial={prefersReduced ? false : { opacity: 0, y: -4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={prefersReduced ? undefined : { opacity: 0 }}
+                  className="text-xs sm:text-sm font-medium text-[var(--pms-blue)] bg-[var(--pms-soft-blue)] border border-[var(--pms-border)] rounded-xl px-4 py-2.5"
+                >
+                  {progress}
+                </motion.p>
+              )}
+            </AnimatePresence>
+
+            <div className="flex gap-3">
+              <motion.button
+                whileHover={prefersReduced || busy ? undefined : { scale: 1.01 }}
+                whileTap={prefersReduced || busy ? undefined : { scale: 0.985 }}
+                onClick={process}
+                disabled={busy}
+                className="flex-1 pms-btn-primary py-3.5 font-bold rounded-2xl disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer"
+              >
+                {busy ? <Loader2 className="w-5 h-5 animate-spin" /> : <ArrowRightLeft className="w-5 h-5" />}
+                {busy
+                  ? 'Converting…'
+                  : mode === 'tiff-to-pdf' ? 'Convert TIFF to PDF' : 'Convert to TIFF Archive'}
+              </motion.button>
+              <button
+                onClick={() => { setFile(null); setResultUrl(null); setProgress(''); }}
+                disabled={busy}
+                className="px-5 py-3.5 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold rounded-2xl hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors cursor-pointer disabled:opacity-40"
+              >
+                Cancel
+              </button>
+            </div>
+
+            <AnimatePresence initial={false}>
+              {resultUrl && (
+                <motion.div
+                  initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={prefersReduced ? undefined : { opacity: 0 }}
+                  className="p-6 bg-[var(--pms-soft-mint)] rounded-2xl border border-emerald-300/70 dark:border-emerald-800/70 text-center space-y-3"
+                >
+                  <p className="text-emerald-800 dark:text-emerald-300 font-bold text-sm">✓ Conversion complete!</p>
+                  <motion.a
+                    whileHover={prefersReduced ? undefined : { scale: 1.02 }}
+                    whileTap={prefersReduced ? undefined : { scale: 0.985 }}
+                    href={resultUrl}
+                    download={resultName}
+                    className="inline-flex items-center gap-2 px-7 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md transition-colors"
+                  >
+                    {mode === 'tiff-to-pdf'
+                      ? <><Download className="w-5 h-5" /> Download PDF</>
+                      : <><Package className="w-5 h-5" /> Download TIFF ZIP</>}
+                  </motion.a>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+        )}
+      </PearlStageSwitch>
+    </ToolWorkspaceShell>
   );
 }

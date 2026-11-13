@@ -1,7 +1,12 @@
-import React, { useState } from 'react';
-import { 
-  ImageIcon, Download, Loader2, Package, Eye, Check, 
-  Sparkles, FileText, Filter, ArrowRight, ExternalLink
+import { useState } from 'react';
+import { motion, AnimatePresence, useReducedMotion } from 'motion/react';
+import {
+  ImageIcon,
+  Download,
+  Loader2,
+  Package,
+  Eye,
+  Sparkles,
 } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
 import '../lib/pdfWorker';
@@ -9,8 +14,9 @@ import JSZip from 'jszip';
 import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
-import { dataUrlToBytes } from '../lib/utils';
 import { triggerBlobDownload } from '../lib/blobUrl';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { AnimatedNumber, PearlScanOverlay, PearlStageSwitch } from '../components/pearl/PearlMotion';
 
 interface ExtractedImage {
   id: string;
@@ -40,6 +46,8 @@ export default function ExtractAllImages() {
   const [selectedFormat, setSelectedFormat] = useState<'png' | 'jpeg' | 'webp'>('png');
   const [downloadingZip, setDownloadingZip] = useState(false);
 
+  const prefersReduced = useReducedMotion();
+
   const handleDrop = async (files: File[]) => {
     if (!files[0]) return;
     const f = files[0];
@@ -59,7 +67,6 @@ export default function ExtractAllImages() {
 
         for (let i = 0; i < opList.fnArray.length; i++) {
           const fn = opList.fnArray[i];
-          // OPS.paintImageXObject is 85 in pdfjs
           if (fn === pdfjsLib.OPS.paintImageXObject) {
             const imgName = opList.argsArray[i][0];
             try {
@@ -71,12 +78,10 @@ export default function ExtractAllImages() {
                 canvas.height = imgObj.height;
                 const ctx = canvas.getContext('2d')!;
 
-                // Draw RGBA / RGB image data
                 const imgData = ctx.createImageData(imgObj.width, imgObj.height);
                 const srcData = imgObj.data;
 
                 if (imgObj.kind === 1 || imgObj.kind === 2 || imgObj.kind === 3) {
-                  // Common RGB to RGBA conversion
                   let srcIdx = 0;
                   let dstIdx = 0;
                   const totalPixels = imgObj.width * imgObj.height;
@@ -93,7 +98,6 @@ export default function ExtractAllImages() {
                   } else if (srcData.length === totalPixels * 4) {
                     imgData.data.set(srcData);
                   } else {
-                    // Grayscale
                     for (let px = 0; px < totalPixels; px++) {
                       const v = srcData[px];
                       imgData.data[dstIdx] = v;
@@ -107,17 +111,17 @@ export default function ExtractAllImages() {
 
                   const dataUrl = canvas.toDataURL(`image/${selectedFormat}`, 0.95);
                   extractedList.push({
-                    id: `${imgName}_${p}`,
+                    id: `${imgName}_${p}_${extractedList.length}`,
                     name: `image_p${p}_${imgName}.${selectedFormat}`,
                     dataUrl,
                     width: imgObj.width,
                     height: imgObj.height,
                     pageIndex: p,
-                    sizeBytes: Math.round(dataUrl.length * 0.75)
+                    sizeBytes: Math.round(dataUrl.length * 0.75),
                   });
                 }
               }
-            } catch (objErr) {
+            } catch {
               // Skip single unrenderable stream
             }
           }
@@ -146,7 +150,7 @@ export default function ExtractAllImages() {
             width: vp.width,
             height: vp.height,
             pageIndex: p,
-            sizeBytes: Math.round(dataUrl.length * 0.75)
+            sizeBytes: Math.round(dataUrl.length * 0.75),
           });
         }
       }
@@ -192,120 +196,187 @@ export default function ExtractAllImages() {
     setImages([]);
   };
 
+  const totalBytes = images.reduce((acc, im) => acc + im.sizeBytes, 0);
+  const stageKey = !file ? 'upload' : busy ? 'scanning' : 'gallery';
+
   return (
-    <div className="flex-1 flex flex-col items-center justify-start p-4 sm:p-8 max-w-6xl mx-auto w-full">
-      {/* Header */}
-      <div className="text-center mb-6">
-        <div className="w-16 h-16 bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 rounded-2xl flex items-center justify-center mx-auto mb-3 shadow-sm border border-blue-100 dark:border-blue-900/50">
-          <ImageIcon className="w-8 h-8" />
-        </div>
-        <h1 className="text-3xl sm:text-4xl font-extrabold text-slate-900 dark:text-white mb-2">
-          PDF Image Extractor & Gallery Studio
-        </h1>
-        <p className="text-base text-slate-600 dark:text-slate-400 max-w-xl mx-auto">
-          Extract all embedded photos and graphics from PDF files in full native resolution. Inspect dimensions and download individually or as a ZIP.
-        </p>
-      </div>
-
-      {!file ? (
-        <div className="w-full max-w-2xl space-y-6">
-          <FileDropzone 
-            onDrop={handleDrop} 
-            multiple={false} 
-            title="Select PDF Document to Extract Images From" 
-          />
-
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
-            <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 text-center">
-              <Eye className="w-6 h-6 text-blue-600 dark:text-blue-400 mx-auto mb-2" />
-              <h3 className="font-bold text-sm text-slate-800 dark:text-slate-200">Gallery Preview</h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Masonry gallery showing native dimensions and aspect ratio.</p>
+    <ToolWorkspaceShell
+      title="PDF Image Extractor & Gallery"
+      subtitle="Extract all embedded photos and graphics from PDF files in full native resolution. Inspect dimensions and download individually or as a ZIP."
+      categoryLabel="Bitmap & Asset Studio"
+      icon={ImageIcon}
+      microVariant="convert"
+      tone="blue"
+      trustNote="100% browser-only bitmap extraction · Lossless resolution"
+    >
+      <PearlStageSwitch stageKey={stageKey}>
+        {!file ? (
+          <div className="w-full max-w-2xl mx-auto space-y-6">
+            {/* Output Format Selector */}
+            <div className="pms-glass-panel p-1.5 rounded-2xl flex items-center justify-center gap-1.5 max-w-xs mx-auto">
+              {(['png', 'jpeg', 'webp'] as const).map(fmt => {
+                const active = selectedFormat === fmt;
+                return (
+                  <button
+                    key={fmt}
+                    type="button"
+                    onClick={() => setSelectedFormat(fmt)}
+                    className={`relative flex-1 py-2 px-3 rounded-xl text-xs font-bold uppercase transition-colors cursor-pointer ${
+                      active ? 'text-white' : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
+                    }`}
+                  >
+                    {active && (
+                      <motion.span
+                        layoutId="extract-img-fmt"
+                        transition={{ type: 'spring', stiffness: 420, damping: 30 }}
+                        className="absolute inset-0 rounded-xl bg-sky-600 shadow-sm"
+                      />
+                    )}
+                    <span className="relative z-10">{fmt}</span>
+                  </button>
+                );
+              })}
             </div>
-            <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 text-center">
-              <Package className="w-6 h-6 text-indigo-600 dark:text-indigo-400 mx-auto mb-2" />
-              <h3 className="font-bold text-sm text-slate-800 dark:text-slate-200">1-Click ZIP Bundle</h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Download all extracted pictures compressed in a single ZIP.</p>
-            </div>
-            <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 text-center">
-              <Sparkles className="w-6 h-6 text-emerald-600 dark:text-emerald-400 mx-auto mb-2" />
-              <h3 className="font-bold text-sm text-slate-800 dark:text-slate-200">Lossless Quality</h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Pulls raw underlying bitmap streams without downscaling.</p>
+
+            <FileDropzone
+              onDrop={handleDrop}
+              multiple={false}
+              title="Select PDF Document to Extract Images From"
+            />
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
+              {[
+                {
+                  icon: Eye,
+                  tint: 'bg-[var(--pms-soft-blue)] text-[var(--pms-blue)]',
+                  title: 'Gallery Preview',
+                  desc: 'Masonry gallery showing native dimensions and aspect ratio.',
+                },
+                {
+                  icon: Package,
+                  tint: 'bg-[var(--pms-soft-lavender)] text-[var(--pms-violet)]',
+                  title: '1-Click ZIP Bundle',
+                  desc: 'Download all extracted pictures compressed in a single ZIP.',
+                },
+                {
+                  icon: Sparkles,
+                  tint: 'bg-[var(--pms-soft-mint)] text-emerald-700 dark:text-emerald-300',
+                  title: 'Lossless Quality',
+                  desc: 'Pulls raw underlying bitmap streams without downscaling.',
+                },
+              ].map((card, idx) => (
+                <motion.div
+                  key={card.title}
+                  initial={prefersReduced ? false : { opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.28, delay: idx * 0.06 }}
+                  whileHover={prefersReduced ? undefined : { y: -3 }}
+                  className="pms-glass-panel p-5 rounded-2xl text-center"
+                >
+                  <div className={`w-10 h-10 rounded-xl ${card.tint} flex items-center justify-center mx-auto mb-2.5`}>
+                    <card.icon className="w-5 h-5" />
+                  </div>
+                  <h3 className="font-bold text-sm text-slate-900 dark:text-white">{card.title}</h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">{card.desc}</p>
+                </motion.div>
+              ))}
             </div>
           </div>
-        </div>
-      ) : busy ? (
-        <div className="p-12 text-center bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
-          <Loader2 className="w-10 h-10 animate-spin text-blue-600 mx-auto" />
-          <h3 className="text-lg font-bold text-slate-900 dark:text-white">Extracting Embedded Bitmaps...</h3>
-          <p className="text-xs text-slate-500">{progressMsg || 'Parsing PDF operator lists...'}</p>
-        </div>
-      ) : (
-        /* Image Gallery Workspace */
-        <div className="w-full space-y-4">
-          {/* Top Control Bar */}
-          <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-wrap items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <span className="text-sm font-bold text-slate-900 dark:text-white">
-                Found {images.length} Image{images.length === 1 ? '' : 's'}
-              </span>
-              <span className="text-xs text-slate-400">• in {file.name}</span>
+        ) : busy ? (
+          <div className="relative max-w-lg mx-auto pms-glass-panel rounded-3xl p-12 text-center space-y-4 overflow-hidden">
+            <PearlScanOverlay active={busy} label={progressMsg || 'Extracting embedded bitmaps…'} />
+            <div className="w-14 h-14 rounded-2xl bg-[var(--pms-soft-blue)] text-[var(--pms-blue)] flex items-center justify-center mx-auto">
+              <Loader2 className="w-7 h-7 animate-spin" />
             </div>
-
-            <div className="flex items-center gap-3">
-              <button
-                onClick={downloadAllAsZip}
-                disabled={downloadingZip || images.length === 0}
-                className="py-2.5 px-5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-md transition-all disabled:opacity-40"
-              >
-                {downloadingZip ? <Loader2 className="w-4 h-4 animate-spin" /> : <Package className="w-4 h-4" />}
-                Download All ({images.length}) as ZIP
-              </button>
-              <button onClick={reset} className="text-xs text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 underline transition-colors">Change File</button>
-            </div>
+            <h3 className="text-lg font-extrabold text-slate-900 dark:text-white">Extracting Embedded Bitmaps…</h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400">{progressMsg || 'Parsing PDF operator lists…'}</p>
           </div>
-
-          {/* Masonry Image Gallery Grid */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-            {images.map(img => (
-              <div
-                key={img.id}
-                className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-sm hover:shadow-md transition-all flex flex-col justify-between"
-              >
-                <div className="p-3 bg-slate-50 dark:bg-slate-800/40 flex items-center justify-center min-h-[180px] max-h-[220px] overflow-hidden">
-                  <img
-                    src={img.dataUrl}
-                    alt={img.name}
-                    className="max-h-[180px] object-contain rounded"
-                  />
-                </div>
-
-                <div className="p-3.5 border-t border-slate-100 dark:border-slate-800 space-y-2">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="font-bold text-slate-800 dark:text-slate-200">
-                      {img.width} × {img.height} px
-                    </span>
-                    <span className="text-[11px] font-mono text-slate-400">
-                      Page {img.pageIndex}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center justify-between pt-1">
-                    <span className="text-[11px] text-slate-500">{formatSize(img.sizeBytes)}</span>
-                    <a
-                      href={img.dataUrl}
-                      download={img.name}
-                      className="py-1.5 px-3 bg-slate-100 dark:bg-slate-800 hover:bg-blue-600 dark:hover:bg-blue-600 text-slate-700 dark:text-slate-200 hover:text-white text-xs font-bold rounded-lg border border-slate-200 dark:border-slate-700 transition-colors flex items-center gap-1.5"
-                    >
-                      <Download className="w-3.5 h-3.5" />
-                      Save
-                    </a>
-                  </div>
-                </div>
+        ) : (
+          <div className="w-full space-y-5">
+            {/* Top Control Bar */}
+            <div className="relative pms-glass-panel p-4 sm:p-5 rounded-2xl flex flex-wrap items-center justify-between gap-4 overflow-hidden">
+              <PearlScanOverlay active={downloadingZip} label="Compiling ZIP archive…" />
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="px-3 py-1 rounded-full bg-[var(--pms-soft-blue)] text-[var(--pms-blue)] text-xs font-extrabold border border-[var(--pms-border)]">
+                  <AnimatedNumber value={images.length} /> Image{images.length === 1 ? '' : 's'}
+                </span>
+                <span className="px-3 py-1 rounded-full bg-[var(--pms-soft-lavender)] text-[var(--pms-violet)] text-xs font-bold border border-[var(--pms-border)]">
+                  Total ~<AnimatedNumber value={totalBytes / 1024} decimals={1} suffix=" KB" />
+                </span>
+                <span className="text-xs text-slate-500 dark:text-slate-400 truncate max-w-xs">
+                  {file.name} · {selectedFormat.toUpperCase()}
+                </span>
               </div>
-            ))}
+
+              <div className="flex items-center gap-3">
+                <motion.button
+                  whileHover={prefersReduced || downloadingZip || images.length === 0 ? undefined : { scale: 1.02 }}
+                  whileTap={prefersReduced || downloadingZip || images.length === 0 ? undefined : { scale: 0.98 }}
+                  onClick={downloadAllAsZip}
+                  disabled={downloadingZip || images.length === 0}
+                  className="pms-btn-primary py-2.5 px-5 font-bold rounded-xl text-xs flex items-center gap-1.5 disabled:opacity-40 cursor-pointer"
+                >
+                  {downloadingZip ? <Loader2 className="w-4 h-4 animate-spin" /> : <Package className="w-4 h-4" />}
+                  Download All (<AnimatedNumber value={images.length} />) as ZIP
+                </motion.button>
+                <button
+                  onClick={reset}
+                  className="px-3.5 py-2 text-xs font-semibold rounded-xl border border-[var(--pms-border)] bg-white/75 dark:bg-slate-900/75 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white cursor-pointer"
+                >
+                  Change File
+                </button>
+              </div>
+            </div>
+
+            {/* Image Gallery Grid */}
+            <AnimatePresence initial={false}>
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                {images.map((img, idx) => (
+                  <motion.div
+                    key={img.id}
+                    initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.24, delay: Math.min(idx * 0.03, 0.35) }}
+                    whileHover={prefersReduced ? undefined : { y: -3 }}
+                    className="pms-glass-panel rounded-2xl overflow-hidden flex flex-col justify-between"
+                  >
+                    <div className="p-3 pms-checkerboard dark:bg-slate-950/60 flex items-center justify-center min-h-[180px] max-h-[220px] overflow-hidden">
+                      <img
+                        src={img.dataUrl}
+                        alt={img.name}
+                        className="max-h-[180px] object-contain rounded shadow-xs"
+                      />
+                    </div>
+
+                    <div className="p-3.5 bg-white/75 dark:bg-slate-900/75 border-t border-[var(--pms-border)] space-y-2">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="font-bold text-slate-800 dark:text-slate-100">
+                          {img.width} × {img.height} px
+                        </span>
+                        <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-[var(--pms-soft-blue)] text-[var(--pms-blue)] font-bold">
+                          P{img.pageIndex}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between pt-1">
+                        <span className="text-[11px] text-slate-500 dark:text-slate-400">{formatSize(img.sizeBytes)}</span>
+                        <a
+                          href={img.dataUrl}
+                          download={img.name}
+                          className="py-1.5 px-3 bg-white dark:bg-slate-800 hover:bg-sky-600 dark:hover:bg-sky-600 text-slate-700 dark:text-slate-200 hover:text-white text-xs font-bold rounded-lg border border-[var(--pms-border)] transition-colors flex items-center gap-1.5"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          Save
+                        </a>
+                      </div>
+                    </div>
+                  </motion.div>
+                ))}
+              </div>
+            </AnimatePresence>
           </div>
-        </div>
-      )}
-    </div>
+        )}
+      </PearlStageSwitch>
+    </ToolWorkspaceShell>
   );
 }

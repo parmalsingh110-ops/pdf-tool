@@ -52,6 +52,7 @@ import ErrorBoundary from './ErrorBoundary';
 import GlobalSearch, { VERIFIED_TOOL_COUNT } from './GlobalSearch';
 import ToolFeedback from './ToolFeedback';
 import BrandLogo from './BrandLogo';
+import { PearlRouteSkeleton } from './pearl/PearlMotion';
 
 const ROUTE_TITLES: Record<string, string> = {
   '/': 'Home',
@@ -748,13 +749,7 @@ export default function Layout() {
 
       <main className="flex-1 flex flex-col pt-16">
         <ErrorBoundary locationKey={location.pathname}>
-          <Suspense
-            fallback={
-              <div className="flex-1 flex items-center justify-center min-h-[40vh] text-sm font-medium" style={{ color: 'var(--pms-muted)' }}>
-                Loading tool…
-              </div>
-            }
-          >
+          <Suspense fallback={<PearlRouteSkeleton />}>
             <Outlet />
           </Suspense>
         </ErrorBoundary>

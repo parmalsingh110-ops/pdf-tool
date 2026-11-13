@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
+import { motion, useReducedMotion } from 'motion/react';
 import { PDFDocument } from 'pdf-lib';
-import { Download, FileText, Minimize2, Check, Zap, Gauge, Shield, Target } from 'lucide-react';
+import { Download, FileText, Minimize2, Check, CheckCircle2, Zap, Gauge, Shield, Target } from 'lucide-react';
 import FileDropzone from '../components/FileDropzone';
 import * as pdfjsLib from 'pdfjs-dist';
 import '../lib/pdfWorker';
@@ -9,7 +10,9 @@ import BackendLoader from '../components/BackendLoader';
 import ToolSEOSection from '../components/ToolSEOSection';
 import { useSEO } from '../hooks/useSEO';
 import { apiFetch } from '../lib/api';
+import { toArrayBufferBytes } from '../lib/blobUrl';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { AnimatedNumber, PearlScanOverlay, PearlStageSwitch } from '../components/pearl/PearlMotion';
 
 type CompressionLevel = 'backend-high-quality' | 'extreme' | 'recommended' | 'low';
 
@@ -31,6 +34,7 @@ export default function CompressPDF() {
   const [stats, setStats] = useState<{original: number, compressed: number, method?: string} | null>(null);
   const [usedFallback, setUsedFallback] = useState(false);
   const [comparisonView, setComparisonView] = useState<'side-by-side' | 'compressed' | 'original'>('side-by-side');
+  const prefersReduced = useReducedMotion();
 
   const previewUrlRef = useRef<string | null>(null);
   const compressedUrlRef = useRef<string | null>(null);
@@ -292,7 +296,7 @@ export default function CompressPDF() {
   };
 
   const finishCompression = (pdfBytes: Uint8Array) => {
-    const blob = new Blob([pdfBytes as any], { type: 'application/pdf' });
+    const blob = new Blob([toArrayBufferBytes(pdfBytes)], { type: 'application/pdf' });
     const url = URL.createObjectURL(blob);
     
     setStats({
@@ -350,16 +354,16 @@ export default function CompressPDF() {
       microVariant="compress"
       tone="emerald"
     >
-      <div className="flex flex-col items-center">
+      <div className="flex flex-col items-center w-full">
         {/* Prominent Target Size Banner / Action Button */}
-        <div className="mb-8 w-full max-w-3xl p-4 sm:p-5 bg-gradient-to-r from-emerald-50 via-teal-50 to-blue-50 dark:from-emerald-950/40 dark:via-teal-950/40 dark:to-blue-950/40 border-2 border-emerald-300 dark:border-emerald-700 rounded-2xl shadow-sm flex flex-col sm:flex-row items-center justify-between gap-4 text-left">
+        <div className="mb-8 w-full max-w-3xl p-4 sm:p-5 pms-glass-panel rounded-3xl border-[var(--pms-border-strong)] flex flex-col sm:flex-row items-center justify-between gap-4 text-left">
           <div className="flex items-start gap-3.5">
-            <div className="w-11 h-11 rounded-2xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-md">
+            <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-500 text-white flex items-center justify-center shrink-0 shadow-md shadow-emerald-500/20">
               <Target className="w-6 h-6" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <span className="text-[11px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700">
+                <span className="text-[11px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-[var(--pms-soft-mint)] text-emerald-800 dark:text-emerald-300 border border-[var(--pms-border)]">
                   Exact Size Mode
                 </span>
                 <span className="text-xs font-bold text-emerald-700 dark:text-emerald-400">
@@ -377,64 +381,80 @@ export default function CompressPDF() {
 
           <Link
             to="/target-compress"
-            className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-extrabold text-sm shadow-md hover:shadow-lg transition-all shrink-0 cursor-pointer w-full sm:w-auto text-center"
+            className="pms-btn-primary relative overflow-hidden inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl font-extrabold text-sm shadow-md hover:shadow-lg transition-all shrink-0 cursor-pointer w-full sm:w-auto text-center"
           >
+            <span className="pms-shimmer pointer-events-none" />
             <Target className="w-4 h-4" />
             <span>Open Target Compress →</span>
           </Link>
         </div>
 
+      <PearlStageSwitch stageKey={!file ? 'upload' : 'workspace'} className="w-full max-w-6xl">
       {!file ? (
-        <FileDropzone onDrop={handleDrop} multiple={false} title="Select PDF file" />
+        <div className="w-full max-w-3xl mx-auto">
+          <FileDropzone onDrop={handleDrop} multiple={false} title="Select PDF file" />
+        </div>
       ) : (
-        <div className={`w-full ${compressedUrl ? 'max-w-6xl' : 'max-w-5xl'} flex flex-col lg:flex-row gap-8 transition-all`}>
-          <div className="flex-1 bg-white dark:bg-slate-900/90 rounded-2xl shadow-sm border border-gray-200 dark:border-slate-800 p-8">
-            <div className="flex items-center gap-4 p-6 bg-gray-50 dark:bg-slate-800/60 rounded-xl border border-gray-200 dark:border-slate-700 mb-8">
-              <div className="w-16 h-16 bg-green-100 dark:bg-green-950/50 text-green-600 dark:text-green-400 rounded-xl flex items-center justify-center shrink-0">
-                <FileText className="w-8 h-8" />
+        <div className={`w-full mx-auto ${compressedUrl ? 'max-w-6xl' : 'max-w-5xl'} flex flex-col lg:flex-row gap-8 transition-all`}>
+          <div className="relative overflow-hidden flex-1 pms-glass-panel rounded-3xl p-6 sm:p-8">
+            <PearlScanOverlay active={isProcessing} label={processingStep || 'Optimizing PDF streams...'} />
+            <div className="flex items-center gap-4 p-5 bg-white/75 dark:bg-slate-900/75 rounded-2xl border border-[var(--pms-border)] mb-7">
+              <div className="w-14 h-14 bg-[var(--pms-soft-mint)] text-emerald-600 dark:text-emerald-400 border border-[var(--pms-border)] rounded-2xl flex items-center justify-center shrink-0">
+                <FileText className="w-7 h-7" />
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-lg font-semibold text-gray-900 dark:text-slate-100 truncate">{file.name}</p>
-                <p className="text-sm text-gray-500 dark:text-slate-400">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
+                <p className="text-base font-bold text-gray-900 dark:text-slate-100 truncate">{file.name}</p>
+                <p className="text-sm text-gray-500 dark:text-slate-400 tabular-nums">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
               </div>
             </div>
 
+            <PearlStageSwitch stageKey={!compressedUrl ? 'configure' : 'result'} className="w-full">
             {!compressedUrl ? (
               <div className="space-y-6">
-                <div className="grid grid-cols-1 gap-4">
-                  {levels.map((level) => (
+                <div className="grid grid-cols-1 gap-3">
+                  {levels.map((level) => {
+                    const active = compressionLevel === level.id;
+                    return (
                     <button
                       key={level.id}
                       onClick={() => setCompressionLevel(level.id as CompressionLevel)}
-                      className={`relative flex items-center gap-4 p-5 rounded-xl border-2 transition-all text-left ${
-                        compressionLevel === level.id 
-                          ? `${level.borderColor} ${level.bgColor} ring-2 ring-green-500 ring-offset-2 dark:ring-offset-slate-900` 
-                          : 'border-gray-100 dark:border-slate-800 bg-gray-50 dark:bg-slate-800/50 hover:border-gray-300 dark:hover:border-slate-600'
+                      className={`relative overflow-hidden flex items-center gap-4 p-4 sm:p-5 rounded-2xl border-2 transition-all text-left ${
+                        active
+                          ? 'border-emerald-500/70 shadow-sm'
+                          : 'border-[var(--pms-border)] bg-white/75 dark:bg-slate-900/75 hover:border-[var(--pms-border-strong)]'
                       }`}
                     >
-                      <div className={`w-12 h-12 rounded-lg flex items-center justify-center shrink-0 ${level.bgColor} ${level.color}`}>
+                      {active && (
+                        <motion.span
+                          layoutId="compress-level-pill"
+                          transition={{ type: 'spring', stiffness: 420, damping: 32 }}
+                          className="absolute inset-0 bg-[var(--pms-soft-mint)] pointer-events-none"
+                        />
+                      )}
+                      <div className={`relative z-10 w-12 h-12 rounded-xl flex items-center justify-center shrink-0 ${level.bgColor} ${level.color}`}>
                         <level.icon className="w-6 h-6" />
                       </div>
-                      <div className="flex-1">
+                      <div className="relative z-10 flex-1">
                         <h3 className="font-bold text-gray-900 dark:text-slate-100">{level.title}</h3>
-                        <p className="text-sm text-gray-500 dark:text-slate-400">{level.desc}</p>
+                        <p className="text-sm text-gray-600 dark:text-slate-400">{level.desc}</p>
                       </div>
-                      {compressionLevel === level.id && (
-                        <div className="w-6 h-6 bg-green-500 text-white rounded-full flex items-center justify-center">
+                      {active && (
+                        <div className="relative z-10 w-6 h-6 bg-emerald-500 text-white rounded-full flex items-center justify-center shadow-sm">
                           <Check className="w-4 h-4" />
                         </div>
                       )}
                     </button>
-                  ))}
+                  );
+                  })}
                 </div>
                 {compressionLevel !== 'low' && (
-                  <div className="rounded-xl border border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-800/60 p-4 space-y-3">
-                    <label className="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-slate-200">
+                  <div className="rounded-2xl border border-[var(--pms-border)] bg-white/75 dark:bg-slate-900/75 p-4 space-y-3">
+                    <label className="flex items-center gap-2 text-sm font-semibold text-gray-800 dark:text-slate-200 cursor-pointer">
                       <input
                         type="checkbox"
                         checked={useTargetSize}
                         onChange={(e) => setUseTargetSize(e.target.checked)}
-                        className="rounded border-gray-300 dark:border-slate-600 dark:bg-slate-800"
+                        className="rounded border-gray-300 dark:border-slate-600 accent-emerald-600"
                       />
                       Use target size based compression
                     </label>
@@ -445,7 +465,7 @@ export default function CompressPDF() {
                             Target Size ({targetUnit})
                           </label>
                           {/* KB / MB Toggle */}
-                          <div className="inline-flex rounded-lg p-0.5 bg-gray-200 dark:bg-slate-800 border border-gray-300 dark:border-slate-700">
+                          <div className="inline-flex rounded-xl p-1 bg-white/80 dark:bg-slate-800/80 border border-[var(--pms-border)]">
                             <button
                               type="button"
                               onClick={() => {
@@ -454,13 +474,20 @@ export default function CompressPDF() {
                                   setTargetSizeKB((prev) => Math.round(prev * 1024));
                                 }
                               }}
-                              className={`px-2.5 py-1 text-xs font-bold rounded-md transition-all ${
+                              className={`relative overflow-hidden px-3 py-1 text-xs font-bold rounded-lg transition-colors ${
                                 targetUnit === 'KB'
-                                  ? 'bg-white dark:bg-slate-700 text-gray-900 dark:text-slate-100 shadow-xs'
+                                  ? 'text-emerald-800 dark:text-emerald-200'
                                   : 'text-gray-600 dark:text-slate-400 hover:text-gray-900 dark:hover:text-slate-200'
                               }`}
                             >
-                              KB
+                              {targetUnit === 'KB' && (
+                                <motion.span
+                                  layoutId="compress-unit-pill"
+                                  transition={{ type: 'spring', stiffness: 450, damping: 32 }}
+                                  className="absolute inset-0 bg-[var(--pms-soft-mint)] rounded-lg pointer-events-none"
+                                />
+                              )}
+                              <span className="relative z-10">KB</span>
                             </button>
                             <button
                               type="button"
@@ -470,13 +497,20 @@ export default function CompressPDF() {
                                   setTargetSizeKB((prev) => Math.max(1, Math.round(prev / 1024)));
                                 }
                               }}
-                              className={`px-2.5 py-1 text-xs font-bold rounded-md transition-all ${
+                              className={`relative overflow-hidden px-3 py-1 text-xs font-bold rounded-lg transition-colors ${
                                 targetUnit === 'MB'
-                                  ? 'bg-white dark:bg-slate-700 text-gray-900 dark:text-slate-100 shadow-xs'
+                                  ? 'text-emerald-800 dark:text-emerald-200'
                                   : 'text-gray-600 dark:text-slate-400 hover:text-gray-900 dark:hover:text-slate-200'
                               }`}
                             >
-                              MB
+                              {targetUnit === 'MB' && (
+                                <motion.span
+                                  layoutId="compress-unit-pill"
+                                  transition={{ type: 'spring', stiffness: 450, damping: 32 }}
+                                  className="absolute inset-0 bg-[var(--pms-soft-mint)] rounded-lg pointer-events-none"
+                                />
+                              )}
+                              <span className="relative z-10">MB</span>
                             </button>
                           </div>
                         </div>
@@ -491,7 +525,7 @@ export default function CompressPDF() {
                             step={targetUnit === 'MB' ? '0.1' : '1'}
                             value={targetSizeKB}
                             onChange={(e) => setTargetSizeKB(Math.max(0.1, Number(e.target.value) || 1))}
-                            className="w-full pl-9 pr-14 py-2.5 rounded-lg border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-gray-900 dark:text-slate-100 focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none text-sm font-bold"
+                            className="w-full pl-9 pr-14 py-2.5 rounded-xl border border-[var(--pms-border)] bg-white/90 dark:bg-slate-900/90 text-gray-900 dark:text-slate-100 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none text-sm font-bold"
                           />
                           <span className="absolute inset-y-0 right-0 pr-3 flex items-center text-xs font-bold text-gray-400 dark:text-slate-500 pointer-events-none">
                             {targetUnit}
@@ -507,18 +541,21 @@ export default function CompressPDF() {
                   </div>
                 )}
 
-                <div className="pt-4 flex gap-4">
-                  <button
+                <div className="pt-2 flex flex-col sm:flex-row gap-3">
+                  <motion.button
+                    whileHover={prefersReduced || isProcessing ? undefined : { scale: 1.01 }}
+                    whileTap={prefersReduced || isProcessing ? undefined : { scale: 0.99 }}
                     onClick={compressPdf}
                     disabled={isProcessing}
-                    className="flex-1 py-4 bg-green-600 text-white text-lg font-bold rounded-xl hover:bg-green-700 transition-colors disabled:opacity-50 shadow-md flex items-center justify-center gap-2"
+                    className="pms-btn-primary relative overflow-hidden flex-1 py-4 text-lg font-bold rounded-xl disabled:opacity-50 shadow-md flex items-center justify-center gap-2"
                   >
+                    <span className="pms-shimmer pointer-events-none" />
                     <Minimize2 className="w-5 h-5" />
                     {isProcessing ? processingStep || 'Compressing...' : 'Compress PDF'}
-                  </button>
+                  </motion.button>
                   <button
                     onClick={() => { setFile(null); }}
-                    className="px-6 py-4 bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-slate-200 text-lg font-semibold rounded-xl hover:bg-gray-200 dark:hover:bg-slate-700 transition-colors"
+                    className="px-6 py-4 bg-white/80 dark:bg-slate-800/80 border border-[var(--pms-border)] text-gray-700 dark:text-slate-200 text-base font-semibold rounded-xl hover:bg-white dark:hover:bg-slate-700 transition-colors"
                   >
                     Cancel
                   </button>
@@ -526,41 +563,56 @@ export default function CompressPDF() {
               </div>
             ) : (
               <div className="space-y-6 text-center">
-                <div className="p-8 bg-green-50 dark:bg-green-950/40 rounded-xl border border-green-200 dark:border-green-800">
-                  <h3 className="text-2xl font-bold text-green-800 dark:text-green-200 mb-4">PDF compressed!</h3>
+                <div className="p-8 rounded-2xl bg-gradient-to-br from-emerald-500/12 via-white/75 to-teal-500/12 dark:from-emerald-950/50 dark:via-slate-900/80 dark:to-teal-950/40 border border-emerald-200/80 dark:border-emerald-800/60">
+                  <motion.div
+                    initial={prefersReduced ? false : { scale: 0.6, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    transition={{ type: 'spring', stiffness: 420, damping: 24 }}
+                    className="w-16 h-16 bg-gradient-to-br from-emerald-400 to-teal-500 text-white rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-emerald-500/25"
+                  >
+                    <CheckCircle2 className="w-8 h-8" />
+                  </motion.div>
+                  <h3 className="text-2xl font-bold text-gray-900 dark:text-slate-100 mb-4">PDF Compressed!</h3>
                   {stats && (
-                    <div className="flex justify-center gap-8 mb-6 text-sm">
-                      <div>
-                        <p className="text-gray-500 dark:text-slate-400">Original</p>
-                        <p className="font-semibold text-gray-900 dark:text-slate-100">{(stats.original / 1024 / 1024).toFixed(2)} MB</p>
+                    <div className="grid grid-cols-3 gap-3 mb-6 text-sm">
+                      <div className="p-3 rounded-xl bg-white/75 dark:bg-slate-900/75 border border-[var(--pms-border)]">
+                        <p className="text-xs text-gray-500 dark:text-slate-400">Original</p>
+                        <p className="font-bold text-gray-900 dark:text-slate-100 tabular-nums">
+                          <AnimatedNumber value={stats.original / 1024 / 1024} decimals={2} suffix=" MB" />
+                        </p>
                       </div>
-                      <div>
-                        <p className="text-gray-500 dark:text-slate-400">Compressed</p>
-                        <p className="font-semibold text-green-700 dark:text-green-400">{(stats.compressed / 1024 / 1024).toFixed(2)} MB</p>
+                      <div className="p-3 rounded-xl bg-white/75 dark:bg-slate-900/75 border border-[var(--pms-border)]">
+                        <p className="text-xs text-gray-500 dark:text-slate-400">Compressed</p>
+                        <p className="font-bold text-emerald-700 dark:text-emerald-400 tabular-nums">
+                          <AnimatedNumber value={stats.compressed / 1024 / 1024} decimals={2} suffix=" MB" />
+                        </p>
                       </div>
-                      <div>
-                        <p className="text-gray-500 dark:text-slate-400">Saved</p>
-                        <p className={`font-semibold ${stats.compressed < stats.original ? 'text-green-700 dark:text-green-400' : 'text-amber-600 dark:text-amber-400'}`}>
+                      <div className="p-3 rounded-xl bg-white/75 dark:bg-slate-900/75 border border-[var(--pms-border)]">
+                        <p className="text-xs text-gray-500 dark:text-slate-400">Saved</p>
+                        <p className={`font-bold tabular-nums ${stats.compressed < stats.original ? 'text-emerald-700 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}`}>
                           {stats.compressed < stats.original
-                            ? `${Math.round((1 - stats.compressed / stats.original) * 100)}%`
+                            ? <AnimatedNumber value={Math.round((1 - stats.compressed / stats.original) * 100)} suffix="%" />
                             : '—'}
                         </p>
                       </div>
                     </div>
                   )}
                   {usedFallback && (
-                    <div className="mb-4 px-4 py-2 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-lg text-sm text-amber-800 dark:text-amber-200">
+                    <div className="mb-4 px-4 py-2 bg-amber-50/90 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-xl text-sm text-amber-800 dark:text-amber-200">
                       ⚠️ PDF was already highly optimized — rasterization would have increased size, so lossless metadata cleanup was applied instead.
                     </div>
                   )}
-                  <a
+                  <motion.a
+                    whileHover={prefersReduced ? undefined : { scale: 1.02 }}
+                    whileTap={prefersReduced ? undefined : { scale: 0.98 }}
                     href={compressedUrl}
                     download={`compressed_${file.name}`}
-                    className="inline-flex items-center justify-center gap-2 px-8 py-4 bg-green-600 text-white text-lg font-bold rounded-xl hover:bg-green-700 transition-colors shadow-md"
+                    className="pms-btn-primary relative overflow-hidden inline-flex items-center justify-center gap-2 px-8 py-4 text-lg font-bold rounded-xl shadow-md"
                   >
+                    <span className="pms-shimmer pointer-events-none" />
                     <Download className="w-6 h-6" />
                     Download compressed PDF
-                  </a>
+                  </motion.a>
                 </div>
                 <button
                   onClick={() => { 
@@ -568,44 +620,41 @@ export default function CompressPDF() {
                     if (compressedUrl) URL.revokeObjectURL(compressedUrl);
                     setFile(null); setCompressedUrl(null); setStats(null); setPreviewUrl(null); 
                   }}
-                  className="text-gray-600 dark:text-slate-400 hover:text-gray-900 dark:hover:text-slate-100 font-medium"
+                  className="text-gray-600 dark:text-slate-400 hover:text-gray-900 dark:hover:text-slate-100 font-semibold text-sm transition-colors"
                 >
                   Compress another PDF
                 </button>
               </div>
             )}
+            </PearlStageSwitch>
           </div>
 
           {/* Preview Area (Interactive Before & After Comparison) */}
-          <div className="flex-1 bg-gray-100 dark:bg-slate-900/90 rounded-2xl border border-gray-200 dark:border-slate-800 overflow-hidden min-h-[520px] flex flex-col">
-            <div className="bg-white dark:bg-slate-900 px-4 py-3 text-xs font-semibold text-gray-700 dark:text-slate-200 border-b border-gray-200 dark:border-slate-800 flex items-center justify-between">
+          <div className="flex-1 pms-glass-panel rounded-3xl overflow-hidden min-h-[520px] flex flex-col">
+            <div className="bg-white/80 dark:bg-slate-900/80 px-4 py-3 text-xs font-semibold text-gray-700 dark:text-slate-200 border-b border-[var(--pms-border)] flex items-center justify-between">
               <span>{compressedUrl ? 'Quality Comparison' : 'PDF Preview'}</span>
               {compressedUrl && (
-                <div className="flex items-center gap-1 bg-gray-100 dark:bg-slate-800 p-0.5 rounded-lg text-[11px]">
-                  <button
-                    onClick={() => setComparisonView('side-by-side')}
-                    className={`px-2.5 py-1 rounded-md font-semibold transition-colors ${
-                      comparisonView === 'side-by-side' ? 'bg-white dark:bg-slate-700 shadow-xs text-green-700 dark:text-emerald-400' : 'text-gray-500 dark:text-slate-400 hover:text-gray-800 dark:hover:text-slate-200'
-                    }`}
-                  >
-                    Side-by-Side
-                  </button>
-                  <button
-                    onClick={() => setComparisonView('compressed')}
-                    className={`px-2.5 py-1 rounded-md font-semibold transition-colors ${
-                      comparisonView === 'compressed' ? 'bg-white dark:bg-slate-700 shadow-xs text-green-700 dark:text-emerald-400' : 'text-gray-500 dark:text-slate-400 hover:text-gray-800 dark:hover:text-slate-200'
-                    }`}
-                  >
-                    Compressed
-                  </button>
-                  <button
-                    onClick={() => setComparisonView('original')}
-                    className={`px-2.5 py-1 rounded-md font-semibold transition-colors ${
-                      comparisonView === 'original' ? 'bg-white dark:bg-slate-700 shadow-xs text-green-700 dark:text-emerald-400' : 'text-gray-500 dark:text-slate-400 hover:text-gray-800 dark:hover:text-slate-200'
-                    }`}
-                  >
-                    Original
-                  </button>
+                <div className="flex items-center gap-1 bg-white/75 dark:bg-slate-800/80 border border-[var(--pms-border)] p-1 rounded-xl text-[11px]">
+                  {(['side-by-side', 'compressed', 'original'] as const).map((view) => (
+                    <button
+                      key={view}
+                      onClick={() => setComparisonView(view)}
+                      className={`relative overflow-hidden px-2.5 py-1 rounded-lg font-semibold transition-colors ${
+                        comparisonView === view ? 'text-emerald-800 dark:text-emerald-200' : 'text-gray-500 dark:text-slate-400 hover:text-gray-800 dark:hover:text-slate-200'
+                      }`}
+                    >
+                      {comparisonView === view && (
+                        <motion.span
+                          layoutId="compress-view-pill"
+                          transition={{ type: 'spring', stiffness: 450, damping: 32 }}
+                          className="absolute inset-0 bg-[var(--pms-soft-mint)] rounded-lg pointer-events-none"
+                        />
+                      )}
+                      <span className="relative z-10">
+                        {view === 'side-by-side' ? 'Side-by-Side' : view === 'compressed' ? 'Compressed' : 'Original'}
+                      </span>
+                    </button>
+                  ))}
                 </div>
               )}
             </div>
@@ -682,6 +731,7 @@ export default function CompressPDF() {
           </div>
         </div>
       )}
+      </PearlStageSwitch>
 
       {/* SEO Guide & FAQs for Search Ranking */}
       <ToolSEOSection

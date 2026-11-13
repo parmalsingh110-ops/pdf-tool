@@ -1,18 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import {
   Upload,
   Download,
-  Printer,
   CreditCard,
-  Sparkles,
-  Layers,
-  CheckCircle2,
-  RefreshCw,
-  Eye,
-  EyeOff,
   Sliders,
-  Maximize2,
-  FileText,
+  Eye,
   Smartphone,
 } from 'lucide-react';
 import { PDFDocument } from 'pdf-lib';
@@ -23,6 +16,9 @@ import { usePageSEO } from '../lib/usePageSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
 import ShareQrModal from '../components/ShareQrModal';
 import { dataUrlToBytes, downloadBlob } from '../lib/utils';
+import { toArrayBufferBytes } from '../lib/blobUrl';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { AnimatedNumber, PearlScanOverlay } from '../components/pearl/PearlMotion';
 
 // Standard CR80 Card Dimensions: 85.6mm × 53.98mm (Aspect ratio ≈ 1.5858)
 const CARD_ASPECT = 85.6 / 53.98;
@@ -332,7 +328,7 @@ export default function PvcCardMaker() {
       });
 
       const pdfBytes = await pdfDoc.save();
-      const blob = new Blob([pdfBytes as any], { type: 'application/pdf' });
+      const blob = new Blob([toArrayBufferBytes(pdfBytes)], { type: 'application/pdf' });
       downloadBlob(blob, `pvc-id-card-${Date.now()}.pdf`);
     } catch (err) {
       console.error('Error generating PDF:', err);
@@ -349,59 +345,74 @@ export default function PvcCardMaker() {
     }, 'image/jpeg', 0.95);
   };
 
-  return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 py-10 px-4 sm:px-6">
-      <div className="max-w-6xl mx-auto space-y-8">
-        {/* Header */}
-        <div className="text-center space-y-3">
-          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 text-xs font-bold uppercase tracking-wider">
-            <CreditCard className="w-4 h-4" /> E-Mitra & CSC Special
-          </div>
-          <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight">
-            e-Aadhaar & Voter ID to PVC Card Maker
-          </h1>
-          <p className="text-sm sm:text-base text-slate-500 dark:text-slate-400 max-w-2xl mx-auto">
-            Convert downloaded e-Aadhaar PDF or Voter slip to standard CR80 PVC Card size (85.6 × 54 mm). 
-            Generate print-ready A4 or 4×6 photo sheets with cut lines and fold marks.
-          </p>
-        </div>
+  const prefersReduced = useReducedMotion();
 
+  return (
+    <ToolWorkspaceShell
+      title="e-Aadhaar & Voter ID to PVC Card Maker"
+      subtitle="Convert downloaded e-Aadhaar PDF or Voter slip to standard CR80 PVC Card size (85.6 × 54 mm). Generate print-ready A4 or 4×6 photo sheets with cut lines and fold marks."
+      categoryLabel="E-Mitra & CSC Special · CR80 Standard"
+      icon={CreditCard}
+      microVariant="crop"
+      tone="blue"
+      trustNote="ISO CR80 85.6×53.98 mm · 300 DPI print sheets · Optional 8-digit Aadhaar masking"
+    >
+      <div className="space-y-8">
         {/* Upload State */}
         {!sourceImage ? (
-          <div className="max-w-2xl mx-auto">
-            <label className="flex flex-col items-center justify-center p-12 border-2 border-dashed border-slate-300 dark:border-slate-700 hover:border-blue-500 rounded-3xl cursor-pointer bg-white dark:bg-slate-900 transition-all shadow-sm group">
+          <motion.div
+            initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.25 }}
+            className="max-w-2xl mx-auto"
+          >
+            <label
+              className="relative flex flex-col items-center justify-center p-12 border-2 border-dashed border-[var(--pms-border-strong)] hover:border-[var(--pms-blue)] rounded-[1.75rem] cursor-pointer pms-glass-panel transition-all group overflow-hidden"
+            >
+              <PearlScanOverlay active={isProcessing} label="Rendering PDF / image to high-res canvas…" />
               <input
                 type="file"
                 accept=".pdf,image/png,image/jpeg,image/webp"
                 onChange={handleFileChange}
                 className="hidden"
               />
-              <div className="w-16 h-16 rounded-2xl bg-blue-50 dark:bg-blue-950/50 text-blue-600 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+              <div
+                className="w-16 h-16 rounded-2xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform"
+                style={{ backgroundColor: 'var(--pms-soft-blue)', color: 'var(--pms-blue)' }}
+              >
                 <Upload className="w-8 h-8" />
               </div>
-              <span className="text-base font-bold text-slate-900 dark:text-white mb-1">
+              <span className="text-base font-bold mb-1" style={{ color: 'var(--pms-ink)' }}>
                 Drop e-Aadhaar PDF or ID Card Image
               </span>
-              <span className="text-xs text-slate-400 text-center max-w-xs">
+              <span className="text-xs text-center max-w-xs" style={{ color: 'var(--pms-muted)' }}>
                 Supports official UIDAI e-Aadhaar PDFs, Voter slips, Jan Aadhaar, Driving License, or College ID cards.
               </span>
+              <span className="mt-5 px-6 py-2.5 rounded-full pms-btn-primary text-xs font-bold">
+                Select File
+              </span>
             </label>
-          </div>
+          </motion.div>
         ) : (
           /* Editor Workspace */
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+          <motion.div
+            initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.28 }}
+            className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start"
+          >
             {/* Left Controls Column */}
-            <div className="lg:col-span-4 space-y-5 bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm">
-              <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
-                <span className="text-sm font-bold flex items-center gap-2">
-                  <Sliders className="w-4 h-4 text-blue-500" /> Print Settings
+            <div className="lg:col-span-4 space-y-5 pms-glass-panel p-6 rounded-3xl">
+              <div className="flex items-center justify-between pb-3 border-b border-[var(--pms-border)]">
+                <span className="text-sm font-bold flex items-center gap-2" style={{ color: 'var(--pms-ink)' }}>
+                  <Sliders className="w-4 h-4 text-[var(--pms-blue)]" /> Print Settings
                 </span>
                 <button
                   onClick={() => {
                     setFile(null);
                     setSourceImage(null);
                   }}
-                  className="text-xs text-rose-500 hover:text-rose-600 font-semibold"
+                  className="text-xs text-[var(--pms-rose)] hover:underline font-semibold cursor-pointer"
                 >
                   Change File
                 </button>
@@ -409,8 +420,8 @@ export default function PvcCardMaker() {
 
               {/* Paper Layout Selection */}
               <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">
-                  Sheet & Print Format
+                <label className="block text-xs font-bold uppercase tracking-wider mb-2" style={{ color: 'var(--pms-muted)' }}>
+                  Sheet &amp; Print Format
                 </label>
                 <div className="grid grid-cols-2 gap-2 text-xs">
                   {[
@@ -422,11 +433,12 @@ export default function PvcCardMaker() {
                     <button
                       key={opt.id}
                       onClick={() => setPaperLayout(opt.id as PaperLayout)}
-                      className={`p-2.5 rounded-xl border text-left font-medium transition ${
+                      className={`p-2.5 rounded-xl border text-left font-medium transition cursor-pointer ${
                         paperLayout === opt.id
-                          ? 'border-blue-500 bg-blue-50/50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400'
-                          : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800'
+                          ? 'border-[var(--pms-blue)] bg-[var(--pms-soft-blue)] text-[var(--pms-blue)] font-bold'
+                          : 'border-[var(--pms-border)] hover:border-sky-300 dark:hover:border-sky-700'
                       }`}
+                      style={paperLayout === opt.id ? undefined : { backgroundColor: 'var(--pms-white)', color: 'var(--pms-ink)' }}
                     >
                       {opt.label}
                     </button>
@@ -436,7 +448,7 @@ export default function PvcCardMaker() {
 
               {/* Filter Mode */}
               <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">
+                <label className="block text-xs font-bold uppercase tracking-wider mb-2" style={{ color: 'var(--pms-muted)' }}>
                   Scanner Filter
                 </label>
                 <div className="grid grid-cols-3 gap-2">
@@ -448,11 +460,12 @@ export default function PvcCardMaker() {
                     <button
                       key={m.id}
                       onClick={() => setFilterMode(m.id as FilterMode)}
-                      className={`py-2 px-3 rounded-xl border text-xs font-bold transition text-center ${
+                      className={`py-2 px-3 rounded-xl border text-xs font-bold transition text-center cursor-pointer ${
                         filterMode === m.id
-                          ? 'border-blue-500 bg-blue-600 text-white shadow-sm'
-                          : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800'
+                          ? 'pms-btn-primary border-transparent shadow-sm'
+                          : 'border-[var(--pms-border)] hover:border-sky-300 dark:hover:border-sky-700'
                       }`}
+                      style={filterMode === m.id ? undefined : { backgroundColor: 'var(--pms-white)', color: 'var(--pms-ink)' }}
                     >
                       {m.label}
                     </button>
@@ -463,22 +476,22 @@ export default function PvcCardMaker() {
               {/* Crop Adjustments Tabs */}
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <label className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                  <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--pms-muted)' }}>
                     Target Crop Coordinates
                   </label>
-                  <div className="flex gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-lg">
+                  <div className="flex gap-1 p-1 rounded-xl border border-[var(--pms-border)]" style={{ backgroundColor: 'var(--pms-pearl)' }}>
                     <button
                       onClick={() => setActiveCropSide('front')}
-                      className={`px-2.5 py-1 text-xs rounded-md font-bold transition ${
-                        activeCropSide === 'front' ? 'bg-white dark:bg-slate-700 text-blue-600 shadow-sm' : 'text-slate-500'
+                      className={`px-2.5 py-1 text-xs rounded-lg font-bold transition cursor-pointer ${
+                        activeCropSide === 'front' ? 'bg-[var(--pms-soft-blue)] text-[var(--pms-blue)] shadow-xs' : 'text-[var(--pms-muted)]'
                       }`}
                     >
                       Front Card
                     </button>
                     <button
                       onClick={() => setActiveCropSide('back')}
-                      className={`px-2.5 py-1 text-xs rounded-md font-bold transition ${
-                        activeCropSide === 'back' ? 'bg-white dark:bg-slate-700 text-blue-600 shadow-sm' : 'text-slate-500'
+                      className={`px-2.5 py-1 text-xs rounded-lg font-bold transition cursor-pointer ${
+                        activeCropSide === 'back' ? 'bg-[var(--pms-soft-blue)] text-[var(--pms-blue)] shadow-xs' : 'text-[var(--pms-muted)]'
                       }`}
                     >
                       Back Card
@@ -487,11 +500,11 @@ export default function PvcCardMaker() {
                 </div>
 
                 {/* Crop Slider Controls */}
-                <div className="space-y-3 p-3.5 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200 dark:border-slate-700 text-xs">
+                <div className="space-y-3 p-3.5 rounded-2xl border border-[var(--pms-border)] text-xs" style={{ backgroundColor: 'var(--pms-pearl)' }}>
                   <div>
-                    <div className="flex justify-between text-[11px] font-semibold text-slate-500 mb-1">
+                    <div className="flex justify-between text-[11px] font-semibold mb-1" style={{ color: 'var(--pms-ink)' }}>
                       <span>Horizontal Position (X)</span>
-                      <span>{activeCropSide === 'front' ? frontCrop.x : backCrop.x}%</span>
+                      <span className="font-mono text-[var(--pms-blue)]">{activeCropSide === 'front' ? frontCrop.x : backCrop.x}%</span>
                     </div>
                     <input
                       type="range"
@@ -503,14 +516,14 @@ export default function PvcCardMaker() {
                         if (activeCropSide === 'front') setFrontCrop({ ...frontCrop, x: val });
                         else setBackCrop({ ...backCrop, x: val });
                       }}
-                      className="w-full accent-blue-600"
+                      className="w-full accent-sky-600 cursor-pointer"
                     />
                   </div>
 
                   <div>
-                    <div className="flex justify-between text-[11px] font-semibold text-slate-500 mb-1">
+                    <div className="flex justify-between text-[11px] font-semibold mb-1" style={{ color: 'var(--pms-ink)' }}>
                       <span>Vertical Position (Y)</span>
-                      <span>{activeCropSide === 'front' ? frontCrop.y : backCrop.y}%</span>
+                      <span className="font-mono text-[var(--pms-blue)]">{activeCropSide === 'front' ? frontCrop.y : backCrop.y}%</span>
                     </div>
                     <input
                       type="range"
@@ -522,7 +535,7 @@ export default function PvcCardMaker() {
                         if (activeCropSide === 'front') setFrontCrop({ ...frontCrop, y: val });
                         else setBackCrop({ ...backCrop, y: val });
                       }}
-                      className="w-full accent-blue-600"
+                      className="w-full accent-sky-600 cursor-pointer"
                     />
                   </div>
                 </div>
@@ -530,54 +543,57 @@ export default function PvcCardMaker() {
 
               {/* Toggles */}
               <div className="space-y-2.5 pt-2">
-                <label className="flex items-center gap-2.5 text-xs text-slate-700 dark:text-slate-300 cursor-pointer">
+                <label className="flex items-center gap-2.5 text-xs cursor-pointer" style={{ color: 'var(--pms-ink)' }}>
                   <input
                     type="checkbox"
                     checked={maskAadhaar}
                     onChange={(e) => setMaskAadhaar(e.target.checked)}
-                    className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 accent-blue-600"
+                    className="w-4 h-4 rounded accent-sky-600"
                   />
                   <span>Mask first 8 digits of Aadhaar (XXXX-XXXX-1234)</span>
                 </label>
-                <label className="flex items-center gap-2.5 text-xs text-slate-700 dark:text-slate-300 cursor-pointer">
+                <label className="flex items-center gap-2.5 text-xs cursor-pointer" style={{ color: 'var(--pms-ink)' }}>
                   <input
                     type="checkbox"
                     checked={includeCutMarks}
                     onChange={(e) => setIncludeCutMarks(e.target.checked)}
-                    className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 accent-blue-600"
+                    className="w-4 h-4 rounded accent-sky-600"
                   />
                   <span>Include scissors cutting guide marks</span>
                 </label>
-                <label className="flex items-center gap-2.5 text-xs text-slate-700 dark:text-slate-300 cursor-pointer">
+                <label className="flex items-center gap-2.5 text-xs cursor-pointer" style={{ color: 'var(--pms-ink)' }}>
                   <input
                     type="checkbox"
                     checked={includeLaminationGuide}
                     onChange={(e) => setIncludeLaminationGuide(e.target.checked)}
-                    className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 accent-blue-600"
+                    className="w-4 h-4 rounded accent-sky-600"
                   />
                   <span>Include 65×95mm lamination pouch border</span>
                 </label>
               </div>
 
               {/* Export Buttons */}
-              <div className="pt-3 border-t border-slate-100 dark:border-slate-800 space-y-2">
-                <button
+              <div className="pt-3 border-t border-[var(--pms-border)] space-y-2.5">
+                <motion.button
+                  whileHover={prefersReduced || isProcessing ? undefined : { scale: 1.01 }}
+                  whileTap={prefersReduced || isProcessing ? undefined : { scale: 0.985 }}
                   onClick={handleDownloadPdf}
                   disabled={isProcessing}
-                  className="w-full flex items-center justify-center gap-2 py-3 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-sm shadow-md transition disabled:opacity-50"
+                  className="w-full flex items-center justify-center gap-2 py-3.5 px-4 pms-btn-primary rounded-2xl font-bold text-sm disabled:opacity-50 cursor-pointer"
                 >
                   <Download className="w-4 h-4" /> Download Print-Ready PDF
-                </button>
+                </motion.button>
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     onClick={handleDownloadJpg}
-                    className="flex items-center justify-center gap-1.5 py-2.5 px-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-xl font-semibold text-xs transition"
+                    className="flex items-center justify-center gap-1.5 py-2.5 px-3 border border-[var(--pms-border)] rounded-xl font-semibold text-xs transition cursor-pointer hover:border-sky-300 dark:hover:border-sky-700"
+                    style={{ backgroundColor: 'var(--pms-white)', color: 'var(--pms-ink)' }}
                   >
                     <Download className="w-3.5 h-3.5" /> High-Res JPG
                   </button>
                   <button
                     onClick={() => setShowQrModal(true)}
-                    className="flex items-center justify-center gap-1.5 py-2.5 px-3 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-100 rounded-xl font-semibold text-xs transition"
+                    className="flex items-center justify-center gap-1.5 py-2.5 px-3 bg-[var(--pms-soft-mint)] text-emerald-700 dark:text-emerald-300 border border-[var(--pms-border)] hover:opacity-90 rounded-xl font-semibold text-xs transition cursor-pointer"
                   >
                     <Smartphone className="w-3.5 h-3.5" /> Send to Phone
                   </button>
@@ -586,31 +602,43 @@ export default function PvcCardMaker() {
             </div>
 
             {/* Right Live Preview Column */}
-            <div className="lg:col-span-8 bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col items-center">
+            <div className="relative lg:col-span-8 pms-glass-panel p-6 rounded-3xl flex flex-col items-center overflow-hidden">
+              <PearlScanOverlay active={isProcessing} label="Generating 300 DPI PVC print sheet…" />
               <div className="w-full flex items-center justify-between mb-4">
-                <span className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-                  <Eye className="w-4 h-4" /> Live Print Sheet Preview (300 DPI)
+                <span className="text-xs font-bold uppercase tracking-wider flex items-center gap-1.5" style={{ color: 'var(--pms-muted)' }}>
+                  <Eye className="w-4 h-4 text-[var(--pms-blue)]" /> Live Print Sheet Preview (<AnimatedNumber value={300} suffix=" DPI" />)
                 </span>
-                <span className="text-xs font-semibold px-2.5 py-1 bg-slate-100 dark:bg-slate-800 rounded-lg text-slate-600 dark:text-slate-300">
+                <span
+                  className="text-xs font-bold px-3 py-1 rounded-full border border-[var(--pms-border)]"
+                  style={{ backgroundColor: 'var(--pms-soft-blue)', color: 'var(--pms-blue)' }}
+                >
                   CR80: 85.6 × 53.98 mm
                 </span>
               </div>
 
-              {previewDataUrl ? (
-                <div className="w-full max-h-[650px] overflow-auto flex items-center justify-center p-4 bg-slate-100 dark:bg-slate-950 rounded-2xl border border-slate-200 dark:border-slate-800">
-                  <img
-                    src={previewDataUrl}
-                    alt="PVC Card Print Sheet Preview"
-                    className="max-h-[580px] w-auto object-contain rounded shadow-lg border border-slate-300 dark:border-slate-700"
-                  />
-                </div>
-              ) : (
-                <div className="w-full h-96 flex items-center justify-center text-slate-400 text-xs">
-                  Generating high-resolution card preview...
-                </div>
-              )}
+              <AnimatePresence mode="wait">
+                {previewDataUrl ? (
+                  <motion.div
+                    key={paperLayout + filterMode + String(maskAadhaar)}
+                    initial={prefersReduced ? false : { opacity: 0.7 }}
+                    animate={{ opacity: 1 }}
+                    transition={{ duration: 0.2 }}
+                    className="w-full max-h-[650px] overflow-auto flex items-center justify-center p-4 bg-slate-100 dark:bg-slate-950 rounded-2xl border border-[var(--pms-border)]"
+                  >
+                    <img
+                      src={previewDataUrl}
+                      alt="PVC Card Print Sheet Preview"
+                      className="max-h-[580px] w-auto object-contain rounded shadow-lg border border-slate-300 dark:border-slate-700 bg-white"
+                    />
+                  </motion.div>
+                ) : (
+                  <div className="w-full h-96 flex items-center justify-center text-xs" style={{ color: 'var(--pms-muted)' }}>
+                    Generating high-resolution card preview...
+                  </div>
+                )}
+              </AnimatePresence>
             </div>
-          </div>
+          </motion.div>
         )}
 
         {/* SEO Section */}
@@ -669,6 +697,6 @@ export default function PvcCardMaker() {
           fileName="pvc-card-sheet.pdf"
         />
       </div>
-    </div>
+    </ToolWorkspaceShell>
   );
 }

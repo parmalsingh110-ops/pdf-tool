@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
@@ -42,7 +43,9 @@ import FileDropzone from '../components/FileDropzone';
 import { useSEO } from '../hooks/useSEO';
 import { apiFetch } from '../lib/api';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
-import { useAutoRevokeUrl } from '../lib/blobUrl';
+import PearlAuroraBackground from '../components/pearl/PearlAuroraBackground';
+import { PearlScanOverlay } from '../components/pearl/PearlMotion';
+import { toArrayBufferBytes, useAutoRevokeUrl } from '../lib/blobUrl';
 import {
   drawMatchedLatinText,
   drawVectorHarfbuzzText,
@@ -178,6 +181,7 @@ interface DetectedTextBlock {
 
 export default function AdvancedEditor() {
   useSEO('Advanced Editor Online Free | PDF Media Suite', 'Free online Advanced Editor tool. No signup or installation required.');
+  const prefersReduced = useReducedMotion();
 
   const [file, setFile] = useState<File | null>(null);
   const [pdfDoc, setPdfDoc] = useState<pdfjsLib.PDFDocumentProxy | null>(null);
@@ -371,6 +375,8 @@ export default function AdvancedEditor() {
     if (acceptedFiles.length > 0) {
       const selectedFile = acceptedFiles[0];
       setFile(selectedFile);
+      setPdfDoc(null);
+      setPageViewport(null);
       setEditedUrl(null);
       setSavedEngineNote(null);
       setAnnotations([]);
@@ -459,7 +465,7 @@ export default function AdvancedEditor() {
   }, []);
 
   useEffect(() => {
-    if (pdfDoc) {
+    if (pdfDoc && !editedUrl) {
       renderPage(currentPage);
       // Fetch accurate backend text layout after rendering
       if (file) {
@@ -467,7 +473,7 @@ export default function AdvancedEditor() {
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pdfDoc, currentPage, zoomLevel]);
+  }, [pdfDoc, currentPage, zoomLevel, editedUrl]);
 
   // If backend finishes waking up after PDF was already rendered on page, fetch layout once
   useEffect(() => {
@@ -2125,7 +2131,7 @@ export default function AdvancedEditor() {
       }
 
       const pdfBytes = await pdf.save();
-      const blob = new Blob([pdfBytes as unknown as BlobPart], { type: 'application/pdf' });
+      const blob = new Blob([toArrayBufferBytes(pdfBytes)], { type: 'application/pdf' });
       const url = URL.createObjectURL(blob);
       setEditedUrl(url);
     } catch (error) {
@@ -2269,16 +2275,34 @@ export default function AdvancedEditor() {
     return result;
   };
 
-  const toolButton = (tool: Tool, icon: React.ReactNode, label: string, title?: string) => (
-    <button
-      onClick={() => setActiveTool(activeTool === tool ? null : tool)}
-      className={`p-2 rounded-lg flex items-center gap-2 transition-colors ${activeTool === tool ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 hover:bg-gray-100'}`}
-      title={title || label}
-    >
-      {icon}
-      <span className="hidden sm:inline text-sm font-medium">{label}</span>
-    </button>
-  );
+  const toolButton = (tool: Tool, icon: React.ReactNode, label: string, title?: string) => {
+    const isActive = activeTool === tool;
+    return (
+      <motion.button
+        type="button"
+        whileTap={prefersReduced ? undefined : { scale: 0.96 }}
+        onClick={() => setActiveTool(isActive ? null : tool)}
+        className={`relative px-2.5 py-1.5 rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer ${
+          isActive
+            ? 'text-[var(--pms-rose)] font-semibold'
+            : 'text-slate-600 dark:text-slate-300 hover:bg-slate-200/60 dark:hover:bg-slate-800/70'
+        }`}
+        title={title || label}
+      >
+        {isActive && (
+          <motion.span
+            layoutId="editor-active-tool-pill"
+            transition={{ type: 'spring', stiffness: 460, damping: 32 }}
+            className="absolute inset-0 rounded-xl bg-[var(--pms-soft-rose)] border border-rose-200/80 dark:border-rose-800/60 shadow-2xs"
+          />
+        )}
+        <span className="relative z-10 flex items-center gap-1.5">
+          {icon}
+          <span className="hidden sm:inline text-xs font-semibold">{label}</span>
+        </span>
+      </motion.button>
+    );
+  };
 
   // Helper: commit inline edit as annotation
   const commitInlineEdit = useCallback(() => {
@@ -2360,7 +2384,13 @@ export default function AdvancedEditor() {
   };
 
   return (
-    <div className="flex-1 flex flex-col bg-gray-100">
+    <div
+      className="relative flex-1 flex flex-col min-h-0 transition-colors"
+      style={{ backgroundColor: 'var(--pms-pearl)', color: 'var(--pms-ink)' }}
+    >
+      {file && <PearlAuroraBackground mode="workspace" />}
+
+      <div className="relative z-10 flex-1 flex flex-col min-h-0">
       {!file ? (
         <ToolWorkspaceShell
           title="Advanced PDF Editor"
@@ -2375,35 +2405,63 @@ export default function AdvancedEditor() {
           </div>
         </ToolWorkspaceShell>
       ) : !editedUrl ? (
-        <div className="flex-1 flex flex-col h-full">
-          {/* Toolbar */}
-          <div className="bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between shadow-sm z-10 flex-wrap gap-2">
+        <motion.div
+          key="editor-workspace"
+          initial={prefersReduced ? false : { opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
+          className="flex-1 flex flex-col h-full min-h-0"
+        >
+          {/* Pearl Frosted Editor Toolbar */}
+          <div className="pms-glass-header sticky top-0 z-20 px-4 py-2.5 flex items-center justify-between flex-wrap gap-2 border-b border-[var(--pms-border)] transition-colors">
             <div className="flex items-center gap-1 flex-wrap">
               {toolButton('select', <MousePointer2 className="w-5 h-5" />, 'Select', 'Select & Edit Existing Text (click on text, double-click to edit inline)')}
               {/* Granularity toggle — only visible when Select is active */}
-              {activeTool === 'select' && (
-                <div className="flex items-center gap-0.5 ml-1 bg-indigo-50 rounded-lg p-0.5 border border-indigo-200">
-                  {(['word', 'line', 'paragraph'] as const).map(g => (
-                    <button
-                      key={g}
-                      type="button"
-                      onClick={() => setSelectionGranularity(g)}
-                      title={g === 'word' ? 'Select individual word/phrase' : g === 'line' ? 'Select full line' : 'Select paragraph'}
-                      className={`px-2 py-1 rounded text-xs font-semibold transition-colors ${
-                        selectionGranularity === g
-                          ? 'bg-indigo-600 text-white shadow-sm'
-                          : 'text-indigo-600 hover:bg-indigo-100'
-                      }`}
-                    >
-                      {g === 'word' ? 'W' : g === 'line' ? 'L' : 'P'}
-                    </button>
-                  ))}
-                  <span className="text-[10px] text-indigo-500 px-1 capitalize">{selectionGranularity}</span>
-                </div>
-              )}
+              <AnimatePresence initial={false}>
+                {activeTool === 'select' && (
+                  <motion.div
+                    initial={prefersReduced ? false : { opacity: 0, scale: 0.92 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={prefersReduced ? undefined : { opacity: 0, scale: 0.92 }}
+                    transition={{ duration: 0.16 }}
+                    className="flex items-center gap-0.5 ml-1 rounded-xl p-0.5 border border-[var(--pms-border)] bg-white/75 dark:bg-slate-900/75 backdrop-blur-sm shadow-xs"
+                  >
+                    {(['word', 'line', 'paragraph'] as const).map(g => {
+                      const activeG = selectionGranularity === g;
+                      return (
+                        <button
+                          key={g}
+                          type="button"
+                          onClick={() => setSelectionGranularity(g)}
+                          title={g === 'word' ? 'Select individual word/phrase' : g === 'line' ? 'Select full line' : 'Select paragraph'}
+                          className={`relative px-2 py-1 rounded-lg text-xs font-bold transition-colors ${
+                            activeG
+                              ? 'text-white'
+                              : 'text-[var(--pms-muted)] hover:text-[var(--pms-ink)]'
+                          }`}
+                        >
+                          {activeG && (
+                            <motion.span
+                              layoutId="editor-granularity-pill"
+                              transition={{ type: 'spring', stiffness: 460, damping: 32 }}
+                              className="absolute inset-0 rounded-lg shadow-xs"
+                              style={{ background: 'linear-gradient(135deg, var(--pms-rose), var(--pms-violet))' }}
+                            />
+                          )}
+                          <span className="relative z-10">{g === 'word' ? 'W' : g === 'line' ? 'L' : 'P'}</span>
+                        </button>
+                      );
+                    })}
+                    <span className="text-[10px] font-semibold px-1.5 capitalize text-[var(--pms-muted)] hidden sm:inline">
+                      {selectionGranularity}
+                    </span>
+                  </motion.div>
+                )}
+              </AnimatePresence>
               {/* Persistent Auto-Select ON/OFF Switch */}
-              <button
+              <motion.button
                 type="button"
+                whileTap={prefersReduced ? undefined : { scale: 0.96 }}
                 onClick={() => {
                   setContinuousSelect(prev => {
                     const next = !prev;
@@ -2412,39 +2470,41 @@ export default function AdvancedEditor() {
                   });
                 }}
                 title={continuousSelect ? "⚡ Auto-Select is ON: Hover & click any text to edit continuously without re-clicking Select. Click to turn OFF." : "Auto-Select is OFF: Click to turn ON."}
-                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold transition-all shadow-xs ml-1 ${
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-semibold transition-all ml-1 border ${
                   continuousSelect
-                    ? 'bg-emerald-600 text-white hover:bg-emerald-700'
-                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200 border border-gray-300'
+                    ? 'bg-emerald-500/15 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border-emerald-500/35 shadow-xs hover:bg-emerald-500/20'
+                    : 'bg-white/75 dark:bg-slate-800/75 text-[var(--pms-muted)] border-[var(--pms-border)] hover:text-[var(--pms-ink)]'
                 }`}
               >
-                <span className={`w-2 h-2 rounded-full ${continuousSelect ? 'bg-white animate-pulse' : 'bg-gray-400'}`} />
+                <span className={`w-2 h-2 rounded-full ${continuousSelect ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}`} />
                 <span>Auto-Select: {continuousSelect ? 'ON' : 'OFF'}</span>
-              </button>
-              <div className="w-px h-6 bg-gray-200 mx-1"></div>
+              </motion.button>
+              <div className="w-px h-6 mx-1" style={{ backgroundColor: 'var(--pms-border)' }}></div>
               {toolButton('text', <Type className="w-5 h-5" />, 'Text', 'Add New Text')}
-              <button
+              <motion.button
                 type="button"
+                whileTap={prefersReduced ? undefined : { scale: 0.94 }}
                 onClick={toggleBoldForText}
-                className={`p-2 rounded-lg flex items-center gap-1 transition-colors ${(selectedTextAnn ? !!selectedTextAnn.bold : defaultBold)
-                    ? 'bg-indigo-100 text-indigo-700'
-                    : 'text-gray-600 hover:bg-gray-100'
+                className={`p-2 rounded-xl flex items-center gap-1 transition-all border ${(selectedTextAnn ? !!selectedTextAnn.bold : defaultBold)
+                    ? 'bg-[var(--pms-soft-rose)] text-[var(--pms-rose)] border-rose-500/25 shadow-xs font-semibold'
+                    : 'border-transparent text-[var(--pms-muted)] hover:text-[var(--pms-ink)] hover:bg-black/5 dark:hover:bg-white/5'
                   }`}
                 title="Bold"
               >
                 <Bold className="w-5 h-5" />
-              </button>
-              <button
+              </motion.button>
+              <motion.button
                 type="button"
+                whileTap={prefersReduced ? undefined : { scale: 0.94 }}
                 onClick={toggleItalicForText}
-                className={`p-2 rounded-lg flex items-center gap-1 transition-colors ${(selectedTextAnn ? !!selectedTextAnn.italic : defaultItalic)
-                    ? 'bg-indigo-100 text-indigo-700'
-                    : 'text-gray-600 hover:bg-gray-100'
+                className={`p-2 rounded-xl flex items-center gap-1 transition-all border ${(selectedTextAnn ? !!selectedTextAnn.italic : defaultItalic)
+                    ? 'bg-[var(--pms-soft-rose)] text-[var(--pms-rose)] border-rose-500/25 shadow-xs font-semibold'
+                    : 'border-transparent text-[var(--pms-muted)] hover:text-[var(--pms-ink)] hover:bg-black/5 dark:hover:bg-white/5'
                   }`}
                 title="Italic"
               >
                 <Italic className="w-5 h-5" />
-              </button>
+              </motion.button>
               {/* NEW: Underline tool */}
               {toolButton('underline', <Underline className="w-5 h-5" />, 'Underline', 'Draw underline over text (drag to mark)')}
               {/* NEW: Strikethrough tool */}
@@ -2453,62 +2513,65 @@ export default function AdvancedEditor() {
               {toolButton('highlight', <Highlighter className="w-5 h-5" />, 'Highlight')}
               {/* Draw tool with color picker */}
               <div className="flex items-center gap-0.5">
-                <button
+                <motion.button
                   type="button"
+                  whileTap={prefersReduced ? undefined : { scale: 0.94 }}
                   onClick={() => setActiveTool(activeTool === 'freehand' ? null : 'freehand')}
-                  className={`p-2 rounded-lg flex items-center gap-1 transition-colors ${activeTool === 'freehand' ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 hover:bg-gray-100'}`}
+                  className={`p-2 rounded-xl flex items-center gap-1.5 transition-all border ${activeTool === 'freehand' ? 'bg-[var(--pms-soft-rose)] text-[var(--pms-rose)] border-rose-500/25 shadow-xs font-semibold' : 'border-transparent text-[var(--pms-muted)] hover:text-[var(--pms-ink)] hover:bg-black/5 dark:hover:bg-white/5'}`}
                   title="Freehand Draw"
                 >
                   <Pencil className="w-5 h-5" />
                   <span className="text-xs font-medium hidden md:inline">Draw</span>
-                </button>
+                </motion.button>
                 <div className="relative" title="Draw Color">
                   <input
                     type="color"
                     value={freehandColor}
                     onChange={e => setFreehandColor(e.target.value)}
-                    className="w-6 h-6 rounded cursor-pointer border-0 p-0 bg-transparent"
+                    className="w-6 h-6 rounded-md cursor-pointer border-0 p-0 bg-transparent"
                     style={{ appearance: 'none', WebkitAppearance: 'none' }}
                   />
-                  <div className="absolute inset-0 rounded pointer-events-none border border-gray-300" style={{ background: freehandColor, opacity: 0.9 }} />
+                  <div className="absolute inset-0 rounded-md pointer-events-none border border-[var(--pms-border)] shadow-xs" style={{ background: freehandColor, opacity: 0.92 }} />
                 </div>
               </div>
               {/* Sign tool with color picker */}
               <div className="flex items-center gap-0.5">
-                <button
+                <motion.button
                   type="button"
+                  whileTap={prefersReduced ? undefined : { scale: 0.94 }}
                   onClick={() => { setActiveTool('signature'); setStartPos({ x: 200, y: 300 }); setShowSignatureModal(true); }}
-                  className={`p-2 rounded-lg flex items-center gap-1 cursor-pointer transition-colors ${activeTool === 'signature' ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 hover:bg-gray-100'}`}
+                  className={`p-2 rounded-xl flex items-center gap-1.5 cursor-pointer transition-all border ${activeTool === 'signature' ? 'bg-[var(--pms-soft-rose)] text-[var(--pms-rose)] border-rose-500/25 shadow-xs font-semibold' : 'border-transparent text-[var(--pms-muted)] hover:text-[var(--pms-ink)] hover:bg-black/5 dark:hover:bg-white/5'}`}
                   title="Sign"
                 >
                   <PenTool className="w-5 h-5" />
                   <span className="text-xs font-medium hidden md:inline">Sign</span>
-                </button>
+                </motion.button>
                 <div className="relative" title="Signature Color">
                   <input
                     type="color"
                     value={signatureColor}
                     onChange={e => setSignatureColor(e.target.value)}
-                    className="w-6 h-6 rounded cursor-pointer border-0 p-0 bg-transparent"
+                    className="w-6 h-6 rounded-md cursor-pointer border-0 p-0 bg-transparent"
                     style={{ appearance: 'none', WebkitAppearance: 'none' }}
                   />
-                  <div className="absolute inset-0 rounded pointer-events-none border border-gray-300" style={{ background: signatureColor, opacity: 0.9 }} />
+                  <div className="absolute inset-0 rounded-md pointer-events-none border border-[var(--pms-border)] shadow-xs" style={{ background: signatureColor, opacity: 0.92 }} />
                 </div>
               </div>
               {/* Eraser tool */}
-              <button
+              <motion.button
                 type="button"
+                whileTap={prefersReduced ? undefined : { scale: 0.94 }}
                 onClick={() => setActiveTool(activeTool === 'eraser' ? null : 'eraser')}
-                className={`p-2 rounded-lg flex items-center gap-1 transition-colors ${activeTool === 'eraser' ? 'bg-red-100 text-red-700' : 'text-gray-600 hover:bg-gray-100'}`}
+                className={`p-2 rounded-xl flex items-center gap-1.5 transition-all border ${activeTool === 'eraser' ? 'bg-red-500/12 dark:bg-red-500/20 text-red-600 dark:text-red-400 border-red-500/25 shadow-xs font-semibold' : 'border-transparent text-[var(--pms-muted)] hover:text-[var(--pms-ink)] hover:bg-black/5 dark:hover:bg-white/5'}`}
                 title="Eraser — erase annotations"
               >
                 <Eraser className="w-5 h-5" />
                 <span className="text-xs font-medium hidden md:inline">Eraser</span>
-              </button>
+              </motion.button>
               {toolButton('link', <LinkIcon className="w-5 h-5" />, 'Link')}
               {/* Insert Image */}
               <label
-                className={`p-2 rounded-lg flex items-center gap-1 cursor-pointer transition-colors text-gray-600 hover:bg-gray-100`}
+                className="p-2 rounded-xl flex items-center gap-1.5 cursor-pointer transition-all text-[var(--pms-muted)] hover:text-[var(--pms-ink)] hover:bg-black/5 dark:hover:bg-white/5"
                 title="Insert Image"
               >
                 <ImagePlus className="w-5 h-5" />
@@ -2543,131 +2606,186 @@ export default function AdvancedEditor() {
                   reader.readAsDataURL(f);
                 }} />
               </label>
-              <div className="w-px h-6 bg-gray-200 mx-1"></div>
+              <div className="w-px h-6 mx-1" style={{ backgroundColor: 'var(--pms-border)' }}></div>
               {/* Undo / Redo */}
-              <button onClick={doUndo} disabled={undoStack.length === 0} className="p-2 rounded-lg text-gray-600 hover:bg-gray-100 disabled:opacity-30" title="Undo (Ctrl+Z)">
+              <div className="flex items-center gap-0.5 shrink-0">
+              <motion.button
+                type="button"
+                whileTap={prefersReduced ? undefined : { scale: 0.92 }}
+                onClick={doUndo}
+                disabled={undoStack.length === 0}
+                className="p-2 rounded-xl text-[var(--pms-muted)] hover:text-[var(--pms-ink)] hover:bg-black/5 dark:hover:bg-white/5 disabled:opacity-30 transition-colors"
+                title="Undo (Ctrl+Z)"
+              >
                 <Undo2 className="w-5 h-5" />
-              </button>
-              <button onClick={doRedo} disabled={redoStack.length === 0} className="p-2 rounded-lg text-gray-600 hover:bg-gray-100 disabled:opacity-30" title="Redo (Ctrl+Shift+Z)">
+              </motion.button>
+              <motion.button
+                type="button"
+                whileTap={prefersReduced ? undefined : { scale: 0.92 }}
+                onClick={doRedo}
+                disabled={redoStack.length === 0}
+                className="p-2 rounded-xl text-[var(--pms-muted)] hover:text-[var(--pms-ink)] hover:bg-black/5 dark:hover:bg-white/5 disabled:opacity-30 transition-colors"
+                title="Redo (Ctrl+Shift+Z)"
+              >
                 <Redo className="w-5 h-5" />
-              </button>
+              </motion.button>
+              </div>
             </div>
 
-            <div className="flex items-center gap-3 flex-wrap">
+            <div className="flex items-center gap-2.5 flex-wrap">
               {/* Zoom */}
-              <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
-                <button onClick={() => handleZoomChange(zoomLevel - 0.25)} className="p-1 rounded hover:bg-white" title="Zoom out">
+              <div className="flex items-center gap-1 rounded-xl p-1 border border-[var(--pms-border)] bg-white/75 dark:bg-slate-900/75 backdrop-blur-sm">
+                <button
+                  type="button"
+                  onClick={() => handleZoomChange(zoomLevel - 0.25)}
+                  className="p-1 rounded-lg hover:bg-white dark:hover:bg-slate-800 text-[var(--pms-ink)] transition-colors"
+                  title="Zoom out"
+                >
                   <ZoomOut className="w-4 h-4" />
                 </button>
-                <span className="text-xs font-medium px-2 min-w-[3rem] text-center">{Math.round(zoomLevel * 100)}%</span>
-                <button onClick={() => handleZoomChange(zoomLevel + 0.25)} className="p-1 rounded hover:bg-white" title="Zoom in">
+                <span className="text-xs font-semibold px-2 min-w-[3rem] text-center tabular-nums text-[var(--pms-ink)]">{Math.round(zoomLevel * 100)}%</span>
+                <button
+                  type="button"
+                  onClick={() => handleZoomChange(zoomLevel + 0.25)}
+                  className="p-1 rounded-lg hover:bg-white dark:hover:bg-slate-800 text-[var(--pms-ink)] transition-colors"
+                  title="Zoom in"
+                >
                   <ZoomIn className="w-4 h-4" />
                 </button>
               </div>
               {/* Page nav with multi-page edit indicators */}
-              <div className="flex items-center gap-2 bg-gray-100 rounded-lg p-1">
+              <div className="flex items-center gap-1.5 rounded-xl p-1 border border-[var(--pms-border)] bg-white/75 dark:bg-slate-900/75 backdrop-blur-sm">
                 <button
+                  type="button"
                   onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
                   disabled={currentPage === 1}
-                  className="p-1 rounded hover:bg-white disabled:opacity-50"
+                  className="p-1 rounded-lg hover:bg-white dark:hover:bg-slate-800 disabled:opacity-40 text-[var(--pms-ink)] transition-colors"
                 >
                   <ChevronLeft className="w-5 h-5" />
                 </button>
-                <div className="flex items-center gap-1">
-                  <span className="text-sm font-medium px-1">{currentPage} / {numPages}</span>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-sm font-semibold px-1 tabular-nums text-[var(--pms-ink)]">{currentPage} / {numPages}</span>
                   {pagesWithEdits.size > 0 && (
                     <span
-                      className="text-[10px] bg-indigo-500 text-white rounded-full px-1.5 py-0.5 font-bold"
+                      className="text-[10px] text-white rounded-full px-1.5 py-0.5 font-bold shadow-xs"
+                      style={{ background: 'linear-gradient(135deg, var(--pms-rose), var(--pms-violet))' }}
                       title={`Edited pages: ${[...pagesWithEdits].sort((a, b) => a - b).join(', ')}`}
                     >
                       {pagesWithEdits.size} edited
                     </span>
                   )}
                   {layoutFetching && (
-                    <span title="Loading font data..."><Loader2 className="w-3 h-3 animate-spin text-indigo-400" /></span>
+                    <span title="Loading font data..."><Loader2 className="w-3 h-3 animate-spin text-[var(--pms-rose)]" /></span>
                   )}
                 </div>
                 <button
+                  type="button"
                   onClick={() => setCurrentPage(Math.min(numPages, currentPage + 1))}
                   disabled={currentPage === numPages}
-                  className="p-1 rounded hover:bg-white disabled:opacity-50"
+                  className="p-1 rounded-lg hover:bg-white dark:hover:bg-slate-800 disabled:opacity-40 text-[var(--pms-ink)] transition-colors"
                 >
                   <ChevronRight className="w-5 h-5" />
                 </button>
               </div>
               {/* OCR button + language selector for scanned PDFs (always accessible before & after scanning) */}
               {(isScannedPdf || ocrDone) && (
-                <div className="flex items-center gap-1">
+                <div className="flex items-center gap-1.5">
                   <select
                     value={ocrLanguage}
                     onChange={e => setOcrLanguage(e.target.value as 'eng' | 'hin' | 'eng+hin')}
                     disabled={ocrBusy}
-                    className="px-2 py-2 bg-amber-50 border border-amber-300 text-amber-900 rounded-lg text-xs font-semibold disabled:opacity-50"
+                    className="px-2.5 py-2 bg-amber-50/90 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-700/60 text-amber-900 dark:text-amber-200 rounded-xl text-xs font-semibold disabled:opacity-50"
                     title="OCR Language"
                   >
                     <option value="eng+hin">Hindi + English</option>
                     <option value="hin">Hindi OCR</option>
                     <option value="eng">English OCR</option>
                   </select>
-                  <button
+                  <motion.button
+                    type="button"
+                    whileTap={prefersReduced ? undefined : { scale: 0.96 }}
                     onClick={runOcrOnPage}
                     disabled={ocrBusy}
-                    className={`px-3 py-2 rounded-lg text-sm font-bold disabled:opacity-50 flex items-center gap-2 ${
+                    className={`px-3 py-2 rounded-xl text-sm font-bold disabled:opacity-50 flex items-center gap-2 transition-colors ${
                       ocrDone
-                        ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200 border border-emerald-300'
-                        : 'bg-amber-100 text-amber-800 hover:bg-amber-200 border border-amber-300'
+                        ? 'bg-emerald-500/15 dark:bg-emerald-500/20 text-emerald-800 dark:text-emerald-200 hover:bg-emerald-500/25 border border-emerald-400/40'
+                        : 'bg-amber-500/15 dark:bg-amber-500/20 text-amber-800 dark:text-amber-200 hover:bg-amber-500/25 border border-amber-400/40'
                     }`}
                     title={ocrDone ? 'Re-run OCR scan on this page' : 'Scanned PDF detected. Run OCR to detect editable words & lines.'}
                   >
                     {ocrBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <ScanText className="w-4 h-4" />}
                     {ocrBusy ? (ocrStatusLabel || 'OCR running…') : ocrDone ? 'Re-Scan Text' : 'Scan Text'}
-                  </button>
+                  </motion.button>
                 </div>
               )}
-              <button
+              <motion.button
+                type="button"
+                whileHover={prefersReduced || isProcessing ? undefined : { y: -1, scale: 1.01 }}
+                whileTap={prefersReduced || isProcessing ? undefined : { scale: 0.97 }}
                 onClick={applyChangesAndSave}
                 disabled={isProcessing}
-                className="px-6 py-2 bg-indigo-600 text-white font-bold rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50 flex items-center gap-2"
+                className="pms-btn-primary relative overflow-hidden px-5 py-2 rounded-xl text-sm font-bold disabled:opacity-50 flex items-center gap-2"
               >
+                {!isProcessing && <span className="pms-shimmer pointer-events-none" />}
                 {isProcessing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-                {isProcessing ? saveStatusLabel : 'Apply Changes'}
-              </button>
+                <span className="relative z-10">{isProcessing ? saveStatusLabel : 'Apply Changes'}</span>
+              </motion.button>
             </div>
           </div>
 
           {/* Scanned PDF notice / OCR status */}
-          {(isScannedPdf || ocrNotice) && (
-            <div className={`border-b px-4 py-2 text-sm flex items-center justify-between gap-2 ${
-              ocrNotice
-                ? 'bg-red-50 border-red-200 text-red-800'
-                : ocrDone
-                ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
-                : 'bg-amber-50 border-amber-200 text-amber-800'
-            }`}>
-              <div className="flex items-center gap-2">
-                <ScanText className="w-4 h-4 shrink-0" />
-                {ocrNotice ? (
-                  <span>{ocrNotice}</span>
-                ) : ocrDone ? (
-                  <span>
-                    OCR active on Page {currentPage}: <strong>{detectedText.length} clickable word boxes</strong> ready. Hover &amp; click any word, or switch <strong>W / L / P</strong> mode in toolbar.
-                  </span>
-                ) : (
-                  <span>
-                    Scanned/image-based PDF detected on Page {currentPage}.
-                    <strong> Choose language</strong> (Hindi + English default) and click <strong>"Scan Text"</strong> to make words clickable for editing.
-                  </span>
-                )}
-              </div>
-            </div>
-          )}
+          <AnimatePresence>
+            {(isScannedPdf || ocrNotice) && (
+              <motion.div
+                initial={prefersReduced ? false : { opacity: 0, y: -6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={prefersReduced ? undefined : { opacity: 0, y: -6 }}
+                transition={{ duration: 0.2 }}
+                className={`border-b backdrop-blur-md px-4 py-2 text-sm flex items-center justify-between gap-2 ${
+                  ocrNotice
+                    ? 'bg-red-50/90 dark:bg-red-950/60 border-red-200 dark:border-red-800/50 text-red-800 dark:text-red-200'
+                    : ocrDone
+                    ? 'bg-emerald-50/90 dark:bg-emerald-950/60 border-emerald-200 dark:border-emerald-800/50 text-emerald-800 dark:text-emerald-200'
+                    : 'bg-amber-50/90 dark:bg-amber-950/60 border-amber-200 dark:border-amber-800/50 text-amber-800 dark:text-amber-200'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <ScanText className="w-4 h-4 shrink-0" />
+                  {ocrNotice ? (
+                    <span>{ocrNotice}</span>
+                  ) : ocrDone ? (
+                    <span>
+                      OCR active on Page {currentPage}: <strong>{detectedText.length} clickable word boxes</strong> ready. Hover &amp; click any word, or switch <strong>W / L / P</strong> mode in toolbar.
+                    </span>
+                  ) : (
+                    <span>
+                      Scanned/image-based PDF detected on Page {currentPage}.
+                      <strong> Choose language</strong> (Hindi + English default) and click <strong>"Scan Text"</strong> to make words clickable for editing.
+                    </span>
+                  )}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
           {/* Editor Layout: Canvas + Sidebar */}
-          <div className="flex-1 flex overflow-hidden">
-            <div className="flex-1 overflow-auto p-8 flex justify-center bg-gray-200" onClick={() => setSelectedId(null)}>
+          <div className="relative flex-1 flex overflow-hidden">
+            <PearlScanOverlay active={isProcessing} label={saveStatusLabel || 'Saving edited PDF...'} />
+            <div
+              className="relative flex-1 overflow-auto p-6 sm:p-8 flex justify-center items-start bg-slate-900/[0.025] dark:bg-slate-950/35"
+              onClick={() => setSelectedId(null)}
+            >
+              {!pageViewport && (
+                <div className="pointer-events-none absolute inset-0 flex items-center justify-center z-20">
+                  <div className="flex items-center gap-2.5 px-5 py-3 rounded-2xl pms-glass-panel text-sm font-semibold text-[var(--pms-ink)] shadow-lg">
+                    <Loader2 className="w-4 h-4 animate-spin text-[var(--pms-rose)]" />
+                    <span>Rendering PDF page…</span>
+                  </div>
+                </div>
+              )}
               <div
-                className="relative shadow-xl bg-white"
-                style={{ width: pageViewport?.width, height: pageViewport?.height }}
+                className="relative bg-white ring-1 ring-black/5 dark:ring-white/10 shrink-0"
+                style={{ width: pageViewport?.width, height: pageViewport?.height, boxShadow: 'var(--pms-shadow-float)' }}
                 onClick={(e) => e.stopPropagation()}
               >
                 <canvas ref={canvasRef} className="absolute top-0 left-0" />
@@ -3181,13 +3299,28 @@ export default function AdvancedEditor() {
               </div>
             </div>
 
-            {/* Properties Sidebar */}
-            <div className="w-80 bg-white border-l border-gray-200 p-6 overflow-y-auto">
+            {/* Pearl Frosted Properties Sidebar */}
+            <aside
+              className="w-80 backdrop-blur-xl border-l border-[var(--pms-border)] p-5 sm:p-6 overflow-y-auto z-10 transition-colors"
+              style={{ backgroundColor: 'var(--pms-glass-bg)' }}
+            >
+              <AnimatePresence mode="wait" initial={false}>
               {selectedId ? (
-                <div className="space-y-8">
+                <motion.div
+                  key={`props-${selectedId}`}
+                  initial={prefersReduced ? false : { opacity: 0, x: 10 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={prefersReduced ? undefined : { opacity: 0, x: -10 }}
+                  transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
+                  className="space-y-6"
+                >
                   <div className="flex items-center justify-between">
-                    <h3 className="text-lg font-bold text-gray-900">Properties</h3>
-                    <button onClick={() => setSelectedId(null)} className="text-gray-400 hover:text-gray-600">
+                    <h3 className="text-lg font-bold text-[var(--pms-ink)]">Properties</h3>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedId(null)}
+                      className="p-1.5 rounded-lg text-[var(--pms-muted)] hover:text-[var(--pms-ink)] hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
+                    >
                       <X className="w-5 h-5" />
                     </button>
                   </div>
@@ -3197,42 +3330,42 @@ export default function AdvancedEditor() {
                     return (
                     <div className="space-y-4">
                       {/* Smart typography match card */}
-                      <div className="p-3.5 bg-gradient-to-br from-indigo-50/80 via-purple-50/50 to-blue-50/80 border border-indigo-100 rounded-xl space-y-2.5">
+                      <div className="p-3.5 bg-gradient-to-br from-rose-500/[0.08] via-violet-500/[0.08] to-sky-500/[0.08] dark:from-rose-500/15 dark:via-violet-500/15 dark:to-sky-500/15 border border-[var(--pms-border)] rounded-2xl space-y-2.5">
                         <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-1.5 text-xs font-bold text-indigo-800">
-                            <Sparkles className="w-4 h-4 text-indigo-600" />
+                          <div className="flex items-center gap-1.5 text-xs font-bold text-[var(--pms-rose)]">
+                            <Sparkles className="w-4 h-4 text-[var(--pms-rose)]" />
                             <span>Matched Typography</span>
                           </div>
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/25">
                             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
                             Exact Match
                           </span>
                         </div>
-                        <div className="grid grid-cols-2 gap-2 text-[11px] text-slate-600 bg-white/70 p-2 rounded-lg border border-indigo-50">
+                        <div className="grid grid-cols-2 gap-2 text-[11px] bg-white/75 dark:bg-slate-900/75 p-2.5 rounded-xl border border-[var(--pms-border)]">
                           <div>
-                            <span className="text-slate-400 block text-[10px] font-medium">Font Family</span>
-                            <span className="font-bold text-slate-800 truncate block" title={selAnn.originalFontName || 'System Default'}>
+                            <span className="text-[var(--pms-muted)] block text-[10px] font-medium">Font Family</span>
+                            <span className="font-bold text-[var(--pms-ink)] truncate block" title={selAnn.originalFontName || 'System Default'}>
                               {selAnn.originalFontName || 'Auto-Detected'}
                             </span>
                           </div>
                           <div>
-                            <span className="text-slate-400 block text-[10px] font-medium">Size & Style</span>
-                            <span className="font-bold text-slate-800">
+                            <span className="text-[var(--pms-muted)] block text-[10px] font-medium">Size & Style</span>
+                            <span className="font-bold text-[var(--pms-ink)]">
                               {selAnn.fontSize || 12} pt · {selAnn.bold ? 'Bold' : 'Regular'}{selAnn.italic ? ', Italic' : ''}
                             </span>
                           </div>
                         </div>
-                        <p className="text-[10px] text-indigo-600 leading-tight">
-                          ✨ 100% matched to original PDF metadata. Replaces in-place with exact typography.
+                        <p className="text-[10px] text-[var(--pms-muted)] leading-tight">
+                          100% matched to original PDF metadata. Replaces in-place with exact typography.
                         </p>
                       </div>
 
                       <div>
-                        <label className="block text-xs font-bold text-gray-700 mb-1.5">Text Content</label>
+                        <label className="block text-xs font-bold text-[var(--pms-ink)] mb-1.5">Text Content</label>
                         <textarea
                           value={selAnn.text || ''}
                           onChange={(e) => updateAnnotationText(selectedId, e.target.value)}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
+                          className="w-full px-3 py-2 border border-[var(--pms-border)] bg-white/80 dark:bg-slate-900/80 text-[var(--pms-ink)] rounded-xl text-sm focus:ring-2 focus:ring-rose-500/20 focus:border-[var(--pms-rose)] outline-none transition-all"
                           rows={3}
                           placeholder="Type replacement text..."
                         />
@@ -3240,34 +3373,44 @@ export default function AdvancedEditor() {
 
                       {/* Text alignment buttons */}
                       <div>
-                        <label className="block text-xs font-bold text-gray-700 mb-1.5">Text Alignment</label>
-                        <div className="grid grid-cols-3 gap-1 bg-gray-100 p-1 rounded-lg">
+                        <label className="block text-xs font-bold text-[var(--pms-ink)] mb-1.5">Text Alignment</label>
+                        <div className="grid grid-cols-3 gap-1 bg-white/70 dark:bg-slate-900/70 border border-[var(--pms-border)] p-1 rounded-xl">
                           {[
                             { id: 'left' as const, icon: AlignLeft, label: 'Left' },
                             { id: 'center' as const, icon: AlignCenter, label: 'Center' },
                             { id: 'right' as const, icon: AlignRight, label: 'Right' },
-                          ].map(({ id, icon: Icon, label }) => (
-                            <button
-                              key={id}
-                              type="button"
-                              onClick={() => updateAnnotation(selectedId, { align: id })}
-                              className={`flex items-center justify-center gap-1.5 py-1.5 rounded-md text-xs font-medium transition-all ${
-                                (selAnn.align || 'left') === id
-                                  ? 'bg-white text-indigo-600 shadow-sm font-bold'
-                                  : 'text-gray-600 hover:text-gray-900'
-                              }`}
-                            >
-                              <Icon className="w-3.5 h-3.5" />
-                              <span>{label}</span>
-                            </button>
-                          ))}
+                          ].map(({ id, icon: Icon, label }) => {
+                            const activeAlign = (selAnn.align || 'left') === id;
+                            return (
+                              <button
+                                key={id}
+                                type="button"
+                                onClick={() => updateAnnotation(selectedId, { align: id })}
+                                className={`relative flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                                  activeAlign
+                                    ? 'text-[var(--pms-rose)] font-bold'
+                                    : 'text-[var(--pms-muted)] hover:text-[var(--pms-ink)]'
+                                }`}
+                              >
+                                {activeAlign && (
+                                  <motion.span
+                                    layoutId="editor-align-pill"
+                                    transition={{ type: 'spring', stiffness: 450, damping: 32 }}
+                                    className="absolute inset-0 rounded-lg bg-[var(--pms-soft-rose)] border border-rose-500/20 shadow-xs"
+                                  />
+                                )}
+                                <Icon className="relative z-10 w-3.5 h-3.5" />
+                                <span className="relative z-10">{label}</span>
+                              </button>
+                            );
+                          })}
                         </div>
                       </div>
 
                       {/* Font Size & Color */}
                       <div className="grid grid-cols-2 gap-3">
                         <div>
-                          <label className="block text-xs font-bold text-gray-700 mb-1.5">Font Size (pt)</label>
+                          <label className="block text-xs font-bold text-[var(--pms-ink)] mb-1.5">Font Size (pt)</label>
                           <input
                             type="number"
                             min="4"
@@ -3284,73 +3427,73 @@ export default function AdvancedEditor() {
                                 height: Math.max(selAnn.height || 0, minBoxH),
                               });
                             }}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                            className="w-full px-3 py-2 border border-[var(--pms-border)] bg-white/80 dark:bg-slate-900/80 text-[var(--pms-ink)] rounded-xl text-sm focus:ring-2 focus:ring-rose-500/20 focus:border-[var(--pms-rose)] outline-none"
                           />
                         </div>
                         <div>
-                          <label className="block text-xs font-bold text-gray-700 mb-1.5">Text Color</label>
+                          <label className="block text-xs font-bold text-[var(--pms-ink)] mb-1.5">Text Color</label>
                           <div className="flex items-center gap-2">
                             <input
                               type="color"
                               value={selAnn.color || '#000000'}
                               onChange={(e) => updateAnnotation(selectedId, { color: e.target.value })}
-                              className="w-10 h-9 p-0.5 border border-gray-300 rounded-lg cursor-pointer"
+                              className="w-10 h-9 p-0.5 border border-[var(--pms-border)] bg-white/80 dark:bg-slate-900/80 rounded-xl cursor-pointer"
                             />
-                            <span className="text-xs font-mono text-gray-600">{selAnn.color || '#000000'}</span>
+                            <span className="text-xs font-mono text-[var(--pms-muted)]">{selAnn.color || '#000000'}</span>
                           </div>
                         </div>
                       </div>
 
                       {/* Background fill color for redaction blending */}
                       <div>
-                        <label className="block text-xs font-bold text-gray-700 mb-1.5">Background Blend Color</label>
+                        <label className="block text-xs font-bold text-[var(--pms-ink)] mb-1.5">Background Blend Color</label>
                         <div className="flex items-center gap-2">
                           <input
                             type="color"
                             value={(selAnn.backgroundColor === '#fbfcfc' || !selAnn.backgroundColor) ? '#ffffff' : selAnn.backgroundColor}
                             onChange={(e) => updateAnnotation(selectedId, { backgroundColor: e.target.value })}
-                            className="w-10 h-9 p-0.5 border border-gray-300 rounded-lg cursor-pointer"
+                            className="w-10 h-9 p-0.5 border border-[var(--pms-border)] bg-white/80 dark:bg-slate-900/80 rounded-xl cursor-pointer"
                           />
-                          <span className="text-xs font-mono text-gray-600">{(selAnn.backgroundColor === '#fbfcfc' || !selAnn.backgroundColor) ? '#ffffff' : selAnn.backgroundColor}</span>
-                          <span className="text-[10px] text-gray-400">(Auto-matched from canvas)</span>
+                          <span className="text-xs font-mono text-[var(--pms-muted)]">{(selAnn.backgroundColor === '#fbfcfc' || !selAnn.backgroundColor) ? '#ffffff' : selAnn.backgroundColor}</span>
+                          <span className="text-[10px] text-[var(--pms-muted)]">(Auto-matched)</span>
                         </div>
                       </div>
 
                       {/* Formatting toggles */}
                       <div className="flex gap-4 flex-wrap pt-1">
-                        <label className="inline-flex items-center gap-2 text-xs font-semibold text-gray-700 cursor-pointer">
+                        <label className="inline-flex items-center gap-2 text-xs font-semibold text-[var(--pms-ink)] cursor-pointer">
                           <input
                             type="checkbox"
                             checked={!!selAnn.bold}
                             onChange={(e) => updateAnnotation(selectedId, { bold: e.target.checked })}
-                            className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                            className="rounded border-[var(--pms-border)] accent-[var(--pms-rose)]"
                           />
                           Bold
                         </label>
-                        <label className="inline-flex items-center gap-2 text-xs font-semibold text-gray-700 cursor-pointer">
+                        <label className="inline-flex items-center gap-2 text-xs font-semibold text-[var(--pms-ink)] cursor-pointer">
                           <input
                             type="checkbox"
                             checked={!!selAnn.italic}
                             onChange={(e) => updateAnnotation(selectedId, { italic: e.target.checked })}
-                            className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                            className="rounded border-[var(--pms-border)] accent-[var(--pms-rose)]"
                           />
                           Italic
                         </label>
-                        <label className="inline-flex items-center gap-2 text-xs font-semibold text-gray-700 cursor-pointer">
+                        <label className="inline-flex items-center gap-2 text-xs font-semibold text-[var(--pms-ink)] cursor-pointer">
                           <input
                             type="checkbox"
                             checked={!!selAnn.underline}
                             onChange={(e) => updateAnnotation(selectedId, { underline: e.target.checked })}
-                            className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                            className="rounded border-[var(--pms-border)] accent-[var(--pms-rose)]"
                           />
                           Underline
                         </label>
-                        <label className="inline-flex items-center gap-2 text-xs font-semibold text-gray-700 cursor-pointer">
+                        <label className="inline-flex items-center gap-2 text-xs font-semibold text-[var(--pms-ink)] cursor-pointer">
                           <input
                             type="checkbox"
                             checked={!!selAnn.strikethrough}
                             onChange={(e) => updateAnnotation(selectedId, { strikethrough: e.target.checked })}
-                            className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                            className="rounded border-[var(--pms-border)] accent-[var(--pms-rose)]"
                           />
                           Strike
                         </label>
@@ -3363,7 +3506,7 @@ export default function AdvancedEditor() {
                     <div className="space-y-4">
                       <div className="grid grid-cols-2 gap-4">
                         <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">Rows</label>
+                          <label className="block text-sm font-medium text-[var(--pms-ink)] mb-2">Rows</label>
                           <input
                             type="number"
                             min="1"
@@ -3380,11 +3523,11 @@ export default function AdvancedEditor() {
                               );
                               updateAnnotation(selectedId, { rows: newRows, tableData: newData });
                             }}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                            className="w-full px-3 py-2 border border-[var(--pms-border)] bg-white/80 dark:bg-slate-900/80 text-[var(--pms-ink)] rounded-xl text-sm outline-none"
                           />
                         </div>
                         <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">Cols</label>
+                          <label className="block text-sm font-medium text-[var(--pms-ink)] mb-2">Cols</label>
                           <input
                             type="number"
                             min="1"
@@ -3401,161 +3544,207 @@ export default function AdvancedEditor() {
                               );
                               updateAnnotation(selectedId, { cols: newCols, tableData: newData });
                             }}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                            className="w-full px-3 py-2 border border-[var(--pms-border)] bg-white/80 dark:bg-slate-900/80 text-[var(--pms-ink)] rounded-xl text-sm outline-none"
                           />
                         </div>
                       </div>
-                      <p className="text-xs text-gray-500 italic">Editing table content directly in the grid.</p>
+                      <p className="text-xs text-[var(--pms-muted)] italic">Editing table content directly in the grid.</p>
                     </div>
                   )}
 
                   {annotations.find(a => a.id === selectedId)?.type === 'freehand' && (
                     <div className="space-y-4">
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Stroke Color</label>
+                        <label className="block text-sm font-medium text-[var(--pms-ink)] mb-2">Stroke Color</label>
                         <input
                           type="color"
                           value={annotations.find(a => a.id === selectedId)?.color || '#000000'}
                           onChange={(e) => updateAnnotation(selectedId, { color: e.target.value })}
-                          className="w-full h-10 p-1 border border-gray-300 rounded-lg cursor-pointer"
+                          className="w-full h-10 p-1 border border-[var(--pms-border)] bg-white/80 dark:bg-slate-900/80 rounded-xl cursor-pointer"
                         />
                       </div>
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Stroke Width: {annotations.find(a => a.id === selectedId)?.strokeWidth || 2}px</label>
+                        <label className="block text-sm font-medium text-[var(--pms-ink)] mb-2">Stroke Width: {annotations.find(a => a.id === selectedId)?.strokeWidth || 2}px</label>
                         <input
                           type="range"
                           min={1}
                           max={10}
                           value={annotations.find(a => a.id === selectedId)?.strokeWidth || 2}
                           onChange={(e) => updateAnnotation(selectedId, { strokeWidth: parseInt(e.target.value) })}
-                          className="w-full"
+                          className="w-full accent-[var(--pms-rose)]"
                         />
                       </div>
                     </div>
                   )}
 
                   <div>
-                    <button
+                    <motion.button
+                      type="button"
+                      whileTap={prefersReduced ? undefined : { scale: 0.98 }}
                       onClick={() => { pushUndo(); deleteAnnotation(selectedId); }}
-                      className="w-full py-2 text-red-600 border border-red-200 rounded-lg hover:bg-red-50 text-sm font-medium transition-colors"
+                      className="w-full py-2.5 text-red-600 dark:text-red-400 border border-red-500/30 rounded-xl hover:bg-red-500/10 text-sm font-semibold transition-colors"
                     >
                       Delete Element
-                    </button>
+                    </motion.button>
                   </div>
-                </div>
+                </motion.div>
               ) : (
-                <div className="space-y-6">
+                <motion.div
+                  key="guide"
+                  initial={prefersReduced ? false : { opacity: 0, x: -10 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={prefersReduced ? undefined : { opacity: 0, x: 10 }}
+                  transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
+                  className="space-y-5"
+                >
                   {/* Smart Editor Guide Card */}
-                  <div className="p-4 bg-gradient-to-br from-indigo-50/70 via-blue-50/50 to-slate-50 border border-indigo-100 rounded-2xl space-y-3">
-                    <div className="flex items-center gap-2">
-                      <div className="p-1.5 bg-indigo-600 text-white rounded-lg shadow-sm">
+                  <div className="p-4 bg-gradient-to-br from-rose-500/[0.06] via-violet-500/[0.06] to-sky-500/[0.06] dark:from-rose-500/15 dark:via-violet-500/15 dark:to-sky-500/10 border border-[var(--pms-border)] rounded-2xl space-y-3 shadow-xs">
+                    <div className="flex items-center gap-2.5">
+                      <div
+                        className="p-2 text-white rounded-xl shadow-sm shrink-0"
+                        style={{ background: 'linear-gradient(135deg, var(--pms-rose), var(--pms-violet))' }}
+                      >
                         <Sparkles className="w-4 h-4" />
                       </div>
                       <div>
-                        <h4 className="text-xs font-bold text-slate-900">Direct PDF Text Editor</h4>
-                        <p className="text-[10px] text-indigo-600 font-medium">Automatic Font & Style Matching</p>
+                        <h4 className="text-xs font-bold text-[var(--pms-ink)]">Direct PDF Text Editor</h4>
+                        <p className="text-[10px] font-semibold text-[var(--pms-rose)]">Automatic Font & Style Matching</p>
                       </div>
                     </div>
 
-                    <div className="space-y-2 text-xs text-slate-600">
-                      <div className="flex items-start gap-2 bg-white/80 p-2.5 rounded-xl border border-slate-100">
-                        <span className="w-4 h-4 rounded-full bg-indigo-100 text-indigo-700 font-bold text-[10px] flex items-center justify-center shrink-0 mt-0.5">1</span>
+                    <div className="space-y-2 text-xs text-[var(--pms-muted)]">
+                      <div className="flex items-start gap-2.5 bg-white/80 dark:bg-slate-900/75 p-2.5 rounded-xl border border-[var(--pms-border)]">
+                        <span className="w-5 h-5 rounded-full bg-[var(--pms-soft-rose)] text-[var(--pms-rose)] font-bold text-[10px] flex items-center justify-center shrink-0 mt-0.5">1</span>
                         <p className="text-[11px] leading-snug">Hover over any text block in the PDF to view its detected font family and size.</p>
                       </div>
-                      <div className="flex items-start gap-2 bg-white/80 p-2.5 rounded-xl border border-slate-100">
-                        <span className="w-4 h-4 rounded-full bg-indigo-100 text-indigo-700 font-bold text-[10px] flex items-center justify-center shrink-0 mt-0.5">2</span>
+                      <div className="flex items-start gap-2.5 bg-white/80 dark:bg-slate-900/75 p-2.5 rounded-xl border border-[var(--pms-border)]">
+                        <span className="w-5 h-5 rounded-full bg-[var(--pms-soft-lavender)] text-[var(--pms-violet)] font-bold text-[10px] flex items-center justify-center shrink-0 mt-0.5">2</span>
                         <p className="text-[11px] leading-snug">Click or double-click any word or line to edit in-place without guessing font or formatting.</p>
                       </div>
-                      <div className="flex items-start gap-2 bg-white/80 p-2.5 rounded-xl border border-slate-100">
-                        <span className="w-4 h-4 rounded-full bg-indigo-100 text-indigo-700 font-bold text-[10px] flex items-center justify-center shrink-0 mt-0.5">3</span>
+                      <div className="flex items-start gap-2.5 bg-white/80 dark:bg-slate-900/75 p-2.5 rounded-xl border border-[var(--pms-border)]">
+                        <span className="w-5 h-5 rounded-full bg-[var(--pms-soft-blue)] text-[var(--pms-blue)] font-bold text-[10px] flex items-center justify-center shrink-0 mt-0.5">3</span>
                         <p className="text-[11px] leading-snug">The exact font style and background blend are matched from native PDF geometry.</p>
                       </div>
                     </div>
 
-                    <div className="pt-1 flex items-center justify-between text-[11px] text-slate-500 border-t border-indigo-100/60">
+                    <div className="pt-2 flex items-center justify-between text-[11px] text-[var(--pms-muted)] border-t border-[var(--pms-border)]">
                       <span>Detected on Page {currentPage}:</span>
-                      <span className="font-bold text-indigo-700">{detectedText.length} Text Blocks</span>
+                      <span className="font-bold text-[var(--pms-rose)] tabular-nums">{detectedText.length} Text Blocks</span>
                     </div>
                   </div>
                   {/* Freehand settings when freehand tool active */}
                   {activeTool === 'freehand' && (
-                    <div className="space-y-4 border-t border-gray-200 pt-4">
-                      <h3 className="text-sm font-bold text-gray-800">Draw Settings</h3>
+                    <div className="space-y-4 border-t border-[var(--pms-border)] pt-4">
+                      <h3 className="text-sm font-bold text-[var(--pms-ink)]">Draw Settings</h3>
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Stroke Color</label>
-                        <input type="color" value={freehandColor} onChange={e => setFreehandColor(e.target.value)} className="w-full h-10 p-1 border border-gray-300 rounded-lg cursor-pointer" />
+                        <label className="block text-sm font-medium text-[var(--pms-ink)] mb-2">Stroke Color</label>
+                        <input type="color" value={freehandColor} onChange={e => setFreehandColor(e.target.value)} className="w-full h-10 p-1 border border-[var(--pms-border)] bg-white/80 dark:bg-slate-900/80 rounded-xl cursor-pointer" />
                         {/* Color presets */}
                         <div className="flex gap-1.5 mt-2 flex-wrap">
                           {['#000000', '#ef4444', '#3b82f6', '#22c55e', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4'].map(c => (
                             <button key={c} type="button" onClick={() => setFreehandColor(c)}
-                              className={`w-6 h-6 rounded-full border-2 transition-transform hover:scale-110 ${freehandColor === c ? 'border-indigo-500 scale-110' : 'border-gray-300'}`}
+                              className={`w-6 h-6 rounded-full border-2 transition-transform hover:scale-110 ${freehandColor === c ? 'border-[var(--pms-rose)] scale-110 ring-2 ring-rose-300/60' : 'border-[var(--pms-border)]'}`}
                               style={{ background: c }} title={c} />
                           ))}
                         </div>
                       </div>
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Stroke Width: {freehandWidth}px</label>
-                        <input type="range" min={1} max={20} value={freehandWidth} onChange={e => setFreehandWidth(Number(e.target.value))} className="w-full" />
+                        <label className="block text-sm font-medium text-[var(--pms-ink)] mb-2">Stroke Width: {freehandWidth}px</label>
+                        <input type="range" min={1} max={20} value={freehandWidth} onChange={e => setFreehandWidth(Number(e.target.value))} className="w-full accent-[var(--pms-rose)]" />
                       </div>
                     </div>
                   )}
                   {/* Eraser settings when eraser tool active */}
                   {activeTool === 'eraser' && (
-                    <div className="space-y-4 border-t border-gray-200 pt-4">
-                      <h3 className="text-sm font-bold text-gray-800">🧹 Eraser Settings</h3>
+                    <div className="space-y-4 border-t border-[var(--pms-border)] pt-4">
+                      <h3 className="text-sm font-bold text-[var(--pms-ink)]">Eraser Settings</h3>
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Eraser Size: {eraserSize}px</label>
-                        <input type="range" min={8} max={120} step={4} value={eraserSize} onChange={e => setEraserSize(Number(e.target.value))} className="w-full" />
-                        <div className="flex justify-between text-xs text-gray-400 mt-1">
+                        <label className="block text-sm font-medium text-[var(--pms-ink)] mb-2">Eraser Size: {eraserSize}px</label>
+                        <input type="range" min={8} max={120} step={4} value={eraserSize} onChange={e => setEraserSize(Number(e.target.value))} className="w-full accent-[var(--pms-rose)]" />
+                        <div className="flex justify-between text-xs text-[var(--pms-muted)] mt-1">
                           <span>Small (8px)</span>
                           <span>Large (120px)</span>
                         </div>
                       </div>
-                      <p className="text-xs text-gray-500">Click or drag over annotations to erase them.</p>
+                      <p className="text-xs text-[var(--pms-muted)]">Click or drag over annotations to erase them.</p>
                     </div>
                   )}
-                </div>
+                </motion.div>
               )}
-            </div>
+              </AnimatePresence>
+            </aside>
           </div>
-        </div>
+        </motion.div>
       ) : (
-        <div className="flex-1 flex items-center justify-center p-8">
-          <div className="w-full max-w-2xl bg-white rounded-2xl shadow-sm border border-gray-200 p-8 text-center">
-            <div className="p-8 bg-green-50 rounded-xl border border-green-200 mb-6">
-              <h3 className="text-2xl font-bold text-green-800 mb-4">PDF edited successfully!</h3>
+        <div className="flex-1 flex items-center justify-center p-6 sm:p-8">
+          <motion.div
+            initial={prefersReduced ? false : { opacity: 0, scale: 0.96, y: 12 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+            className="w-full max-w-2xl pms-glass-panel rounded-3xl p-7 sm:p-10 text-center shadow-xl"
+          >
+            <div className="p-7 sm:p-8 rounded-2xl border border-emerald-500/25 bg-emerald-500/[0.08] dark:bg-emerald-500/10 mb-6">
+              <motion.div
+                initial={prefersReduced ? false : { scale: 0.8, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                transition={{ type: 'spring', stiffness: 360, damping: 22 }}
+                className="w-14 h-14 mx-auto mb-4 rounded-2xl flex items-center justify-center text-white shadow-md"
+                style={{ background: 'linear-gradient(135deg, #10b981, #059669)' }}
+              >
+                <Download className="w-7 h-7" />
+              </motion.div>
+              <h3 className="text-2xl font-bold text-[var(--pms-ink)] mb-3">PDF edited successfully!</h3>
               {savedEngineNote && (
-                <p className="text-xs text-emerald-700 bg-emerald-100/70 border border-emerald-200 rounded-lg px-3 py-2 mb-4 max-w-md mx-auto">
+                <p className="text-xs text-emerald-800 dark:text-emerald-200 bg-emerald-500/15 border border-emerald-500/25 rounded-xl px-3.5 py-2 mb-5 max-w-md mx-auto font-medium">
                   {savedEngineNote}
                 </p>
               )}
-              <a
+              <motion.a
+                whileHover={prefersReduced ? undefined : { y: -1, scale: 1.02 }}
+                whileTap={prefersReduced ? undefined : { scale: 0.98 }}
                 href={editedUrl}
                 download={`edited_${file.name}`}
-                className="inline-flex items-center justify-center gap-2 px-8 py-4 bg-green-600 text-white text-lg font-bold rounded-xl hover:bg-green-700 transition-colors shadow-md"
+                className="pms-btn-primary relative overflow-hidden inline-flex items-center justify-center gap-2.5 px-8 py-4 text-lg font-bold rounded-2xl shadow-lg"
               >
-                <Download className="w-6 h-6" />
-                Download Edited PDF
-              </a>
+                <span className="pms-shimmer pointer-events-none" />
+                <Download className="w-5 h-5 relative z-10" />
+                <span className="relative z-10">Download Edited PDF</span>
+              </motion.a>
             </div>
             <button
+              type="button"
               onClick={() => { setFile(null); setEditedUrl(null); setSavedEngineNote(null); setAnnotations([]); setUndoStack([]); setRedoStack([]); }}
-              className="text-gray-600 hover:text-gray-900 font-medium"
+              className="px-4 py-2 rounded-xl text-[var(--pms-muted)] hover:text-[var(--pms-ink)] hover:bg-black/5 dark:hover:bg-white/5 font-semibold transition-colors"
             >
               Edit another PDF
             </button>
-          </div>
+          </motion.div>
         </div>
       )}
+      </div>
 
       {/* Signature Modal */}
+      <AnimatePresence>
       {showSignatureModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl p-6 w-full max-w-md shadow-2xl">
-            <h3 className="text-xl font-bold text-gray-900 mb-4">Draw your signature</h3>
+        <motion.div
+          key="signature-modal"
+          initial={prefersReduced ? false : { opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={prefersReduced ? undefined : { opacity: 0 }}
+          transition={{ duration: 0.16 }}
+          className="fixed inset-0 bg-slate-950/45 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+        >
+          <motion.div
+            initial={prefersReduced ? false : { opacity: 0, scale: 0.95, y: 10 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={prefersReduced ? undefined : { opacity: 0, scale: 0.95, y: 10 }}
+            transition={{ type: 'spring', stiffness: 360, damping: 28 }}
+            className="pms-glass-panel rounded-2xl p-6 w-full max-w-md shadow-2xl"
+          >
+            <h3 className="text-xl font-bold text-[var(--pms-ink)] mb-4">Draw your signature</h3>
             {/* Signature color picker */}
             <div className="mb-3">
-              <label className="text-sm font-medium text-gray-700 block mb-2">Ink Color:</label>
+              <label className="text-sm font-medium text-[var(--pms-ink)] block mb-2">Ink Color:</label>
               <div className="flex items-center gap-2 flex-wrap">
                 <input
                   type="color"
@@ -3564,32 +3753,33 @@ export default function AdvancedEditor() {
                     setSignatureColor(e.target.value);
                     sigCanvasRef.current?.clear();
                   }}
-                  className="w-8 h-8 p-0.5 border border-gray-300 rounded cursor-pointer flex-shrink-0"
+                  className="w-8 h-8 p-0.5 border border-[var(--pms-border)] bg-white/80 dark:bg-slate-900/80 rounded-lg cursor-pointer flex-shrink-0"
                 />
                 {['#000000', '#1d4ed8', '#dc2626', '#16a34a', '#7c3aed', '#db2777', '#0891b2', '#d97706', '#1e3a8a', '#7f1d1d'].map(c => (
                   <button key={c} type="button"
                     onClick={() => { setSignatureColor(c); sigCanvasRef.current?.clear(); }}
-                    className={`w-7 h-7 rounded-full border-2 transition-transform hover:scale-110 flex-shrink-0 ${signatureColor === c ? 'border-indigo-500 scale-110 ring-2 ring-indigo-300' : 'border-gray-300'}`}
+                    className={`w-7 h-7 rounded-full border-2 transition-transform hover:scale-110 flex-shrink-0 ${signatureColor === c ? 'border-[var(--pms-rose)] scale-110 ring-2 ring-rose-300/70' : 'border-[var(--pms-border)]'}`}
                     style={{ background: c }} title={c} />
                 ))}
               </div>
             </div>
             {/* Signature pen width */}
             <div className="mb-3">
-              <label className="text-sm font-medium text-gray-700 block mb-1">
-                Stroke Width: <span className="font-bold text-indigo-600">{signaturePenWidth}px</span>
+              <label className="text-sm font-medium text-[var(--pms-ink)] block mb-1">
+                Stroke Width: <span className="font-bold text-[var(--pms-rose)]">{signaturePenWidth}px</span>
               </label>
               <input
                 type="range" min={1} max={8} step={0.5}
                 value={signaturePenWidth}
                 onChange={e => { setSignaturePenWidth(Number(e.target.value)); sigCanvasRef.current?.clear(); }}
-                className="w-full"
+                className="w-full accent-[var(--pms-rose)]"
               />
-              <div className="flex justify-between text-xs text-gray-400">
+              <div className="flex justify-between text-xs text-[var(--pms-muted)]">
                 <span>Thin (1px)</span><span>Thick (8px)</span>
               </div>
             </div>
-            <div className="border-2 border-dashed border-gray-300 rounded-lg mb-4 bg-gray-50">
+            {/* Keep signature drawing canvas pure white for crisp ink export contrast */}
+            <div className="border-2 border-dashed border-[var(--pms-border)] rounded-xl mb-4 bg-white overflow-hidden">
               <SignatureCanvas
                 ref={sigCanvasRef}
                 canvasProps={{ className: 'w-full h-48 rounded-lg' }}
@@ -3601,82 +3791,110 @@ export default function AdvancedEditor() {
             </div>
             <div className="flex justify-between gap-4">
               <button
+                type="button"
                 onClick={() => sigCanvasRef.current?.clear()}
-                className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg font-medium"
+                className="px-4 py-2 text-[var(--pms-muted)] hover:text-[var(--pms-ink)] hover:bg-black/5 dark:hover:bg-white/5 rounded-xl font-medium transition-colors"
               >
                 Clear
               </button>
               <div className="flex gap-2">
                 <button
+                  type="button"
                   onClick={() => { setShowSignatureModal(false); setActiveTool(null); }}
-                  className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg font-medium"
+                  className="px-4 py-2 text-[var(--pms-muted)] hover:text-[var(--pms-ink)] hover:bg-black/5 dark:hover:bg-white/5 rounded-xl font-medium transition-colors"
                 >
                   Cancel
                 </button>
-                <button
+                <motion.button
+                  type="button"
+                  whileTap={prefersReduced ? undefined : { scale: 0.96 }}
                   onClick={saveSignature}
-                  className="px-6 py-2 bg-indigo-600 text-white rounded-lg font-bold hover:bg-indigo-700"
+                  className="pms-btn-primary px-6 py-2 rounded-xl font-bold"
                 >
                   Add
-                </button>
+                </motion.button>
               </div>
             </div>
-          </div>
-        </div>
+          </motion.div>
+        </motion.div>
       )}
+      </AnimatePresence>
 
       {/* Link Modal */}
+      <AnimatePresence>
       {showLinkModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl p-6 w-full max-w-md shadow-2xl">
-            <h3 className="text-xl font-bold text-gray-900 mb-4">Add Link URL</h3>
+        <motion.div
+          key="link-modal"
+          initial={prefersReduced ? false : { opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={prefersReduced ? undefined : { opacity: 0 }}
+          transition={{ duration: 0.16 }}
+          className="fixed inset-0 bg-slate-950/45 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+        >
+          <motion.div
+            initial={prefersReduced ? false : { opacity: 0, scale: 0.95, y: 10 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={prefersReduced ? undefined : { opacity: 0, scale: 0.95, y: 10 }}
+            transition={{ type: 'spring', stiffness: 360, damping: 28 }}
+            className="pms-glass-panel rounded-2xl p-6 w-full max-w-md shadow-2xl"
+          >
+            <h3 className="text-xl font-bold text-[var(--pms-ink)] mb-4">Add Link URL</h3>
             <input
               type="url"
               value={linkUrl}
               onChange={(e) => setLinkUrl(e.target.value)}
               placeholder="https://example.com"
-              className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 outline-none mb-6"
+              className="w-full px-4 py-3 rounded-xl border border-[var(--pms-border)] bg-white/80 dark:bg-slate-900/80 text-[var(--pms-ink)] focus:ring-2 focus:ring-rose-500/20 focus:border-[var(--pms-rose)] outline-none mb-6"
               autoFocus
             />
             <div className="flex justify-end gap-2">
               <button
+                type="button"
                 onClick={() => { setShowLinkModal(false); setPendingLinkRect(null); setActiveTool(null); }}
-                className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg font-medium"
+                className="px-4 py-2 text-[var(--pms-muted)] hover:text-[var(--pms-ink)] hover:bg-black/5 dark:hover:bg-white/5 rounded-xl font-medium transition-colors"
               >
                 Cancel
               </button>
-              <button
+              <motion.button
+                type="button"
+                whileTap={prefersReduced ? undefined : { scale: 0.96 }}
                 onClick={saveLink}
                 disabled={!linkUrl}
-                className="px-6 py-2 bg-indigo-600 text-white rounded-lg font-bold hover:bg-indigo-700 disabled:opacity-50"
+                className="pms-btn-primary px-6 py-2 rounded-xl font-bold disabled:opacity-50"
               >
                 Add Link
-              </button>
+              </motion.button>
             </div>
-          </div>
-        </div>
+          </motion.div>
+        </motion.div>
       )}
+      </AnimatePresence>
 
       {/* ── RIGHT-CLICK CONTEXT MENU ── */}
+      <AnimatePresence>
       {contextMenu.visible && contextMenu.block && (
-        <>
+        <div key="editor-context-menu-root" className="fixed inset-0 z-[200]">
           {/* Backdrop to close menu */}
           <div
-            className="fixed inset-0 z-[200]"
+            className="absolute inset-0"
             onClick={() => setContextMenu({ visible: false, x: 0, y: 0, block: null })}
             onContextMenu={e => { e.preventDefault(); setContextMenu({ visible: false, x: 0, y: 0, block: null }); }}
           />
-          <div
-            className="fixed z-[201] bg-white rounded-xl shadow-2xl border border-gray-200 py-1 min-w-[200px] overflow-hidden"
+          <motion.div
+            initial={prefersReduced ? false : { opacity: 0, scale: 0.95, y: -4 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={prefersReduced ? undefined : { opacity: 0, scale: 0.95, y: -4 }}
+            transition={{ duration: 0.14 }}
+            className="fixed z-[201] bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl rounded-2xl shadow-2xl border border-[var(--pms-border)] py-1.5 min-w-[210px] overflow-hidden"
             style={{ left: contextMenu.x, top: contextMenu.y }}
           >
             {/* Header */}
-            <div className="px-3 py-2 border-b border-gray-100 text-xs font-semibold text-gray-500 truncate max-w-[220px]">
+            <div className="px-3.5 py-2 border-b border-[var(--pms-border)] text-xs font-semibold text-[var(--pms-muted)] truncate max-w-[230px]">
               "{contextMenu.block.text.slice(0, 40)}{contextMenu.block.text.length > 40 ? '…' : ''}"
             </div>
             {/* Actions */}
             <button
-              className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-indigo-50 hover:text-indigo-700 flex items-center gap-2 transition-colors"
+              className="w-full text-left px-3.5 py-2 text-sm text-[var(--pms-ink)] hover:bg-[var(--pms-soft-rose)] hover:text-[var(--pms-rose)] flex items-center gap-2.5 transition-colors"
               onClick={() => {
                 setContextMenu({ visible: false, x: 0, y: 0, block: null });
                 setInlineEdit({ active: true, block: contextMenu.block!, text: contextMenu.block!.text });
@@ -3686,7 +3904,7 @@ export default function AdvancedEditor() {
               <SquarePen className="w-4 h-4" /> Edit Text Inline
             </button>
             <button
-              className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-yellow-50 hover:text-yellow-700 flex items-center gap-2 transition-colors"
+              className="w-full text-left px-3.5 py-2 text-sm text-[var(--pms-ink)] hover:bg-amber-500/12 hover:text-amber-600 dark:hover:text-amber-300 flex items-center gap-2.5 transition-colors"
               onClick={() => {
                 const block = contextMenu.block!;
                 pushUndo();
@@ -3705,7 +3923,7 @@ export default function AdvancedEditor() {
               <Highlighter className="w-4 h-4" /> Highlight
             </button>
             <button
-              className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2 transition-colors"
+              className="w-full text-left px-3.5 py-2 text-sm text-[var(--pms-ink)] hover:bg-black/5 dark:hover:bg-white/5 flex items-center gap-2.5 transition-colors"
               onClick={() => {
                 const block = contextMenu.block!;
                 pushUndo();
@@ -3725,7 +3943,7 @@ export default function AdvancedEditor() {
               <Underline className="w-4 h-4" /> Underline
             </button>
             <button
-              className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2 transition-colors"
+              className="w-full text-left px-3.5 py-2 text-sm text-[var(--pms-ink)] hover:bg-black/5 dark:hover:bg-white/5 flex items-center gap-2.5 transition-colors"
               onClick={() => {
                 const block = contextMenu.block!;
                 pushUndo();
@@ -3745,7 +3963,7 @@ export default function AdvancedEditor() {
               <Strikethrough className="w-4 h-4" /> Strikethrough
             </button>
             <button
-              className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-red-50 hover:text-red-600 flex items-center gap-2 transition-colors"
+              className="w-full text-left px-3.5 py-2 text-sm text-[var(--pms-ink)] hover:bg-red-500/12 hover:text-red-600 dark:hover:text-red-400 flex items-center gap-2.5 transition-colors"
               onClick={() => {
                 const block = contextMenu.block!;
                 pushUndo();
@@ -3765,7 +3983,7 @@ export default function AdvancedEditor() {
               <Eraser className="w-4 h-4" /> Redact / Whiteout
             </button>
             <button
-              className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-600 flex items-center gap-2 transition-colors"
+              className="w-full text-left px-3.5 py-2 text-sm text-[var(--pms-ink)] hover:bg-sky-500/12 hover:text-sky-600 dark:hover:text-sky-300 flex items-center gap-2.5 transition-colors"
               onClick={() => {
                 navigator.clipboard?.writeText(contextMenu.block!.text).catch(() => {});
                 setContextMenu({ visible: false, x: 0, y: 0, block: null });
@@ -3773,9 +3991,10 @@ export default function AdvancedEditor() {
             >
               <TypeIcon className="w-4 h-4" /> Copy Text
             </button>
-          </div>
-        </>
+          </motion.div>
+        </div>
       )}
+      </AnimatePresence>
     </div>
   );
 }

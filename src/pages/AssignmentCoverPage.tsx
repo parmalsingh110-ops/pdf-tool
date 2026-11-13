@@ -1,31 +1,28 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
-  Upload,
   Download,
   GraduationCap,
-  Sparkles,
-  BookOpen,
-  FileCheck,
   CheckCircle2,
-  Sliders,
-  Palette,
-  FileText,
   Smartphone,
   Eye,
   Plus,
 } from 'lucide-react';
-import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
-import * as pdfjsLib from 'pdfjs-dist';
-import '../lib/pdfWorker';
+import { motion, AnimatePresence, useReducedMotion } from 'motion/react';
+import { PDFDocument } from 'pdf-lib';
 import { useSEO } from '../hooks/useSEO';
 import { usePageSEO } from '../lib/usePageSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
 import ShareQrModal from '../components/ShareQrModal';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { AnimatedNumber, PearlScanOverlay } from '../components/pearl/PearlMotion';
+import { toArrayBufferBytes } from '../lib/blobUrl';
 import { dataUrlToBytes, downloadBlob } from '../lib/utils';
 
 type TemplateStyle = 'modern_accent' | 'classic_academic' | 'tech_engineering' | 'medical_science' | 'formal_border';
 
 export default function AssignmentCoverPage() {
+  const prefersReduced = useReducedMotion();
+
   useSEO(
     'College Assignment Cover Page Maker Online — Free Front Page Generator',
     'Create formal college and school assignment cover pages online. Choose from classic university border, engineering lab, and modern templates. Merge directly with your assignment PDF.'
@@ -68,7 +65,6 @@ export default function AssignmentCoverPage() {
 
   // Attached Assignment PDF (Optional)
   const [attachedPdf, setAttachedPdf] = useState<File | null>(null);
-  const [autoPageNumber, setAutoPageNumber] = useState(true);
 
   // Preview & Processing
   const [previewDataUrl, setPreviewDataUrl] = useState<string | null>(null);
@@ -427,7 +423,7 @@ export default function AssignmentCoverPage() {
       }
 
       const pdfBytes = await finalPdfDoc.save();
-      const blob = new Blob([pdfBytes as any], { type: 'application/pdf' });
+      const blob = new Blob([toArrayBufferBytes(pdfBytes)], { type: 'application/pdf' });
       downloadBlob(blob, `assignment-cover-page-${Date.now()}.pdf`);
     } catch (err) {
       console.error('Error generating cover page PDF:', err);
@@ -437,29 +433,27 @@ export default function AssignmentCoverPage() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 py-10 px-4 sm:px-6">
-      <div className="max-w-6xl mx-auto space-y-8">
-        {/* Header */}
-        <div className="text-center space-y-3">
-          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 text-xs font-bold uppercase tracking-wider">
-            <GraduationCap className="w-4 h-4" /> College & School Special
-          </div>
-          <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight">
-            Assignment Cover Page Generator & Dossier
-          </h1>
-          <p className="text-sm sm:text-base text-slate-500 dark:text-slate-400 max-w-2xl mx-auto">
-            Create formal university assignment front pages with clean typography and academic borders.
-            Optionally attach your assignment PDF to automatically merge as Page 1!
-          </p>
-        </div>
-
+    <ToolWorkspaceShell
+      title="Assignment Cover Page Generator & Dossier"
+      subtitle="Create formal university assignment front pages with clean typography and academic borders. Optionally attach your assignment PDF to automatically merge as Page 1!"
+      categoryLabel="College & School Special"
+      icon={GraduationCap}
+      microVariant="edit"
+      tone="indigo"
+      trustNote="300 DPI A4 cover sheet · Optional auto-merge with your PDF"
+    >
+      <div className="space-y-8">
         {/* Editor Layout */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
           {/* Left Form Column */}
-          <div className="lg:col-span-6 space-y-5 bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm">
+          <motion.div
+            initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="lg:col-span-6 space-y-5 pms-glass-panel p-6 rounded-3xl"
+          >
             {/* Template Selector */}
             <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">
+              <label className="block text-xs font-bold uppercase tracking-wider text-[var(--pms-muted)] mb-2">
                 Choose Academic Style
               </label>
               <div className="grid grid-cols-3 gap-2 text-xs">
@@ -471,10 +465,10 @@ export default function AssignmentCoverPage() {
                   <button
                     key={t.id}
                     onClick={() => setTemplate(t.id as TemplateStyle)}
-                    className={`py-2 px-3 rounded-xl border text-xs font-bold transition text-center ${
+                    className={`py-2 px-3 rounded-xl border text-xs font-bold transition text-center cursor-pointer ${
                       template === t.id
                         ? 'border-indigo-500 bg-indigo-600 text-white shadow-sm'
-                        : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800'
+                        : 'border-[var(--pms-border)] bg-[var(--pms-white)] text-[var(--pms-ink)] hover:border-[var(--pms-border-strong)]'
                     }`}
                   >
                     {t.label}
@@ -485,10 +479,10 @@ export default function AssignmentCoverPage() {
 
             {/* Accent Color Palette */}
             <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1.5">
+              <label className="block text-xs font-bold uppercase tracking-wider text-[var(--pms-muted)] mb-1.5">
                 Accent Ink Color
               </label>
-              <div className="flex gap-2">
+              <div className="flex gap-2.5">
                 {[
                   { name: 'Royal Blue', hex: '#1e40af' },
                   { name: 'Navy', hex: '#0f172a' },
@@ -501,7 +495,7 @@ export default function AssignmentCoverPage() {
                     onClick={() => setAccentColor(c.hex)}
                     style={{ backgroundColor: c.hex }}
                     title={c.name}
-                    className={`w-8 h-8 rounded-full border-2 transition-transform ${
+                    className={`w-8 h-8 rounded-full border-2 transition-transform cursor-pointer ${
                       accentColor === c.hex ? 'scale-110 border-white ring-2 ring-indigo-500' : 'border-transparent'
                     }`}
                   />
@@ -510,82 +504,94 @@ export default function AssignmentCoverPage() {
             </div>
 
             {/* Institute & Title */}
-            <div className="space-y-3 pt-2 border-t border-slate-100 dark:border-slate-800">
-              <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                1. University & Assignment Details
+            <div className="space-y-3 pt-3 border-t border-[var(--pms-border)]">
+              <span className="text-xs font-bold uppercase tracking-wider text-[var(--pms-muted)]">
+                1. University &amp; Assignment Details
               </span>
 
               <div>
-                <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                <label className="block text-[11px] font-semibold text-[var(--pms-muted)] mb-1">
                   University / College / School Name
                 </label>
                 <input
                   type="text"
                   value={universityName}
                   onChange={(e) => setUniversityName(e.target.value)}
-                  className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-medium"
+                  className="w-full px-3 py-2 text-xs rounded-xl border border-[var(--pms-border)] bg-[var(--pms-white)] text-[var(--pms-ink)] font-medium focus:outline-none focus:border-indigo-500"
                 />
               </div>
 
               <div>
-                <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                <label className="block text-[11px] font-semibold text-[var(--pms-muted)] mb-1">
                   Department / Faculty
                 </label>
                 <input
                   type="text"
                   value={departmentName}
                   onChange={(e) => setDepartmentName(e.target.value)}
-                  className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                  className="w-full px-3 py-2 text-xs rounded-xl border border-[var(--pms-border)] bg-[var(--pms-white)] text-[var(--pms-ink)] focus:outline-none focus:border-indigo-500"
                 />
               </div>
 
               <div>
-                <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                <label className="block text-[11px] font-semibold text-[var(--pms-muted)] mb-1">
                   Assignment / Project Title
                 </label>
                 <input
                   type="text"
                   value={projectTitle}
                   onChange={(e) => setProjectTitle(e.target.value)}
-                  className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold"
+                  className="w-full px-3 py-2 text-xs rounded-xl border border-[var(--pms-border)] bg-[var(--pms-white)] text-[var(--pms-ink)] font-bold focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-[var(--pms-muted)] mb-1">
+                  Subtitle / Record Type
+                </label>
+                <input
+                  type="text"
+                  value={projectSubtitle}
+                  onChange={(e) => setProjectSubtitle(e.target.value)}
+                  className="w-full px-3 py-2 text-xs rounded-xl border border-[var(--pms-border)] bg-[var(--pms-white)] text-[var(--pms-ink)] focus:outline-none focus:border-indigo-500"
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
-                    Subject Name & Code
+                  <label className="block text-[11px] font-semibold text-[var(--pms-muted)] mb-1">
+                    Subject Name &amp; Code
                   </label>
                   <input
                     type="text"
                     value={subjectName}
                     onChange={(e) => setSubjectName(e.target.value)}
-                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                    className="w-full px-3 py-2 text-xs rounded-xl border border-[var(--pms-border)] bg-[var(--pms-white)] text-[var(--pms-ink)] focus:outline-none focus:border-indigo-500"
                   />
                 </div>
                 <div>
-                  <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                  <label className="block text-[11px] font-semibold text-[var(--pms-muted)] mb-1">
                     Academic Session
                   </label>
                   <input
                     type="text"
                     value={sessionYear}
                     onChange={(e) => setSessionYear(e.target.value)}
-                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                    className="w-full px-3 py-2 text-xs rounded-xl border border-[var(--pms-border)] bg-[var(--pms-white)] text-[var(--pms-ink)] focus:outline-none focus:border-indigo-500"
                   />
                 </div>
               </div>
             </div>
 
             {/* Student & Faculty Columns */}
-            <div className="space-y-3 pt-2 border-t border-slate-100 dark:border-slate-800">
-              <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                2. Student & Teacher Credentials
+            <div className="space-y-3 pt-3 border-t border-[var(--pms-border)]">
+              <span className="text-xs font-bold uppercase tracking-wider text-[var(--pms-muted)]">
+                2. Student &amp; Teacher Credentials
               </span>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl space-y-2">
-                  <span className="text-[11px] font-bold text-indigo-600 dark:text-indigo-400 uppercase">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="p-3 bg-[var(--pms-white)] border border-[var(--pms-border)] rounded-2xl space-y-2">
+                  <span className="text-[11px] font-bold text-[var(--pms-violet)] uppercase">
                     Student Details
                   </span>
                   <input
@@ -593,33 +599,33 @@ export default function AssignmentCoverPage() {
                     placeholder="Student Name"
                     value={studentName}
                     onChange={(e) => setStudentName(e.target.value)}
-                    className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 font-medium"
+                    className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-[var(--pms-border)] bg-transparent text-[var(--pms-ink)] font-medium"
                   />
                   <input
                     type="text"
                     placeholder="Roll Number"
                     value={rollNumber}
                     onChange={(e) => setRollNumber(e.target.value)}
-                    className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900"
+                    className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-[var(--pms-border)] bg-transparent text-[var(--pms-ink)]"
                   />
                   <input
                     type="text"
                     placeholder="Semester / Year"
                     value={semesterYear}
                     onChange={(e) => setSemesterYear(e.target.value)}
-                    className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900"
+                    className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-[var(--pms-border)] bg-transparent text-[var(--pms-ink)]"
                   />
                   <input
                     type="text"
                     placeholder="Branch / Section"
                     value={branchSection}
                     onChange={(e) => setBranchSection(e.target.value)}
-                    className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900"
+                    className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-[var(--pms-border)] bg-transparent text-[var(--pms-ink)]"
                   />
                 </div>
 
-                <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl space-y-2">
-                  <span className="text-[11px] font-bold text-indigo-600 dark:text-indigo-400 uppercase">
+                <div className="p-3 bg-[var(--pms-white)] border border-[var(--pms-border)] rounded-2xl space-y-2">
+                  <span className="text-[11px] font-bold text-[var(--pms-violet)] uppercase">
                     Faculty Details
                   </span>
                   <input
@@ -627,91 +633,111 @@ export default function AssignmentCoverPage() {
                     placeholder="Professor / Teacher Name"
                     value={facultyName}
                     onChange={(e) => setFacultyName(e.target.value)}
-                    className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 font-medium"
+                    className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-[var(--pms-border)] bg-transparent text-[var(--pms-ink)] font-medium"
                   />
                   <input
                     type="text"
                     placeholder="Designation"
                     value={facultyDesignation}
                     onChange={(e) => setFacultyDesignation(e.target.value)}
-                    className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900"
+                    className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-[var(--pms-border)] bg-transparent text-[var(--pms-ink)]"
                   />
                   <input
                     type="text"
                     placeholder="Submission Date"
                     value={submissionDate}
                     onChange={(e) => setSubmissionDate(e.target.value)}
-                    className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900"
+                    className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-[var(--pms-border)] bg-transparent text-[var(--pms-ink)]"
                   />
                 </div>
               </div>
             </div>
 
             {/* Optional: Attach Full Assignment PDF */}
-            <div className="p-4 bg-indigo-50/60 dark:bg-indigo-950/30 rounded-2xl border border-indigo-200 dark:border-indigo-800 space-y-2">
-              <span className="text-xs font-bold text-indigo-900 dark:text-indigo-300 flex items-center gap-1.5">
-                <Plus className="w-4 h-4 text-indigo-600" /> Optional: Attach Assignment PDF to Auto-Merge
+            <div
+              className="p-4 rounded-2xl border border-[var(--pms-border)] space-y-2"
+              style={{ background: 'var(--pms-soft-lavender)' }}
+            >
+              <span className="text-xs font-bold text-[var(--pms-ink)] flex items-center gap-1.5">
+                <Plus className="w-4 h-4 text-[var(--pms-violet)]" /> Optional: Attach Assignment PDF to Auto-Merge
               </span>
-              <p className="text-[11px] text-indigo-700 dark:text-indigo-400">
+              <p className="text-[11px] text-[var(--pms-muted)]">
                 Attach your handwritten or typed PDF. This cover page will become Page 1 of your complete submission!
               </p>
               <input
                 type="file"
                 accept=".pdf"
                 onChange={(e) => setAttachedPdf(e.target.files?.[0] || null)}
-                className="text-xs text-slate-500 file:mr-2 file:py-1 file:px-2.5 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-indigo-600 file:text-white hover:file:bg-indigo-700 cursor-pointer"
+                className="text-xs text-[var(--pms-muted)] file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-indigo-600 file:text-white hover:file:bg-indigo-700 cursor-pointer"
               />
-              {attachedPdf && (
-                <div className="text-[11px] text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-1">
-                  <CheckCircle2 className="w-3.5 h-3.5" /> Attached: {attachedPdf.name}
-                </div>
-              )}
+              <AnimatePresence>
+                {attachedPdf && (
+                  <motion.div
+                    initial={prefersReduced ? false : { opacity: 0, y: 4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={prefersReduced ? undefined : { opacity: 0 }}
+                    className="text-[11px] text-emerald-700 dark:text-emerald-400 font-semibold flex items-center gap-1"
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5" /> Attached: {attachedPdf.name}
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
 
             {/* Download Buttons */}
-            <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-2">
+            <div className="pt-3 border-t border-[var(--pms-border)] space-y-2">
               <button
                 onClick={handleDownloadPdf}
                 disabled={isProcessing}
-                className="w-full flex items-center justify-center gap-2 py-3.5 px-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-sm shadow-md transition disabled:opacity-50"
+                className="pms-btn-primary w-full flex items-center justify-center gap-2 py-3.5 px-4 rounded-xl font-bold text-sm transition disabled:opacity-50 cursor-pointer"
               >
                 <Download className="w-4 h-4" />
                 {attachedPdf ? 'Download Merged Assignment Dossier PDF' : 'Download Cover Page PDF'}
               </button>
               <button
                 onClick={() => setShowQrModal(true)}
-                className="w-full flex items-center justify-center gap-1.5 py-2 px-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-xl font-semibold text-xs transition"
+                className="w-full flex items-center justify-center gap-1.5 py-2.5 px-3 bg-[var(--pms-white)] border border-[var(--pms-border)] hover:border-[var(--pms-border-strong)] text-[var(--pms-ink)] rounded-xl font-semibold text-xs transition cursor-pointer"
               >
                 <Smartphone className="w-3.5 h-3.5" /> Send to Mobile Phone
               </button>
             </div>
-          </div>
+          </motion.div>
 
           {/* Right Live Preview */}
-          <div className="lg:col-span-6 bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col items-center">
-            <div className="w-full flex items-center justify-between mb-4">
-              <span className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-                <Eye className="w-4 h-4 text-indigo-500" /> A4 Cover Page Real-Time Preview
+          <motion.div
+            initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.06 }}
+            className="lg:col-span-6 pms-glass-panel p-6 rounded-3xl flex flex-col items-center relative overflow-hidden"
+          >
+            <PearlScanOverlay active={isProcessing} label="Building A4 assignment dossier PDF..." />
+
+            <div className="w-full flex items-center justify-between mb-4 flex-wrap gap-2">
+              <span className="text-xs font-bold uppercase tracking-wider text-[var(--pms-muted)] flex items-center gap-1.5">
+                <Eye className="w-4 h-4 text-[var(--pms-violet)]" /> A4 Cover Page Real-Time Preview
               </span>
-              <span className="text-xs font-semibold px-2.5 py-1 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-400 rounded-lg">
-                Print Ready A4 (300 DPI)
+              <span
+                className="text-xs font-semibold px-3 py-1 text-[var(--pms-ink)] rounded-full border border-[var(--pms-border)]"
+                style={{ background: 'var(--pms-soft-blue)' }}
+              >
+                Print Ready A4 (<AnimatedNumber value={300} suffix=" DPI" />)
               </span>
             </div>
 
             {previewDataUrl ? (
-              <div className="w-full max-h-[640px] overflow-auto flex items-center justify-center p-4 bg-slate-100 dark:bg-slate-950 rounded-2xl border border-slate-200 dark:border-slate-800">
+              <div className="w-full max-h-[640px] overflow-auto flex items-center justify-center p-4 pms-paper-grid rounded-2xl border border-[var(--pms-border)]">
                 <img
                   src={previewDataUrl}
                   alt="Assignment Cover Page Preview"
-                  className="max-h-[580px] w-auto object-contain rounded shadow-lg border border-slate-300 dark:border-slate-700"
+                  className="max-h-[580px] w-auto object-contain rounded bg-white shadow-lg border border-[var(--pms-border-strong)]"
                 />
               </div>
             ) : (
-              <div className="w-full h-96 flex items-center justify-center text-slate-400 text-xs">
+              <div className="w-full h-96 flex items-center justify-center text-[var(--pms-muted)] text-xs">
                 Rendering live cover preview...
               </div>
             )}
-          </div>
+          </motion.div>
         </div>
 
         {/* SEO Section */}
@@ -770,7 +796,7 @@ export default function AssignmentCoverPage() {
           fileName="assignment-cover.pdf"
         />
       </div>
-    </div>
+    </ToolWorkspaceShell>
   );
 }
 

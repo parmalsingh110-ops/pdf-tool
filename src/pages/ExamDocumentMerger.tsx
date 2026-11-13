@@ -1,10 +1,12 @@
-import { useState, useCallback } from 'react';
-import { Upload, Download, FileText, ArrowUp, ArrowDown, Trash2, CheckCircle2, AlertCircle, Sparkles, Layers, Shield, Tag } from 'lucide-react';
+import { useState } from 'react';
+import { Upload, Download, ArrowUp, ArrowDown, Trash2, CheckCircle2, Layers, Tag } from 'lucide-react';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { PDFDocument } from 'pdf-lib';
+import { motion, AnimatePresence, useReducedMotion } from 'motion/react';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
-import { safeRevokeUrl, useAutoRevokeUrl, useAutoRevokeUrls } from '../lib/blobUrl';
+import { AnimatedNumber, PearlScanOverlay } from '../components/pearl/PearlMotion';
+import { safeRevokeUrl, toArrayBufferBytes, useAutoRevokeUrl, useAutoRevokeUrls } from '../lib/blobUrl';
 
 interface DocItem {
   id: string;
@@ -39,6 +41,7 @@ export default function ExamDocumentMerger() {
   );
 
   const [docs, setDocs] = useState<DocItem[]>([]);
+  const prefersReduced = useReducedMotion();
   const [targetSizeLimitKb, setTargetSizeLimitKb] = useState<number>(1000); // 1000 KB = 1 MB
   const [isProcessing, setIsProcessing] = useState(false);
   const [progressMsg, setProgressMsg] = useState('');
@@ -229,7 +232,7 @@ export default function ExamDocumentMerger() {
       if (bestPdfBytes) {
         const finalKb = Math.round(bestPdfBytes.length / 1024);
         setFinalSizeKb(finalKb);
-        const blob = new Blob([bestPdfBytes as any], { type: 'application/pdf' });
+        const blob = new Blob([toArrayBufferBytes(bestPdfBytes)], { type: 'application/pdf' });
         setMergedPdfUrl(URL.createObjectURL(blob));
       }
     } catch (err: any) {
@@ -254,10 +257,10 @@ export default function ExamDocumentMerger() {
     >
 
       {/* Target Size Presets Header */}
-      <div className="p-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xs mb-6">
+      <div className="p-4 sm:p-5 pms-glass-panel rounded-2xl mb-6">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="text-xs font-bold text-gray-800 dark:text-slate-200 uppercase tracking-wider flex items-center gap-2">
-            <Layers className="w-4 h-4 text-blue-600 dark:text-blue-400" /> Target PDF Size Limit:
+          <div className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider flex items-center gap-2">
+            <Layers className="w-4 h-4 text-[var(--pms-blue)]" /> Target PDF Size Limit:
           </div>
 
           <div className="flex flex-wrap gap-2">
@@ -266,32 +269,48 @@ export default function ExamDocumentMerger() {
               { label: 'Under 500 KB (Strict State PSC)', kb: 500 },
               { label: 'Under 2 MB (University / Visa)', kb: 2000 },
               { label: 'Under 300 KB', kb: 300 },
-            ].map((preset) => (
-              <button
-                key={preset.label}
-                type="button"
-                onClick={() => setTargetSizeLimitKb(preset.kb)}
-                className={`text-xs px-3 py-1.5 rounded-lg border font-semibold transition-all ${
-                  targetSizeLimitKb === preset.kb
-                    ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
-                    : 'bg-gray-50 dark:bg-slate-800 text-gray-700 dark:text-slate-200 border-gray-200 dark:border-slate-700 hover:bg-gray-100 dark:hover:bg-slate-700'
-                }`}
-              >
-                {preset.label}
-              </button>
-            ))}
+            ].map((preset) => {
+              const active = targetSizeLimitKb === preset.kb;
+              return (
+                <button
+                  key={preset.label}
+                  type="button"
+                  onClick={() => setTargetSizeLimitKb(preset.kb)}
+                  className={`relative text-xs px-3 py-1.5 rounded-xl border font-semibold transition-colors ${
+                    active
+                      ? 'border-[var(--pms-blue)] text-slate-900 dark:text-white shadow-xs'
+                      : 'bg-white/75 dark:bg-slate-900/75 text-slate-700 dark:text-slate-200 border-[var(--pms-border)] hover:border-slate-300 dark:hover:border-slate-600'
+                  }`}
+                >
+                  {active && (
+                    <motion.span
+                      layoutId="exam-limit-pill"
+                      transition={prefersReduced ? { duration: 0 } : { type: 'spring', stiffness: 420, damping: 32 }}
+                      className="absolute inset-0 rounded-xl -z-0"
+                      style={{ backgroundColor: 'var(--pms-soft-blue)' }}
+                    />
+                  )}
+                  <span className="relative z-10">{preset.label}</span>
+                </button>
+              );
+            })}
           </div>
         </div>
       </div>
 
       {/* Dropzone */}
-      <div className="mb-6">
-        <label className="flex flex-col items-center justify-center border-2 border-dashed border-blue-300 dark:border-blue-700 hover:border-blue-500 rounded-2xl p-8 cursor-pointer transition-colors bg-blue-50/20 dark:bg-blue-950/20 hover:bg-blue-50/40 dark:hover:bg-blue-950/30 text-center">
-          <Upload className="w-10 h-10 text-blue-600 dark:text-blue-400 mb-2" />
-          <span className="text-base font-bold text-gray-800 dark:text-slate-100">
+      <div className="pms-glass-panel rounded-3xl p-4 sm:p-5 mb-6">
+        <label className="flex flex-col items-center justify-center border-2 border-dashed border-[var(--pms-border)] hover:border-[var(--pms-blue)] rounded-2xl p-8 cursor-pointer transition-all bg-white/75 dark:bg-slate-900/75 text-center group">
+          <div
+            className="w-14 h-14 rounded-2xl flex items-center justify-center mb-3 group-hover:scale-105 transition-transform shadow-xs"
+            style={{ backgroundColor: 'var(--pms-soft-blue)', color: 'var(--pms-blue)' }}
+          >
+            <Upload className="w-7 h-7" />
+          </div>
+          <span className="text-base font-bold text-slate-900 dark:text-slate-100">
             Select All Certificates & Marksheets (PDF, JPG, PNG)
           </span>
-          <span className="text-xs text-gray-500 dark:text-slate-400 mt-1">
+          <span className="text-xs text-slate-500 dark:text-slate-400 mt-1">
             Upload multiple files at once. You can reorder and tag each certificate below.
           </span>
           <input
@@ -306,28 +325,34 @@ export default function ExamDocumentMerger() {
 
       {/* Document List */}
       {docs.length > 0 && (
-        <div className="space-y-4 mb-8">
-          <div className="flex items-center justify-between text-xs text-gray-600 dark:text-slate-300 px-1">
-            <span className="font-bold text-gray-800 dark:text-slate-100">
-              {docs.length} Documents Selected • Total Raw Size: {(totalInputSizeKb / 1024).toFixed(2)} MB
+        <div className="relative overflow-hidden pms-glass-panel rounded-3xl p-5 sm:p-6 space-y-4 mb-8">
+          <PearlScanOverlay active={isProcessing} label={progressMsg || 'Optimizing exam bundle PDF…'} />
+
+          <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-600 dark:text-slate-300 px-1">
+            <span className="font-bold text-slate-800 dark:text-slate-100">
+              <AnimatedNumber value={docs.length} /> Documents Selected • Total Raw Size:{' '}
+              <AnimatedNumber value={totalInputSizeKb / 1024} decimals={2} suffix=" MB" />
             </span>
-            <span className="text-gray-400 dark:text-slate-500">Reorder with ↑ ↓ arrows to set page sequence</span>
+            <span className="text-slate-500 dark:text-slate-400">Reorder with ↑ ↓ arrows to set page sequence</span>
           </div>
 
           <div className="space-y-2.5">
             {docs.map((doc, idx) => (
               <div
                 key={doc.id}
-                className="p-3.5 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-xl shadow-xs flex flex-col sm:flex-row sm:items-center gap-3 justify-between"
+                className="p-3.5 bg-white/75 dark:bg-slate-900/75 border border-[var(--pms-border)] rounded-2xl shadow-xs flex flex-col sm:flex-row sm:items-center gap-3 justify-between"
               >
                 {/* Index & File Name */}
                 <div className="flex items-center gap-3 flex-1 min-w-0">
-                  <span className="w-7 h-7 rounded-lg bg-blue-100 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 font-bold text-xs flex items-center justify-center shrink-0">
+                  <span
+                    className="w-7 h-7 rounded-lg font-bold text-xs flex items-center justify-center shrink-0"
+                    style={{ backgroundColor: 'var(--pms-soft-blue)', color: 'var(--pms-blue)' }}
+                  >
                     {idx + 1}
                   </span>
                   <div className="flex-1 min-w-0">
-                    <p className="text-xs font-bold text-gray-900 dark:text-slate-100 truncate">{doc.file.name}</p>
-                    <p className="text-[11px] text-gray-500 dark:text-slate-400">
+                    <p className="text-xs font-bold text-slate-900 dark:text-slate-100 truncate">{doc.file.name}</p>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
                       {doc.sizeKb} KB • {doc.type.toUpperCase()}
                     </p>
                   </div>
@@ -336,13 +361,13 @@ export default function ExamDocumentMerger() {
                 {/* Document Type Label Selector */}
                 <div className="flex-1 min-w-0 max-w-xs">
                   <div className="relative">
-                    <Tag className="w-3.5 h-3.5 text-gray-400 dark:text-slate-500 absolute left-2.5 top-2.5" />
+                    <Tag className="w-3.5 h-3.5 text-slate-400 dark:text-slate-500 absolute left-2.5 top-2.5" />
                     <input
                       type="text"
                       value={doc.label}
                       onChange={(e) => updateLabel(doc.id, e.target.value)}
                       placeholder="Certificate label..."
-                      className="w-full pl-8 pr-3 py-1.5 bg-gray-50 dark:bg-slate-800 text-gray-900 dark:text-slate-100 border border-gray-300 dark:border-slate-700 rounded-lg text-xs font-medium focus:ring-2 focus:ring-blue-500 outline-none"
+                      className="w-full pl-8 pr-3 py-1.5 bg-white/90 dark:bg-slate-950/70 text-slate-900 dark:text-slate-100 border border-[var(--pms-border)] rounded-lg text-xs font-medium focus:ring-2 focus:ring-sky-500 outline-none"
                     />
                   </div>
                 </div>
@@ -353,7 +378,7 @@ export default function ExamDocumentMerger() {
                     type="button"
                     onClick={() => moveUp(idx)}
                     disabled={idx === 0}
-                    className="p-1.5 rounded-lg text-gray-500 dark:text-slate-400 hover:text-gray-900 dark:hover:text-slate-100 hover:bg-gray-100 dark:hover:bg-slate-800 disabled:opacity-30"
+                    className="p-1.5 rounded-lg text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-30"
                     title="Move up"
                   >
                     <ArrowUp className="w-4 h-4" />
@@ -362,7 +387,7 @@ export default function ExamDocumentMerger() {
                     type="button"
                     onClick={() => moveDown(idx)}
                     disabled={idx === docs.length - 1}
-                    className="p-1.5 rounded-lg text-gray-500 dark:text-slate-400 hover:text-gray-900 dark:hover:text-slate-100 hover:bg-gray-100 dark:hover:bg-slate-800 disabled:opacity-30"
+                    className="p-1.5 rounded-lg text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-30"
                     title="Move down"
                   >
                     <ArrowDown className="w-4 h-4" />
@@ -370,7 +395,7 @@ export default function ExamDocumentMerger() {
                   <button
                     type="button"
                     onClick={() => removeDoc(doc.id)}
-                    className="p-1.5 rounded-lg text-red-500 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40"
+                    className="p-1.5 rounded-lg text-rose-500 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40"
                     title="Remove"
                   >
                     <Trash2 className="w-4 h-4" />
@@ -381,94 +406,118 @@ export default function ExamDocumentMerger() {
           </div>
 
           {/* Action Button & Result */}
-          {!mergedPdfUrl ? (
-            <div className="pt-4 space-y-3">
-              {isProcessing && progressMsg && (
-                <div className="p-4 bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 rounded-xl">
-                  <div className="flex items-center gap-3">
-                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600 dark:border-blue-400 shrink-0"></div>
-                    <p className="text-xs font-semibold text-blue-700 dark:text-blue-300">{progressMsg}</p>
+          <AnimatePresence mode="wait">
+            {!mergedPdfUrl ? (
+              <motion.div
+                key="action"
+                initial={prefersReduced ? false : { opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={prefersReduced ? undefined : { opacity: 0, y: -8 }}
+                transition={prefersReduced ? { duration: 0 } : { duration: 0.2 }}
+                className="pt-4 space-y-3"
+              >
+                {isProcessing && progressMsg && (
+                  <div
+                    className="p-4 border border-[var(--pms-border)] rounded-2xl"
+                    style={{ backgroundColor: 'var(--pms-soft-blue)' }}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-[var(--pms-blue)] shrink-0"></div>
+                      <p className="text-xs font-semibold text-slate-800 dark:text-slate-100">{progressMsg}</p>
+                    </div>
                   </div>
-                </div>
-              )}
-
-              <button
-                type="button"
-                onClick={mergeAndCompressBundle}
-                disabled={isProcessing}
-                className="w-full py-4 bg-blue-600 hover:bg-blue-700 text-white font-bold text-base rounded-xl shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 notranslate"
-                translate="no"
-              >
-                {isProcessing ? (
-                  <span className="flex items-center gap-2">
-                    <span className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin inline-block" />
-                    <span>Processing {docs.length} Documents...</span>
-                  </span>
-                ) : (
-                  <span className="flex items-center gap-2">
-                    <Layers className="w-5 h-5" />
-                    <span>Merge All Documents into Single PDF (Target: Under {targetSizeLimitKb} KB)</span>
-                  </span>
                 )}
-              </button>
-            </div>
-          ) : (
-            <div className="p-6 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 rounded-2xl text-center space-y-4">
-              <div className="w-12 h-12 bg-emerald-100 dark:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 rounded-full flex items-center justify-center mx-auto">
-                <CheckCircle2 className="w-7 h-7" />
-              </div>
-              <div>
-                <h3 className="text-xl font-extrabold text-emerald-950 dark:text-emerald-100">Documents Merged &amp; Compressed!</h3>
-                <p className="text-xs text-emerald-800 dark:text-emerald-300 mt-1">
-                  <span>Final Bundle Size: </span>
-                  <strong className="notranslate" translate="no">{finalSizeKb} KB</strong>
-                  <span> (Limit: Under {targetSizeLimitKb} KB) • Portal Accepted ✅</span>
-                </p>
-              </div>
 
-              <a
-                href={mergedPdfUrl}
-                download={`exam_document_bundle_${finalSizeKb}kb.pdf`}
-                className="inline-flex items-center justify-center gap-2 px-8 py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md hover:shadow-lg transition-all text-sm"
-              >
-                <Download className="w-4 h-4" /> Download Merged Exam PDF ({finalSizeKb} KB)
-              </a>
-
-              <div>
-                <button
+                <motion.button
                   type="button"
-                  onClick={() => setMergedPdfUrl(null)}
-                  className="text-xs text-gray-500 dark:text-slate-400 hover:text-gray-900 dark:hover:text-slate-100 font-semibold"
+                  whileTap={prefersReduced ? undefined : { scale: 0.98 }}
+                  onClick={mergeAndCompressBundle}
+                  disabled={isProcessing}
+                  className="pms-btn-primary w-full py-4 font-bold text-base rounded-2xl shadow-md flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 notranslate"
+                  translate="no"
                 >
-                  Adjust files or re-compress
-                </button>
-              </div>
-            </div>
-          )}
+                  {isProcessing ? (
+                    <span className="flex items-center gap-2">
+                      <span className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin inline-block" />
+                      <span>Processing {docs.length} Documents...</span>
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-2">
+                      <Layers className="w-5 h-5" />
+                      <span>Merge All Documents into Single PDF (Target: Under {targetSizeLimitKb} KB)</span>
+                    </span>
+                  )}
+                </motion.button>
+              </motion.div>
+            ) : (
+              <motion.div
+                key="result"
+                initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={prefersReduced ? undefined : { opacity: 0, y: -8 }}
+                transition={prefersReduced ? { duration: 0 } : { duration: 0.25 }}
+                className="p-6 border border-emerald-300/60 dark:border-emerald-800/60 rounded-2xl text-center space-y-4"
+                style={{ backgroundColor: 'var(--pms-soft-mint)' }}
+              >
+                <div className="w-12 h-12 bg-white/90 dark:bg-slate-900/90 text-emerald-600 dark:text-emerald-400 rounded-full flex items-center justify-center mx-auto shadow-xs">
+                  <CheckCircle2 className="w-7 h-7" />
+                </div>
+                <div>
+                  <h3 className="text-xl font-extrabold text-slate-900 dark:text-white">Documents Merged &amp; Compressed!</h3>
+                  <p className="text-xs text-slate-700 dark:text-slate-300 mt-1">
+                    <span>Final Bundle Size: </span>
+                    <strong className="notranslate tabular-nums" translate="no">
+                      <AnimatedNumber value={finalSizeKb ?? 0} suffix=" KB" />
+                    </strong>
+                    <span> (Limit: Under {targetSizeLimitKb} KB) • Portal Accepted ✅</span>
+                  </p>
+                </div>
+
+                <motion.a
+                  whileTap={prefersReduced ? undefined : { scale: 0.98 }}
+                  href={mergedPdfUrl}
+                  download={`exam_document_bundle_${finalSizeKb}kb.pdf`}
+                  className="pms-btn-primary inline-flex items-center justify-center gap-2 px-8 py-3.5 font-bold rounded-xl shadow-md text-sm"
+                >
+                  <Download className="w-4 h-4" /> Download Merged Exam PDF ({finalSizeKb} KB)
+                </motion.a>
+
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => setMergedPdfUrl(null)}
+                    className="text-xs text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white font-semibold"
+                  >
+                    Adjust files or re-compress
+                  </button>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       )}
 
       {/* Trust & FAQ */}
-      <div className="mt-16 border-t border-gray-200 dark:border-slate-800 pt-10 text-gray-800 dark:text-slate-200">
-        <h2 className="text-2xl font-bold mb-6 text-center text-gray-900 dark:text-slate-100">
+      <div className="mt-16 border-t border-[var(--pms-border)] pt-10 text-slate-800 dark:text-slate-200">
+        <h2 className="text-2xl font-bold mb-6 text-center text-slate-900 dark:text-slate-100">
           Official Guidelines for Exam Document Bundles
         </h2>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-sm">
-          <div className="p-5 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-xl shadow-xs">
-            <h3 className="font-bold text-gray-900 dark:text-slate-100 mb-2">UPSC & State PSCs</h3>
-            <p className="text-gray-600 dark:text-slate-400 text-xs leading-relaxed">
+          <div className="p-5 pms-glass-panel rounded-2xl">
+            <h3 className="font-bold text-slate-900 dark:text-slate-100 mb-2">UPSC & State PSCs</h3>
+            <p className="text-slate-600 dark:text-slate-400 text-xs leading-relaxed">
               Most PSC forms require all educational qualifications merged in chronological order (10th → 12th → Graduation) into a single PDF under 1 MB.
             </p>
           </div>
-          <div className="p-5 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-xl shadow-xs">
-            <h3 className="font-bold text-gray-900 dark:text-slate-100 mb-2">Smart DPI Compression</h3>
-            <p className="text-gray-600 dark:text-slate-400 text-xs leading-relaxed">
+          <div className="p-5 pms-glass-panel rounded-2xl">
+            <h3 className="font-bold text-slate-900 dark:text-slate-100 mb-2">Smart DPI Compression</h3>
+            <p className="text-slate-600 dark:text-slate-400 text-xs leading-relaxed">
               Instead of naive blurring, our engine selectively balances text contrast and JPEG compression so your roll numbers and marks remain crisp.
             </p>
           </div>
-          <div className="p-5 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-xl shadow-xs">
-            <h3 className="font-bold text-gray-900 dark:text-slate-100 mb-2">Private & Local</h3>
-            <p className="text-gray-600 dark:text-slate-400 text-xs leading-relaxed">
+          <div className="p-5 pms-glass-panel rounded-2xl">
+            <h3 className="font-bold text-slate-900 dark:text-slate-100 mb-2">Private & Local</h3>
+            <p className="text-slate-600 dark:text-slate-400 text-xs leading-relaxed">
               Your certificates contain private marks and personal records. Everything is merged strictly inside your browser without uploading to any server.
             </p>
           </div>

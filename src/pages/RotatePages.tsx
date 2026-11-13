@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
-import { RotateCw, RotateCcw, Download, Check, RefreshCcw, Layers, Undo2, ZoomIn, X, CheckSquare, Square } from 'lucide-react';
+import { motion, useReducedMotion } from 'motion/react';
+import { RotateCw, RotateCcw, Download, Check, CheckCircle2, RefreshCcw, Undo2, ZoomIn, X, CheckSquare, Square } from 'lucide-react';
 import { PDFDocument, degrees } from 'pdf-lib';
 import * as pdfjsLib from 'pdfjs-dist';
 import '../lib/pdfWorker';
@@ -7,7 +8,9 @@ import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { useToast } from '../components/Toast';
+import { toArrayBufferBytes } from '../lib/blobUrl';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { AnimatedNumber, PearlScanOverlay, PearlStageSwitch } from '../components/pearl/PearlMotion';
 
 interface PageInfo {
   index: number;
@@ -29,6 +32,7 @@ export default function RotatePages() {
   const [zoomPage, setZoomPage] = useState<PageInfo | null>(null);
 
   const toast = useToast();
+  const prefersReduced = useReducedMotion();
 
   // Cleanup blob URLs for pages and result on unmount
   useEffect(() => {
@@ -142,7 +146,7 @@ export default function RotatePages() {
       });
 
       const bytes = await doc.save();
-      const blob = new Blob([bytes as any], { type: 'application/pdf' });
+      const blob = new Blob([toArrayBufferBytes(bytes)], { type: 'application/pdf' });
       if (resultUrl) URL.revokeObjectURL(resultUrl);
       setResultUrl(URL.createObjectURL(blob));
       toast.success(`Rotated ${pages.filter(p => p.rotation !== 0).length || pages.length} page(s) successfully!`);
@@ -168,79 +172,96 @@ export default function RotatePages() {
     >
       <div className="flex flex-col items-center w-full">
 
+      <PearlStageSwitch
+        stageKey={!file ? 'upload' : loading ? 'loading' : resultUrl ? 'result' : 'configure'}
+        className="w-full max-w-6xl"
+      >
       {!file ? (
-        <FileDropzone onDrop={handleDrop} multiple={false} title="Drop PDF here or click to select" />
+        <div className="w-full max-w-3xl mx-auto">
+          <FileDropzone onDrop={handleDrop} multiple={false} title="Drop PDF here or click to select" />
+        </div>
       ) : loading ? (
-        <div className="w-full max-w-md bg-white dark:bg-slate-900/90 p-8 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-800 text-center space-y-4">
-          <div className="w-12 h-12 border-3 border-sky-200 dark:border-sky-900 border-t-sky-600 dark:border-t-sky-400 rounded-full animate-spin mx-auto" />
+        <div className="relative overflow-hidden w-full max-w-md mx-auto pms-glass-panel p-8 rounded-3xl text-center space-y-4">
+          <PearlScanOverlay active label={`Rendering page ${loadingProgress.current} of ${loadingProgress.total || '...'}...`} />
+          <div className="w-12 h-12 border-3 border-sky-200 dark:border-sky-900 border-t-[var(--pms-blue)] rounded-full animate-spin mx-auto" />
           <h3 className="text-lg font-bold text-gray-900 dark:text-slate-100">Rendering Page Previews...</h3>
-          <p className="text-sm text-gray-500 dark:text-slate-400">
+          <p className="text-sm text-gray-500 dark:text-slate-400 tabular-nums">
             Page {loadingProgress.current} of {loadingProgress.total}
           </p>
-          <div className="w-full bg-gray-100 dark:bg-slate-800 rounded-full h-2 overflow-hidden">
+          <div className="w-full bg-white/75 dark:bg-slate-800 rounded-full h-2 overflow-hidden border border-[var(--pms-border)]">
             <div
-              className="bg-sky-600 h-full transition-all duration-200"
+              className="bg-gradient-to-r from-sky-500 to-cyan-500 h-full transition-all duration-200"
               style={{ width: `${loadingProgress.total ? (loadingProgress.current / loadingProgress.total) * 100 : 0}%` }}
             />
           </div>
         </div>
       ) : resultUrl ? (
         /* Success Screen */
-        <div className="w-full max-w-lg bg-white dark:bg-slate-900/90 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-800 p-8 text-center">
-          <div className="w-16 h-16 bg-green-100 dark:bg-green-950/50 text-green-600 dark:text-green-400 rounded-full flex items-center justify-center mx-auto mb-4">
-            <Check className="w-8 h-8" />
+        <div className="w-full max-w-lg mx-auto pms-glass-panel rounded-3xl p-8 text-center">
+          <div className="p-6 rounded-2xl bg-gradient-to-br from-emerald-500/12 via-white/75 to-teal-500/12 dark:from-emerald-950/50 dark:via-slate-900/80 dark:to-teal-950/40 border border-emerald-200/80 dark:border-emerald-800/60 mb-5">
+            <motion.div
+              initial={prefersReduced ? false : { scale: 0.6, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              transition={{ type: 'spring', stiffness: 420, damping: 24 }}
+              className="w-16 h-16 bg-gradient-to-br from-emerald-400 to-teal-500 text-white rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-emerald-500/25"
+            >
+              <CheckCircle2 className="w-8 h-8" />
+            </motion.div>
+            <h3 className="text-2xl font-bold text-gray-900 dark:text-slate-100 mb-1">Rotation Applied Successfully!</h3>
+            <p className="text-sm text-gray-600 dark:text-slate-400 mb-6 tabular-nums">
+              <AnimatedNumber value={changedCount} /> page{changedCount !== 1 ? 's were' : ' was'} rotated.
+            </p>
+            <motion.a
+              whileHover={prefersReduced ? undefined : { scale: 1.02 }}
+              whileTap={prefersReduced ? undefined : { scale: 0.98 }}
+              href={resultUrl}
+              download={`rotated_${file.name}`}
+              className="pms-btn-primary relative overflow-hidden inline-flex items-center justify-center gap-2 w-full py-4 font-bold rounded-xl shadow-md"
+            >
+              <span className="pms-shimmer pointer-events-none" />
+              <Download className="w-5 h-5" /> Download Rotated PDF
+            </motion.a>
           </div>
-          <h3 className="text-2xl font-bold text-gray-900 dark:text-slate-100 mb-1">Rotation Applied Successfully!</h3>
-          <p className="text-gray-500 dark:text-slate-400 mb-6">
-            {changedCount} page{changedCount !== 1 ? 's were' : ' was'} rotated.
-          </p>
-          <a
-            href={resultUrl}
-            download={`rotated_${file.name}`}
-            className="inline-flex items-center justify-center gap-2 w-full py-4 bg-sky-600 text-white font-bold rounded-xl hover:bg-sky-700 transition-colors shadow-md mb-4"
-          >
-            <Download className="w-5 h-5" /> Download Rotated PDF
-          </a>
-          <br />
           <button
             onClick={() => { setFile(null); setPages([]); setResultUrl(null); }}
-            className="text-gray-500 dark:text-slate-400 hover:text-gray-800 dark:hover:text-slate-200 font-medium text-sm mt-2"
+            className="text-gray-600 dark:text-slate-400 hover:text-gray-900 dark:hover:text-slate-200 font-semibold text-sm mt-1 transition-colors"
           >
             Rotate another PDF
           </button>
         </div>
       ) : (
         /* Workspace */
-        <div className="w-full max-w-6xl space-y-5">
+        <div className="w-full space-y-5">
 
           {/* Action Toolbar */}
-          <div className="bg-white dark:bg-slate-900/90 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-800 p-4 space-y-3">
+          <div className="relative overflow-hidden pms-glass-panel rounded-3xl p-4 sm:p-5 space-y-3">
+            <PearlScanOverlay active={busy} label="Applying rotation transforms to PDF..." />
             <div className="flex flex-wrap items-center justify-between gap-3">
               {/* Batch rotation buttons */}
               <div className="flex flex-wrap items-center gap-2">
-                <span className="text-xs font-bold text-gray-400 dark:text-slate-500 uppercase tracking-wider mr-1">Rotate All:</span>
+                <span className="text-xs font-bold text-gray-500 dark:text-slate-400 uppercase tracking-wider mr-1">Rotate All:</span>
                 <button
                   onClick={() => rotateAll(-90)}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 bg-sky-50 dark:bg-sky-950/50 text-sky-700 dark:text-sky-300 font-semibold rounded-xl text-xs hover:bg-sky-100 dark:hover:bg-sky-900/60 transition-colors border border-sky-100 dark:border-sky-800/50"
+                  className="inline-flex items-center gap-1.5 px-3 py-2 bg-[var(--pms-soft-blue)] text-sky-800 dark:text-sky-200 font-semibold rounded-xl text-xs hover:brightness-95 transition-all border border-[var(--pms-border)]"
                 >
                   <RotateCcw className="w-3.5 h-3.5" /> Left 90°
                 </button>
                 <button
                   onClick={() => rotateAll(90)}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 bg-sky-50 dark:bg-sky-950/50 text-sky-700 dark:text-sky-300 font-semibold rounded-xl text-xs hover:bg-sky-100 dark:hover:bg-sky-900/60 transition-colors border border-sky-100 dark:border-sky-800/50"
+                  className="inline-flex items-center gap-1.5 px-3 py-2 bg-[var(--pms-soft-blue)] text-sky-800 dark:text-sky-200 font-semibold rounded-xl text-xs hover:brightness-95 transition-all border border-[var(--pms-border)]"
                 >
                   <RotateCw className="w-3.5 h-3.5" /> Right 90°
                 </button>
                 <button
                   onClick={() => rotateAll(180)}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 bg-sky-50 dark:bg-sky-950/50 text-sky-700 dark:text-sky-300 font-semibold rounded-xl text-xs hover:bg-sky-100 dark:hover:bg-sky-900/60 transition-colors border border-sky-100 dark:border-sky-800/50"
+                  className="inline-flex items-center gap-1.5 px-3 py-2 bg-[var(--pms-soft-blue)] text-sky-800 dark:text-sky-200 font-semibold rounded-xl text-xs hover:brightness-95 transition-all border border-[var(--pms-border)]"
                 >
                   <RefreshCcw className="w-3.5 h-3.5" /> 180° Flip
                 </button>
                 {changedCount > 0 && (
                   <button
                     onClick={resetAll}
-                    className="inline-flex items-center gap-1 px-3 py-2 text-gray-500 dark:text-slate-400 hover:text-red-600 dark:hover:text-red-400 rounded-xl text-xs hover:bg-red-50 dark:hover:bg-red-950/40 transition-colors"
+                    className="inline-flex items-center gap-1 px-3 py-2 text-gray-600 dark:text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 rounded-xl text-xs hover:bg-[var(--pms-soft-rose)] transition-colors"
                   >
                     <Undo2 className="w-3.5 h-3.5" /> Reset All
                   </button>
@@ -248,9 +269,9 @@ export default function RotatePages() {
               </div>
 
               {/* Status pill */}
-              <div className="text-xs font-semibold px-3 py-1.5 bg-gray-50 dark:bg-slate-800 text-gray-600 dark:text-slate-300 rounded-lg border border-gray-100 dark:border-slate-700">
+              <div className="text-xs font-semibold px-3 py-1.5 bg-white/80 dark:bg-slate-800/80 text-gray-700 dark:text-slate-300 rounded-xl border border-[var(--pms-border)] tabular-nums">
                 {changedCount > 0 ? (
-                  <span className="text-sky-600 dark:text-sky-400">{changedCount} of {pages.length} pages rotated</span>
+                  <span className="text-[var(--pms-blue)] font-bold">{changedCount} of {pages.length} pages rotated</span>
                 ) : (
                   <span>{pages.length} pages total</span>
                 )}
@@ -258,27 +279,27 @@ export default function RotatePages() {
             </div>
 
             {/* Selection bar */}
-            <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-gray-100 dark:border-slate-800 text-xs">
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-[var(--pms-border)] text-xs">
               <div className="flex items-center gap-2">
-                <span className="text-gray-400 dark:text-slate-500 font-medium">Select:</span>
-                <button onClick={() => selectAll(true)} className="px-2.5 py-1 text-gray-700 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-lg font-medium">All</button>
-                <button onClick={selectOdd} className="px-2.5 py-1 text-gray-700 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-lg font-medium">Odd</button>
-                <button onClick={selectEven} className="px-2.5 py-1 text-gray-700 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-lg font-medium">Even</button>
-                <button onClick={() => selectAll(false)} className="px-2.5 py-1 text-gray-400 dark:text-slate-500 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-lg">Clear</button>
+                <span className="text-gray-500 dark:text-slate-400 font-medium">Select:</span>
+                <button onClick={() => selectAll(true)} className="px-2.5 py-1 text-gray-700 dark:text-slate-300 hover:bg-white/80 dark:hover:bg-slate-800 rounded-lg font-medium transition-colors">All</button>
+                <button onClick={selectOdd} className="px-2.5 py-1 text-gray-700 dark:text-slate-300 hover:bg-white/80 dark:hover:bg-slate-800 rounded-lg font-medium transition-colors">Odd</button>
+                <button onClick={selectEven} className="px-2.5 py-1 text-gray-700 dark:text-slate-300 hover:bg-white/80 dark:hover:bg-slate-800 rounded-lg font-medium transition-colors">Even</button>
+                <button onClick={() => selectAll(false)} className="px-2.5 py-1 text-gray-500 dark:text-slate-400 hover:bg-white/80 dark:hover:bg-slate-800 rounded-lg transition-colors">Clear</button>
               </div>
 
               {selectedCount > 0 && (
                 <div className="flex items-center gap-2">
-                  <span className="font-semibold text-purple-700 dark:text-purple-400">{selectedCount} selected:</span>
+                  <span className="font-semibold text-[var(--pms-violet)]">{selectedCount} selected:</span>
                   <button
                     onClick={() => rotateSelected(-90)}
-                    className="px-2.5 py-1 bg-purple-50 dark:bg-purple-950/50 text-purple-700 dark:text-purple-300 font-semibold rounded-lg hover:bg-purple-100 dark:hover:bg-purple-900/60 flex items-center gap-1"
+                    className="px-2.5 py-1 bg-[var(--pms-soft-lavender)] text-purple-800 dark:text-purple-200 border border-[var(--pms-border)] font-semibold rounded-lg hover:brightness-95 flex items-center gap-1"
                   >
                     <RotateCcw className="w-3 h-3" /> Left
                   </button>
                   <button
                     onClick={() => rotateSelected(90)}
-                    className="px-2.5 py-1 bg-purple-50 dark:bg-purple-950/50 text-purple-700 dark:text-purple-300 font-semibold rounded-lg hover:bg-purple-100 dark:hover:bg-purple-900/60 flex items-center gap-1"
+                    className="px-2.5 py-1 bg-[var(--pms-soft-lavender)] text-purple-800 dark:text-purple-200 border border-[var(--pms-border)] font-semibold rounded-lg hover:brightness-95 flex items-center gap-1"
                   >
                     <RotateCw className="w-3 h-3" /> Right
                   </button>
@@ -292,23 +313,23 @@ export default function RotatePages() {
             {pages.map((pg, i) => (
               <div
                 key={pg.index}
-                className={`relative group bg-white dark:bg-slate-900/90 rounded-2xl border-2 transition-all p-3 shadow-sm hover:shadow-md flex flex-col items-center ${
+                className={`relative group pms-glass-panel rounded-2xl border-2 transition-all p-3 hover:shadow-md flex flex-col items-center ${
                   pg.rotation !== 0
-                    ? 'border-sky-400 ring-2 ring-sky-100 dark:ring-sky-900/50 bg-sky-50/20 dark:bg-sky-950/20'
+                    ? 'border-[var(--pms-blue)] ring-2 ring-sky-200/70 dark:ring-sky-900/50 bg-[var(--pms-soft-blue)]'
                     : pg.selected
-                    ? 'border-purple-400 ring-2 ring-purple-100 dark:ring-purple-900/50'
-                    : 'border-gray-200 dark:border-slate-800 hover:border-gray-300 dark:hover:border-slate-700'
+                    ? 'border-[var(--pms-violet)] ring-2 ring-purple-200/70 dark:ring-purple-900/50'
+                    : 'border-[var(--pms-border)] hover:border-[var(--pms-border-strong)]'
                 }`}
               >
                 {/* Select checkbox & badge header */}
                 <div className="w-full flex items-center justify-between mb-2">
                   <button
                     onClick={() => toggleSelect(i)}
-                    className="text-gray-400 dark:text-slate-500 hover:text-purple-600 dark:hover:text-purple-400 transition-colors p-0.5"
+                    className="text-gray-400 dark:text-slate-500 hover:text-[var(--pms-violet)] transition-colors p-0.5"
                     title="Select page"
                   >
                     {pg.selected ? (
-                      <CheckSquare className="w-4 h-4 text-purple-600 dark:text-purple-400" />
+                      <CheckSquare className="w-4 h-4 text-[var(--pms-violet)]" />
                     ) : (
                       <Square className="w-4 h-4 text-gray-300 dark:text-slate-600" />
                     )}
@@ -317,13 +338,13 @@ export default function RotatePages() {
                   <span className="text-xs font-bold text-gray-700 dark:text-slate-200">#{pg.index}</span>
 
                   {pg.rotation !== 0 ? (
-                    <span className="text-[10px] font-bold bg-sky-600 text-white px-1.5 py-0.5 rounded-full">
+                    <span className="text-[10px] font-bold bg-[var(--pms-blue)] text-white px-1.5 py-0.5 rounded-full">
                       {pg.rotation}°
                     </span>
                   ) : (
                     <button
                       onClick={() => setZoomPage(pg)}
-                      className="text-gray-300 dark:text-slate-500 hover:text-gray-600 dark:hover:text-slate-300 p-0.5"
+                      className="text-gray-400 dark:text-slate-500 hover:text-gray-700 dark:hover:text-slate-200 p-0.5"
                       title="Enlarge preview"
                     >
                       <ZoomIn className="w-3.5 h-3.5" />
@@ -331,10 +352,10 @@ export default function RotatePages() {
                   )}
                 </div>
 
-                {/* Page preview */}
+                {/* Page preview - white paper frame */}
                 <div
                   onClick={() => rotatePage(i, 90)}
-                  className="w-full aspect-[3/4] bg-gray-50 dark:bg-slate-800/70 rounded-xl overflow-hidden flex items-center justify-center cursor-pointer p-1 relative"
+                  className="w-full aspect-[3/4] bg-white rounded-xl border border-gray-200 dark:border-slate-700 overflow-hidden flex items-center justify-center cursor-pointer p-1 relative shadow-inner"
                   title="Click to rotate 90° clockwise"
                 >
                   <img
@@ -346,10 +367,10 @@ export default function RotatePages() {
                 </div>
 
                 {/* Action buttons on card */}
-                <div className="w-full flex items-center justify-between gap-1 mt-2.5 pt-2 border-t border-gray-100 dark:border-slate-800">
+                <div className="w-full flex items-center justify-between gap-1 mt-2.5 pt-2 border-t border-[var(--pms-border)]">
                   <button
                     onClick={() => rotatePage(i, -90)}
-                    className="p-1.5 text-gray-500 dark:text-slate-400 hover:text-sky-600 dark:hover:text-sky-400 hover:bg-sky-50 dark:hover:bg-sky-950/40 rounded-lg transition-colors"
+                    className="p-1.5 text-gray-500 dark:text-slate-400 hover:text-[var(--pms-blue)] hover:bg-[var(--pms-soft-blue)] rounded-lg transition-colors"
                     title="Rotate left 90°"
                   >
                     <RotateCcw className="w-3.5 h-3.5" />
@@ -357,14 +378,14 @@ export default function RotatePages() {
                   {pg.rotation !== 0 && (
                     <button
                       onClick={() => resetPage(i)}
-                      className="text-[10px] font-semibold text-gray-400 dark:text-slate-500 hover:text-red-500 dark:hover:text-red-400 px-1"
+                      className="text-[10px] font-semibold text-gray-500 dark:text-slate-400 hover:text-rose-500 dark:hover:text-rose-400 px-1"
                     >
                       Reset
                     </button>
                   )}
                   <button
                     onClick={() => rotatePage(i, 90)}
-                    className="p-1.5 text-gray-500 dark:text-slate-400 hover:text-sky-600 dark:hover:text-sky-400 hover:bg-sky-50 dark:hover:bg-sky-950/40 rounded-lg transition-colors"
+                    className="p-1.5 text-gray-500 dark:text-slate-400 hover:text-[var(--pms-blue)] hover:bg-[var(--pms-soft-blue)] rounded-lg transition-colors"
                     title="Rotate right 90°"
                   >
                     <RotateCw className="w-3.5 h-3.5" />
@@ -375,25 +396,28 @@ export default function RotatePages() {
           </div>
 
           {/* Bottom Save Bar */}
-          <div className="sticky bottom-6 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md rounded-2xl shadow-lg border border-gray-200/80 dark:border-slate-800 p-4 flex items-center justify-between gap-4">
+          <div className="sticky bottom-6 pms-glass-panel rounded-2xl shadow-xl p-4 flex flex-wrap items-center justify-between gap-4">
             <div>
               <p className="text-sm font-bold text-gray-900 dark:text-slate-100">
                 {changedCount === 0 ? 'Click any page or use toolbar to rotate' : `${changedCount} page${changedCount !== 1 ? 's' : ''} modified`}
               </p>
-              <p className="text-xs text-gray-400 dark:text-slate-500">Preview reflects actual output orientation.</p>
+              <p className="text-xs text-gray-500 dark:text-slate-400">Preview reflects actual output orientation.</p>
             </div>
             <div className="flex items-center gap-3">
               <button
                 onClick={() => { setFile(null); setPages([]); }}
-                className="px-4 py-2.5 text-gray-500 dark:text-slate-400 hover:text-gray-800 dark:hover:text-slate-200 text-sm font-semibold rounded-xl hover:bg-gray-100 dark:hover:bg-slate-800 transition-colors"
+                className="px-4 py-2.5 text-gray-600 dark:text-slate-300 hover:text-gray-900 dark:hover:text-white text-sm font-semibold rounded-xl bg-white/75 dark:bg-slate-800/75 border border-[var(--pms-border)] transition-colors"
               >
                 Cancel
               </button>
-              <button
+              <motion.button
+                whileHover={prefersReduced || busy || changedCount === 0 ? undefined : { scale: 1.02 }}
+                whileTap={prefersReduced || busy || changedCount === 0 ? undefined : { scale: 0.98 }}
                 onClick={applyRotation}
                 disabled={busy || changedCount === 0}
-                className="px-6 py-2.5 bg-sky-600 text-white text-sm font-bold rounded-xl hover:bg-sky-700 transition-colors disabled:opacity-40 shadow-sm flex items-center gap-2"
+                className="pms-btn-primary relative overflow-hidden px-6 py-2.5 text-sm font-bold rounded-xl disabled:opacity-40 shadow-sm flex items-center gap-2"
               >
+                <span className="pms-shimmer pointer-events-none" />
                 {busy ? (
                   <>
                     <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
@@ -404,25 +428,26 @@ export default function RotatePages() {
                     <Check className="w-4 h-4" /> Save Rotated PDF
                   </>
                 )}
-              </button>
+              </motion.button>
             </div>
           </div>
         </div>
       )}
+      </PearlStageSwitch>
 
       {/* Zoom Modal */}
       {zoomPage && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-6" onClick={() => setZoomPage(null)}>
-          <div className="bg-white dark:bg-slate-900 border border-transparent dark:border-slate-800 rounded-2xl p-4 max-w-lg w-full max-h-[90vh] flex flex-col items-center relative" onClick={e => e.stopPropagation()}>
-            <button onClick={() => setZoomPage(null)} className="absolute top-4 right-4 text-gray-400 hover:text-gray-700 dark:hover:text-slate-200">
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-6" onClick={() => setZoomPage(null)}>
+          <div className="pms-glass-panel rounded-3xl p-5 max-w-lg w-full max-h-[90vh] flex flex-col items-center relative" onClick={e => e.stopPropagation()}>
+            <button onClick={() => setZoomPage(null)} className="absolute top-4 right-4 text-gray-500 hover:text-gray-800 dark:hover:text-slate-200 p-1 rounded-lg">
               <X className="w-5 h-5" />
             </button>
             <h3 className="font-bold text-gray-900 dark:text-slate-100 mb-3">Page {zoomPage.index} Preview</h3>
-            <div className="flex-1 flex items-center justify-center p-2 max-h-[70vh] overflow-hidden">
+            <div className="flex-1 flex items-center justify-center p-3 max-h-[70vh] overflow-hidden bg-white rounded-2xl border border-gray-200 shadow-inner">
               <img
                 src={zoomPage.url}
                 alt={`Page ${zoomPage.index}`}
-                className="max-h-[65vh] object-contain rounded-lg shadow-md transition-transform duration-300"
+                className="max-h-[65vh] object-contain rounded-lg transition-transform duration-300"
                 style={{ transform: `rotate(${zoomPage.rotation}deg)` }}
               />
             </div>

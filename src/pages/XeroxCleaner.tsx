@@ -1,21 +1,15 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Upload,
   Download,
-  Printer,
-  Sparkles,
   Sliders,
-  CheckCircle2,
-  RefreshCw,
   Eye,
-  FileText,
   Smartphone,
   ChevronLeft,
   ChevronRight,
-  SunMedium,
-  Contrast,
   Zap,
 } from 'lucide-react';
+import { motion, AnimatePresence, useReducedMotion } from 'motion/react';
 import { PDFDocument } from 'pdf-lib';
 import * as pdfjsLib from 'pdfjs-dist';
 import '../lib/pdfWorker';
@@ -23,6 +17,9 @@ import { useSEO } from '../hooks/useSEO';
 import { usePageSEO } from '../lib/usePageSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
 import ShareQrModal from '../components/ShareQrModal';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { AnimatedNumber, PearlScanOverlay } from '../components/pearl/PearlMotion';
+import { toArrayBufferBytes } from '../lib/blobUrl';
 import { dataUrlToBytes, downloadBlob } from '../lib/utils';
 
 type CleanMode = 'crisp_xerox' | 'grayscale' | 'toner_saver' | 'magic_color';
@@ -35,6 +32,8 @@ interface PageItem {
 }
 
 export default function XeroxCleaner() {
+  const prefersReduced = useReducedMotion();
+
   useSEO(
     'Ultra Xerox Eco-Cleaner & Ink Saver — Whiten Document Background Online',
     'Remove yellow shadows, dark backgrounds, and phone lighting from mobile photos of documents. Turn phone photos into pure white, sharp black photocopy prints. Free & private.'
@@ -53,7 +52,7 @@ export default function XeroxCleaner() {
   const [cleanMode, setCleanMode] = useState<CleanMode>('crisp_xerox');
   const [whitenessThreshold, setWhitenessThreshold] = useState<number>(180); // 100-240
   const [textDarkness, setTextDarkness] = useState<number>(35); // 0-100
-  const [contrastBoost, setContrastBoost] = useState<number>(20); // 0-50
+  const [contrastBoost] = useState<number>(20); // 0-50
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [showQrModal, setShowQrModal] = useState<boolean>(false);
 
@@ -275,7 +274,7 @@ export default function XeroxCleaner() {
       }
 
       const outBytes = await pdfDoc.save();
-      const blob = new Blob([outBytes as any], { type: 'application/pdf' });
+      const blob = new Blob([toArrayBufferBytes(outBytes)], { type: 'application/pdf' });
       downloadBlob(blob, `clean-xerox-${Date.now()}.pdf`);
     } catch (err) {
       console.error('Error creating clean PDF:', err);
@@ -296,26 +295,25 @@ export default function XeroxCleaner() {
   const activePage = pages[activePageIndex];
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 py-10 px-4 sm:px-6">
-      <div className="max-w-6xl mx-auto space-y-8">
-        {/* Header */}
-        <div className="text-center space-y-3">
-          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs font-bold uppercase tracking-wider">
-            <Zap className="w-4 h-4" /> Eco-Print & Photo State Special
-          </div>
-          <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight">
-            Ultra Xerox Eco-Cleaner & Ink Saver
-          </h1>
-          <p className="text-sm sm:text-base text-slate-500 dark:text-slate-400 max-w-2xl mx-auto">
-            Transform dark, yellow, shadow-filled mobile photos into 100% pure white, sharp black photocopies.
-            Saves up to 60% printer toner and delivers crystal-clear prints.
-          </p>
-        </div>
-
+    <ToolWorkspaceShell
+      title="Ultra Xerox Eco-Cleaner & Ink Saver"
+      subtitle="Transform dark, yellow, shadow-filled mobile photos into 100% pure white, sharp black photocopies. Saves up to 60% printer toner and delivers crystal-clear prints."
+      categoryLabel="Eco-Print & Photo State Special"
+      icon={Zap}
+      microVariant="ocr"
+      tone="emerald"
+      trustNote="100% pure-white background bleach · Browser-only image engine"
+    >
+      <div className="space-y-8">
         {/* Upload State */}
         {pages.length === 0 ? (
-          <div className="max-w-2xl mx-auto">
-            <label className="flex flex-col items-center justify-center p-12 border-2 border-dashed border-slate-300 dark:border-slate-700 hover:border-emerald-500 rounded-3xl cursor-pointer bg-white dark:bg-slate-900 transition-all shadow-sm group">
+          <motion.div
+            initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="max-w-2xl mx-auto pms-glass-panel rounded-3xl p-4 relative overflow-hidden"
+          >
+            <PearlScanOverlay active={isProcessing} label="Loading & bleaching uploaded pages..." />
+            <label className="flex flex-col items-center justify-center p-12 border-2 border-dashed border-[var(--pms-border-strong)] hover:border-emerald-500 rounded-2xl cursor-pointer bg-[var(--pms-white)] transition-all group">
               <input
                 type="file"
                 multiple
@@ -323,37 +321,52 @@ export default function XeroxCleaner() {
                 onChange={handleFileUpload}
                 className="hidden"
               />
-              <div className="w-16 h-16 rounded-2xl bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+              <div
+                className="w-16 h-16 rounded-2xl text-emerald-600 dark:text-emerald-400 border border-[var(--pms-border)] flex items-center justify-center mb-4 group-hover:scale-105 transition-transform"
+                style={{ background: 'var(--pms-soft-mint)' }}
+              >
                 <Upload className="w-8 h-8" />
               </div>
-              <span className="text-base font-bold text-slate-900 dark:text-white mb-1">
+              <span className="text-base font-bold text-[var(--pms-ink)] mb-1">
                 Drop Mobile Photos or Scanned PDF
               </span>
-              <span className="text-xs text-slate-400 text-center max-w-xs">
+              <span className="text-xs text-[var(--pms-muted)] text-center max-w-xs">
                 Upload student notes, marksheets, receipts, book pages, or certificates. Supports batch files.
               </span>
             </label>
-          </div>
+          </motion.div>
         ) : (
           /* Editor Layout */
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
             {/* Left Controls */}
-            <div className="lg:col-span-4 space-y-5 bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm">
-              <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
-                <span className="text-sm font-bold flex items-center gap-2">
+            <motion.div
+              initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="lg:col-span-4 space-y-5 pms-glass-panel p-6 rounded-3xl"
+            >
+              <div className="flex items-center justify-between pb-3 border-b border-[var(--pms-border)]">
+                <span className="text-sm font-bold text-[var(--pms-ink)] flex items-center gap-2">
                   <Sliders className="w-4 h-4 text-emerald-500" /> Cleaner Controls
                 </span>
-                <button
-                  onClick={() => setPages([])}
-                  className="text-xs text-rose-500 hover:text-rose-600 font-semibold"
-                >
-                  Clear Files
-                </button>
+                <div className="flex items-center gap-2">
+                  <span
+                    className="text-[11px] font-bold px-2 py-0.5 rounded-full text-[var(--pms-ink)] border border-[var(--pms-border)]"
+                    style={{ background: 'var(--pms-soft-blue)' }}
+                  >
+                    {files.length} file{files.length === 1 ? '' : 's'}
+                  </span>
+                  <button
+                    onClick={() => setPages([])}
+                    className="text-xs text-rose-500 hover:text-rose-600 font-semibold cursor-pointer"
+                  >
+                    Clear Files
+                  </button>
+                </div>
               </div>
 
               {/* Cleaning Mode Presets */}
               <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">
+                <label className="block text-xs font-bold uppercase tracking-wider text-[var(--pms-muted)] mb-2">
                   Cleaning Mode
                 </label>
                 <div className="grid grid-cols-2 gap-2 text-xs">
@@ -366,24 +379,24 @@ export default function XeroxCleaner() {
                     <button
                       key={m.id}
                       onClick={() => setCleanMode(m.id as CleanMode)}
-                      className={`p-2.5 rounded-xl border text-left font-medium transition ${
+                      className={`p-2.5 rounded-xl border text-left font-medium transition cursor-pointer ${
                         cleanMode === m.id
-                          ? 'border-emerald-500 bg-emerald-50/50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400'
-                          : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800'
+                          ? 'border-emerald-500 bg-[var(--pms-soft-mint)] text-[var(--pms-ink)] shadow-sm'
+                          : 'border-[var(--pms-border)] bg-[var(--pms-white)] text-[var(--pms-muted)] hover:text-[var(--pms-ink)]'
                       }`}
                     >
                       <div className="font-bold">{m.label}</div>
-                      <div className="text-[10px] text-slate-400 mt-0.5">{m.desc}</div>
+                      <div className="text-[10px] opacity-75 mt-0.5">{m.desc}</div>
                     </button>
                   ))}
                 </div>
               </div>
 
               {/* Whiteness Threshold Slider */}
-              <div className="space-y-3 p-4 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200 dark:border-slate-700 text-xs">
+              <div className="space-y-3 p-4 bg-[var(--pms-white)] rounded-2xl border border-[var(--pms-border)] text-xs">
                 <div>
                   <div className="flex justify-between items-center font-semibold mb-1">
-                    <span className="text-slate-700 dark:text-slate-300">Background Bleach Level</span>
+                    <span className="text-[var(--pms-ink)]">Background Bleach Level</span>
                     <span className="text-emerald-600 dark:text-emerald-400 font-mono">{whitenessThreshold}</span>
                   </div>
                   <input
@@ -394,7 +407,7 @@ export default function XeroxCleaner() {
                     onChange={(e) => setWhitenessThreshold(Number(e.target.value))}
                     className="w-full accent-emerald-600"
                   />
-                  <div className="flex justify-between text-[10px] text-slate-400 mt-1">
+                  <div className="flex justify-between text-[10px] text-[var(--pms-muted)] mt-1">
                     <span>Keep light pencils</span>
                     <span>Aggressive Whiten</span>
                   </div>
@@ -402,7 +415,7 @@ export default function XeroxCleaner() {
 
                 <div>
                   <div className="flex justify-between items-center font-semibold mb-1">
-                    <span className="text-slate-700 dark:text-slate-300">Text Darkness Boost</span>
+                    <span className="text-[var(--pms-ink)]">Text Darkness Boost</span>
                     <span className="text-emerald-600 dark:text-emerald-400 font-mono">{textDarkness}%</span>
                   </div>
                   <input
@@ -417,77 +430,97 @@ export default function XeroxCleaner() {
               </div>
 
               {/* Page Navigator */}
-              {pages.length > 1 && (
-                <div className="flex items-center justify-between p-3 bg-slate-100 dark:bg-slate-800 rounded-xl text-xs font-semibold">
-                  <button
-                    onClick={() => setActivePageIndex(Math.max(0, activePageIndex - 1))}
-                    disabled={activePageIndex === 0}
-                    className="p-1 rounded hover:bg-white dark:hover:bg-slate-700 disabled:opacity-30"
+              <AnimatePresence>
+                {pages.length > 1 && (
+                  <motion.div
+                    initial={prefersReduced ? false : { opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={prefersReduced ? undefined : { opacity: 0, height: 0 }}
+                    className="flex items-center justify-between p-3 bg-[var(--pms-white)] border border-[var(--pms-border)] rounded-xl text-xs font-semibold text-[var(--pms-ink)]"
                   >
-                    <ChevronLeft className="w-4 h-4" />
-                  </button>
-                  <span>Page {activePageIndex + 1} of {pages.length}</span>
-                  <button
-                    onClick={() => setActivePageIndex(Math.min(pages.length - 1, activePageIndex + 1))}
-                    disabled={activePageIndex === pages.length - 1}
-                    className="p-1 rounded hover:bg-white dark:hover:bg-slate-700 disabled:opacity-30"
-                  >
-                    <ChevronRight className="w-4 h-4" />
-                  </button>
-                </div>
-              )}
+                    <button
+                      onClick={() => setActivePageIndex(Math.max(0, activePageIndex - 1))}
+                      disabled={activePageIndex === 0}
+                      className="p-1.5 rounded-lg hover:bg-[var(--pms-soft-lavender)] disabled:opacity-30 cursor-pointer"
+                    >
+                      <ChevronLeft className="w-4 h-4" />
+                    </button>
+                    <span>
+                      Page {activePageIndex + 1} of <AnimatedNumber value={pages.length} />
+                    </span>
+                    <button
+                      onClick={() => setActivePageIndex(Math.min(pages.length - 1, activePageIndex + 1))}
+                      disabled={activePageIndex === pages.length - 1}
+                      className="p-1.5 rounded-lg hover:bg-[var(--pms-soft-lavender)] disabled:opacity-30 cursor-pointer"
+                    >
+                      <ChevronRight className="w-4 h-4" />
+                    </button>
+                  </motion.div>
+                )}
+              </AnimatePresence>
 
               {/* Action Buttons */}
-              <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-2">
+              <div className="pt-3 border-t border-[var(--pms-border)] space-y-2">
                 <button
                   onClick={handleDownloadPdf}
                   disabled={isProcessing}
-                  className="w-full flex items-center justify-center gap-2 py-3.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-sm shadow-md transition disabled:opacity-50"
+                  className="pms-btn-primary w-full flex items-center justify-center gap-2 py-3.5 px-4 rounded-xl font-bold text-sm transition disabled:opacity-50 cursor-pointer"
                 >
-                  <Download className="w-4 h-4" /> Download Cleaned A4 PDF ({pages.length} pages)
+                  <Download className="w-4 h-4" /> Download Cleaned A4 PDF (<AnimatedNumber value={pages.length} /> pages)
                 </button>
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     onClick={handleDownloadCurrentJpg}
-                    className="flex items-center justify-center gap-1.5 py-2.5 px-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-xl font-semibold text-xs transition"
+                    className="flex items-center justify-center gap-1.5 py-2.5 px-3 bg-[var(--pms-white)] border border-[var(--pms-border)] hover:border-[var(--pms-border-strong)] text-[var(--pms-ink)] rounded-xl font-semibold text-xs transition cursor-pointer"
                   >
                     <Download className="w-3.5 h-3.5" /> Page {activePageIndex + 1} JPG
                   </button>
                   <button
                     onClick={() => setShowQrModal(true)}
-                    className="flex items-center justify-center gap-1.5 py-2.5 px-3 bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 hover:bg-blue-100 rounded-xl font-semibold text-xs transition"
+                    className="flex items-center justify-center gap-1.5 py-2.5 px-3 border border-[var(--pms-border)] text-[var(--pms-ink)] rounded-xl font-semibold text-xs transition cursor-pointer hover:opacity-90"
+                    style={{ background: 'var(--pms-soft-blue)' }}
                   >
-                    <Smartphone className="w-3.5 h-3.5" /> Send to Phone
+                    <Smartphone className="w-3.5 h-3.5 text-[var(--pms-blue)]" /> Send to Phone
                   </button>
                 </div>
               </div>
-            </div>
+            </motion.div>
 
             {/* Right Live Preview */}
-            <div className="lg:col-span-8 bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col items-center">
-              <div className="w-full flex items-center justify-between mb-4">
-                <span className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+            <motion.div
+              initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.06 }}
+              className="lg:col-span-8 pms-glass-panel p-6 rounded-3xl flex flex-col items-center relative overflow-hidden"
+            >
+              <PearlScanOverlay active={isProcessing} label="Bleaching paper & assembling A4 PDF..." />
+
+              <div className="w-full flex items-center justify-between mb-4 flex-wrap gap-2">
+                <span className="text-xs font-bold uppercase tracking-wider text-[var(--pms-muted)] flex items-center gap-1.5">
                   <Eye className="w-4 h-4 text-emerald-500" /> Cleaned Photocopy Preview
                 </span>
-                <span className="text-xs font-semibold px-2.5 py-1 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 rounded-lg">
+                <span
+                  className="text-xs font-semibold px-2.5 py-1 text-[var(--pms-ink)] rounded-full border border-[var(--pms-border)]"
+                  style={{ background: 'var(--pms-soft-mint)' }}
+                >
                   100% White Paper Bleached
                 </span>
               </div>
 
               {activePage?.cleanedDataUrl ? (
-                <div className="w-full max-h-[640px] overflow-auto flex items-center justify-center p-4 bg-slate-100 dark:bg-slate-950 rounded-2xl border border-slate-200 dark:border-slate-800">
+                <div className="w-full max-h-[640px] overflow-auto flex items-center justify-center p-4 pms-paper-grid rounded-2xl border border-[var(--pms-border)]">
                   <img
                     src={activePage.cleanedDataUrl}
                     alt={`Cleaned Document Page ${activePageIndex + 1}`}
-                    className="max-h-[580px] w-auto object-contain rounded shadow-lg border border-slate-300 dark:border-slate-700"
+                    className="max-h-[580px] w-auto object-contain rounded bg-white shadow-lg border border-[var(--pms-border-strong)]"
                   />
                 </div>
               ) : (
-                <div className="w-full h-96 flex items-center justify-center text-slate-400 text-xs">
+                <div className="w-full h-96 flex items-center justify-center text-[var(--pms-muted)] text-xs">
                   Cleaning document background...
                 </div>
               )}
-            </div>
+            </motion.div>
           </div>
         )}
 
@@ -547,6 +580,6 @@ export default function XeroxCleaner() {
           fileName="clean-xerox.pdf"
         />
       </div>
-    </div>
+    </ToolWorkspaceShell>
   );
 }

@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { Download, FileText, CheckCircle2, Eye, Loader2, Sparkles, Tag, Archive, Search, FileEdit, Trash2, ArrowRight } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { motion, useReducedMotion } from 'motion/react';
+import { Loader2, Tag, Archive, Trash2, Download } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
 import '../lib/pdfWorker';
 import JSZip from 'jszip';
@@ -8,6 +9,9 @@ import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
 import { useToast } from '../components/Toast';
+import { useAutoRevokeUrl } from '../lib/blobUrl';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { AnimatedNumber, PearlScanOverlay, PearlStageSwitch } from '../components/pearl/PearlMotion';
 
 interface FileItem {
   id: string;
@@ -32,19 +36,15 @@ export default function RenamePDF() {
   const [files, setFiles] = useState<FileItem[]>([]);
   const [busy, setBusy] = useState(false);
   const [namingPattern, setNamingPattern] = useState<string>('{text}_{orig}');
-  const [customPrefix, setCustomPrefix] = useState<string>('');
+  const [customPrefix] = useState<string>('');
   const [matchMode, setMatchMode] = useState<'invoice' | 'date' | 'firstLine' | 'customRegex'>('firstLine');
   const [customRegex, setCustomRegex] = useState<string>('INV-[0-9]+');
 
   const [zipUrl, setZipUrl] = useState<string | null>(null);
 
   const toast = useToast();
-
-  useEffect(() => {
-    return () => {
-      if (zipUrl) URL.revokeObjectURL(zipUrl);
-    };
-  }, [zipUrl]);
+  const prefersReduced = useReducedMotion();
+  useAutoRevokeUrl(zipUrl);
 
   const handleDrop = async (acceptedFiles: File[]) => {
     if (!acceptedFiles.length) return;
@@ -115,7 +115,7 @@ export default function RenamePDF() {
 
             item.extractedText = matched;
             item.status = 'extracted';
-          } catch (e) {
+          } catch {
             item.status = 'error';
             item.extractedText = 'ErrorReading';
           }
@@ -185,29 +185,37 @@ export default function RenamePDF() {
       a.download = `renamed_documents_${Date.now()}.zip`;
       a.click();
       toast.success(`Successfully downloaded ${files.length} renamed documents as ZIP!`);
-    } catch (e) {
+    } catch {
       toast.error('Error creating ZIP bundle');
     } finally {
       setBusy(false);
     }
   };
 
-  return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 py-12 px-4 transition-colors">
-      <div className="max-w-5xl mx-auto">
-        {/* Header */}
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-400 text-sm font-semibold mb-3">
-            <Tag className="w-4 h-4" /> Batch Smart Auto-Renamer
-          </div>
-          <h1 className="text-3xl md:text-5xl font-extrabold text-slate-900 dark:text-white tracking-tight mb-3">
-            Rename PDF by Text Content
-          </h1>
-          <p className="text-base md:text-lg text-slate-600 dark:text-slate-400 max-w-2xl mx-auto">
-            Batch rename PDFs using text found on page 1 — invoice numbers, receipt codes, customer names, or dates.
-          </p>
-        </div>
+  const matchModes = [
+    { id: 'firstLine', label: 'Title / First Line' },
+    { id: 'invoice', label: 'Invoice / Order Number' },
+    { id: 'date', label: 'Date on Document' },
+    { id: 'customRegex', label: 'Custom Pattern (Regex)' },
+  ] as const;
 
+  const templatePresets = [
+    { pattern: '{text}_{orig}', label: '[Text]_[Original]' },
+    { pattern: '{text}', label: '[Text Only]' },
+    { pattern: 'Invoice_{text}', label: 'Invoice_[Text]' },
+  ];
+
+  return (
+    <ToolWorkspaceShell
+      title="Rename PDF by Text Content"
+      subtitle="Batch rename PDFs using text found on page 1 — invoice numbers, receipt codes, customer names, or dates."
+      categoryLabel="Batch Smart Auto-Renamer"
+      icon={Tag}
+      microVariant="edit"
+      tone="violet"
+      trustNote="100% browser-only Page 1 extraction · Instant ZIP export · Zero server uploads"
+    >
+      <PearlStageSwitch stageKey={files.length === 0 ? 'upload' : 'workspace'}>
         {files.length === 0 ? (
           <div className="max-w-2xl mx-auto">
             <FileDropzone
@@ -219,21 +227,23 @@ export default function RenamePDF() {
             />
           </div>
         ) : (
-          <div className="space-y-8">
+          <div className="space-y-6">
             {/* Renaming Settings Bar */}
-            <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800 p-6">
-              <div className="flex flex-wrap items-center justify-between gap-4 pb-6 border-b border-slate-100 dark:border-slate-800">
+            <div className="relative pms-glass-panel rounded-3xl p-6 overflow-hidden">
+              <PearlScanOverlay active={busy} label="Scanning Page 1 & preparing ZIP archive…" />
+
+              <div className="flex flex-wrap items-center justify-between gap-4 pb-5 border-b border-[var(--pms-border)]">
                 <div>
-                  <h3 className="font-bold text-slate-800 dark:text-slate-200">
-                    {files.length} Document{files.length > 1 ? 's' : ''} Loaded
+                  <h3 className="font-bold text-slate-900 dark:text-white">
+                    <AnimatedNumber value={files.length} /> Document{files.length > 1 ? 's' : ''} Loaded
                   </h3>
-                  <p className="text-xs text-slate-500">
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
                     Configure extraction rule below to auto-generate filenames
                   </p>
                 </div>
 
                 <div className="flex gap-2">
-                  <label className="px-3.5 py-1.5 text-xs font-semibold text-indigo-600 bg-indigo-50 dark:bg-indigo-950/40 rounded-lg hover:bg-indigo-100 cursor-pointer">
+                  <label className="px-3.5 py-1.5 text-xs font-semibold text-[var(--pms-violet)] bg-[var(--pms-soft-lavender)] border border-[var(--pms-border)] rounded-xl hover:brightness-95 cursor-pointer transition-all">
                     + Add More Files
                     <input
                       type="file"
@@ -246,7 +256,7 @@ export default function RenamePDF() {
 
                   <button
                     onClick={() => setFiles([])}
-                    className="px-3.5 py-1.5 text-xs font-semibold text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                    className="px-3.5 py-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:text-rose-600 hover:bg-[var(--pms-soft-rose)] rounded-xl transition-colors cursor-pointer"
                   >
                     Clear All
                   </button>
@@ -254,79 +264,51 @@ export default function RenamePDF() {
               </div>
 
               {/* Extraction Rules */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-5">
                 {/* 1. Content Extraction Mode */}
                 <div>
-                  <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">
+                  <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2.5">
                     What text to extract from Page 1?
                   </label>
                   <div className="grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setMatchMode('firstLine');
-                        reextractAll();
-                      }}
-                      className={`p-2.5 rounded-xl border text-xs font-bold transition-all text-left ${
-                        matchMode === 'firstLine'
-                          ? 'border-indigo-600 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-400'
-                          : 'border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300'
-                      }`}
-                    >
-                      Title / First Line
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setMatchMode('invoice');
-                        reextractAll();
-                      }}
-                      className={`p-2.5 rounded-xl border text-xs font-bold transition-all text-left ${
-                        matchMode === 'invoice'
-                          ? 'border-indigo-600 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-400'
-                          : 'border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300'
-                      }`}
-                    >
-                      Invoice / Order Number
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setMatchMode('date');
-                        reextractAll();
-                      }}
-                      className={`p-2.5 rounded-xl border text-xs font-bold transition-all text-left ${
-                        matchMode === 'date'
-                          ? 'border-indigo-600 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-400'
-                          : 'border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300'
-                      }`}
-                    >
-                      Date on Document
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setMatchMode('customRegex');
-                        reextractAll();
-                      }}
-                      className={`p-2.5 rounded-xl border text-xs font-bold transition-all text-left ${
-                        matchMode === 'customRegex'
-                          ? 'border-indigo-600 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-400'
-                          : 'border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300'
-                      }`}
-                    >
-                      Custom Pattern (Regex)
-                    </button>
+                    {matchModes.map((m) => {
+                      const active = matchMode === m.id;
+                      return (
+                        <button
+                          key={m.id}
+                          type="button"
+                          onClick={() => {
+                            setMatchMode(m.id);
+                            reextractAll();
+                          }}
+                          className="relative p-2.5 rounded-xl border text-xs font-bold text-left transition-colors cursor-pointer overflow-hidden"
+                          style={{
+                            borderColor: active ? 'var(--pms-violet)' : 'var(--pms-border)',
+                            backgroundColor: active ? 'var(--pms-soft-lavender)' : 'var(--pms-white)',
+                            color: active ? 'var(--pms-violet)' : 'var(--pms-ink)',
+                          }}
+                        >
+                          {active && (
+                            <motion.span
+                              layoutId="rename-match-mode"
+                              transition={{ type: 'spring', stiffness: 420, damping: 30 }}
+                              className="absolute inset-0 rounded-xl ring-2 ring-violet-500/30 pointer-events-none"
+                            />
+                          )}
+                          <span className="relative z-10">{m.label}</span>
+                        </button>
+                      );
+                    })}
                   </div>
 
                   {matchMode === 'customRegex' && (
-                    <div className="mt-2">
+                    <div className="mt-2.5">
                       <input
                         type="text"
                         value={customRegex}
                         onChange={(e) => setCustomRegex(e.target.value)}
                         placeholder="e.g. INV-[0-9]+ or [A-Z]{3}-\d{4}"
-                        className="w-full px-3 py-1.5 text-xs font-mono border border-slate-300 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                        className="w-full px-3 py-2 text-xs font-mono border border-[var(--pms-border)] rounded-xl bg-white/90 dark:bg-slate-900/80 text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-violet-400"
                       />
                     </div>
                   )}
@@ -334,68 +316,64 @@ export default function RenamePDF() {
 
                 {/* 2. Naming Format Template */}
                 <div>
-                  <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">
+                  <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2.5">
                     New Filename Template
                   </label>
-                  <div className="grid grid-cols-3 gap-2 mb-2">
-                    <button
-                      type="button"
-                      onClick={() => setNamingPattern('{text}_{orig}')}
-                      className={`p-2 rounded-lg border text-[11px] font-bold ${
-                        namingPattern === '{text}_{orig}'
-                          ? 'border-indigo-600 bg-indigo-50 text-indigo-700'
-                          : 'border-slate-200 text-slate-700'
-                      }`}
-                    >
-                      [Text]_[Original]
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setNamingPattern('{text}')}
-                      className={`p-2 rounded-lg border text-[11px] font-bold ${
-                        namingPattern === '{text}'
-                          ? 'border-indigo-600 bg-indigo-50 text-indigo-700'
-                          : 'border-slate-200 text-slate-700'
-                      }`}
-                    >
-                      [Text Only]
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setNamingPattern('Invoice_{text}')}
-                      className={`p-2 rounded-lg border text-[11px] font-bold ${
-                        namingPattern === 'Invoice_{text}'
-                          ? 'border-indigo-600 bg-indigo-50 text-indigo-700'
-                          : 'border-slate-200 text-slate-700'
-                      }`}
-                    >
-                      Invoice_[Text]
-                    </button>
+                  <div className="grid grid-cols-3 gap-2 mb-2.5">
+                    {templatePresets.map((tp) => {
+                      const active = namingPattern === tp.pattern;
+                      return (
+                        <button
+                          key={tp.pattern}
+                          type="button"
+                          onClick={() => setNamingPattern(tp.pattern)}
+                          className="relative p-2 rounded-xl border text-[11px] font-bold transition-colors cursor-pointer overflow-hidden"
+                          style={{
+                            borderColor: active ? 'var(--pms-blue)' : 'var(--pms-border)',
+                            backgroundColor: active ? 'var(--pms-soft-blue)' : 'var(--pms-white)',
+                            color: active ? 'var(--pms-blue)' : 'var(--pms-ink)',
+                          }}
+                        >
+                          {active && (
+                            <motion.span
+                              layoutId="rename-template-pill"
+                              transition={{ type: 'spring', stiffness: 420, damping: 30 }}
+                              className="absolute inset-0 rounded-xl ring-2 ring-sky-500/30 pointer-events-none"
+                            />
+                          )}
+                          <span className="relative z-10">{tp.label}</span>
+                        </button>
+                      );
+                    })}
                   </div>
                   <input
                     type="text"
                     value={namingPattern}
                     onChange={(e) => setNamingPattern(e.target.value)}
-                    className="w-full px-3 py-1.5 text-xs font-mono border border-slate-300 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                    className="w-full px-3 py-2 text-xs font-mono border border-[var(--pms-border)] rounded-xl bg-white/90 dark:bg-slate-900/80 text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-violet-400"
                   />
-                  <p className="text-[11px] text-slate-400 mt-1">Available variables: {'{text}'}, {'{orig}'}</p>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+                    Available variables: {'{text}'}, {'{orig}'}
+                  </p>
                 </div>
               </div>
 
               {/* Action Buttons */}
-              <div className="mt-6 pt-6 border-t border-slate-100 dark:border-slate-800 flex justify-between items-center">
+              <div className="mt-6 pt-5 border-t border-[var(--pms-border)] flex flex-wrap justify-between items-center gap-3">
                 <button
                   type="button"
                   onClick={reextractAll}
-                  className="text-xs text-indigo-600 font-semibold hover:underline"
+                  className="text-xs text-[var(--pms-violet)] font-bold hover:underline cursor-pointer"
                 >
                   ↻ Re-scan All Files
                 </button>
 
-                <button
+                <motion.button
+                  whileHover={prefersReduced || busy ? undefined : { scale: 1.015 }}
+                  whileTap={prefersReduced || busy ? undefined : { scale: 0.985 }}
                   onClick={downloadAllZip}
                   disabled={busy}
-                  className="inline-flex items-center gap-2 px-6 py-2.5 rounded-xl font-bold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 transition-colors shadow-sm"
+                  className="pms-btn-primary inline-flex items-center gap-2 px-6 py-3 rounded-2xl font-bold text-xs sm:text-sm disabled:opacity-50 cursor-pointer"
                 >
                   {busy ? (
                     <>
@@ -406,21 +384,24 @@ export default function RenamePDF() {
                       <Archive className="w-4 h-4" /> Download All as Renamed ZIP
                     </>
                   )}
-                </button>
+                </motion.button>
               </div>
             </div>
 
             {/* Live Table Preview */}
-            <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800 overflow-hidden">
-              <div className="p-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/40">
-                <h4 className="text-sm font-bold text-slate-800 dark:text-slate-200">
+            <div className="pms-glass-panel rounded-3xl overflow-hidden">
+              <div className="p-4 border-b border-[var(--pms-border)] bg-white/50 dark:bg-slate-800/40 flex items-center justify-between">
+                <h4 className="text-sm font-bold text-slate-900 dark:text-white">
                   Renaming Live Preview
                 </h4>
+                <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-[var(--pms-soft-mint)] text-emerald-700 dark:text-emerald-300">
+                  {files.filter((f) => f.status === 'extracted').length}/{files.length} scanned
+                </span>
               </div>
 
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs">
-                  <thead className="bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 uppercase tracking-wider font-semibold">
+                  <thead className="bg-slate-100/80 dark:bg-slate-800/70 text-slate-600 dark:text-slate-300 uppercase tracking-wider font-semibold">
                     <tr>
                       <th className="py-3 px-4">Original Filename</th>
                       <th className="py-3 px-4">Extracted Text</th>
@@ -428,11 +409,11 @@ export default function RenamePDF() {
                       <th className="py-3 px-4 text-right">Action</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                  <tbody className="divide-y divide-[var(--pms-border)]">
                     {files.map((item) => {
                       const newName = computeNewName(item);
                       return (
-                        <tr key={item.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                        <tr key={item.id} className="hover:bg-white/60 dark:hover:bg-slate-800/40 transition-colors">
                           <td className="py-3 px-4 font-mono text-slate-600 dark:text-slate-400 max-w-xs truncate">
                             {item.originalName}
                           </td>
@@ -442,7 +423,7 @@ export default function RenamePDF() {
                                 <Loader2 className="w-3 h-3 animate-spin" /> Reading...
                               </span>
                             ) : (
-                              <span className="font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950 px-2 py-0.5 rounded font-mono">
+                              <span className="font-bold text-[var(--pms-violet)] bg-[var(--pms-soft-lavender)] px-2.5 py-0.5 rounded-lg font-mono">
                                 {item.extractedText || 'None'}
                               </span>
                             )}
@@ -450,17 +431,18 @@ export default function RenamePDF() {
                           <td className="py-3 px-4 font-mono font-bold text-slate-900 dark:text-white max-w-xs truncate">
                             {newName}
                           </td>
-                          <td className="py-3 px-4 text-right space-x-2">
+                          <td className="py-3 px-4 text-right space-x-2 whitespace-nowrap">
                             <button
                               onClick={() => downloadSingle(item)}
                               title="Download this renamed file"
-                              className="px-2.5 py-1 rounded bg-slate-100 dark:bg-slate-800 hover:bg-indigo-50 hover:text-indigo-600 text-slate-700 dark:text-slate-300 font-semibold"
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white/80 dark:bg-slate-800 border border-[var(--pms-border)] hover:border-violet-400 hover:text-[var(--pms-violet)] text-slate-700 dark:text-slate-300 font-semibold cursor-pointer transition-colors"
                             >
-                              Download
+                              <Download className="w-3 h-3" /> Download
                             </button>
                             <button
                               onClick={() => removeFile(item.id)}
-                              className="p-1 rounded text-slate-400 hover:text-red-500"
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-rose-500 cursor-pointer transition-colors"
+                              aria-label="Remove file"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>
@@ -474,23 +456,23 @@ export default function RenamePDF() {
             </div>
           </div>
         )}
+      </PearlStageSwitch>
 
-        <ToolSEOSection
-          toolName="Rename PDF by Text Content"
-          headline="Batch Auto-Renamer"
-          description="Batch rename PDF files automatically based on text found inside each file. Match invoice numbers, employee IDs, dates, or titles."
-          faqs={[
-            {
-              q: 'Can I rename hundreds of invoices at once?',
-              a: 'Yes, you can drop 50 or more PDF files and our batch engine reads Page 1 of each document in your browser to extract invoice IDs and rename them.',
-            },
-            {
-              q: 'How does regex matching work?',
-              a: 'Enter any valid JavaScript regular expression like "INV-[0-9]+" or "[A-Z]{3}-[0-9]{4}" to target specific text structures.',
-            },
-          ]}
-        />
-      </div>
-    </div>
+      <ToolSEOSection
+        toolName="Rename PDF by Text Content"
+        headline="Batch Auto-Renamer"
+        description="Batch rename PDF files automatically based on text found inside each file. Match invoice numbers, employee IDs, dates, or titles."
+        faqs={[
+          {
+            q: 'Can I rename hundreds of invoices at once?',
+            a: 'Yes, you can drop 50 or more PDF files and our batch engine reads Page 1 of each document in your browser to extract invoice IDs and rename them.',
+          },
+          {
+            q: 'How does regex matching work?',
+            a: 'Enter any valid JavaScript regular expression like "INV-[0-9]+" or "[A-Z]{3}-[0-9]{4}" to target specific text structures.',
+          },
+        ]}
+      />
+    </ToolWorkspaceShell>
   );
 }

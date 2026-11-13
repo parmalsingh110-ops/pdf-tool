@@ -1,27 +1,27 @@
-import React, { useState, useRef, useEffect } from 'react';
+import { useState, useEffect } from 'react';
+import { motion, useReducedMotion } from 'motion/react';
 import {
-  Upload,
   Download,
-  Printer,
   Presentation,
-  FileText,
   Sliders,
-  CheckCircle2,
   Smartphone,
   Eye,
-  Layers,
   ChevronLeft,
   ChevronRight,
-  FileCheck2,
+  Loader2,
 } from 'lucide-react';
 import { PDFDocument } from 'pdf-lib';
 import * as pdfjsLib from 'pdfjs-dist';
 import '../lib/pdfWorker';
 import { useSEO } from '../hooks/useSEO';
 import { usePageSEO } from '../lib/usePageSEO';
+import FileDropzone from '../components/FileDropzone';
 import ToolSEOSection from '../components/ToolSEOSection';
 import ShareQrModal from '../components/ShareQrModal';
 import { dataUrlToBytes, downloadBlob } from '../lib/utils';
+import { toArrayBufferBytes } from '../lib/blobUrl';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { AnimatedNumber, PearlScanOverlay } from '../components/pearl/PearlMotion';
 
 type HandoutLayout = '3_slides_notes' | '2_slides' | '4_slides' | '6_slides' | '9_slides';
 
@@ -50,10 +50,10 @@ export default function SlideHandouts() {
   const [totalPagesGenerated, setTotalPagesGenerated] = useState(0);
   const [showQrModal, setShowQrModal] = useState(false);
 
+  const prefersReduced = useReducedMotion();
+
   // Render all slide pages from PDF
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selected = e.target.files?.[0];
-    if (!selected) return;
+  const loadSlidePdf = async (selected: File) => {
     setFile(selected);
     setIsProcessing(true);
 
@@ -142,7 +142,6 @@ export default function SlideHandouts() {
     if (layout === '3_slides_notes') {
       // 3 slides stacked on the left, lined ruled notes on the right
       const slideW = 760;
-      const slideH = 570; // 4:3 or 16:9 thumb
       const startY = 140;
       const spacing = 720;
 
@@ -265,8 +264,8 @@ export default function SlideHandouts() {
         page.drawImage(jpgImg, { x: 0, y: 0, width: 595.28, height: 841.89 });
       }
 
-      const outBytes = await pdfDoc.save();
-      const blob = new Blob([outBytes as any], { type: 'application/pdf' });
+      const outBytes = toArrayBufferBytes(await pdfDoc.save());
+      const blob = new Blob([outBytes], { type: 'application/pdf' });
       downloadBlob(blob, `slides-handout-${Date.now()}.pdf`);
     } catch (err) {
       console.error('Error exporting handout PDF:', err);
@@ -275,59 +274,85 @@ export default function SlideHandouts() {
     }
   };
 
-  return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 py-10 px-4 sm:px-6">
-      <div className="max-w-6xl mx-auto space-y-8">
-        {/* Header */}
-        <div className="text-center space-y-3">
-          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-violet-500/10 text-violet-600 dark:text-violet-400 text-xs font-bold uppercase tracking-wider">
-            <Presentation className="w-4 h-4" /> Student Paper Saver Special
-          </div>
-          <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight">
-            Lecture Slides Handout Maker
-          </h1>
-          <p className="text-sm sm:text-base text-slate-500 dark:text-slate-400 max-w-2xl mx-auto">
-            Convert PPT and slide PDFs into compact print-ready handouts.
-            Print 3 slides per page with ruled lecture note lines, or 4 to 6 slides to save 75% paper!
-          </p>
-        </div>
+  const handoutOptions: { id: HandoutLayout; title: string; desc: string }[] = [
+    {
+      id: '3_slides_notes',
+      title: '3 Slides with Note Lines (Recommended)',
+      desc: 'Slide on left + ruled writing lines on right (Classic Harvard lecture format)',
+    },
+    {
+      id: '4_slides',
+      title: '4 Slides per Page (2×2 Grid)',
+      desc: 'Optimal readability while saving 75% paper costs',
+    },
+    {
+      id: '6_slides',
+      title: '6 Slides per Page (3×2 Grid)',
+      desc: 'Maximum paper efficiency for quick exam revision',
+    },
+    {
+      id: '2_slides',
+      title: '2 Slides per Page (Large)',
+      desc: 'Extra large diagrams and detailed code slides',
+    },
+    {
+      id: '9_slides',
+      title: '9 Slides per Page (3×3 Ultra Grid)',
+      desc: 'Compact thumbnail overview for slide decks and quick indexing',
+    },
+  ];
 
+  return (
+    <ToolWorkspaceShell
+      title="Lecture Slides Handout Maker"
+      subtitle="Convert PPT and slide PDFs into compact print-ready handouts. Print 3 slides per page with ruled lecture note lines, or 4 to 6 slides to save 75% paper!"
+      categoryLabel="Student Paper Saver Special"
+      icon={Presentation}
+      microVariant="split"
+      tone="violet"
+      trustNote="100% browser-side A4 handout builder · Save up to 80% paper"
+    >
+      <div className="space-y-8">
         {/* Upload State */}
         {slideCanvases.length === 0 ? (
-          <div className="max-w-2xl mx-auto">
-            <label className="flex flex-col items-center justify-center p-12 border-2 border-dashed border-slate-300 dark:border-slate-700 hover:border-violet-500 rounded-3xl cursor-pointer bg-white dark:bg-slate-900 transition-all shadow-sm group">
-              <input
-                type="file"
-                accept=".pdf"
-                onChange={handleFileUpload}
-                className="hidden"
-              />
-              <div className="w-16 h-16 rounded-2xl bg-violet-50 dark:bg-violet-950/50 text-violet-600 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-                <Upload className="w-8 h-8" />
-              </div>
-              <span className="text-base font-bold text-slate-900 dark:text-white mb-1">
-                Drop Slide Deck or PPT PDF Here
-              </span>
-              <span className="text-xs text-slate-400 text-center max-w-xs">
-                Supports presentation PDFs exported from PowerPoint, Google Slides, Canva, Keynote, or PDF slides.
-              </span>
-            </label>
-          </div>
+          <motion.div
+            initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.28 }}
+            className="relative max-w-2xl mx-auto rounded-[1.75rem] overflow-hidden"
+          >
+            <PearlScanOverlay active={isProcessing} label={file ? `Rendering ${file.name}…` : 'Rendering slide deck…'} />
+            <FileDropzone
+              onDrop={(files) => files[0] && loadSlidePdf(files[0])}
+              accept={{ 'application/pdf': ['.pdf'] }}
+              multiple={false}
+              title="Drop Slide Deck or PPT PDF Here"
+              subtitle="Supports presentation PDFs exported from PowerPoint, Google Slides, Canva, Keynote, or PDF slides."
+            />
+          </motion.div>
         ) : (
           /* Editor Layout */
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+          <motion.div
+            initial={prefersReduced ? false : { opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.28 }}
+            className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start"
+          >
             {/* Left Controls */}
-            <div className="lg:col-span-5 space-y-5 bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm">
-              <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
-                <span className="text-sm font-bold flex items-center gap-2">
-                  <Sliders className="w-4 h-4 text-violet-500" /> Handout Layout
+            <div className="relative lg:col-span-5 space-y-5 pms-glass-panel p-6 rounded-3xl overflow-hidden">
+              <PearlScanOverlay active={isProcessing} label="Building A4 handout PDF…" />
+
+              <div className="flex items-center justify-between pb-3 border-b border-[var(--pms-border)]">
+                <span className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                  <Sliders className="w-4 h-4 text-[var(--pms-violet)]" /> Handout Layout
                 </span>
                 <button
                   onClick={() => {
                     setFile(null);
                     setSlideCanvases([]);
+                    setPreviewDataUrl(null);
                   }}
-                  className="text-xs text-rose-500 hover:text-rose-600 font-semibold"
+                  className="text-xs text-[var(--pms-rose)] hover:underline font-semibold cursor-pointer"
                 >
                   Change Slides
                 </button>
@@ -335,53 +360,39 @@ export default function SlideHandouts() {
 
               {/* Layout Choices */}
               <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">
-                  Handout Format & Grid
+                <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2">
+                  Handout Format &amp; Grid
                 </label>
                 <div className="grid grid-cols-1 gap-2 text-xs">
-                  {[
-                    {
-                      id: '3_slides_notes',
-                      title: '3 Slides with Note Lines (Recommended)',
-                      desc: 'Slide on left + ruled writing lines on right (Classic Harvard lecture format)',
-                    },
-                    {
-                      id: '4_slides',
-                      title: '4 Slides per Page (2×2 Grid)',
-                      desc: 'Optimal readability while saving 75% paper costs',
-                    },
-                    {
-                      id: '6_slides',
-                      title: '6 Slides per Page (3×2 Grid)',
-                      desc: 'Maximum paper efficiency for quick exam revision',
-                    },
-                    {
-                      id: '2_slides',
-                      title: '2 Slides per Page (Large)',
-                      desc: 'Extra large diagrams and detailed code slides',
-                    },
-                    {
-                      id: '9_slides',
-                      title: '9 Slides per Page (3×3 Ultra Grid)',
-                      desc: 'Compact thumbnail overview for slide decks and quick indexing',
-                    },
-                  ].map((opt) => (
-                    <button
-                      key={opt.id}
-                      onClick={() => {
-                        setLayout(opt.id as HandoutLayout);
-                        setPreviewPageIdx(0);
-                      }}
-                      className={`p-3 rounded-2xl border text-left transition ${
-                        layout === opt.id
-                          ? 'border-violet-500 bg-violet-50/50 dark:bg-violet-950/40 text-violet-900 dark:text-violet-300'
-                          : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800'
-                      }`}
-                    >
-                      <div className="font-bold">{opt.title}</div>
-                      <div className="text-[11px] text-slate-400 mt-0.5">{opt.desc}</div>
-                    </button>
-                  ))}
+                  {handoutOptions.map((opt) => {
+                    const active = layout === opt.id;
+                    return (
+                      <button
+                        key={opt.id}
+                        onClick={() => {
+                          setLayout(opt.id);
+                          setPreviewPageIdx(0);
+                        }}
+                        className="relative p-3 rounded-2xl border text-left transition-colors cursor-pointer overflow-hidden"
+                        style={{
+                          borderColor: active ? 'var(--pms-violet)' : 'var(--pms-border)',
+                          backgroundColor: active ? 'var(--pms-soft-lavender)' : 'var(--pms-white)',
+                        }}
+                      >
+                        {active && (
+                          <motion.span
+                            layoutId="handout-layout-pill"
+                            transition={{ type: 'spring', stiffness: 420, damping: 32 }}
+                            className="absolute inset-0 rounded-2xl ring-2 ring-violet-500/30 pointer-events-none"
+                          />
+                        )}
+                        <div className="relative z-10">
+                          <div className="font-bold text-slate-900 dark:text-white">{opt.title}</div>
+                          <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">{opt.desc}</div>
+                        </div>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 
@@ -394,7 +405,7 @@ export default function SlideHandouts() {
                   type="text"
                   value={headerTitle}
                   onChange={(e) => setHeaderTitle(e.target.value)}
-                  className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                  className="w-full px-3 py-2 text-xs rounded-xl border border-[var(--pms-border)] bg-white/90 dark:bg-slate-800/80 text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-violet-400"
                 />
               </div>
 
@@ -407,7 +418,7 @@ export default function SlideHandouts() {
                     onChange={(e) => setShowSlideNumbers(e.target.checked)}
                     className="w-4 h-4 rounded text-violet-600 accent-violet-600"
                   />
-                  <span>Show slide numbering ("Slide 1, Slide 2...")</span>
+                  <span>Show slide numbering (&quot;Slide 1, Slide 2...&quot;)</span>
                 </label>
                 <label className="flex items-center gap-2.5 text-xs text-slate-700 dark:text-slate-300 cursor-pointer">
                   <input
@@ -422,19 +433,21 @@ export default function SlideHandouts() {
 
               {/* Page Navigator */}
               {totalPagesGenerated > 1 && (
-                <div className="flex items-center justify-between p-3 bg-slate-100 dark:bg-slate-800 rounded-xl text-xs font-semibold">
+                <div className="flex items-center justify-between p-3 bg-white/80 dark:bg-slate-800/70 border border-[var(--pms-border)] rounded-2xl text-xs font-semibold">
                   <button
                     onClick={() => setPreviewPageIdx(Math.max(0, previewPageIdx - 1))}
                     disabled={previewPageIdx === 0}
-                    className="p-1 rounded hover:bg-white dark:hover:bg-slate-700 disabled:opacity-30"
+                    className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-30 cursor-pointer"
                   >
                     <ChevronLeft className="w-4 h-4" />
                   </button>
-                  <span>Handout Page {previewPageIdx + 1} of {totalPagesGenerated}</span>
+                  <span>
+                    Handout Page {previewPageIdx + 1} of {totalPagesGenerated}
+                  </span>
                   <button
                     onClick={() => setPreviewPageIdx(Math.min(totalPagesGenerated - 1, previewPageIdx + 1))}
                     disabled={previewPageIdx === totalPagesGenerated - 1}
-                    className="p-1 rounded hover:bg-white dark:hover:bg-slate-700 disabled:opacity-30"
+                    className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-30 cursor-pointer"
                   >
                     <ChevronRight className="w-4 h-4" />
                   </button>
@@ -442,17 +455,20 @@ export default function SlideHandouts() {
               )}
 
               {/* Export Buttons */}
-              <div className="pt-3 border-t border-slate-100 dark:border-slate-800 space-y-2">
-                <button
+              <div className="pt-3 border-t border-[var(--pms-border)] space-y-2.5">
+                <motion.button
+                  whileHover={prefersReduced || isProcessing ? undefined : { scale: 1.01 }}
+                  whileTap={prefersReduced || isProcessing ? undefined : { scale: 0.985 }}
                   onClick={handleDownloadPdf}
                   disabled={isProcessing}
-                  className="w-full flex items-center justify-center gap-2 py-3.5 px-4 bg-violet-600 hover:bg-violet-700 text-white rounded-xl font-bold text-sm shadow-md transition disabled:opacity-50"
+                  className="w-full pms-btn-primary flex items-center justify-center gap-2 py-3.5 px-4 rounded-2xl font-bold text-sm disabled:opacity-50 cursor-pointer"
                 >
-                  <Download className="w-4 h-4" /> Download Complete Handouts PDF ({totalPagesGenerated} A4 Pages)
-                </button>
+                  {isProcessing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                  Download Complete Handouts PDF ({totalPagesGenerated} A4 Pages)
+                </motion.button>
                 <button
                   onClick={() => setShowQrModal(true)}
-                  className="w-full flex items-center justify-center gap-1.5 py-2 px-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-xl font-semibold text-xs transition"
+                  className="w-full flex items-center justify-center gap-1.5 py-2.5 px-3 bg-[var(--pms-soft-lavender)] hover:brightness-95 text-[var(--pms-violet)] border border-[var(--pms-border)] rounded-xl font-semibold text-xs transition cursor-pointer"
                 >
                   <Smartphone className="w-3.5 h-3.5" /> Send to Mobile Phone
                 </button>
@@ -460,22 +476,22 @@ export default function SlideHandouts() {
             </div>
 
             {/* Right Live Preview */}
-            <div className="lg:col-span-7 bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col items-center">
+            <div className="lg:col-span-7 pms-glass-panel p-6 rounded-3xl flex flex-col items-center">
               <div className="w-full flex items-center justify-between mb-4">
-                <span className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-                  <Eye className="w-4 h-4 text-violet-500" /> A4 Handout Sheet Preview
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+                  <Eye className="w-4 h-4 text-[var(--pms-violet)]" /> A4 Handout Sheet Preview
                 </span>
-                <span className="text-xs font-semibold px-2.5 py-1 bg-violet-50 dark:bg-violet-950/40 text-violet-700 dark:text-violet-400 rounded-lg">
-                  {slideCanvases.length} Total Slides
+                <span className="text-xs font-bold px-3 py-1 bg-[var(--pms-soft-lavender)] text-[var(--pms-violet)] border border-[var(--pms-border)] rounded-full">
+                  <AnimatedNumber value={slideCanvases.length} /> Total Slides
                 </span>
               </div>
 
               {previewDataUrl ? (
-                <div className="w-full max-h-[640px] overflow-auto flex items-center justify-center p-4 bg-slate-100 dark:bg-slate-950 rounded-2xl border border-slate-200 dark:border-slate-800">
+                <div className="w-full max-h-[640px] overflow-auto flex items-center justify-center p-4 bg-white dark:bg-slate-950 rounded-2xl border border-[var(--pms-border)]">
                   <img
                     src={previewDataUrl}
                     alt="Handout Sheet Preview"
-                    className="max-h-[580px] w-auto object-contain rounded shadow-lg border border-slate-300 dark:border-slate-700"
+                    className="max-h-[580px] w-auto object-contain rounded shadow-lg border border-slate-200 bg-white"
                   />
                 </div>
               ) : (
@@ -484,10 +500,9 @@ export default function SlideHandouts() {
                 </div>
               )}
             </div>
-          </div>
+          </motion.div>
         )}
 
-        {/* SEO Section */}
         <ToolSEOSection
           toolName="Lecture Slides Handout Maker"
           headline="Format PPT & Slide Decks into Compact Print Handouts with Notes"
@@ -535,7 +550,6 @@ export default function SlideHandouts() {
           ]}
         />
 
-        {/* Mobile Transfer Modal */}
         <ShareQrModal
           isOpen={showQrModal}
           onClose={() => setShowQrModal(false)}
@@ -543,6 +557,6 @@ export default function SlideHandouts() {
           fileName="slides-handout.pdf"
         />
       </div>
-    </div>
+    </ToolWorkspaceShell>
   );
 }

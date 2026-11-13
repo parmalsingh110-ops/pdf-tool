@@ -1,5 +1,6 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, type ElementType } from 'react';
 import { Link } from 'react-router-dom';
+import { motion, useReducedMotion } from 'motion/react';
 import { PDFDocument } from 'pdf-lib';
 import { Download, Eye, Scissors, FileText, CheckSquare, Square, Layers, LayoutGrid, Archive, HardDrive, Search, Sparkles } from 'lucide-react';
 import JSZip from 'jszip';
@@ -9,7 +10,9 @@ import '../lib/pdfWorker';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { useToast } from '../components/Toast';
+import { toArrayBufferBytes } from '../lib/blobUrl';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { AnimatedNumber, PearlScanOverlay, PearlStageSwitch } from '../components/pearl/PearlMotion';
 
 type SplitMode = 'all' | 'ranges' | 'selection' | 'every' | 'size' | 'keyword';
 
@@ -158,7 +161,7 @@ export default function SplitPDF() {
           const [copied] = await newPdf.copyPages(sourcePdf, [i]);
           newPdf.addPage(copied);
           const bytes = await newPdf.save();
-          const blob = new Blob([bytes as any], { type: 'application/pdf' });
+          const blob = new Blob([toArrayBufferBytes(bytes)], { type: 'application/pdf' });
           results.push({ url: URL.createObjectURL(blob), name: `page_${i + 1}.pdf`, pages: `Page ${i + 1}`, sizeLabel: formatSplitSize(blob.size) });
         }
       } else if (splitMode === 'selection') {
@@ -169,7 +172,7 @@ export default function SplitPDF() {
         const copied = await newPdf.copyPages(sourcePdf, sorted.map(p => p - 1));
         copied.forEach(p => newPdf.addPage(p));
         const bytes = await newPdf.save();
-        const blob = new Blob([bytes as any], { type: 'application/pdf' });
+        const blob = new Blob([toArrayBufferBytes(bytes)], { type: 'application/pdf' });
         const label = sorted.length === 1 ? `${sorted[0]}` : `${sorted[0]}-${sorted[sorted.length - 1]}`;
         results.push({ url: URL.createObjectURL(blob), name: `pages_${label}.pdf`, pages: `Pages: ${sorted.join(', ')}`, sizeLabel: formatSplitSize(blob.size) });
       } else if (splitMode === 'ranges') {
@@ -190,7 +193,7 @@ export default function SplitPDF() {
           const copied = await newPdf.copyPages(sourcePdf, indices);
           copied.forEach(p => newPdf.addPage(p));
           const bytes = await newPdf.save();
-          const blob = new Blob([bytes as any], { type: 'application/pdf' });
+          const blob = new Blob([toArrayBufferBytes(bytes)], { type: 'application/pdf' });
           results.push({ url: URL.createObjectURL(blob), name: `split_${start}-${end}.pdf`, pages: `Pages ${start}–${end}`, sizeLabel: formatSplitSize(blob.size) });
         }
       } else if (splitMode === 'every') {
@@ -205,7 +208,7 @@ export default function SplitPDF() {
           const copied = await newPdf.copyPages(sourcePdf, indices);
           copied.forEach(p => newPdf.addPage(p));
           const bytes = await newPdf.save();
-          const blob = new Blob([bytes as any], { type: 'application/pdf' });
+          const blob = new Blob([toArrayBufferBytes(bytes)], { type: 'application/pdf' });
           results.push({ url: URL.createObjectURL(blob), name: `part_${chunk}.pdf`, pages: `Pages ${start + 1}–${end + 1}`, sizeLabel: formatSplitSize(blob.size) });
         }
       } else if (splitMode === 'size') {
@@ -227,7 +230,7 @@ export default function SplitPDF() {
             const chunkCopied = await finalPdf.copyPages(sourcePdf, currentPages);
             chunkCopied.forEach(p => finalPdf.addPage(p));
             const finalBytes = await finalPdf.save();
-            const blob = new Blob([finalBytes as any], { type: 'application/pdf' });
+            const blob = new Blob([toArrayBufferBytes(finalBytes)], { type: 'application/pdf' });
             const pStart = currentPages[0] + 1;
             const pEnd = currentPages[currentPages.length - 1] + 1;
             const sizeLabel = (finalBytes.byteLength / 1024 / 1024).toFixed(2);
@@ -249,7 +252,7 @@ export default function SplitPDF() {
           const chunkCopied = await finalPdf.copyPages(sourcePdf, currentPages);
           chunkCopied.forEach(p => finalPdf.addPage(p));
           const finalBytes = await finalPdf.save();
-          const blob = new Blob([finalBytes as any], { type: 'application/pdf' });
+          const blob = new Blob([toArrayBufferBytes(finalBytes)], { type: 'application/pdf' });
           const pStart = currentPages[0] + 1;
           const pEnd = currentPages[currentPages.length - 1] + 1;
           const sizeLabel = (finalBytes.byteLength / 1024 / 1024).toFixed(2);
@@ -302,7 +305,7 @@ export default function SplitPDF() {
           const copied = await newPdf.copyPages(sourcePdf, indices);
           copied.forEach(p => newPdf.addPage(p));
           const bytes = await newPdf.save();
-          const blob = new Blob([bytes as any], { type: 'application/pdf' });
+          const blob = new Blob([toArrayBufferBytes(bytes)], { type: 'application/pdf' });
           const safeKw = splitKeyword.replace(/[^a-zA-Z0-9_-]/g, '_');
           results.push({
             url: URL.createObjectURL(blob),
@@ -362,23 +365,17 @@ export default function SplitPDF() {
     }
   };
 
-  const modes: { id: SplitMode; icon: React.ElementType; label: string; desc: string; color: string }[] = [
-    { id: 'all', icon: Layers, label: 'All Pages', desc: 'Each page becomes a separate PDF', color: 'orange' },
-    { id: 'selection', icon: LayoutGrid, label: 'Select Pages', desc: 'Click thumbnails to pick specific pages', color: 'violet' },
-    { id: 'ranges', icon: Scissors, label: 'Custom Ranges', desc: 'Enter ranges like 1-3, 5, 7-10', color: 'blue' },
-    { id: 'every', icon: Layers, label: 'Every N Pages', desc: 'Split every N pages into chunks', color: 'emerald' },
-    { id: 'size', icon: HardDrive, label: 'By File Size (MB)', desc: 'Split into parts under target limit (e.g. 2MB)', color: 'teal' },
-    { id: 'keyword', icon: Search, label: 'By Keyword / Invoice', desc: 'Split whenever "Invoice", "Slip" appears', color: 'indigo' },
-  ];
+  const prefersReduced = useReducedMotion();
+  const stageKey = !file ? 'upload' : splitUrls.length > 0 ? 'result' : 'configure';
 
-  const colorMap: Record<string, string> = {
-    orange: 'border-orange-400 bg-orange-50 dark:bg-orange-950/40 text-orange-700 dark:text-orange-300',
-    violet: 'border-violet-400 bg-violet-50 dark:bg-violet-950/40 text-violet-700 dark:text-violet-300',
-    blue: 'border-blue-400 bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300',
-    emerald: 'border-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300',
-    teal: 'border-teal-400 bg-teal-50 dark:bg-teal-950/40 text-teal-700 dark:text-teal-300',
-    indigo: 'border-indigo-400 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300',
-  };
+  const modes: { id: SplitMode; icon: ElementType; label: string; desc: string; softBg: string; ringCls: string; accentText: string }[] = [
+    { id: 'all', icon: Layers, label: 'All Pages', desc: 'Each page becomes a separate PDF', softBg: 'var(--pms-soft-rose)', ringCls: 'ring-rose-500/40', accentText: 'text-rose-700 dark:text-rose-300' },
+    { id: 'selection', icon: LayoutGrid, label: 'Select Pages', desc: 'Click thumbnails to pick specific pages', softBg: 'var(--pms-soft-lavender)', ringCls: 'ring-violet-500/40', accentText: 'text-violet-700 dark:text-violet-300' },
+    { id: 'ranges', icon: Scissors, label: 'Custom Ranges', desc: 'Enter ranges like 1-3, 5, 7-10', softBg: 'var(--pms-soft-blue)', ringCls: 'ring-sky-500/40', accentText: 'text-sky-700 dark:text-sky-300' },
+    { id: 'every', icon: Layers, label: 'Every N Pages', desc: 'Split every N pages into chunks', softBg: 'var(--pms-soft-mint)', ringCls: 'ring-emerald-500/40', accentText: 'text-emerald-700 dark:text-emerald-300' },
+    { id: 'size', icon: HardDrive, label: 'By File Size (MB)', desc: 'Split into parts under target limit (e.g. 2MB)', softBg: 'var(--pms-soft-blue)', ringCls: 'ring-sky-500/40', accentText: 'text-sky-700 dark:text-sky-300' },
+    { id: 'keyword', icon: Search, label: 'By Keyword / Invoice', desc: 'Split whenever "Invoice", "Slip" appears', softBg: 'var(--pms-soft-lavender)', ringCls: 'ring-indigo-500/40', accentText: 'text-indigo-700 dark:text-indigo-300' },
+  ];
 
   return (
     <ToolWorkspaceShell
@@ -391,413 +388,500 @@ export default function SplitPDF() {
     >
       <div className="flex flex-col items-center">
         <div className="flex flex-wrap items-center justify-center gap-2 mb-7">
-          <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold bg-teal-100/80 dark:bg-teal-950/50 text-teal-800 dark:text-teal-300 border border-teal-200/70 dark:border-teal-800/50">
+          <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold bg-[var(--pms-soft-blue)] text-sky-800 dark:text-sky-300 border border-[var(--pms-border)]">
             💾 Split by Target Size (&lt;2MB Govt / WhatsApp)
           </span>
-          <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold bg-indigo-100/80 dark:bg-indigo-950/50 text-indigo-800 dark:text-indigo-300 border border-indigo-200/70 dark:border-indigo-800/50">
+          <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold bg-[var(--pms-soft-lavender)] text-violet-800 dark:text-violet-300 border border-[var(--pms-border)]">
             🔍 Split by Keyword / Invoice Title
           </span>
-          <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold bg-amber-100/80 dark:bg-amber-950/50 text-amber-800 dark:text-amber-300 border border-amber-200/70 dark:border-amber-800/50">
+          <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold bg-[var(--pms-soft-rose)] text-rose-800 dark:text-rose-300 border border-[var(--pms-border)]">
             ✂️ Visual Page Selector
           </span>
           <Link
             to="/split-in-half"
-            className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-rose-100/80 dark:bg-rose-950/50 text-rose-800 dark:text-rose-300 hover:bg-rose-200/80 dark:hover:bg-rose-900/60 transition-colors border border-rose-200/70 dark:border-rose-800/50"
+            className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-[var(--pms-soft-rose)] text-rose-800 dark:text-rose-300 hover:brightness-95 transition-all border border-[var(--pms-border)]"
           >
             ✂ Need to split 2-page book spreads? Split In Half →
           </Link>
         </div>
 
-                {!file ? (
-                  <div className="w-full max-w-5xl space-y-6">
-                    <FileDropzone onDrop={handleDrop} multiple={false} title="Drop PDF here or click to select" />
+        <PearlStageSwitch stageKey={stageKey}>
+          {!file ? (
+            <div className="w-full max-w-5xl mx-auto space-y-6">
+              <FileDropzone onDrop={handleDrop} multiple={false} title="Drop PDF here or click to select" />
 
-                    {/* Supported Split Modes Showcase */}
-                    <div className="bg-white dark:bg-slate-900/90 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-800 p-6">
-                      <div className="flex items-center justify-between mb-4">
-                        <div className="flex items-center gap-2">
-                          <Sparkles className="w-5 h-5 text-orange-600 dark:text-orange-400" />
-                          <h3 className="text-base font-bold text-gray-900 dark:text-slate-100">Supported Split Modes</h3>
-                          <span className="text-[10px] font-bold uppercase tracking-wider bg-orange-100 dark:bg-orange-950/60 text-orange-700 dark:text-orange-300 px-2 py-0.5 rounded-full">Choose & Drop</span>
-                        </div>
-                        <span className="text-xs text-gray-400 dark:text-slate-500">Click any mode to pre-select it</span>
-                      </div>
-
-                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                        {modes.map(m => (
-                          <button
-                            key={m.id}
-                            type="button"
-                            onClick={() => setSplitMode(m.id)}
-                            className={`flex items-start gap-3 p-4 rounded-xl border-2 text-left transition-all ${splitMode === m.id
-                              ? colorMap[m.color] + ' ring-2 ring-offset-1 dark:ring-offset-slate-900 ring-current shadow-xs'
-                              : 'border-gray-100 dark:border-slate-800 bg-gray-50/60 dark:bg-slate-800/50 hover:border-gray-200 dark:hover:border-slate-700 text-gray-700 dark:text-slate-200'
-                              }`}
-                          >
-                            <m.icon className="w-5 h-5 mt-0.5 shrink-0" />
-                            <div>
-                              <div className={`font-bold text-sm ${splitMode === m.id ? 'text-current' : 'text-gray-900 dark:text-slate-100'}`}>{m.label}</div>
-                              <div className={`text-xs mt-1 leading-relaxed ${splitMode === m.id ? 'opacity-85' : 'text-gray-500 dark:text-slate-400'}`}>{m.desc}</div>
-                            </div>
-                          </button>
-                        ))}
-                      </div>
-
-                      {/* Mode Specific Preview / Quick Info */}
-                      <div className="mt-4 p-4 rounded-xl bg-slate-50 dark:bg-slate-800/70 border border-slate-100 dark:border-slate-800 flex items-center justify-between">
-                        <div className="text-xs text-slate-600 dark:text-slate-300">
-                          {splitMode === 'size' && (
-                            <span>⚡ <strong>Target Size Mode:</strong> Guarantees output files stay strictly under 2MB for Govt portals (SSC, UPSC) or 16MB for WhatsApp without trial and error.</span>
-                          )}
-                          {splitMode === 'keyword' && (
-                            <span>🔍 <strong>Keyword / Invoice Mode:</strong> Uses OCR and PDF text extraction to cut new documents whenever terms like "Invoice", "Salary Slip", or "Roll No" appear.</span>
-                          )}
-                          {splitMode === 'all' && (
-                            <span>📑 <strong>All Pages:</strong> Every single page of your document will be exported into an individual single-page PDF.</span>
-                          )}
-                          {splitMode === 'selection' && (
-                            <span>🎯 <strong>Visual Selection:</strong> Interactive thumbnail grid lets you click specific pages to extract.</span>
-                          )}
-                          {splitMode === 'ranges' && (
-                            <span>✂️ <strong>Custom Ranges:</strong> Specify custom page ranges like 1-5, 8, 12-15 to split into exact segments.</span>
-                          )}
-                          {splitMode === 'every' && (
-                            <span>📚 <strong>Every N Pages:</strong> Automatically bundle every 2, 5, or 10 pages into equal chunks.</span>
-                          )}
-                        </div>
-                        <span className="text-xs font-bold text-orange-600 dark:text-orange-400 shrink-0 ml-4">Active: {modes.find(m => m.id === splitMode)?.label}</span>
-                      </div>
-                    </div>
+              {/* Supported Split Modes Showcase */}
+              <div className="pms-glass-panel rounded-3xl p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="w-5 h-5 text-rose-600 dark:text-rose-400" />
+                    <h3 className="text-base font-bold text-gray-900 dark:text-slate-100">Supported Split Modes</h3>
+                    <span className="text-[10px] font-bold uppercase tracking-wider bg-[var(--pms-soft-rose)] text-rose-700 dark:text-rose-300 px-2 py-0.5 rounded-full border border-[var(--pms-border)]">Choose & Drop</span>
                   </div>
-                ) : (
-                  <div className="w-full max-w-6xl space-y-6">
+                  <span className="text-xs text-gray-400 dark:text-slate-500">Click any mode to pre-select it</span>
+                </div>
 
-                    {/* File info bar */}
-                    <div className="flex items-center gap-4 p-4 bg-white dark:bg-slate-900/90 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-800">
-                      <div className="w-12 h-12 bg-orange-100 dark:bg-orange-950/50 rounded-xl flex items-center justify-center shrink-0">
-                        <FileText className="w-6 h-6 text-orange-600 dark:text-orange-400" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="font-semibold text-gray-900 dark:text-slate-100 truncate">{file.name}</p>
-                        <p className="text-sm text-gray-500 dark:text-slate-400">{pageCount} pages · {(file.size / 1024 / 1024).toFixed(2)} MB</p>
-                      </div>
-                      <button onClick={() => { setFile(null); setSplitUrls([]); setThumbs([]); }} className="text-sm text-gray-400 dark:text-slate-500 hover:text-red-500 dark:hover:text-red-400 transition-colors px-3 py-1 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/40">
-                        Change file
-                      </button>
-                    </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {modes.map(m => {
+                    const isSelected = splitMode === m.id;
+                    return (
+                      <motion.button
+                        key={m.id}
+                        type="button"
+                        whileTap={prefersReduced ? undefined : { scale: 0.985 }}
+                        onClick={() => setSplitMode(m.id)}
+                        className={`relative flex items-start gap-3 p-4 rounded-2xl border text-left transition-colors cursor-pointer overflow-hidden ${
+                          isSelected
+                            ? `${m.accentText} border-[var(--pms-border-strong)]`
+                            : 'bg-white/75 dark:bg-slate-900/75 border-[var(--pms-border)] hover:border-[var(--pms-border-strong)] text-gray-700 dark:text-slate-200'
+                        }`}
+                        style={isSelected ? { backgroundColor: m.softBg } : undefined}
+                      >
+                        {isSelected && (
+                          <motion.div
+                            layoutId="split-pre-mode-pill"
+                            transition={prefersReduced ? { duration: 0 } : { type: 'spring', stiffness: 420, damping: 32 }}
+                            className={`absolute inset-0 rounded-2xl ring-2 ${m.ringCls} pointer-events-none`}
+                          />
+                        )}
+                        <m.icon className="relative z-10 w-5 h-5 mt-0.5 shrink-0" />
+                        <div className="relative z-10">
+                          <div className={`font-bold text-sm ${isSelected ? 'text-current' : 'text-gray-900 dark:text-slate-100'}`}>{m.label}</div>
+                          <div className={`text-xs mt-1 leading-relaxed ${isSelected ? 'opacity-85' : 'text-gray-500 dark:text-slate-400'}`}>{m.desc}</div>
+                        </div>
+                      </motion.button>
+                    );
+                  })}
+                </div>
 
-                    {splitUrls.length > 0 ? (
-                      /* Results */
-                      <div className="bg-white dark:bg-slate-900/90 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-800 p-6">
-                        <div className="text-center mb-6">
-                          <div className="inline-flex items-center justify-center w-12 h-12 bg-emerald-100 dark:bg-emerald-950/60 rounded-full mb-3">
-                            <CheckSquare className="w-6 h-6 text-emerald-600 dark:text-emerald-400" />
-                          </div>
-                          <h3 className="text-2xl font-bold text-gray-900 dark:text-slate-100">Split Complete!</h3>
-                          <p className="text-gray-500 dark:text-slate-400 mt-1">
-                            {splitUrls.length} PDF file{splitUrls.length > 1 ? 's' : ''} ready
+                {/* Mode Specific Preview / Quick Info */}
+                <div className="mt-4 p-4 rounded-2xl bg-white/75 dark:bg-slate-900/75 border border-[var(--pms-border)] flex items-center justify-between">
+                  <div className="text-xs text-slate-600 dark:text-slate-300">
+                    {splitMode === 'size' && (
+                      <span>⚡ <strong>Target Size Mode:</strong> Guarantees output files stay strictly under 2MB for Govt portals (SSC, UPSC) or 16MB for WhatsApp without trial and error.</span>
+                    )}
+                    {splitMode === 'keyword' && (
+                      <span>🔍 <strong>Keyword / Invoice Mode:</strong> Uses OCR and PDF text extraction to cut new documents whenever terms like "Invoice", "Salary Slip", or "Roll No" appear.</span>
+                    )}
+                    {splitMode === 'all' && (
+                      <span>📑 <strong>All Pages:</strong> Every single page of your document will be exported into an individual single-page PDF.</span>
+                    )}
+                    {splitMode === 'selection' && (
+                      <span>🎯 <strong>Visual Selection:</strong> Interactive thumbnail grid lets you click specific pages to extract.</span>
+                    )}
+                    {splitMode === 'ranges' && (
+                      <span>✂️ <strong>Custom Ranges:</strong> Specify custom page ranges like 1-5, 8, 12-15 to split into exact segments.</span>
+                    )}
+                    {splitMode === 'every' && (
+                      <span>📚 <strong>Every N Pages:</strong> Automatically bundle every 2, 5, or 10 pages into equal chunks.</span>
+                    )}
+                  </div>
+                  <span className="text-xs font-bold text-rose-600 dark:text-rose-400 shrink-0 ml-4">Active: {modes.find(m => m.id === splitMode)?.label}</span>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="w-full max-w-6xl mx-auto space-y-6">
+              {/* File info bar */}
+              <div className="pms-glass-panel rounded-2xl p-4 flex items-center gap-4">
+                <div className="w-12 h-12 bg-[var(--pms-soft-rose)] rounded-xl flex items-center justify-center shrink-0">
+                  <FileText className="w-6 h-6 text-rose-600 dark:text-rose-400" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-semibold text-gray-900 dark:text-slate-100 truncate">{file.name}</p>
+                  <p className="text-sm text-gray-500 dark:text-slate-400">{pageCount} pages · {(file.size / 1024 / 1024).toFixed(2)} MB</p>
+                </div>
+                <button
+                  onClick={() => { setFile(null); setSplitUrls([]); setThumbs([]); }}
+                  disabled={isProcessing}
+                  className="text-sm font-semibold text-gray-500 dark:text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 transition-colors px-3 py-1.5 rounded-xl bg-white/75 dark:bg-slate-900/75 border border-[var(--pms-border)] disabled:opacity-50 cursor-pointer"
+                >
+                  Change file
+                </button>
+              </div>
+
+              {splitUrls.length > 0 ? (
+                /* Results */
+                <div className="pms-glass-panel rounded-3xl p-6 sm:p-8 border border-emerald-200/80 dark:border-emerald-800/70 bg-gradient-to-br from-emerald-50/75 via-white/80 to-teal-50/55 dark:from-emerald-950/35 dark:via-slate-900/85 dark:to-teal-950/25">
+                  <div className="text-center mb-6">
+                    <motion.div
+                      initial={prefersReduced ? false : { scale: 0.45, rotate: -10, opacity: 0 }}
+                      animate={{ scale: 1, rotate: 0, opacity: 1 }}
+                      transition={prefersReduced ? { duration: 0 } : { type: 'spring', stiffness: 360, damping: 18 }}
+                      className="inline-flex items-center justify-center w-16 h-16 bg-emerald-100 dark:bg-emerald-950/60 rounded-full mb-3 shadow-inner"
+                    >
+                      <CheckSquare className="w-8 h-8 text-emerald-600 dark:text-emerald-400" />
+                    </motion.div>
+                    <h3 className="text-2xl font-extrabold text-emerald-900 dark:text-emerald-100">Split Complete!</h3>
+                    <p className="text-emerald-700 dark:text-emerald-300 mt-1 text-sm">
+                      <strong className="font-extrabold">
+                        <AnimatedNumber value={splitUrls.length} />
+                      </strong>{' '}
+                      PDF file{splitUrls.length > 1 ? 's' : ''} ready
+                    </p>
+                  </div>
+
+                  {splitUrls.length === 1 ? (
+                    <div className="max-w-lg mx-auto space-y-5 text-center">
+                      <div className="flex items-center gap-3.5 p-4 rounded-2xl border border-[var(--pms-border)] bg-white/75 dark:bg-slate-900/75 text-left">
+                        <div className="w-11 h-11 bg-[var(--pms-soft-rose)] rounded-xl flex items-center justify-center shrink-0">
+                          <FileText className="w-5 h-5 text-rose-500 dark:text-rose-400" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-bold text-gray-900 dark:text-slate-100 text-sm truncate">{splitUrls[0].name}</p>
+                          <p className="text-xs text-gray-500 dark:text-slate-400 mt-0.5">
+                            {splitUrls[0].pages} · {splitUrls[0].sizeLabel}
                           </p>
                         </div>
+                      </div>
 
-                        {splitUrls.length === 1 ? (
-                          <div className="max-w-lg mx-auto space-y-5 text-center">
-                            <div className="flex items-center gap-3.5 p-4 rounded-xl border border-gray-200 dark:border-slate-700 bg-gray-50/80 dark:bg-slate-800/60 text-left">
-                              <div className="w-11 h-11 bg-red-50 dark:bg-red-950/50 rounded-xl flex items-center justify-center shrink-0">
-                                <FileText className="w-5 h-5 text-red-500 dark:text-red-400" />
+                      <div className="flex flex-wrap items-center justify-center gap-3">
+                        <motion.a
+                          whileHover={prefersReduced ? undefined : { scale: 1.015 }}
+                          whileTap={prefersReduced ? undefined : { scale: 0.985 }}
+                          href={splitUrls[0].url}
+                          download={splitUrls[0].name}
+                          className="relative overflow-hidden flex-1 min-w-[200px] pms-btn-primary py-3.5 px-6 font-bold text-sm rounded-2xl inline-flex items-center justify-center gap-2"
+                        >
+                          <span aria-hidden="true" className="pointer-events-none absolute inset-0 pms-shimmer opacity-40" />
+                          <Download className="relative z-10 w-4 h-4" />
+                          <span className="relative z-10">Download Split PDF</span>
+                        </motion.a>
+                        <motion.a
+                          whileHover={prefersReduced ? undefined : { scale: 1.015 }}
+                          whileTap={prefersReduced ? undefined : { scale: 0.985 }}
+                          href={splitUrls[0].url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="py-3.5 px-5 bg-white/80 dark:bg-slate-900/80 hover:bg-white dark:hover:bg-slate-800 text-gray-700 dark:text-slate-200 border border-[var(--pms-border)] font-semibold text-sm rounded-2xl inline-flex items-center justify-center gap-2 transition-colors"
+                        >
+                          <Eye className="w-4 h-4" /> Preview
+                        </motion.a>
+                      </div>
+
+                      <button
+                        onClick={() => {
+                          splitUrls.forEach((u) => URL.revokeObjectURL(u.url));
+                          setSplitUrls([]);
+                          setSelectedPages(new Set());
+                        }}
+                        className="text-sm text-gray-600 dark:text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 font-medium underline underline-offset-4 transition-colors cursor-pointer"
+                      >
+                        Split again or choose different pages
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="flex flex-col sm:flex-row gap-3 mb-4">
+                        <motion.button
+                          whileHover={prefersReduced || isZipping ? undefined : { scale: 1.01 }}
+                          whileTap={prefersReduced || isZipping ? undefined : { scale: 0.985 }}
+                          onClick={downloadAll}
+                          disabled={isZipping}
+                          className="relative overflow-hidden flex-1 pms-btn-primary py-3.5 px-5 font-bold rounded-2xl disabled:opacity-60 flex items-center justify-center gap-2 cursor-pointer"
+                        >
+                          <span aria-hidden="true" className="pointer-events-none absolute inset-0 pms-shimmer opacity-40" />
+                          {isZipping ? (
+                            <span className="relative z-10 inline-flex items-center gap-2">
+                              <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                              Creating ZIP Archive...
+                            </span>
+                          ) : (
+                            <span className="relative z-10 inline-flex items-center gap-2">
+                              <Archive className="w-5 h-5" /> Download All as ZIP ({splitUrls.length} files)
+                            </span>
+                          )}
+                        </motion.button>
+                        <button
+                          onClick={() => {
+                            splitUrls.forEach((u) => URL.revokeObjectURL(u.url));
+                            setSplitUrls([]);
+                            setSelectedPages(new Set());
+                          }}
+                          className="px-5 py-3.5 bg-white/80 dark:bg-slate-800/80 text-gray-700 dark:text-slate-200 font-semibold rounded-2xl border border-[var(--pms-border)] hover:bg-white dark:hover:bg-slate-700 transition-colors shrink-0 cursor-pointer"
+                        >
+                          Split Again
+                        </button>
+                      </div>
+
+                      <div className="max-h-[400px] overflow-y-auto pr-1 space-y-2.5">
+                        {splitUrls.map((item, i) => (
+                          <motion.div
+                            key={i}
+                            initial={prefersReduced ? false : { opacity: 0, y: 8 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ duration: 0.22, delay: Math.min(i * 0.03, 0.3) }}
+                            className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 border border-[var(--pms-border)] bg-white/75 dark:bg-slate-900/75 rounded-2xl hover:border-[var(--pms-border-strong)] transition-colors"
+                          >
+                            <div className="flex items-center gap-3 min-w-0 flex-1">
+                              <div className="w-10 h-10 bg-[var(--pms-soft-rose)] rounded-xl flex items-center justify-center shrink-0">
+                                <FileText className="w-5 h-5 text-rose-500 dark:text-rose-400" />
                               </div>
-                              <div className="flex-1 min-w-0">
-                                <p className="font-bold text-gray-900 dark:text-slate-100 text-sm truncate">{splitUrls[0].name}</p>
-                                <p className="text-xs text-gray-500 dark:text-slate-400 mt-0.5">
-                                  {splitUrls[0].pages} · {splitUrls[0].sizeLabel}
-                                </p>
+                              <div className="min-w-0 flex-1">
+                                <p className="font-semibold text-gray-900 dark:text-slate-100 text-sm truncate">{item.name}</p>
+                                <p className="text-xs text-gray-500 dark:text-slate-400">{item.pages} · {item.sizeLabel}</p>
                               </div>
                             </div>
-
-                            <div className="flex flex-wrap items-center justify-center gap-3">
+                            <div className="flex items-center gap-2 shrink-0 justify-end">
                               <a
-                                href={splitUrls[0].url}
-                                download={splitUrls[0].name}
-                                className="flex-1 min-w-[200px] py-3 px-6 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm rounded-xl inline-flex items-center justify-center gap-2 shadow-md transition-colors"
-                              >
-                                <Download className="w-4 h-4" /> Download Split PDF
-                              </a>
-                              <a
-                                href={splitUrls[0].url}
+                                href={item.url}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="py-3 px-5 bg-white dark:bg-slate-800 hover:bg-gray-50 dark:hover:bg-slate-700 text-gray-700 dark:text-slate-200 border border-gray-200 dark:border-slate-700 font-semibold text-sm rounded-xl inline-flex items-center justify-center gap-2 transition-colors"
+                                className="px-3 py-2 rounded-xl border border-[var(--pms-border)] bg-white/80 dark:bg-slate-800 hover:bg-white dark:hover:bg-slate-700 text-gray-700 dark:text-slate-200 text-xs font-semibold inline-flex items-center gap-1.5 transition-colors"
                               >
-                                <Eye className="w-4 h-4" /> Preview
+                                <Eye className="w-3.5 h-3.5" /> Preview
+                              </a>
+                              <a
+                                href={item.url}
+                                download={item.name}
+                                className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold inline-flex items-center gap-1.5 shadow-sm transition-colors"
+                              >
+                                <Download className="w-3.5 h-3.5" /> Download
                               </a>
                             </div>
+                          </motion.div>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                  {/* Left: mode + options */}
+                  <div className="lg:col-span-1 relative pms-glass-panel rounded-3xl p-5 space-y-4 overflow-hidden h-fit">
+                    <PearlScanOverlay active={isProcessing} label={processStep || 'Splitting PDF pages…'} />
 
-                            <button
-                              onClick={() => {
-                                splitUrls.forEach((u) => URL.revokeObjectURL(u.url));
-                                setSplitUrls([]);
-                                setSelectedPages(new Set());
-                              }}
-                              className="text-sm text-gray-500 dark:text-slate-400 hover:text-orange-600 dark:hover:text-orange-400 font-medium underline underline-offset-4 transition-colors"
+                    <div>
+                      <h3 className="font-bold text-gray-800 dark:text-slate-200 mb-3 text-sm uppercase tracking-wider">Split Mode</h3>
+                      <div className="space-y-2">
+                        {modes.map(m => {
+                          const isSelected = splitMode === m.id;
+                          return (
+                            <motion.button
+                              key={m.id}
+                              type="button"
+                              whileTap={prefersReduced ? undefined : { scale: 0.985 }}
+                              onClick={() => setSplitMode(m.id)}
+                              className={`relative w-full flex items-start gap-3 p-3.5 rounded-2xl border text-left transition-colors cursor-pointer overflow-hidden ${
+                                isSelected
+                                  ? `${m.accentText} border-[var(--pms-border-strong)]`
+                                  : 'bg-white/75 dark:bg-slate-900/75 border-[var(--pms-border)] text-gray-800 dark:text-slate-200 hover:border-[var(--pms-border-strong)]'
+                              }`}
+                              style={isSelected ? { backgroundColor: m.softBg } : undefined}
                             >
-                              Split again or choose different pages
-                            </button>
-                          </div>
-                        ) : (
-                          <>
-                            <div className="flex flex-col sm:flex-row gap-3 mb-4">
-                              <button
-                                onClick={downloadAll}
-                                disabled={isZipping}
-                                className="flex-1 py-3 px-5 bg-orange-600 text-white font-bold rounded-xl hover:bg-orange-700 disabled:opacity-60 transition-colors flex items-center justify-center gap-2 shadow-md"
-                              >
-                                {isZipping ? (
-                                  <>
-                                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                                    Creating ZIP Archive...
-                                  </>
-                                ) : (
-                                  <>
-                                    <Archive className="w-5 h-5" /> Download All as ZIP ({splitUrls.length} files)
-                                  </>
-                                )}
-                              </button>
-                              <button
-                                onClick={() => {
-                                  splitUrls.forEach((u) => URL.revokeObjectURL(u.url));
-                                  setSplitUrls([]);
-                                  setSelectedPages(new Set());
-                                }}
-                                className="px-5 py-3 bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-slate-200 font-semibold rounded-xl hover:bg-gray-200 dark:hover:bg-slate-700 transition-colors shrink-0"
-                              >
-                                Split Again
-                              </button>
-                            </div>
+                              {isSelected && (
+                                <motion.div
+                                  layoutId="split-active-mode-pill"
+                                  transition={prefersReduced ? { duration: 0 } : { type: 'spring', stiffness: 420, damping: 32 }}
+                                  className={`absolute inset-0 rounded-2xl ring-2 ${m.ringCls} pointer-events-none`}
+                                />
+                              )}
+                              <m.icon className="relative z-10 w-5 h-5 mt-0.5 shrink-0" />
+                              <div className="relative z-10">
+                                <div className="font-semibold text-sm">{m.label}</div>
+                                <div className="text-xs opacity-75 mt-0.5">{m.desc}</div>
+                              </div>
+                            </motion.button>
+                          );
+                        })}
+                      </div>
+                    </div>
 
-                            <div className="max-h-[400px] overflow-y-auto pr-1 space-y-2.5">
-                              {splitUrls.map((item, i) => (
-                                <div
-                                  key={i}
-                                  className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 border border-gray-200 dark:border-slate-700 bg-gray-50/70 dark:bg-slate-800/50 rounded-xl hover:border-orange-300 dark:hover:border-orange-600 transition-colors"
-                                >
-                                  <div className="flex items-center gap-3 min-w-0 flex-1">
-                                    <div className="w-10 h-10 bg-red-50 dark:bg-red-950/50 rounded-lg flex items-center justify-center shrink-0">
-                                      <FileText className="w-5 h-5 text-red-500 dark:text-red-400" />
-                                    </div>
-                                    <div className="min-w-0 flex-1">
-                                      <p className="font-semibold text-gray-900 dark:text-slate-100 text-sm truncate">{item.name}</p>
-                                      <p className="text-xs text-gray-500 dark:text-slate-400">{item.pages} · {item.sizeLabel}</p>
-                                    </div>
-                                  </div>
-                                  <div className="flex items-center gap-2 shrink-0 justify-end">
-                                    <a
-                                      href={item.url}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="px-3 py-2 rounded-lg border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-gray-100 dark:hover:bg-slate-700 text-gray-700 dark:text-slate-200 text-xs font-semibold inline-flex items-center gap-1.5 transition-colors"
-                                    >
-                                      <Eye className="w-3.5 h-3.5" /> Preview
-                                    </a>
-                                    <a
-                                      href={item.url}
-                                      download={item.name}
-                                      className="px-3.5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold inline-flex items-center gap-1.5 shadow-sm transition-colors"
-                                    >
-                                      <Download className="w-3.5 h-3.5" /> Download
-                                    </a>
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          </>
+                    {/* Mode-specific options */}
+                    {splitMode === 'ranges' && (
+                      <div className="bg-white/75 dark:bg-slate-900/75 rounded-2xl border border-[var(--pms-border)] p-4">
+                        <label className="block text-sm font-semibold text-gray-700 dark:text-slate-300 mb-2">Page Ranges</label>
+                        <input type="text" value={ranges} onChange={e => setRanges(e.target.value)}
+                          className="w-full px-4 py-3 bg-white dark:bg-slate-800/80 text-gray-900 dark:text-slate-100 placeholder-gray-400 dark:placeholder-slate-500 rounded-xl border border-[var(--pms-border)] focus:ring-2 focus:ring-sky-400 focus:border-sky-400 outline-none text-sm"
+                          placeholder="e.g. 1-3, 5, 7-10" />
+                        <p className="text-xs text-gray-400 dark:text-slate-500 mt-2">Each range creates a separate PDF file.</p>
+                      </div>
+                    )}
+
+                    {splitMode === 'every' && (
+                      <div className="bg-white/75 dark:bg-slate-900/75 rounded-2xl border border-[var(--pms-border)] p-4">
+                        <label className="block text-sm font-semibold text-gray-700 dark:text-slate-300 mb-2">Split every <span className="text-emerald-600 dark:text-emerald-400">{everyN}</span> page{everyN > 1 ? 's' : ''}</label>
+                        <input type="range" min={1} max={Math.max(1, Math.floor(pageCount / 2))} value={everyN}
+                          onChange={e => setEveryN(Number(e.target.value))}
+                          className="w-full accent-emerald-500" />
+                        <div className="flex justify-between text-xs text-gray-400 dark:text-slate-500 mt-1">
+                          <span>1</span><span>{Math.max(1, Math.floor(pageCount / 2))}</span>
+                        </div>
+                        <p className="text-xs text-gray-400 dark:text-slate-500 mt-2">Creates {Math.ceil(pageCount / everyN)} chunks of {everyN} page{everyN > 1 ? 's' : ''} each.</p>
+                      </div>
+                    )}
+
+                    {splitMode === 'selection' && (
+                      <div className="bg-white/75 dark:bg-slate-900/75 rounded-2xl border border-[var(--pms-border)] p-4">
+                        <div className="flex gap-2">
+                          <button onClick={selectAll} className="flex-1 py-2 text-sm font-semibold bg-[var(--pms-soft-lavender)] text-violet-700 dark:text-violet-300 rounded-xl hover:brightness-95 transition-all cursor-pointer">Select All</button>
+                          <button onClick={clearAll} className="flex-1 py-2 text-sm font-semibold bg-white/80 dark:bg-slate-800 text-gray-600 dark:text-slate-300 rounded-xl border border-[var(--pms-border)] hover:bg-gray-100 dark:hover:bg-slate-700 transition-colors cursor-pointer">Clear</button>
+                        </div>
+                        {selectedPages.size > 0 && (
+                          <p className="text-xs text-center text-violet-600 dark:text-violet-400 mt-2 font-medium">{selectedPages.size} page{selectedPages.size > 1 ? 's' : ''} selected</p>
                         )}
                       </div>
-                    ) : (
-                      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                        {/* Left: mode + options */}
-                        <div className="lg:col-span-1 space-y-4">
-                          <div className="bg-white dark:bg-slate-900/90 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-800 p-5">
-                            <h3 className="font-bold text-gray-800 dark:text-slate-200 mb-4 text-sm uppercase tracking-wider">Split Mode</h3>
-                            <div className="space-y-2">
-                              {modes.map(m => (
-                                <button key={m.id} onClick={() => setSplitMode(m.id)}
-                                  className={`w-full flex items-start gap-3 p-3.5 rounded-xl border-2 text-left transition-all ${splitMode === m.id ? colorMap[m.color] + ' ring-2 ring-offset-1 dark:ring-offset-slate-900 ring-current' : 'border-gray-100 dark:border-slate-800 bg-gray-50 dark:bg-slate-800/50 text-gray-800 dark:text-slate-200 hover:border-gray-200 dark:hover:border-slate-700'}`}>
-                                  <m.icon className="w-5 h-5 mt-0.5 shrink-0" />
-                                  <div>
-                                    <div className="font-semibold text-sm">{m.label}</div>
-                                    <div className="text-xs opacity-70 mt-0.5">{m.desc}</div>
-                                  </div>
-                                </button>
-                              ))}
-                            </div>
-                          </div>
+                    )}
 
-                          {/* Mode-specific options */}
-                          {splitMode === 'ranges' && (
-                            <div className="bg-white dark:bg-slate-900/90 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-800 p-5">
-                              <label className="block text-sm font-semibold text-gray-700 dark:text-slate-300 mb-2">Page Ranges</label>
-                              <input type="text" value={ranges} onChange={e => setRanges(e.target.value)}
-                                className="w-full px-4 py-3 bg-white dark:bg-slate-800/80 text-gray-900 dark:text-slate-100 placeholder-gray-400 dark:placeholder-slate-500 rounded-xl border border-gray-200 dark:border-slate-700 focus:ring-2 focus:ring-orange-400 focus:border-orange-400 outline-none text-sm"
-                                placeholder="e.g. 1-3, 5, 7-10" />
-                              <p className="text-xs text-gray-400 dark:text-slate-500 mt-2">Each range creates a separate PDF file.</p>
-                            </div>
-                          )}
-
-                          {splitMode === 'every' && (
-                            <div className="bg-white dark:bg-slate-900/90 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-800 p-5">
-                              <label className="block text-sm font-semibold text-gray-700 dark:text-slate-300 mb-2">Split every <span className="text-orange-600 dark:text-orange-400">{everyN}</span> page{everyN > 1 ? 's' : ''}</label>
-                              <input type="range" min={1} max={Math.max(1, Math.floor(pageCount / 2))} value={everyN}
-                                onChange={e => setEveryN(Number(e.target.value))}
-                                className="w-full accent-orange-500" />
-                              <div className="flex justify-between text-xs text-gray-400 dark:text-slate-500 mt-1">
-                                <span>1</span><span>{Math.max(1, Math.floor(pageCount / 2))}</span>
-                              </div>
-                              <p className="text-xs text-gray-400 dark:text-slate-500 mt-2">Creates {Math.ceil(pageCount / everyN)} chunks of {everyN} page{everyN > 1 ? 's' : ''} each.</p>
-                            </div>
-                          )}
-
-                          {splitMode === 'selection' && (
-                            <div className="bg-white dark:bg-slate-900/90 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-800 p-4">
-                              <div className="flex gap-2">
-                                <button onClick={selectAll} className="flex-1 py-2 text-sm font-semibold bg-violet-50 dark:bg-violet-950/50 text-violet-700 dark:text-violet-300 rounded-lg hover:bg-violet-100 dark:hover:bg-violet-900/60 transition-colors">Select All</button>
-                                <button onClick={clearAll} className="flex-1 py-2 text-sm font-semibold bg-gray-50 dark:bg-slate-800 text-gray-600 dark:text-slate-300 rounded-lg hover:bg-gray-100 dark:hover:bg-slate-700 transition-colors">Clear</button>
-                              </div>
-                              {selectedPages.size > 0 && (
-                                <p className="text-xs text-center text-violet-600 dark:text-violet-400 mt-2 font-medium">{selectedPages.size} page{selectedPages.size > 1 ? 's' : ''} selected</p>
-                              )}
-                            </div>
-                          )}
-
-                          {/* Split by File Size */}
-                          {splitMode === 'size' && (
-                            <div className="bg-white dark:bg-slate-900/90 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-800 p-5 space-y-3">
-                              <div className="flex items-center gap-1.5 text-teal-700 dark:text-teal-400 font-bold text-sm">
-                                <HardDrive className="w-4 h-4" />
-                                <span>Target Maximum File Size</span>
-                              </div>
-                              <div className="grid grid-cols-2 gap-2">
-                                {[
-                                  { label: '2 MB', desc: 'Govt Portals / SSC', val: 2 },
-                                  { label: '5 MB', desc: 'Standard Form', val: 5 },
-                                  { label: '10 MB', desc: 'Email Attachment', val: 10 },
-                                  { label: '16 MB', desc: 'WhatsApp Limit', val: 16 },
-                                ].map(preset => (
-                                  <button
-                                    key={preset.val}
-                                    type="button"
-                                    onClick={() => setTargetSizeMB(preset.val)}
-                                    className={`p-2 rounded-xl text-left border-2 transition-all ${targetSizeMB === preset.val
-                                      ? 'border-teal-500 bg-teal-50 dark:bg-teal-950/40 text-teal-900 dark:text-teal-200 font-bold'
-                                      : 'border-gray-100 dark:border-slate-800 bg-gray-50 dark:bg-slate-800/60 hover:border-gray-200 dark:hover:border-slate-700 text-gray-700 dark:text-slate-200'
-                                      }`}
-                                  >
-                                    <div className="text-xs font-bold">{preset.label}</div>
-                                    <div className="text-[10px] text-gray-500 dark:text-slate-400">{preset.desc}</div>
-                                  </button>
-                                ))}
-                              </div>
-                              <div className="pt-2">
-                                <label className="block text-xs font-semibold text-gray-600 dark:text-slate-400 mb-1">Custom Limit (MB)</label>
-                                <input
-                                  type="number"
-                                  min={0.2}
-                                  max={100}
-                                  step={0.5}
-                                  value={targetSizeMB}
-                                  onChange={e => setTargetSizeMB(Number(e.target.value))}
-                                  className="w-full px-3 py-2 bg-white dark:bg-slate-800/80 text-gray-900 dark:text-slate-100 border border-gray-200 dark:border-slate-700 rounded-lg text-sm font-semibold focus:outline-none focus:border-teal-500"
-                                />
-                              </div>
-                              <p className="text-[11px] text-gray-400 dark:text-slate-500 leading-tight">
-                                Guarantees every output PDF chunk stays strictly below {targetSizeMB} MB without trial and error.
-                              </p>
-                            </div>
-                          )}
-
-                          {/* Split by Keyword / Invoice */}
-                          {splitMode === 'keyword' && (
-                            <div className="bg-white dark:bg-slate-900/90 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-800 p-5 space-y-3">
-                              <div className="flex items-center gap-1.5 text-indigo-700 dark:text-indigo-400 font-bold text-sm">
-                                <Search className="w-4 h-4" />
-                                <span>Split Boundary Keyword</span>
-                              </div>
-                              <input
-                                type="text"
-                                value={splitKeyword}
-                                onChange={e => setSplitKeyword(e.target.value)}
-                                placeholder="e.g. Invoice, Salary, Roll No"
-                                className="w-full px-3 py-2 bg-white dark:bg-slate-800/80 text-gray-900 dark:text-slate-100 placeholder-gray-400 dark:placeholder-slate-500 border border-gray-200 dark:border-slate-700 rounded-lg text-sm font-semibold focus:outline-none focus:border-indigo-500"
-                              />
-                              <div className="flex flex-wrap gap-1.5">
-                                {['Invoice', 'Salary Slip', 'Roll No', 'Receipt', 'Form 16', 'Statement'].map(tag => (
-                                  <button
-                                    key={tag}
-                                    type="button"
-                                    onClick={() => setSplitKeyword(tag)}
-                                    className="px-2 py-0.5 text-[11px] rounded-md bg-indigo-50 dark:bg-indigo-950/50 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 font-medium transition-colors"
-                                  >
-                                    {tag}
-                                  </button>
-                                ))}
-                              </div>
-                              <p className="text-[11px] text-gray-400 dark:text-slate-500 leading-tight">
-                                Scans the text of all pages. Each page containing "{splitKeyword}" begins a new separate document.
-                              </p>
-                            </div>
-                          )}
-
-                          <button onClick={splitPdf} disabled={isProcessing || (splitMode === 'selection' && selectedPages.size === 0)}
-                            className="w-full py-4 bg-orange-600 text-white text-base font-bold rounded-xl hover:bg-orange-700 transition-colors disabled:opacity-50 shadow-md flex items-center justify-center gap-2">
-                            {isProcessing ? (
-                              <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />{processStep || 'Splitting...'}</>
-                            ) : (
-                              <><Scissors className="w-5 h-5" />Split PDF</>
-                            )}
-                          </button>
+                    {/* Split by File Size */}
+                    {splitMode === 'size' && (
+                      <div className="bg-white/75 dark:bg-slate-900/75 rounded-2xl border border-[var(--pms-border)] p-4 space-y-3">
+                        <div className="flex items-center gap-1.5 text-sky-700 dark:text-sky-400 font-bold text-sm">
+                          <HardDrive className="w-4 h-4" />
+                          <span>Target Maximum File Size</span>
                         </div>
-
-                        {/* Right: Thumbnail grid */}
-                        <div className="lg:col-span-2 bg-white dark:bg-slate-900/90 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-800 p-5">
-                          <div className="flex items-center justify-between mb-4">
-                            <h3 className="font-bold text-gray-800 dark:text-slate-200 text-sm uppercase tracking-wider">Page Preview</h3>
-                            {loadingThumbs && (
-                              <span className="text-xs text-gray-400 dark:text-slate-500 flex items-center gap-1">
-                                <div className="w-3 h-3 border-2 border-orange-400 border-t-transparent rounded-full animate-spin" />
-                                Loading {thumbProgress}%
-                              </span>
-                            )}
-                          </div>
-                          {thumbs.length === 0 && !loadingThumbs && (
-                            <div className="flex items-center justify-center h-48 text-gray-300 dark:text-slate-600">
-                              <p className="text-sm">Thumbnails loading...</p>
-                            </div>
-                          )}
-                          <div className="grid grid-cols-4 sm:grid-cols-5 md:grid-cols-6 gap-2 max-h-[480px] overflow-y-auto pr-1">
-                            {thumbs.map(t => {
-                              const isSelected = selectedPages.has(t.num);
-                              return (
-                                <button key={t.num} onClick={() => splitMode === 'selection' && togglePage(t.num)}
-                                  className={`relative group flex flex-col items-center rounded-xl overflow-hidden border-2 transition-all bg-white ${splitMode === 'selection' ? 'cursor-pointer' : 'cursor-default'} ${isSelected ? 'border-violet-500 shadow-md shadow-violet-200 dark:shadow-violet-950/50' : 'border-gray-200 dark:border-slate-700 hover:border-orange-300 dark:hover:border-orange-500'}`}>
-                                  <img src={t.thumb} alt={`Page ${t.num}`} className="w-full object-cover" />
-                                  {splitMode === 'selection' && (
-                                    <div className={`absolute top-1 right-1 w-5 h-5 rounded-full flex items-center justify-center transition-all ${isSelected ? 'bg-violet-500 text-white' : 'bg-white/80 text-gray-400 border border-gray-300 opacity-0 group-hover:opacity-100'}`}>
-                                      {isSelected ? <CheckSquare className="w-3 h-3" /> : <Square className="w-3 h-3" />}
-                                    </div>
-                                  )}
-                                  <div className={`w-full py-1 text-center text-[10px] font-semibold ${isSelected ? 'bg-violet-500 text-white' : 'bg-gray-50 dark:bg-slate-800 text-gray-500 dark:text-slate-400'}`}>
-                                    {t.num}
-                                  </div>
-                                </button>
-                              );
-                            })}
-                            {loadingThumbs && Array.from({ length: Math.max(0, pageCount - thumbs.length) }).map((_, i) => (
-                              <div key={i} className="aspect-[3/4] rounded-xl bg-gray-100 dark:bg-slate-800 animate-pulse" />
-                            ))}
-                          </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          {[
+                            { label: '2 MB', desc: 'Govt Portals / SSC', val: 2 },
+                            { label: '5 MB', desc: 'Standard Form', val: 5 },
+                            { label: '10 MB', desc: 'Email Attachment', val: 10 },
+                            { label: '16 MB', desc: 'WhatsApp Limit', val: 16 },
+                          ].map(preset => {
+                            const isSelected = targetSizeMB === preset.val;
+                            return (
+                              <button
+                                key={preset.val}
+                                type="button"
+                                onClick={() => setTargetSizeMB(preset.val)}
+                                className={`relative p-2.5 rounded-xl text-left border transition-colors cursor-pointer overflow-hidden ${
+                                  isSelected
+                                    ? 'border-[var(--pms-border-strong)] text-sky-900 dark:text-sky-200 font-bold'
+                                    : 'border-[var(--pms-border)] bg-white/70 dark:bg-slate-800/60 hover:border-[var(--pms-border-strong)] text-gray-700 dark:text-slate-200'
+                                }`}
+                                style={isSelected ? { backgroundColor: 'var(--pms-soft-blue)' } : undefined}
+                              >
+                                {isSelected && (
+                                  <motion.div
+                                    layoutId="split-size-preset-pill"
+                                    transition={prefersReduced ? { duration: 0 } : { type: 'spring', stiffness: 420, damping: 32 }}
+                                    className="absolute inset-0 rounded-xl ring-2 ring-sky-500/35 pointer-events-none"
+                                  />
+                                )}
+                                <div className="relative z-10">
+                                  <div className="text-xs font-bold">{preset.label}</div>
+                                  <div className="text-[10px] text-gray-500 dark:text-slate-400">{preset.desc}</div>
+                                </div>
+                              </button>
+                            );
+                          })}
                         </div>
+                        <div className="pt-1">
+                          <label className="block text-xs font-semibold text-gray-600 dark:text-slate-400 mb-1">Custom Limit (MB)</label>
+                          <input
+                            type="number"
+                            min={0.2}
+                            max={100}
+                            step={0.5}
+                            value={targetSizeMB}
+                            onChange={e => setTargetSizeMB(Number(e.target.value))}
+                            className="w-full px-3 py-2 bg-white dark:bg-slate-800/80 text-gray-900 dark:text-slate-100 border border-[var(--pms-border)] rounded-xl text-sm font-semibold focus:outline-none focus:border-sky-500"
+                          />
+                        </div>
+                        <p className="text-[11px] text-gray-400 dark:text-slate-500 leading-tight">
+                          Guarantees every output PDF chunk stays strictly below {targetSizeMB} MB without trial and error.
+                        </p>
                       </div>
-            )}
-          </div>
-        )}
+                    )}
+
+                    {/* Split by Keyword / Invoice */}
+                    {splitMode === 'keyword' && (
+                      <div className="bg-white/75 dark:bg-slate-900/75 rounded-2xl border border-[var(--pms-border)] p-4 space-y-3">
+                        <div className="flex items-center gap-1.5 text-indigo-700 dark:text-indigo-400 font-bold text-sm">
+                          <Search className="w-4 h-4" />
+                          <span>Split Boundary Keyword</span>
+                        </div>
+                        <input
+                          type="text"
+                          value={splitKeyword}
+                          onChange={e => setSplitKeyword(e.target.value)}
+                          placeholder="e.g. Invoice, Salary, Roll No"
+                          className="w-full px-3 py-2 bg-white dark:bg-slate-800/80 text-gray-900 dark:text-slate-100 placeholder-gray-400 dark:placeholder-slate-500 border border-[var(--pms-border)] rounded-xl text-sm font-semibold focus:outline-none focus:border-indigo-500"
+                        />
+                        <div className="flex flex-wrap gap-1.5">
+                          {['Invoice', 'Salary Slip', 'Roll No', 'Receipt', 'Form 16', 'Statement'].map(tag => (
+                            <button
+                              key={tag}
+                              type="button"
+                              onClick={() => setSplitKeyword(tag)}
+                              className="px-2.5 py-0.5 text-[11px] rounded-lg bg-[var(--pms-soft-lavender)] hover:brightness-95 text-indigo-700 dark:text-indigo-300 font-medium transition-all cursor-pointer"
+                            >
+                              {tag}
+                            </button>
+                          ))}
+                        </div>
+                        <p className="text-[11px] text-gray-400 dark:text-slate-500 leading-tight">
+                          Scans the text of all pages. Each page containing "{splitKeyword}" begins a new separate document.
+                        </p>
+                      </div>
+                    )}
+
+                    <motion.button
+                      whileHover={prefersReduced || isProcessing || (splitMode === 'selection' && selectedPages.size === 0) ? undefined : { scale: 1.01 }}
+                      whileTap={prefersReduced || isProcessing || (splitMode === 'selection' && selectedPages.size === 0) ? undefined : { scale: 0.985 }}
+                      onClick={splitPdf}
+                      disabled={isProcessing || (splitMode === 'selection' && selectedPages.size === 0)}
+                      className="relative overflow-hidden w-full pms-btn-primary py-4 text-base font-bold rounded-2xl disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      <span aria-hidden="true" className="pointer-events-none absolute inset-0 pms-shimmer opacity-40" />
+                      {isProcessing ? (
+                        <span className="relative z-10 inline-flex items-center gap-2">
+                          <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                          {processStep || 'Splitting...'}
+                        </span>
+                      ) : (
+                        <span className="relative z-10 inline-flex items-center gap-2">
+                          <Scissors className="w-5 h-5" />
+                          Split PDF
+                        </span>
+                      )}
+                    </motion.button>
+                  </div>
+
+                  {/* Right: Thumbnail grid */}
+                  <div className="lg:col-span-2 relative pms-glass-panel rounded-3xl p-5 overflow-hidden">
+                    <PearlScanOverlay active={loadingThumbs} label={`Rendering previews (${thumbProgress}%)…`} />
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="font-bold text-gray-800 dark:text-slate-200 text-sm uppercase tracking-wider">Page Preview</h3>
+                      {loadingThumbs && (
+                        <span className="text-xs text-gray-500 dark:text-slate-400 flex items-center gap-1.5">
+                          <div className="w-3 h-3 border-2 border-rose-500 border-t-transparent rounded-full animate-spin" />
+                          Loading {thumbProgress}%
+                        </span>
+                      )}
+                    </div>
+                    {thumbs.length === 0 && !loadingThumbs && (
+                      <div className="flex items-center justify-center h-48 text-gray-400 dark:text-slate-500">
+                        <p className="text-sm">Thumbnails loading...</p>
+                      </div>
+                    )}
+                    <div className="grid grid-cols-4 sm:grid-cols-5 md:grid-cols-6 gap-2.5 max-h-[520px] overflow-y-auto pr-1">
+                      {thumbs.map(t => {
+                        const isSelected = selectedPages.has(t.num);
+                        return (
+                          <button key={t.num} onClick={() => splitMode === 'selection' && togglePage(t.num)}
+                            className={`relative group flex flex-col items-center rounded-xl overflow-hidden border-2 transition-all bg-white ${splitMode === 'selection' ? 'cursor-pointer' : 'cursor-default'} ${isSelected ? 'border-violet-500 shadow-md shadow-violet-200 dark:shadow-violet-950/50' : 'border-gray-200 dark:border-slate-700 hover:border-rose-300 dark:hover:border-rose-500'}`}>
+                            <img src={t.thumb} alt={`Page ${t.num}`} className="w-full object-cover bg-white" />
+                            {splitMode === 'selection' && (
+                              <div className={`absolute top-1 right-1 w-5 h-5 rounded-full flex items-center justify-center transition-all ${isSelected ? 'bg-violet-500 text-white' : 'bg-white/90 text-gray-400 border border-gray-300 opacity-0 group-hover:opacity-100'}`}>
+                                {isSelected ? <CheckSquare className="w-3 h-3" /> : <Square className="w-3 h-3" />}
+                              </div>
+                            )}
+                            <div className={`w-full py-1 text-center text-[10px] font-semibold ${isSelected ? 'bg-violet-500 text-white' : 'bg-gray-50 dark:bg-slate-800 text-gray-500 dark:text-slate-400'}`}>
+                              {t.num}
+                            </div>
+                          </button>
+                        );
+                      })}
+                      {loadingThumbs && Array.from({ length: Math.max(0, pageCount - thumbs.length) }).map((_, i) => (
+                        <div key={i} className="aspect-[3/4] rounded-xl pms-shimmer border border-[var(--pms-border)]" />
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </PearlStageSwitch>
       </div>
     </ToolWorkspaceShell>
   );

@@ -1,18 +1,20 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { 
-  GitCompare, Download, Loader2, SplitSquareVertical, SlidersHorizontal, 
-  FileText, ArrowRight, CheckCircle2, AlertCircle, ChevronLeft, ChevronRight, Layers, Eye,
-  ZoomIn, ZoomOut, RotateCcw
+import React, { useState, useRef } from 'react';
+import {
+  GitCompare, Download, Loader2, SplitSquareVertical, SlidersHorizontal,
+  FileText, ArrowRight, ChevronLeft, ChevronRight, Layers,
+  ZoomIn, ZoomOut
 } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
+import { motion, useReducedMotion } from 'motion/react';
 import '../lib/pdfWorker';
 import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { dataUrlToBytes } from '../lib/utils';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
-import { triggerBlobDownload } from '../lib/blobUrl';
+import { AnimatedNumber, PearlScanOverlay } from '../components/pearl/PearlMotion';
+import { toArrayBufferBytes, triggerBlobDownload } from '../lib/blobUrl';
 
 type ViewMode = 'slider' | 'side-by-side' | 'diff-overlay' | 'text-diff';
 
@@ -47,6 +49,7 @@ export default function PdfComparison() {
   const [sliderPos, setSliderPos] = useState(50); // percentage
   const [zoomLevel, setZoomLevel] = useState<number>(100); // 50% - 250% zoom
 
+  const prefersReduced = useReducedMotion();
   const sliderRef = useRef<HTMLDivElement>(null);
   const isDraggingRef = useRef(false);
 
@@ -364,7 +367,7 @@ export default function PdfComparison() {
       }
 
       const finalBytes = await pdfDoc.save();
-      const blob = new Blob([finalBytes as any], { type: 'application/pdf' });
+      const blob = new Blob([toArrayBufferBytes(finalBytes)], { type: 'application/pdf' });
       triggerBlobDownload(blob, `PDF_Audit_Report_${fileA.name.replace(/\.pdf$/i, '')}_vs_${fileB.name.replace(/\.pdf$/i, '')}.pdf`);
     } catch (err) {
       console.error('Export report error:', err);
@@ -395,30 +398,37 @@ export default function PdfComparison() {
       <div className="max-w-6xl mx-auto flex flex-col items-center">
 
       {!pagesA.length ? (
-        <div className="w-full max-w-3xl space-y-6">
+        <motion.div
+          initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+          className="relative w-full max-w-3xl pms-glass-panel rounded-3xl p-5 sm:p-7 overflow-hidden min-h-[260px] space-y-6"
+        >
+          <PearlScanOverlay active={busy} label="Comparing documents pixel by pixel…" />
+
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-3">
-              <span className="inline-block px-2.5 py-0.5 rounded-full text-xs font-bold bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
+            <div className="pms-glass-panel p-5 rounded-2xl space-y-3">
+              <span className="inline-block px-2.5 py-0.5 rounded-full text-xs font-bold bg-[var(--pms-soft-blue)] text-[var(--pms-blue)]">
                 Original Version (Document A)
               </span>
               {fileA ? (
-                <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded-xl flex items-center justify-between">
-                  <div className="truncate text-xs font-bold text-slate-800 dark:text-slate-200">{fileA.name}</div>
-                  <button onClick={() => setFileA(null)} className="text-xs text-red-500 font-bold ml-2">Remove</button>
+                <div className="p-3 bg-[var(--pms-pearl)] dark:bg-slate-800/80 border border-[var(--pms-border)] rounded-xl flex items-center justify-between gap-2">
+                  <div className="truncate text-xs font-bold text-[var(--pms-ink)]">{fileA.name}</div>
+                  <button onClick={() => setFileA(null)} className="text-xs text-[var(--pms-rose)] font-bold shrink-0">Remove</button>
                 </div>
               ) : (
                 <FileDropzone onDrop={handleDropA} multiple={false} title="Select Original Document A" />
               )}
             </div>
 
-            <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-3">
-              <span className="inline-block px-2.5 py-0.5 rounded-full text-xs font-bold bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300">
+            <div className="pms-glass-panel p-5 rounded-2xl space-y-3">
+              <span className="inline-block px-2.5 py-0.5 rounded-full text-xs font-bold bg-[var(--pms-soft-lavender)] text-[var(--pms-violet)]">
                 Revised Version (Document B)
               </span>
               {fileB ? (
-                <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded-xl flex items-center justify-between">
-                  <div className="truncate text-xs font-bold text-slate-800 dark:text-slate-200">{fileB.name}</div>
-                  <button onClick={() => setFileB(null)} className="text-xs text-red-500 font-bold ml-2">Remove</button>
+                <div className="p-3 bg-[var(--pms-pearl)] dark:bg-slate-800/80 border border-[var(--pms-border)] rounded-xl flex items-center justify-between gap-2">
+                  <div className="truncate text-xs font-bold text-[var(--pms-ink)]">{fileB.name}</div>
+                  <button onClick={() => setFileB(null)} className="text-xs text-[var(--pms-rose)] font-bold shrink-0">Remove</button>
                 </div>
               ) : (
                 <FileDropzone onDrop={handleDropB} multiple={false} title="Select Revised Document B" />
@@ -426,15 +436,17 @@ export default function PdfComparison() {
             </div>
           </div>
 
-          <button
+          <motion.button
+            whileHover={prefersReduced ? undefined : { scale: 1.01 }}
+            whileTap={prefersReduced ? undefined : { scale: 0.99 }}
             onClick={compareDocuments}
             disabled={!fileA || !fileB || busy}
-            className="w-full py-4 px-6 bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white font-bold rounded-2xl shadow-lg shadow-indigo-600/20 flex items-center justify-center gap-2 text-base transition-all disabled:opacity-50"
+            className="pms-btn-primary w-full py-4 px-6 font-bold rounded-2xl flex items-center justify-center gap-2 text-base disabled:opacity-50"
           >
             {busy ? (
               <>
                 <Loader2 className="w-5 h-5 animate-spin" />
-                <span>Comparing Documents Pixel by Pixel...</span>
+                <span>Comparing Documents Pixel by Pixel…</span>
               </>
             ) : (
               <>
@@ -443,15 +455,20 @@ export default function PdfComparison() {
                 <ArrowRight className="w-5 h-5" />
               </>
             )}
-          </button>
-        </div>
+          </motion.button>
+        </motion.div>
       ) : (
         /* Active Comparison Workspace */
-        <div className="w-full space-y-4">
+        <motion.div
+          initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+          className="w-full space-y-4"
+        >
           {/* Top Control Bar */}
-          <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-wrap items-center justify-between gap-4">
+          <div className="pms-glass-panel p-4 rounded-3xl flex flex-wrap items-center justify-between gap-4">
             {/* View Mode Tabs */}
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-1.5 bg-[var(--pms-pearl)]/80 dark:bg-slate-900/70 p-1.5 rounded-2xl border border-[var(--pms-border)]">
               {[
                 { id: 'slider', label: 'Swipe Slider', icon: SlidersHorizontal },
                 { id: 'side-by-side', label: 'Side by Side', icon: SplitSquareVertical },
@@ -465,8 +482,8 @@ export default function PdfComparison() {
                     onClick={() => setViewMode(tab.id as ViewMode)}
                     className={`py-2 px-3.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all ${
                       viewMode === tab.id
-                        ? 'bg-indigo-600 text-white shadow-sm'
-                        : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200'
+                        ? 'bg-[var(--pms-violet)] text-white shadow-sm'
+                        : 'text-[var(--pms-muted)] hover:text-[var(--pms-ink)] hover:bg-[var(--pms-white)] dark:hover:bg-slate-800'
                     }`}
                   >
                     <Icon className="w-3.5 h-3.5" />
@@ -479,132 +496,138 @@ export default function PdfComparison() {
             {/* Metrics, Zoom & Page Flipping */}
             <div className="flex flex-wrap items-center gap-3">
               {currentStat && (
-                <span className="text-xs font-bold px-3 py-1 bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 rounded-full border border-rose-200 dark:border-rose-900">
-                  {currentStat.diffPercent}% Changed ({currentStat.diffPixels.toLocaleString()} px)
+                <span className="text-xs font-bold px-3 py-1 bg-[var(--pms-soft-rose)] text-[var(--pms-rose)] rounded-full border border-rose-200/80 dark:border-rose-900/70 tabular-nums">
+                  <AnimatedNumber value={currentStat.diffPercent} decimals={2} suffix="%" /> Changed ({currentStat.diffPixels.toLocaleString()} px)
                 </span>
               )}
 
               {/* Synchronized Zoom Controls */}
-              <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl text-xs">
+              <div className="flex items-center gap-1 bg-[var(--pms-pearl)] dark:bg-slate-900/80 border border-[var(--pms-border)] p-1 rounded-xl text-xs">
                 <button
                   onClick={() => setZoomLevel(z => Math.max(50, z - 25))}
-                  className="p-1.5 hover:bg-white dark:hover:bg-slate-700 rounded-lg text-slate-700 dark:text-slate-300 transition-colors"
+                  className="p-1.5 hover:bg-[var(--pms-white)] dark:hover:bg-slate-800 rounded-lg text-[var(--pms-ink)] transition-colors"
                   title="Zoom Out"
                 >
                   <ZoomOut className="w-3.5 h-3.5" />
                 </button>
                 <button
                   onClick={() => setZoomLevel(100)}
-                  className="px-2 py-1 font-mono font-bold text-[11px] text-slate-700 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-700 rounded-lg transition-colors"
+                  className="px-2 py-1 font-mono font-bold text-[11px] text-[var(--pms-ink)] hover:bg-[var(--pms-white)] dark:hover:bg-slate-800 rounded-lg transition-colors tabular-nums"
                   title="Reset Zoom to 100%"
                 >
                   {zoomLevel}%
                 </button>
                 <button
                   onClick={() => setZoomLevel(z => Math.min(250, z + 25))}
-                  className="p-1.5 hover:bg-white dark:hover:bg-slate-700 rounded-lg text-slate-700 dark:text-slate-300 transition-colors"
+                  className="p-1.5 hover:bg-[var(--pms-white)] dark:hover:bg-slate-800 rounded-lg text-[var(--pms-ink)] transition-colors"
                   title="Zoom In"
                 >
                   <ZoomIn className="w-3.5 h-3.5" />
                 </button>
               </div>
 
-              <div className="flex items-center gap-1 text-xs font-bold text-slate-600 dark:text-slate-400">
+              <div className="flex items-center gap-1.5 text-xs font-bold text-[var(--pms-muted)]">
                 <button
                   onClick={() => setCurrentPage(p => Math.max(p - 1, 0))}
                   disabled={currentPage === 0}
-                  className="p-1.5 rounded-lg border hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-30"
+                  className="p-1.5 rounded-xl border border-[var(--pms-border)] bg-[var(--pms-white)] dark:bg-slate-900 hover:bg-[var(--pms-soft-lavender)] disabled:opacity-30 transition-colors"
                 >
-                  <ChevronLeft className="w-4 h-4" />
+                  <ChevronLeft className="w-4 h-4 text-[var(--pms-ink)]" />
                 </button>
-                <span>Page {currentPage + 1} / {diffImages.length}</span>
+                <span className="text-[var(--pms-ink)]">Page {currentPage + 1} / {diffImages.length}</span>
                 <button
                   onClick={() => setCurrentPage(p => Math.min(p + 1, diffImages.length - 1))}
                   disabled={currentPage === diffImages.length - 1}
-                  className="p-1.5 rounded-lg border hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-30"
+                  className="p-1.5 rounded-xl border border-[var(--pms-border)] bg-[var(--pms-white)] dark:bg-slate-900 hover:bg-[var(--pms-soft-lavender)] disabled:opacity-30 transition-colors"
                 >
-                  <ChevronRight className="w-4 h-4" />
+                  <ChevronRight className="w-4 h-4 text-[var(--pms-ink)]" />
                 </button>
               </div>
 
-              <button
+              <motion.button
+                whileHover={prefersReduced ? undefined : { scale: 1.02 }}
+                whileTap={prefersReduced ? undefined : { scale: 0.98 }}
                 onClick={exportDiffPdf}
-                className="py-2 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-sm"
+                className="pms-btn-primary py-2 px-4 font-bold rounded-xl text-xs flex items-center gap-1.5"
               >
                 <Download className="w-3.5 h-3.5" />
                 Export Audit Report PDF
+              </motion.button>
+              <button onClick={reset} className="text-xs font-semibold text-[var(--pms-muted)] hover:text-[var(--pms-ink)] underline">
+                Change
               </button>
-              <button onClick={reset} className="text-xs text-slate-400 hover:text-slate-600 underline">Change</button>
             </div>
           </div>
 
           {/* Interactive Workspace Viewport */}
           {viewMode === 'slider' ? (
-            /* Mode 1: Swipe Slider */
-            <div 
-              ref={sliderRef}
-              className="relative border shadow-xl bg-white select-none overflow-hidden rounded-2xl mx-auto cursor-ew-resize max-w-full transition-transform"
-              style={{ transform: `scale(${zoomLevel / 100})`, transformOrigin: 'top center' }}
-              onMouseDown={onMouseDown}
-              onMouseUp={onMouseUp}
-              onMouseMove={onMouseMove}
-            >
-              {/* Document B (Underneath / Full) */}
-              <img
-                src={pagesB[currentPage]}
-                alt="Document B"
-                className="max-h-[75vh] object-contain pointer-events-none mx-auto block"
-              />
-
-              {/* Document A (Clipped by slider position) */}
-              <div 
-                className="absolute inset-0 overflow-hidden pointer-events-none border-r-2 border-indigo-600 shadow-2xl"
-                style={{ width: `${sliderPos}%` }}
+            /* Mode 1: Swipe Slider (keep bg-white paper surface) */
+            <div className="pms-glass-panel p-4 sm:p-5 rounded-3xl flex justify-center overflow-auto">
+              <div
+                ref={sliderRef}
+                className="relative border border-[var(--pms-border-strong)] shadow-xl bg-white select-none overflow-hidden rounded-2xl mx-auto cursor-ew-resize max-w-full transition-transform"
+                style={{ transform: `scale(${zoomLevel / 100})`, transformOrigin: 'top center' }}
+                onMouseDown={onMouseDown}
+                onMouseUp={onMouseUp}
+                onMouseMove={onMouseMove}
               >
+                {/* Document B (Underneath / Full) */}
                 <img
-                  src={pagesA[currentPage]}
-                  alt="Document A"
-                  className="max-h-[75vh] object-contain max-w-none pointer-events-none"
+                  src={pagesB[currentPage]}
+                  alt="Document B"
+                  className="max-h-[75vh] object-contain pointer-events-none mx-auto block"
                 />
-              </div>
 
-              {/* Slider Handle Knob */}
-              <div 
-                className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center shadow-lg pointer-events-none z-10 text-xs font-bold"
-                style={{ left: `${sliderPos}%` }}
-              >
-                ⇄
-              </div>
+                {/* Document A (Clipped by slider position) */}
+                <div
+                  className="absolute inset-0 overflow-hidden pointer-events-none border-r-2 border-indigo-600 shadow-2xl"
+                  style={{ width: `${sliderPos}%` }}
+                >
+                  <img
+                    src={pagesA[currentPage]}
+                    alt="Document A"
+                    className="max-h-[75vh] object-contain max-w-none pointer-events-none"
+                  />
+                </div>
 
-              {/* Labels */}
-              <div className="absolute top-3 left-3 bg-blue-600 text-white px-2.5 py-1 rounded-lg text-[10px] font-bold shadow-md">
-                Original (Doc A)
-              </div>
-              <div className="absolute top-3 right-3 bg-indigo-600 text-white px-2.5 py-1 rounded-lg text-[10px] font-bold shadow-md">
-                Revised (Doc B)
+                {/* Slider Handle Knob */}
+                <div
+                  className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center shadow-lg pointer-events-none z-10 text-xs font-bold"
+                  style={{ left: `${sliderPos}%` }}
+                >
+                  ⇄
+                </div>
+
+                {/* Labels */}
+                <div className="absolute top-3 left-3 bg-blue-600 text-white px-2.5 py-1 rounded-lg text-[10px] font-bold shadow-md">
+                  Original (Doc A)
+                </div>
+                <div className="absolute top-3 right-3 bg-indigo-600 text-white px-2.5 py-1 rounded-lg text-[10px] font-bold shadow-md">
+                  Revised (Doc B)
+                </div>
               </div>
             </div>
           ) : viewMode === 'side-by-side' ? (
             /* Mode 2: Side by Side with Synchronized Zoom */
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="bg-white dark:bg-slate-900 p-3 rounded-2xl border shadow-md space-y-2">
-                <span className="text-xs font-bold text-blue-600 block text-center">Document A (Original)</span>
-                <div className="overflow-auto max-h-[70vh] flex justify-center">
+              <div className="pms-glass-panel p-4 rounded-3xl space-y-2">
+                <span className="text-xs font-bold text-[var(--pms-blue)] block text-center">Document A (Original)</span>
+                <div className="overflow-auto max-h-[70vh] flex justify-center rounded-xl bg-white p-2 border border-[var(--pms-border)]">
                   <img
                     src={pagesA[currentPage]}
                     alt="Doc A"
-                    className="max-h-[68vh] object-contain border transition-transform"
+                    className="max-h-[68vh] object-contain transition-transform"
                     style={{ transform: `scale(${zoomLevel / 100})`, transformOrigin: 'top center' }}
                   />
                 </div>
               </div>
-              <div className="bg-white dark:bg-slate-900 p-3 rounded-2xl border shadow-md space-y-2">
-                <span className="text-xs font-bold text-indigo-600 block text-center">Document B (Revised)</span>
-                <div className="overflow-auto max-h-[70vh] flex justify-center">
+              <div className="pms-glass-panel p-4 rounded-3xl space-y-2">
+                <span className="text-xs font-bold text-[var(--pms-violet)] block text-center">Document B (Revised)</span>
+                <div className="overflow-auto max-h-[70vh] flex justify-center rounded-xl bg-white p-2 border border-[var(--pms-border)]">
                   <img
                     src={pagesB[currentPage]}
                     alt="Doc B"
-                    className="max-h-[68vh] object-contain border transition-transform"
+                    className="max-h-[68vh] object-contain transition-transform"
                     style={{ transform: `scale(${zoomLevel / 100})`, transformOrigin: 'top center' }}
                   />
                 </div>
@@ -612,48 +635,48 @@ export default function PdfComparison() {
             </div>
           ) : viewMode === 'diff-overlay' ? (
             /* Mode 3: Pixel Diff Heatmap with 3-Color Legend */
-            <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border shadow-lg text-center space-y-4">
+            <div className="pms-glass-panel p-5 rounded-3xl text-center space-y-4">
               <div className="flex flex-wrap items-center justify-center gap-3 text-xs font-bold">
-                <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-300 rounded-full border border-red-200 dark:border-red-900">
-                  <span className="w-2.5 h-2.5 rounded-full bg-red-500"></span>
-                  🔴 Red: Removed / Deleted
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-rose-100/90 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300 rounded-full border border-rose-200 dark:border-rose-900">
+                  <span className="w-2.5 h-2.5 rounded-full bg-rose-500"></span>
+                  Red: Removed / Deleted
                 </span>
-                <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 rounded-full border border-emerald-200 dark:border-emerald-900">
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-100/90 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 rounded-full border border-emerald-200 dark:border-emerald-900">
                   <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
-                  🟢 Green: Added / Inserted
+                  Green: Added / Inserted
                 </span>
-                <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300 rounded-full border border-amber-200 dark:border-amber-900">
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-amber-100/90 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300 rounded-full border border-amber-200 dark:border-amber-900">
                   <span className="w-2.5 h-2.5 rounded-full bg-amber-500"></span>
-                  🟡 Amber: Modified / Shifted
+                  Amber: Modified / Shifted
                 </span>
               </div>
-              <div className="overflow-auto max-h-[75vh] flex justify-center">
+              <div className="overflow-auto max-h-[75vh] flex justify-center rounded-2xl bg-white p-3 border border-[var(--pms-border)]">
                 <img
                   src={diffImages[currentPage]}
                   alt="Diff Heatmap"
-                  className="max-h-[75vh] object-contain border shadow-md rounded transition-transform"
+                  className="max-h-[75vh] object-contain shadow-md rounded transition-transform"
                   style={{ transform: `scale(${zoomLevel / 100})`, transformOrigin: 'top center' }}
                 />
               </div>
             </div>
           ) : (
             /* Mode 4: Semantic Text Diff */
-            <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl border shadow-sm space-y-4 text-left">
-              <h3 className="font-bold text-sm text-slate-800 dark:text-slate-200">
+            <div className="pms-glass-panel p-6 rounded-3xl space-y-4 text-left">
+              <h3 className="font-bold text-sm text-[var(--pms-ink)]">
                 Text Differences on Page {currentPage + 1}:
               </h3>
 
               {currentTextDiff.length === 0 ? (
-                <p className="text-xs text-slate-500 italic">No significant sentence additions or deletions detected on this page.</p>
+                <p className="text-xs text-[var(--pms-muted)] italic">No significant sentence additions or deletions detected on this page.</p>
               ) : (
                 <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-2">
                   {currentTextDiff.map((line, idx) => (
-                    <div 
+                    <div
                       key={idx}
                       className={`p-3 rounded-xl text-xs font-mono flex items-start gap-2 border ${
                         line.type === 'added'
-                          ? 'bg-emerald-50 text-emerald-900 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-200'
-                          : 'bg-rose-50 text-rose-900 border-rose-200 dark:bg-rose-950/40 dark:text-rose-200'
+                          ? 'bg-emerald-50 text-emerald-900 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-200 dark:border-emerald-900/60'
+                          : 'bg-rose-50 text-rose-900 border-rose-200 dark:bg-rose-950/40 dark:text-rose-200 dark:border-rose-900/60'
                       }`}
                     >
                       <span className="font-bold shrink-0">{line.type === 'added' ? '[+]' : '[-]'}</span>
@@ -664,7 +687,7 @@ export default function PdfComparison() {
               )}
             </div>
           )}
-        </div>
+        </motion.div>
       )}
       </div>
     </ToolWorkspaceShell>

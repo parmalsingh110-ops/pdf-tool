@@ -1,16 +1,19 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState } from 'react';
 import { 
   ShieldCheck, Key, Lock, CheckCircle2, Download, FileText, 
-  UserCheck, Calendar, MapPin, Award, RefreshCw, Eye, Sparkles, AlertCircle
+  UserCheck, Award, RefreshCw
 } from 'lucide-react';
-import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
+import { motion, useReducedMotion } from 'motion/react';
+import { PDFDocument } from 'pdf-lib';
 import * as pdfjsLib from 'pdfjs-dist';
 import '../lib/pdfWorker';
 import FileDropzone from '../components/FileDropzone';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { PearlScanOverlay, PearlStageSwitch } from '../components/pearl/PearlMotion';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { dataUrlToBytes } from '../lib/utils';
-import { triggerBlobDownload, useAutoRevokeUrl } from '../lib/blobUrl';
+import { toArrayBufferBytes, triggerBlobDownload, useAutoRevokeUrl } from '../lib/blobUrl';
 
 type StampStyle = 'corporate' | 'notary' | 'minimal' | 'legal';
 
@@ -40,6 +43,7 @@ export default function CryptographicSignatures() {
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [auditReceipt, setAuditReceipt] = useState<any | null>(null);
 
+  const prefersReduced = useReducedMotion();
   useAutoRevokeUrl(resultUrl);
 
   const handleDrop = async (acceptedFiles: File[]) => {
@@ -260,7 +264,7 @@ export default function CryptographicSignatures() {
       pdfDoc.setKeywords([`DigitalSignature:${hashHex}`, `Signer:${signerName}`, `Timestamp:${isoTimestamp}`]);
 
       const signedBytes = await pdfDoc.save();
-      const blob = new Blob([signedBytes as any], { type: 'application/pdf' });
+      const blob = new Blob([toArrayBufferBytes(signedBytes)], { type: 'application/pdf' });
       const url = URL.createObjectURL(blob);
       setResultUrl(url);
 
@@ -307,291 +311,302 @@ export default function CryptographicSignatures() {
     setPagePreview(null);
   };
 
+  const stageKey = !file ? 'upload' : !resultUrl ? 'configure' : 'result';
+
   return (
-    <div className="flex-1 flex flex-col items-center justify-start p-4 sm:p-8 max-w-5xl mx-auto w-full">
-      {/* Header */}
-      <div className="text-center mb-8">
-        <div className="w-16 h-16 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-sm border border-emerald-100 dark:border-emerald-900/50">
-          <ShieldCheck className="w-8 h-8" />
-        </div>
-        <h1 className="text-3xl sm:text-4xl font-extrabold text-slate-900 dark:text-white mb-2">
-          Cryptographic Digital Signature Studio
-        </h1>
-        <p className="text-base sm:text-lg text-slate-600 dark:text-slate-400 max-w-2xl mx-auto">
-          Sign your PDF using client-side RSA-2048 WebCrypto PKI encryption with verifiable cryptographic seals.
-        </p>
-      </div>
+    <ToolWorkspaceShell
+      title="Cryptographic Digital Signature Studio"
+      subtitle="Sign your PDF using client-side RSA-2048 WebCrypto PKI encryption with verifiable cryptographic seals."
+      categoryLabel="PKI & Digital Signing"
+      icon={ShieldCheck}
+      microVariant="sign"
+      tone="emerald"
+      trustNote="Keys generated strictly via browser WebCrypto API • Zero private-key transmission"
+    >
+      <PearlStageSwitch stageKey={stageKey} className="w-full max-w-5xl mx-auto flex flex-col items-center">
+        {!file ? (
+          <div className="w-full max-w-2xl space-y-6">
+            <FileDropzone 
+              onDrop={handleDrop} 
+              multiple={false} 
+              title="Select PDF Document to Digitally Sign" 
+            />
 
-      {!file ? (
-        <div className="w-full max-w-2xl space-y-6">
-          <FileDropzone 
-            onDrop={handleDrop} 
-            multiple={false} 
-            title="Select PDF Document to Digitally Sign" 
-          />
-
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
-            <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 text-center">
-              <Key className="w-6 h-6 text-emerald-600 dark:text-emerald-400 mx-auto mb-2" />
-              <h3 className="font-bold text-sm text-slate-800 dark:text-slate-200">RSA-2048 PKI</h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Generates cryptographic keypairs using browser WebCrypto.</p>
-            </div>
-            <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 text-center">
-              <Lock className="w-6 h-6 text-blue-600 dark:text-blue-400 mx-auto mb-2" />
-              <h3 className="font-bold text-sm text-slate-800 dark:text-slate-200">SHA-256 Digest</h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Computes cryptographic document fingerprint to detect tampering.</p>
-            </div>
-            <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 text-center">
-              <Award className="w-6 h-6 text-purple-600 dark:text-purple-400 mx-auto mb-2" />
-              <h3 className="font-bold text-sm text-slate-800 dark:text-slate-200">Audit Certificate</h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Exports verifiable JSON signing receipt with full checksums.</p>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
+              <div className="pms-glass-panel p-4 rounded-2xl text-center">
+                <Key className="w-6 h-6 text-emerald-600 dark:text-emerald-400 mx-auto mb-2" />
+                <h3 className="font-bold text-sm text-[var(--pms-ink)]">RSA-2048 PKI</h3>
+                <p className="text-xs text-[var(--pms-muted)] mt-1">Generates cryptographic keypairs using browser WebCrypto.</p>
+              </div>
+              <div className="pms-glass-panel p-4 rounded-2xl text-center">
+                <Lock className="w-6 h-6 text-blue-600 dark:text-blue-400 mx-auto mb-2" />
+                <h3 className="font-bold text-sm text-[var(--pms-ink)]">SHA-256 Digest</h3>
+                <p className="text-xs text-[var(--pms-muted)] mt-1">Computes cryptographic document fingerprint to detect tampering.</p>
+              </div>
+              <div className="pms-glass-panel p-4 rounded-2xl text-center">
+                <Award className="w-6 h-6 text-violet-600 dark:text-violet-400 mx-auto mb-2" />
+                <h3 className="font-bold text-sm text-[var(--pms-ink)]">Audit Certificate</h3>
+                <p className="text-xs text-[var(--pms-muted)] mt-1">Exports verifiable JSON signing receipt with full checksums.</p>
+              </div>
             </div>
           </div>
-        </div>
-      ) : !resultUrl ? (
-        <div className="w-full max-w-4xl grid grid-cols-1 md:grid-cols-12 gap-6">
-          {/* Settings Panel */}
-          <div className="md:col-span-7 bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-5">
-            <h2 className="font-bold text-lg text-slate-900 dark:text-white flex items-center gap-2">
-              <UserCheck className="w-5 h-5 text-emerald-600" />
-              Signer Credentials & Identification
-            </h2>
+        ) : !resultUrl ? (
+          <motion.div
+            initial={prefersReduced ? false : { opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: prefersReduced ? 0 : 0.24 }}
+            className="w-full max-w-4xl grid grid-cols-1 md:grid-cols-12 gap-6"
+          >
+            {/* Settings Panel */}
+            <div className="md:col-span-7 pms-glass-panel p-6 rounded-2xl space-y-5 relative overflow-hidden">
+              <PearlScanOverlay active={isProcessing} label="Computing RSA-2048 signature & SHA-256 seal..." />
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Signer Full Name</label>
-                <input 
-                  type="text" 
-                  value={signerName} 
-                  onChange={e => setSignerName(e.target.value)}
-                  className="w-full px-3 py-2 text-sm rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-emerald-500 outline-none"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Organization / Title</label>
-                <input 
-                  type="text" 
-                  value={signerOrg} 
-                  onChange={e => setSignerOrg(e.target.value)}
-                  className="w-full px-3 py-2 text-sm rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-emerald-500 outline-none"
-                />
-              </div>
-            </div>
+              <h2 className="font-bold text-lg text-[var(--pms-ink)] flex items-center gap-2">
+                <UserCheck className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+                Signer Credentials &amp; Identification
+              </h2>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Signing Location</label>
-                <input 
-                  type="text" 
-                  value={signLocation} 
-                  onChange={e => setSignLocation(e.target.value)}
-                  className="w-full px-3 py-2 text-sm rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-emerald-500 outline-none"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Apply to Page</label>
-                <select 
-                  value={targetPage} 
-                  onChange={e => setTargetPage(Number(e.target.value))}
-                  className="w-full px-3 py-2 text-sm rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-emerald-500 outline-none"
-                >
-                  {Array.from({ length: totalPages }, (_, i) => (
-                    <option key={i + 1} value={i + 1}>Page {i + 1} of {totalPages}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Signing Statement / Reason</label>
-              <input 
-                type="text" 
-                value={signReason} 
-                onChange={e => setSignReason(e.target.value)}
-                className="w-full px-3 py-2 text-sm rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-emerald-500 outline-none"
-              />
-            </div>
-
-            {/* Seal Style Selector */}
-            <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-2">Visual Seal Style</label>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                {[
-                  { id: 'corporate', label: 'Corporate Blue' },
-                  { id: 'notary', label: 'Notary Gold' },
-                  { id: 'legal', label: 'Legal Black' },
-                  { id: 'minimal', label: 'Green Badge' }
-                ].map(s => (
-                  <button
-                    key={s.id}
-                    type="button"
-                    onClick={() => setStampStyle(s.id as StampStyle)}
-                    className={`py-2 px-3 text-xs rounded-xl font-bold border transition-all ${
-                      stampStyle === s.id 
-                        ? 'border-emerald-600 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300' 
-                        : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400'
-                    }`}
-                  >
-                    {s.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Seal Placement */}
-            <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-2">Seal Position</label>
-              <div className="grid grid-cols-3 gap-2">
-                {[
-                  { id: 'bottom-right', label: 'Bottom Right' },
-                  { id: 'bottom-left', label: 'Bottom Left' },
-                  { id: 'top-right', label: 'Top Right' }
-                ].map(p => (
-                  <button
-                    key={p.id}
-                    type="button"
-                    onClick={() => setStampPosition(p.id as any)}
-                    className={`py-2 px-3 text-xs rounded-xl font-bold border transition-all ${
-                      stampPosition === p.id 
-                        ? 'border-emerald-600 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300' 
-                        : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400'
-                    }`}
-                  >
-                    {p.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Action */}
-            <button
-              onClick={executeSigning}
-              disabled={isProcessing}
-              className="w-full mt-4 py-3.5 px-6 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-lg shadow-emerald-600/20 flex items-center justify-center gap-2 text-base transition-all disabled:opacity-50"
-            >
-              {isProcessing ? (
-                <>
-                  <RefreshCw className="w-5 h-5 animate-spin" />
-                  <span>Computing Cryptographic Signature...</span>
-                </>
-              ) : (
-                <>
-                  <ShieldCheck className="w-5 h-5" />
-                  <span>Cryptographically Sign Document</span>
-                </>
-              )}
-            </button>
-          </div>
-
-          {/* Document Preview & File Card */}
-          <div className="md:col-span-5 space-y-4">
-            <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex items-center justify-between">
-              <div className="flex items-center gap-3 min-w-0">
-                <FileText className="w-8 h-8 text-emerald-600 shrink-0" />
-                <div className="min-w-0">
-                  <p className="font-bold text-sm text-slate-900 dark:text-white truncate">{file.name}</p>
-                  <p className="text-xs text-slate-500">{totalPages} Pages • Page {targetPage} selected</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-[var(--pms-ink)] mb-1">Signer Full Name</label>
+                  <input 
+                    type="text" 
+                    value={signerName} 
+                    onChange={e => setSignerName(e.target.value)}
+                    className="w-full px-3 py-2 text-sm rounded-xl border border-[var(--pms-border)] bg-white/75 dark:bg-slate-900/75 text-[var(--pms-ink)] focus:ring-2 focus:ring-emerald-500 outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-[var(--pms-ink)] mb-1">Organization / Title</label>
+                  <input 
+                    type="text" 
+                    value={signerOrg} 
+                    onChange={e => setSignerOrg(e.target.value)}
+                    className="w-full px-3 py-2 text-sm rounded-xl border border-[var(--pms-border)] bg-white/75 dark:bg-slate-900/75 text-[var(--pms-ink)] focus:ring-2 focus:ring-emerald-500 outline-none"
+                  />
                 </div>
               </div>
-              <button onClick={reset} className="text-xs text-slate-500 hover:text-slate-800 underline">Change</button>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-[var(--pms-ink)] mb-1">Signing Location</label>
+                  <input 
+                    type="text" 
+                    value={signLocation} 
+                    onChange={e => setSignLocation(e.target.value)}
+                    className="w-full px-3 py-2 text-sm rounded-xl border border-[var(--pms-border)] bg-white/75 dark:bg-slate-900/75 text-[var(--pms-ink)] focus:ring-2 focus:ring-emerald-500 outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-[var(--pms-ink)] mb-1">Apply to Page</label>
+                  <select 
+                    value={targetPage} 
+                    onChange={e => setTargetPage(Number(e.target.value))}
+                    className="w-full px-3 py-2 text-sm rounded-xl border border-[var(--pms-border)] bg-white/75 dark:bg-slate-900/75 text-[var(--pms-ink)] focus:ring-2 focus:ring-emerald-500 outline-none"
+                  >
+                    {Array.from({ length: totalPages }, (_, i) => (
+                      <option key={i + 1} value={i + 1}>Page {i + 1} of {totalPages}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-[var(--pms-ink)] mb-1">Signing Statement / Reason</label>
+                <input 
+                  type="text" 
+                  value={signReason} 
+                  onChange={e => setSignReason(e.target.value)}
+                  className="w-full px-3 py-2 text-sm rounded-xl border border-[var(--pms-border)] bg-white/75 dark:bg-slate-900/75 text-[var(--pms-ink)] focus:ring-2 focus:ring-emerald-500 outline-none"
+                />
+              </div>
+
+              {/* Seal Style Selector */}
+              <div className="pt-2 border-t border-[var(--pms-border)]">
+                <label className="block text-xs font-bold text-[var(--pms-ink)] mb-2">Visual Seal Style</label>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {[
+                    { id: 'corporate', label: 'Corporate Blue' },
+                    { id: 'notary', label: 'Notary Gold' },
+                    { id: 'legal', label: 'Legal Black' },
+                    { id: 'minimal', label: 'Green Badge' }
+                  ].map(s => (
+                    <button
+                      key={s.id}
+                      type="button"
+                      onClick={() => setStampStyle(s.id as StampStyle)}
+                      className={`py-2 px-3 text-xs rounded-xl font-bold border transition-all ${
+                        stampStyle === s.id 
+                          ? 'border-emerald-600 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 shadow-sm' 
+                          : 'border-[var(--pms-border)] bg-white/50 dark:bg-slate-900/50 text-[var(--pms-muted)] hover:text-[var(--pms-ink)]'
+                      }`}
+                    >
+                      {s.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Seal Placement */}
+              <div>
+                <label className="block text-xs font-bold text-[var(--pms-ink)] mb-2">Seal Position</label>
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { id: 'bottom-right', label: 'Bottom Right' },
+                    { id: 'bottom-left', label: 'Bottom Left' },
+                    { id: 'top-right', label: 'Top Right' }
+                  ].map(p => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => setStampPosition(p.id as any)}
+                      className={`py-2 px-3 text-xs rounded-xl font-bold border transition-all ${
+                        stampPosition === p.id 
+                          ? 'border-emerald-600 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 shadow-sm' 
+                          : 'border-[var(--pms-border)] bg-white/50 dark:bg-slate-900/50 text-[var(--pms-muted)] hover:text-[var(--pms-ink)]'
+                      }`}
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Action */}
+              <button
+                onClick={executeSigning}
+                disabled={isProcessing}
+                className="pms-btn-primary w-full mt-4 py-3.5 px-6 font-bold rounded-2xl flex items-center justify-center gap-2 text-base disabled:opacity-50"
+              >
+                {isProcessing ? (
+                  <>
+                    <RefreshCw className="w-5 h-5 animate-spin" />
+                    <span>Computing Cryptographic Signature...</span>
+                  </>
+                ) : (
+                  <>
+                    <ShieldCheck className="w-5 h-5" />
+                    <span>Cryptographically Sign Document</span>
+                  </>
+                )}
+              </button>
             </div>
 
-            {/* Page Thumbnail with Seal Position Preview */}
-            <div className="bg-slate-100 dark:bg-slate-800 p-3 rounded-2xl border border-slate-200 dark:border-slate-700 relative flex items-center justify-center overflow-hidden min-h-[300px]">
-              {pagePreview ? (
-                <div className="relative border shadow-md bg-white">
-                  <img src={pagePreview} alt="Target Page" className="max-h-[380px] object-contain" />
-                  {/* Seal Preview Overlay Box */}
-                  <div className={`absolute p-1.5 bg-emerald-600/90 text-white rounded text-[10px] font-bold shadow-lg flex items-center gap-1 ${
-                    stampPosition === 'bottom-right' ? 'bottom-2 right-2' :
-                    stampPosition === 'bottom-left' ? 'bottom-2 left-2' : 'top-2 right-2'
-                  }`}>
-                    <ShieldCheck className="w-3 h-3" />
-                    <span>Digital Seal</span>
+            {/* Document Preview & File Card */}
+            <div className="md:col-span-5 space-y-4">
+              <div className="pms-glass-panel p-4 rounded-2xl flex items-center justify-between gap-2">
+                <div className="flex items-center gap-3 min-w-0">
+                  <FileText className="w-8 h-8 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                  <div className="min-w-0">
+                    <p className="font-bold text-sm text-[var(--pms-ink)] truncate">{file.name}</p>
+                    <p className="text-xs text-[var(--pms-muted)]">{totalPages} Pages • Page {targetPage} selected</p>
                   </div>
                 </div>
-              ) : (
-                <p className="text-xs text-slate-400">Loading page preview...</p>
-              )}
-            </div>
-          </div>
-        </div>
-      ) : (
-        /* Result Screen */
-        <div className="w-full max-w-2xl bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-8 shadow-xl text-center space-y-6">
-          <div className="w-20 h-20 bg-emerald-100 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400 rounded-full flex items-center justify-center mx-auto shadow-inner">
-            <CheckCircle2 className="w-10 h-10" />
-          </div>
+                <button onClick={reset} className="text-xs text-[var(--pms-muted)] hover:text-[var(--pms-ink)] underline shrink-0">Change</button>
+              </div>
 
-          <div>
-            <span className="inline-block px-3 py-1 bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 rounded-full text-xs font-bold uppercase tracking-wider mb-2">
-              Cryptographically Certified
-            </span>
-            <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white">
-              Document Signed Successfully!
-            </h2>
-            <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-              Your PDF has been stamped with an RSA-2048 cryptographic seal and registered with a SHA-256 integrity hash.
-            </p>
-          </div>
-
-          {/* Audit Details */}
-          {auditReceipt && (
-            <div className="bg-slate-50 dark:bg-slate-800/40 p-4 rounded-2xl border border-slate-100 dark:border-slate-800 text-left space-y-2 text-xs">
-              <div className="flex justify-between border-b pb-1 dark:border-slate-700">
-                <span className="text-slate-500">Signer Identity:</span>
-                <span className="font-bold text-slate-800 dark:text-slate-200">{auditReceipt.signerName} ({auditReceipt.organization})</span>
-              </div>
-              <div className="flex justify-between border-b pb-1 dark:border-slate-700">
-                <span className="text-slate-500">Timestamp:</span>
-                <span className="font-mono text-slate-700 dark:text-slate-300">{auditReceipt.timestamp}</span>
-              </div>
-              <div className="flex justify-between border-b pb-1 dark:border-slate-700">
-                <span className="text-slate-500">Algorithm:</span>
-                <span className="font-semibold text-emerald-600">{auditReceipt.keyAlgorithm}</span>
-              </div>
-              <div className="pt-1">
-                <span className="text-slate-500 block mb-1">SHA-256 Digest:</span>
-                <span className="font-mono text-[10px] break-all text-slate-600 dark:text-slate-400 bg-white dark:bg-slate-900 p-2 rounded block border border-slate-200 dark:border-slate-700">
-                  {auditReceipt.sha256Hash}
-                </span>
+              {/* Page Thumbnail with Seal Position Preview */}
+              <div className="pms-glass-panel p-3 rounded-2xl relative flex items-center justify-center overflow-hidden min-h-[300px]">
+                {pagePreview ? (
+                  <div className="relative border border-slate-200 shadow-md bg-white">
+                    <img src={pagePreview} alt="Target Page" className="max-h-[380px] object-contain" />
+                    {/* Seal Preview Overlay Box */}
+                    <div className={`absolute p-1.5 bg-emerald-600/90 text-white rounded text-[10px] font-bold shadow-lg flex items-center gap-1 ${
+                      stampPosition === 'bottom-right' ? 'bottom-2 right-2' :
+                      stampPosition === 'bottom-left' ? 'bottom-2 left-2' : 'top-2 right-2'
+                    }`}>
+                      <ShieldCheck className="w-3 h-3" />
+                      <span>Digital Seal</span>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-xs text-[var(--pms-muted)]">Loading page preview...</p>
+                )}
               </div>
             </div>
-          )}
+          </motion.div>
+        ) : (
+          /* Result Screen */
+          <motion.div
+            initial={prefersReduced ? false : { opacity: 0, scale: 0.98 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ duration: prefersReduced ? 0 : 0.25 }}
+            className="w-full max-w-2xl pms-glass-panel rounded-3xl p-8 text-center space-y-6"
+          >
+            <div className="w-20 h-20 bg-emerald-100 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400 rounded-full flex items-center justify-center mx-auto shadow-inner">
+              <CheckCircle2 className="w-10 h-10" />
+            </div>
 
-          {/* Actions */}
-          <div className="flex flex-col sm:flex-row gap-3 pt-2">
-            <a
-              href={resultUrl}
-              download={`${file?.name.replace(/\.pdf$/i, '')}_Digitally_Signed.pdf`}
-              className="flex-1 py-4 px-6 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-2xl shadow-lg shadow-emerald-600/20 flex items-center justify-center gap-2 text-base transition-all"
-            >
-              <Download className="w-5 h-5" />
-              Download Signed PDF
-            </a>
-            <button
-              onClick={downloadPublicKeyPem}
-              className="py-4 px-5 bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 dark:hover:bg-blue-900/50 text-blue-700 dark:text-blue-300 font-bold rounded-2xl border border-blue-200 dark:border-blue-800 transition-all text-xs flex items-center justify-center gap-1.5"
-            >
-              <Key className="w-4 h-4 text-blue-600" />
-              Public Key (.pem)
-            </button>
-            <button
-              onClick={downloadAuditCertificate}
-              className="py-4 px-5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold rounded-2xl transition-all text-xs flex items-center justify-center gap-1.5"
-            >
-              <Award className="w-4 h-4 text-purple-600" />
-              Audit Receipt (.json)
-            </button>
-            <button
-              onClick={reset}
-              className="py-4 px-5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold rounded-2xl transition-all text-xs"
-            >
-              Sign Another
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
+            <div>
+              <span className="inline-block px-3 py-1 bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 rounded-full text-xs font-bold uppercase tracking-wider mb-2">
+                Cryptographically Certified
+              </span>
+              <h2 className="text-2xl sm:text-3xl font-extrabold text-[var(--pms-ink)]">
+                Document Signed Successfully!
+              </h2>
+              <p className="text-sm text-[var(--pms-muted)] mt-1">
+                Your PDF has been stamped with an RSA-2048 cryptographic seal and registered with a SHA-256 integrity hash.
+              </p>
+            </div>
+
+            {/* Audit Details */}
+            {auditReceipt && (
+              <div className="bg-white/60 dark:bg-slate-900/60 p-4 rounded-2xl border border-[var(--pms-border)] text-left space-y-2 text-xs">
+                <div className="flex justify-between border-b border-[var(--pms-border)] pb-1.5">
+                  <span className="text-[var(--pms-muted)]">Signer Identity:</span>
+                  <span className="font-bold text-[var(--pms-ink)]">{auditReceipt.signerName} ({auditReceipt.organization})</span>
+                </div>
+                <div className="flex justify-between border-b border-[var(--pms-border)] pb-1.5">
+                  <span className="text-[var(--pms-muted)]">Timestamp:</span>
+                  <span className="font-mono text-[var(--pms-ink)]">{auditReceipt.timestamp}</span>
+                </div>
+                <div className="flex justify-between border-b border-[var(--pms-border)] pb-1.5">
+                  <span className="text-[var(--pms-muted)]">Algorithm:</span>
+                  <span className="font-semibold text-emerald-600 dark:text-emerald-400">{auditReceipt.keyAlgorithm}</span>
+                </div>
+                <div className="pt-1">
+                  <span className="text-[var(--pms-muted)] block mb-1">SHA-256 Digest:</span>
+                  <span className="font-mono text-[10px] break-all text-[var(--pms-muted)] bg-white/80 dark:bg-slate-950/75 p-2 rounded block border border-[var(--pms-border)]">
+                    {auditReceipt.sha256Hash}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {/* Actions */}
+            <div className="flex flex-col sm:flex-row gap-3 pt-2 flex-wrap">
+              <a
+                href={resultUrl}
+                download={`${file?.name.replace(/\.pdf$/i, '')}_Digitally_Signed.pdf`}
+                className="pms-btn-primary flex-1 py-4 px-6 font-bold rounded-2xl flex items-center justify-center gap-2 text-base"
+              >
+                <Download className="w-5 h-5" />
+                Download Signed PDF
+              </a>
+              <button
+                onClick={downloadPublicKeyPem}
+                className="py-4 px-5 bg-blue-50/90 dark:bg-blue-900/30 hover:bg-blue-100 dark:hover:bg-blue-900/50 text-blue-700 dark:text-blue-300 font-bold rounded-2xl border border-blue-200 dark:border-blue-800 transition-all text-xs flex items-center justify-center gap-1.5"
+              >
+                <Key className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                Public Key (.pem)
+              </button>
+              <button
+                onClick={downloadAuditCertificate}
+                className="py-4 px-5 bg-white/75 dark:bg-slate-800/80 hover:bg-white dark:hover:bg-slate-800 border border-[var(--pms-border)] text-[var(--pms-ink)] font-bold rounded-2xl transition-all text-xs flex items-center justify-center gap-1.5"
+              >
+                <Award className="w-4 h-4 text-violet-600 dark:text-violet-400" />
+                Audit Receipt (.json)
+              </button>
+              <button
+                onClick={reset}
+                className="py-4 px-5 bg-white/75 dark:bg-slate-800/80 hover:bg-white dark:hover:bg-slate-800 border border-[var(--pms-border)] text-[var(--pms-ink)] font-bold rounded-2xl transition-all text-xs"
+              >
+                Sign Another
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </PearlStageSwitch>
+    </ToolWorkspaceShell>
   );
 }

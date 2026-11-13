@@ -1,13 +1,16 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { Download, FileText, Scissors, CheckCircle2, Eye, Loader2, Sparkles, Sliders, Columns, Rows, ArrowRightLeft, RefreshCw } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Download, FileText, Scissors, CheckCircle2, Eye, Loader2, Columns, Rows } from 'lucide-react';
 import { PDFDocument } from 'pdf-lib';
 import * as pdfjsLib from 'pdfjs-dist';
 import '../lib/pdfWorker';
+import { motion, AnimatePresence, useReducedMotion } from 'motion/react';
 import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { AnimatedNumber, PearlScanOverlay } from '../components/pearl/PearlMotion';
+import { toArrayBufferBytes } from '../lib/blobUrl';
 
 interface PreviewThumb {
   pageNum: number;
@@ -28,6 +31,7 @@ export default function SplitInHalf() {
   );
 
   const [file, setFile] = useState<File | null>(null);
+  const prefersReduced = useReducedMotion();
   const [busy, setBusy] = useState(false);
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [resultUrl, setResultUrl] = useState<string | null>(null);
@@ -202,7 +206,7 @@ export default function SplitInHalf() {
       }
 
       const outBytes = await outDoc.save();
-      const blob = new Blob([outBytes as any], { type: 'application/pdf' });
+      const blob = new Blob([toArrayBufferBytes(outBytes)], { type: 'application/pdf' });
       const url = URL.createObjectURL(blob);
       setResultUrl(url);
       setResultName(`${file.name.replace(/\.pdf$/i, '')}_split_in_half.pdf`);
@@ -225,7 +229,12 @@ export default function SplitInHalf() {
     >
 
         {!file ? (
-          <div className="max-w-2xl mx-auto">
+          <motion.div
+            initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={prefersReduced ? { duration: 0 } : { duration: 0.25 }}
+            className="max-w-2xl mx-auto pms-glass-panel rounded-3xl p-4 sm:p-6"
+          >
             <FileDropzone
               onDrop={handleDrop}
               accept={{ 'application/pdf': ['.pdf'] }}
@@ -233,31 +242,42 @@ export default function SplitInHalf() {
               title="Upload Scanned PDF or Book Spread"
               subtitle="Drop a 2-page spread PDF to split down the center"
             />
-          </div>
+          </motion.div>
         ) : (
-          <div className="space-y-8">
+          <motion.div
+            initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={prefersReduced ? { duration: 0 } : { duration: 0.25 }}
+            className="space-y-8"
+          >
             {/* Control Bar */}
-            <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800 p-6">
-              <div className="flex flex-wrap items-center justify-between gap-4 pb-6 border-b border-slate-100 dark:border-slate-800">
+            <div className="relative overflow-hidden pms-glass-panel rounded-3xl p-6">
+              <PearlScanOverlay active={busy} label="Splitting pages in half…" />
+
+              <div className="flex flex-wrap items-center justify-between gap-4 pb-6 border-b border-[var(--pms-border)]">
                 <div className="flex items-center gap-3">
-                  <div className="p-2.5 rounded-xl bg-orange-50 dark:bg-orange-950/50 text-orange-600 dark:text-orange-400">
+                  <div
+                    className="p-2.5 rounded-xl text-[var(--pms-rose)] shadow-xs"
+                    style={{ backgroundColor: 'var(--pms-soft-rose)' }}
+                  >
                     <FileText className="w-6 h-6" />
                   </div>
                   <div>
-                    <h3 className="font-bold text-slate-800 dark:text-slate-200">{file.name}</h3>
-                    <p className="text-xs text-slate-500">
-                      {pageCount} page{pageCount > 1 ? 's' : ''} • {(file.size / (1024 * 1024)).toFixed(2)} MB
+                    <h3 className="font-bold text-slate-900 dark:text-slate-100">{file.name}</h3>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      <AnimatedNumber value={pageCount} /> page{pageCount > 1 ? 's' : ''} • {(file.size / (1024 * 1024)).toFixed(2)} MB
                     </p>
                   </div>
                 </div>
 
                 <button
+                  type="button"
                   onClick={() => {
                     setFile(null);
                     setResultUrl(null);
                     setPreviewThumb(null);
                   }}
-                  className="px-3.5 py-1.5 text-xs font-semibold text-slate-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-lg transition-colors"
+                  className="px-3.5 py-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300 bg-white/75 dark:bg-slate-900/75 border border-[var(--pms-border)] hover:text-rose-600 hover:border-rose-300 rounded-xl transition-colors"
                 >
                   Change File
                 </button>
@@ -271,30 +291,37 @@ export default function SplitInHalf() {
                     Split Direction
                   </label>
                   <div className="grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setDirection('vertical')}
-                      className={`flex items-center justify-center gap-2 p-3 rounded-xl border text-sm font-semibold transition-all ${
-                        direction === 'vertical'
-                          ? 'border-orange-500 bg-orange-50 dark:bg-orange-950/40 text-orange-600 dark:text-orange-400'
-                          : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 text-slate-700 dark:text-slate-300'
-                      }`}
-                    >
-                      <Columns className="w-4 h-4" /> Vertical (Left / Right)
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setDirection('horizontal')}
-                      className={`flex items-center justify-center gap-2 p-3 rounded-xl border text-sm font-semibold transition-all ${
-                        direction === 'horizontal'
-                          ? 'border-orange-500 bg-orange-50 dark:bg-orange-950/40 text-orange-600 dark:text-orange-400'
-                          : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 text-slate-700 dark:text-slate-300'
-                      }`}
-                    >
-                      <Rows className="w-4 h-4" /> Horizontal (Top / Bottom)
-                    </button>
+                    {[
+                      { id: 'vertical' as const, label: 'Vertical (Left / Right)', Icon: Columns },
+                      { id: 'horizontal' as const, label: 'Horizontal (Top / Bottom)', Icon: Rows },
+                    ].map(({ id, label, Icon }) => {
+                      const active = direction === id;
+                      return (
+                        <button
+                          key={id}
+                          type="button"
+                          onClick={() => setDirection(id)}
+                          className={`relative flex items-center justify-center gap-2 p-3 rounded-xl border text-sm font-semibold transition-colors ${
+                            active
+                              ? 'border-[var(--pms-rose)] text-slate-900 dark:text-white shadow-xs'
+                              : 'bg-white/75 dark:bg-slate-900/75 border-[var(--pms-border)] hover:border-slate-300 dark:hover:border-slate-600 text-slate-700 dark:text-slate-300'
+                          }`}
+                        >
+                          {active && (
+                            <motion.span
+                              layoutId="split-dir-pill"
+                              transition={prefersReduced ? { duration: 0 } : { type: 'spring', stiffness: 420, damping: 32 }}
+                              className="absolute inset-0 rounded-xl -z-0"
+                              style={{ backgroundColor: 'var(--pms-soft-rose)' }}
+                            />
+                          )}
+                          <Icon className="relative z-10 w-4 h-4 shrink-0" />
+                          <span className="relative z-10 text-xs sm:text-sm">{label}</span>
+                        </button>
+                      );
+                    })}
                   </div>
-                  <p className="text-[11px] text-slate-400 mt-1.5">
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1.5">
                     {direction === 'vertical' ? 'Standard for book spreads and side-by-side scans' : 'For landscape top-to-bottom calendars and folded plans'}
                   </p>
                 </div>
@@ -305,42 +332,51 @@ export default function SplitInHalf() {
                     Reading Order
                   </label>
                   <div className="grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setReadingOrder('ltr')}
-                      className={`flex items-center justify-center gap-1.5 p-3 rounded-xl border text-sm font-semibold transition-all ${
-                        readingOrder === 'ltr'
-                          ? 'border-orange-500 bg-orange-50 dark:bg-orange-950/40 text-orange-600 dark:text-orange-400'
-                          : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 text-slate-700 dark:text-slate-300'
-                      }`}
-                    >
-                      LTR (Left ➔ Right)
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setReadingOrder('rtl')}
-                      className={`flex items-center justify-center gap-1.5 p-3 rounded-xl border text-sm font-semibold transition-all ${
-                        readingOrder === 'rtl'
-                          ? 'border-orange-500 bg-orange-50 dark:bg-orange-950/40 text-orange-600 dark:text-orange-400'
-                          : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 text-slate-700 dark:text-slate-300'
-                      }`}
-                    >
-                      RTL (Manga / Right ➔ Left)
-                    </button>
+                    {[
+                      { id: 'ltr' as const, label: 'LTR (Left ➔ Right)' },
+                      { id: 'rtl' as const, label: 'RTL (Manga / Right ➔ Left)' },
+                    ].map((opt) => {
+                      const active = readingOrder === opt.id;
+                      return (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          onClick={() => setReadingOrder(opt.id)}
+                          className={`relative flex items-center justify-center gap-1.5 p-3 rounded-xl border text-xs sm:text-sm font-semibold transition-colors ${
+                            active
+                              ? 'border-[var(--pms-rose)] text-slate-900 dark:text-white shadow-xs'
+                              : 'bg-white/75 dark:bg-slate-900/75 border-[var(--pms-border)] hover:border-slate-300 dark:hover:border-slate-600 text-slate-700 dark:text-slate-300'
+                          }`}
+                        >
+                          {active && (
+                            <motion.span
+                              layoutId="split-order-pill"
+                              transition={prefersReduced ? { duration: 0 } : { type: 'spring', stiffness: 420, damping: 32 }}
+                              className="absolute inset-0 rounded-xl -z-0"
+                              style={{ backgroundColor: 'var(--pms-soft-rose)' }}
+                            />
+                          )}
+                          <span className="relative z-10">{opt.label}</span>
+                        </button>
+                      );
+                    })}
                   </div>
-                  <p className="text-[11px] text-slate-400 mt-1.5">
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1.5">
                     {readingOrder === 'ltr' ? 'Page 1 is on the left, Page 2 on the right' : 'Right page is read first (Japanese Manga, Urdu, Arabic)'}
                   </p>
                 </div>
 
                 {/* 3. Split Cut Position */}
-                <div>
+                <div className="p-3.5 bg-white/75 dark:bg-slate-900/75 rounded-2xl border border-[var(--pms-border)]">
                   <div className="flex justify-between items-center mb-2">
                     <label className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
                       Cut Position
                     </label>
-                    <span className="text-xs font-bold text-orange-600 bg-orange-100 dark:bg-orange-950/50 px-2 py-0.5 rounded">
-                      {splitRatio}% : {100 - splitRatio}%
+                    <span
+                      className="text-xs font-bold text-[var(--pms-rose)] px-2.5 py-0.5 rounded-lg border border-rose-300/60 dark:border-rose-800/60 tabular-nums"
+                      style={{ backgroundColor: 'var(--pms-soft-rose)' }}
+                    >
+                      <AnimatedNumber value={splitRatio} suffix="%" /> : <AnimatedNumber value={100 - splitRatio} suffix="%" />
                     </span>
                   </div>
                   <input
@@ -349,13 +385,14 @@ export default function SplitInHalf() {
                     max={80}
                     value={splitRatio}
                     onChange={(e) => setSplitRatio(Number(e.target.value))}
-                    className="w-full h-2 bg-slate-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer accent-orange-600"
+                    className="w-full h-2 bg-slate-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer accent-rose-600"
                   />
-                  <div className="flex justify-between text-[11px] text-slate-400 mt-1">
+                  <div className="flex justify-between text-[11px] text-slate-500 dark:text-slate-400 mt-1.5">
                     <span>Left 20%</span>
                     <button
+                      type="button"
                       onClick={() => setSplitRatio(50)}
-                      className="text-orange-600 dark:text-orange-400 hover:underline font-semibold"
+                      className="text-[var(--pms-rose)] hover:underline font-semibold"
                     >
                       Reset 50% Center
                     </button>
@@ -365,15 +402,15 @@ export default function SplitInHalf() {
               </div>
 
               {/* Pages to split option */}
-              <div className="mt-6 pt-6 border-t border-slate-100 dark:border-slate-800 flex flex-wrap items-center justify-between gap-4">
-                <div className="flex items-center gap-4">
-                  <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Pages to Split:</span>
+              <div className="mt-6 pt-6 border-t border-[var(--pms-border)] flex flex-wrap items-center justify-between gap-4">
+                <div className="flex flex-wrap items-center gap-4">
+                  <span className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Pages to Split:</span>
                   <label className="inline-flex items-center gap-1.5 text-sm font-medium text-slate-700 dark:text-slate-300 cursor-pointer">
                     <input
                       type="radio"
                       checked={pageSelection === 'all'}
                       onChange={() => setPageSelection('all')}
-                      className="text-orange-600 focus:ring-orange-500"
+                      className="text-rose-600 focus:ring-rose-500 accent-rose-600"
                     />
                     All Pages ({pageCount})
                   </label>
@@ -382,7 +419,7 @@ export default function SplitInHalf() {
                       type="radio"
                       checked={pageSelection === 'custom'}
                       onChange={() => setPageSelection('custom')}
-                      className="text-orange-600 focus:ring-orange-500"
+                      className="text-rose-600 focus:ring-rose-500 accent-rose-600"
                     />
                     Custom Range
                   </label>
@@ -392,15 +429,17 @@ export default function SplitInHalf() {
                       value={customRange}
                       onChange={(e) => setCustomRange(e.target.value)}
                       placeholder="e.g. 1-5, 8, 11-14"
-                      className="px-3 py-1 text-xs border border-slate-300 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white w-36"
+                      className="px-3 py-1.5 text-xs border border-[var(--pms-border)] rounded-lg bg-white/80 dark:bg-slate-950/70 text-slate-900 dark:text-white w-36"
                     />
                   )}
                 </div>
 
-                <button
+                <motion.button
+                  type="button"
+                  whileTap={prefersReduced ? undefined : { scale: 0.98 }}
                   onClick={processSplit}
                   disabled={busy}
-                  className="inline-flex items-center gap-2 px-6 py-2.5 rounded-xl font-bold text-white bg-orange-600 hover:bg-orange-700 disabled:opacity-50 transition-colors shadow-sm"
+                  className="pms-btn-primary inline-flex items-center gap-2 px-6 py-2.5 rounded-xl font-bold disabled:opacity-50 shadow-sm"
                 >
                   {busy ? (
                     <>
@@ -411,22 +450,27 @@ export default function SplitInHalf() {
                       <Scissors className="w-4 h-4" /> Split PDF in Half
                     </>
                   )}
-                </button>
+                </motion.button>
               </div>
             </div>
 
             {/* Live Cut Preview */}
-            <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800 p-6 text-center">
-              <div className="flex items-center justify-between mb-4">
+            <div className="relative overflow-hidden pms-glass-panel rounded-3xl p-6 text-center">
+              <PearlScanOverlay
+                active={busy || loadingPreview}
+                label={loadingPreview ? 'Rendering page preview…' : 'Splitting PDF in half…'}
+              />
+
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
                 <div className="flex items-center gap-2">
-                  <Eye className="w-4 h-4 text-orange-600" />
+                  <Eye className="w-4 h-4 text-[var(--pms-rose)]" />
                   <h4 className="text-sm font-bold text-slate-800 dark:text-slate-200">
-                    Live Cut Preview (Page {previewPageNum} of {pageCount})
+                    Live Cut Preview (Page <AnimatedNumber value={previewPageNum} /> of <AnimatedNumber value={pageCount} />)
                   </h4>
                 </div>
                 {pageCount > 1 && (
                   <div className="flex items-center gap-2 text-xs">
-                    <span className="text-slate-500">Preview page:</span>
+                    <span className="text-slate-500 dark:text-slate-400">Preview page:</span>
                     <select
                       value={previewPageNum}
                       onChange={async (e) => {
@@ -440,7 +484,7 @@ export default function SplitInHalf() {
                           console.error('Failed to switch split-in-half preview page:', err);
                         }
                       }}
-                      className="px-2 py-1 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 text-xs"
+                      className="px-2.5 py-1 rounded-lg border border-[var(--pms-border)] bg-white/80 dark:bg-slate-900/80 text-slate-800 dark:text-slate-200 text-xs"
                     >
                       {Array.from({ length: Math.min(pageCount, 30) }, (_, i) => i + 1).map((n) => (
                         <option key={n} value={n}>
@@ -453,7 +497,7 @@ export default function SplitInHalf() {
               </div>
 
               {previewThumb ? (
-                <div className="relative inline-block border-2 border-slate-300 dark:border-slate-700 rounded-lg overflow-hidden shadow-md bg-white">
+                <div className="relative inline-block border-2 border-slate-300 dark:border-slate-700 rounded-xl overflow-hidden shadow-md bg-white">
                   <img
                     src={previewThumb.dataUrl}
                     alt="Preview"
@@ -466,7 +510,7 @@ export default function SplitInHalf() {
                       className="absolute top-0 bottom-0 pointer-events-none border-l-2 border-dashed border-red-500 flex items-center justify-center"
                       style={{ left: `${splitRatio}%` }}
                     >
-                      <span className="bg-red-500 text-white font-mono text-[10px] px-1 py-0.5 rounded shadow absolute top-2 transform -translate-x-1/2">
+                      <span className="bg-red-500 text-white font-mono text-[10px] px-1.5 py-0.5 rounded shadow absolute top-2 transform -translate-x-1/2">
                         ✂ Cut Line
                       </span>
                       <span className="bg-blue-600 text-white font-bold text-[10px] px-1.5 py-0.5 rounded shadow absolute bottom-3 -left-12">
@@ -481,7 +525,7 @@ export default function SplitInHalf() {
                       className="absolute left-0 right-0 pointer-events-none border-t-2 border-dashed border-red-500 flex items-center justify-center"
                       style={{ top: `${splitRatio}%` }}
                     >
-                      <span className="bg-red-500 text-white font-mono text-[10px] px-1 py-0.5 rounded shadow absolute left-2 transform -translate-y-1/2">
+                      <span className="bg-red-500 text-white font-mono text-[10px] px-1.5 py-0.5 rounded shadow absolute left-2 transform -translate-y-1/2">
                         ✂ Cut Line
                       </span>
                       <span className="bg-blue-600 text-white font-bold text-[10px] px-1.5 py-0.5 rounded shadow absolute top-3 left-1/2 -translate-x-1/2">
@@ -501,35 +545,49 @@ export default function SplitInHalf() {
             </div>
 
             {/* Result Box */}
-            {resultUrl && (
-              <div className="p-6 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-center animate-fade-in">
-                <CheckCircle2 className="w-10 h-10 text-emerald-600 dark:text-emerald-400 mx-auto mb-2" />
-                <h3 className="text-xl font-bold text-emerald-900 dark:text-emerald-100 mb-1">
-                  Split In Half Complete!
-                </h3>
-                <p className="text-sm text-emerald-700 dark:text-emerald-300 mb-4">
-                  Your two-page layout document has been split down the center into individual, correctly ordered pages.
-                </p>
-                <div className="flex flex-wrap items-center justify-center gap-3">
-                  <a
-                    href={resultUrl}
-                    download={resultName}
-                    className="inline-flex items-center gap-2 px-6 py-2.5 rounded-xl font-bold text-white bg-emerald-600 hover:bg-emerald-700 shadow-md transition-colors"
+            <AnimatePresence>
+              {resultUrl && (
+                <motion.div
+                  initial={prefersReduced ? false : { opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={prefersReduced ? undefined : { opacity: 0, y: -8 }}
+                  transition={prefersReduced ? { duration: 0 } : { duration: 0.25 }}
+                  className="pms-glass-panel p-6 sm:p-8 rounded-3xl text-center"
+                >
+                  <div
+                    className="p-6 rounded-2xl border border-emerald-300/60 dark:border-emerald-800/60"
+                    style={{ backgroundColor: 'var(--pms-soft-mint)' }}
                   >
-                    <Download className="w-4 h-4" /> Download Split PDF
-                  </a>
-                  <a
-                    href={resultUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-emerald-800 dark:text-emerald-200 bg-white dark:bg-slate-800 border border-emerald-300 dark:border-emerald-700 hover:bg-emerald-100/50 dark:hover:bg-slate-700 transition-colors"
-                  >
-                    <Eye className="w-4 h-4" /> Preview in Browser
-                  </a>
-                </div>
-              </div>
-            )}
-          </div>
+                    <CheckCircle2 className="w-10 h-10 text-emerald-600 dark:text-emerald-400 mx-auto mb-2" />
+                    <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-1">
+                      Split In Half Complete!
+                    </h3>
+                    <p className="text-sm text-slate-700 dark:text-slate-300 mb-4">
+                      Your two-page layout document has been split down the center into individual, correctly ordered pages.
+                    </p>
+                    <div className="flex flex-wrap items-center justify-center gap-3">
+                      <motion.a
+                        whileTap={prefersReduced ? undefined : { scale: 0.98 }}
+                        href={resultUrl}
+                        download={resultName}
+                        className="pms-btn-primary inline-flex items-center gap-2 px-6 py-2.5 rounded-xl font-bold shadow-md"
+                      >
+                        <Download className="w-4 h-4" /> Download Split PDF
+                      </motion.a>
+                      <a
+                        href={resultUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-slate-800 dark:text-slate-200 bg-white/80 dark:bg-slate-900/80 border border-[var(--pms-border)] hover:bg-white dark:hover:bg-slate-800 transition-colors"
+                      >
+                        <Eye className="w-4 h-4" /> Preview in Browser
+                      </a>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </motion.div>
         )}
 
         <ToolSEOSection

@@ -1,7 +1,16 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { 
-  BookOpen, Bookmark, StickyNote, ChevronLeft, ChevronRight, Download, 
-  Loader2, FileText, X, Clock, Sun, Moon, Sparkles, Maximize2, Trash2, Check, Copy
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { motion, useReducedMotion } from 'motion/react';
+import {
+  BookOpen,
+  Bookmark,
+  StickyNote,
+  ChevronLeft,
+  ChevronRight,
+  Download,
+  Loader2,
+  Clock,
+  Sun,
+  Trash2,
 } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
 import '../lib/pdfWorker';
@@ -10,6 +19,8 @@ import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { hashStorageId } from '../lib/privacy';
 import { triggerBlobDownload } from '../lib/blobUrl';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { AnimatedNumber, PearlScanOverlay } from '../components/pearl/PearlMotion';
 
 type ReadingTheme = 'light' | 'dark' | 'sepia' | 'oled';
 
@@ -45,6 +56,7 @@ export default function ReadingTracker() {
   const [storageKey, setStorageKey] = useState<string | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const pdfRef = useRef<pdfjsLib.PDFDocumentProxy | null>(null);
+  const prefersReduced = useReducedMotion();
 
   const renderPage = useCallback(async (num: number) => {
     if (!pdfRef.current || !canvasRef.current) return;
@@ -163,7 +175,7 @@ export default function ReadingTracker() {
     const item: BookmarkItem = {
       page: current + 1,
       note: noteText.trim() || `Bookmark on Page ${current + 1}`,
-      addedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      addedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     };
     setBookmarks(prev => [item, ...prev]);
     setNoteText('');
@@ -193,102 +205,160 @@ export default function ReadingTracker() {
     setBookmarks([]);
   };
 
-  return (
-    <div className="flex-1 flex flex-col items-center justify-start p-4 sm:p-8 max-w-6xl mx-auto w-full">
-      {/* Header */}
-      <div className="text-center mb-6">
-        <div className="w-16 h-16 bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 rounded-2xl flex items-center justify-center mx-auto mb-3 shadow-sm border border-blue-100 dark:border-blue-900/50">
-          <BookOpen className="w-8 h-8" />
-        </div>
-        <h1 className="text-3xl sm:text-4xl font-extrabold text-slate-900 dark:text-white mb-2">
-          PDF Reading Tracker & Study Hub Studio
-        </h1>
-        <p className="text-base text-slate-600 dark:text-slate-400 max-w-xl mx-auto">
-          Track your reading progress, calculate time remaining with reading speed (WPM), switch eye-care themes, and save study notes.
-        </p>
-      </div>
+  const readingThemes: { id: ReadingTheme; label: string }[] = [
+    { id: 'light', label: 'Day' },
+    { id: 'sepia', label: 'Sepia' },
+    { id: 'dark', label: 'Dark' },
+    { id: 'oled', label: 'OLED' },
+  ];
 
+  return (
+    <ToolWorkspaceShell
+      title="PDF Reading Tracker & Study Hub Studio"
+      subtitle="Track your reading progress, calculate time remaining with reading speed (WPM), switch eye-care themes, and save study notes."
+      categoryLabel="E-Reader & Study Hub"
+      icon={BookOpen}
+      microVariant="generic"
+      tone="blue"
+      trustNote="100% client-side reader · Private hashed bookmark storage · Zero uploads"
+    >
       {!file ? (
-        <div className="w-full max-w-2xl space-y-6">
-          <FileDropzone 
-            onDrop={files => files[0] && loadPdf(files[0])} 
-            multiple={false} 
-            title="Select PDF Document to Read & Track" 
+        <motion.div
+          initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.28 }}
+          className="w-full max-w-2xl mx-auto space-y-6"
+        >
+          <FileDropzone
+            onDrop={files => files[0] && loadPdf(files[0])}
+            multiple={false}
+            title="Select PDF Document to Read & Track"
           />
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
-            <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 text-center">
-              <Clock className="w-6 h-6 text-blue-600 dark:text-blue-400 mx-auto mb-2" />
-              <h3 className="font-bold text-sm text-slate-800 dark:text-slate-200">Time Estimator</h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Calculates reading time left based on your personal reading WPM.</p>
-            </div>
-            <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 text-center">
-              <Sun className="w-6 h-6 text-amber-600 dark:text-amber-400 mx-auto mb-2" />
-              <h3 className="font-bold text-sm text-slate-800 dark:text-slate-200">Eye-Care Themes</h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Includes Kindle-style Sepia, Dark Night, and OLED black modes.</p>
-            </div>
-            <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 text-center">
-              <StickyNote className="w-6 h-6 text-emerald-600 dark:text-emerald-400 mx-auto mb-2" />
-              <h3 className="font-bold text-sm text-slate-800 dark:text-slate-200">Study Notes Export</h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Export page bookmarks and study notes to Markdown summaries.</p>
-            </div>
+            {[
+              {
+                icon: Clock,
+                iconCls: 'text-[var(--pms-blue)] bg-[var(--pms-soft-blue)]',
+                title: 'Time Estimator',
+                desc: 'Calculates reading time left based on your personal reading WPM.',
+              },
+              {
+                icon: Sun,
+                iconCls: 'text-amber-600 dark:text-amber-400 bg-[var(--pms-soft-rose)]',
+                title: 'Eye-Care Themes',
+                desc: 'Includes Kindle-style Sepia, Dark Night, and OLED black modes.',
+              },
+              {
+                icon: StickyNote,
+                iconCls: 'text-emerald-600 dark:text-emerald-400 bg-[var(--pms-soft-mint)]',
+                title: 'Study Notes Export',
+                desc: 'Export page bookmarks and study notes to Markdown summaries.',
+              },
+            ].map((card, idx) => (
+              <motion.div
+                key={card.title}
+                initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.26, delay: idx * 0.05 }}
+                whileHover={prefersReduced ? undefined : { y: -3 }}
+                className="pms-glass-panel p-5 rounded-2xl text-center"
+              >
+                <div className={`w-10 h-10 rounded-xl ${card.iconCls} flex items-center justify-center mx-auto mb-2.5`}>
+                  <card.icon className="w-5 h-5" />
+                </div>
+                <h3 className="font-bold text-sm text-slate-900 dark:text-white">{card.title}</h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">{card.desc}</p>
+              </motion.div>
+            ))}
           </div>
-        </div>
+        </motion.div>
       ) : busy ? (
-        <div className="p-12 text-center bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
-          <Loader2 className="w-10 h-10 animate-spin text-blue-600 mx-auto" />
+        <motion.div
+          initial={prefersReduced ? false : { opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="relative max-w-xl mx-auto p-12 text-center pms-glass-panel rounded-3xl space-y-4 overflow-hidden"
+        >
+          <PearlScanOverlay active={true} label="Opening PDF reading stream…" />
+          <Loader2 className="w-10 h-10 animate-spin text-[var(--pms-blue)] mx-auto" />
           <h3 className="text-lg font-bold text-slate-900 dark:text-white">Opening PDF Reading Stream...</h3>
-          <p className="text-xs text-slate-500">Restoring bookmarks and saved progress...</p>
-        </div>
+          <p className="text-xs text-slate-500 dark:text-slate-400">Restoring bookmarks and saved progress...</p>
+        </motion.div>
       ) : (
-        /* E-Reader Workspace */
-        <div className="w-full space-y-4">
+        <motion.div
+          initial={prefersReduced ? false : { opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.28 }}
+          className="w-full space-y-5"
+        >
           {/* Top Control Bar with Analytics */}
-          <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-wrap items-center justify-between gap-4">
+          <div className="pms-glass-panel p-4 rounded-2xl flex flex-wrap items-center justify-between gap-4">
             {/* Reading Stats */}
-            <div className="flex items-center gap-3">
-              <span className="text-xs font-bold text-blue-600 bg-blue-50 dark:bg-blue-950/40 px-3 py-1 rounded-full">
-                {percentRead}% Completed
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="text-xs font-bold text-[var(--pms-blue)] bg-[var(--pms-soft-blue)] px-3 py-1.5 rounded-full border border-[var(--pms-border)]">
+                <AnimatedNumber value={percentRead} suffix="%" /> Completed
               </span>
-              <span className="text-xs text-slate-500">
-                ~{estimatedTimeRemainingMin} min remaining ({pagesRemaining} pages left)
+              <span className="text-xs text-slate-600 dark:text-slate-300 font-medium">
+                ~<AnimatedNumber value={estimatedTimeRemainingMin} /> min remaining ({pagesRemaining} pages left)
               </span>
+              <select
+                value={wpm}
+                onChange={e => setWpm(Number(e.target.value))}
+                className="px-2.5 py-1 rounded-xl text-xs font-semibold border border-[var(--pms-border)] bg-white/80 dark:bg-slate-800/80 text-slate-700 dark:text-slate-200 outline-none"
+                aria-label="Reading speed (WPM)"
+              >
+                <option value={150}>150 WPM (Careful)</option>
+                <option value={200}>200 WPM (Normal)</option>
+                <option value={250}>250 WPM (Fast)</option>
+                <option value={300}>300 WPM (Skim)</option>
+              </select>
             </div>
 
             {/* Eye-Care Themes */}
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-bold text-slate-400 mr-1">Theme:</span>
-              {[
-                { id: 'light', label: 'Day' },
-                { id: 'sepia', label: 'Sepia' },
-                { id: 'dark', label: 'Dark' },
-                { id: 'oled', label: 'OLED' }
-              ].map(t => (
-                <button
-                  key={t.id}
-                  onClick={() => setTheme(t.id as ReadingTheme)}
-                  className={`py-1 px-3 rounded-lg text-xs font-bold transition-all ${
-                    theme === t.id
-                      ? 'bg-blue-600 text-white shadow-sm'
-                      : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
-                  }`}
-                >
-                  {t.label}
-                </button>
-              ))}
-              <button onClick={reset} className="text-xs text-slate-400 hover:text-slate-600 underline ml-2">Change</button>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-bold text-slate-500 dark:text-slate-400 mr-1">Theme:</span>
+              {readingThemes.map(t => {
+                const active = theme === t.id;
+                return (
+                  <button
+                    key={t.id}
+                    onClick={() => setTheme(t.id)}
+                    className="relative py-1.5 px-3 rounded-xl border text-xs font-bold transition-colors cursor-pointer overflow-hidden"
+                    style={{
+                      borderColor: active ? 'var(--pms-blue)' : 'var(--pms-border)',
+                      backgroundColor: active ? 'var(--pms-soft-blue)' : 'var(--pms-white)',
+                      color: active ? 'var(--pms-blue)' : 'var(--pms-ink)',
+                    }}
+                  >
+                    {active && (
+                      <motion.span
+                        layoutId="reading-theme-pill"
+                        transition={{ type: 'spring', stiffness: 420, damping: 30 }}
+                        className="absolute inset-0 rounded-xl ring-2 ring-sky-500/30 pointer-events-none"
+                      />
+                    )}
+                    <span className="relative z-10">{t.label}</span>
+                  </button>
+                );
+              })}
+              <button
+                onClick={reset}
+                className="text-xs font-semibold text-slate-500 dark:text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 ml-2 cursor-pointer transition-colors"
+              >
+                Change
+              </button>
             </div>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
             {/* Main Reader Canvas */}
-            <div className="lg:col-span-8 flex flex-col items-center gap-3">
+            <div className="lg:col-span-8 pms-glass-panel rounded-3xl p-4 sm:p-5 flex flex-col items-center gap-3">
               {/* Page Navigator */}
-              <div className="flex items-center gap-3 text-xs font-bold text-slate-600 dark:text-slate-400">
+              <div className="flex flex-wrap items-center justify-center gap-3 text-xs font-bold text-slate-600 dark:text-slate-300">
                 <button
                   onClick={() => setCurrent(p => Math.max(p - 1, 0))}
                   disabled={current === 0}
-                  className="p-1.5 rounded-lg border hover:bg-slate-100 disabled:opacity-30"
+                  className="p-2 rounded-xl border border-[var(--pms-border)] bg-white/80 dark:bg-slate-800/80 hover:bg-white dark:hover:bg-slate-700 disabled:opacity-30 cursor-pointer"
                 >
                   <ChevronLeft className="w-4 h-4" />
                 </button>
@@ -296,46 +366,56 @@ export default function ReadingTracker() {
                 <button
                   onClick={() => setCurrent(p => Math.min(p + 1, totalPages - 1))}
                   disabled={current === totalPages - 1}
-                  className="p-1.5 rounded-lg border hover:bg-slate-100 disabled:opacity-30"
+                  className="p-2 rounded-xl border border-[var(--pms-border)] bg-white/80 dark:bg-slate-800/80 hover:bg-white dark:hover:bg-slate-700 disabled:opacity-30 cursor-pointer"
                 >
                   <ChevronRight className="w-4 h-4" />
                 </button>
-                <span className="text-slate-400 ml-2">({wordCount} words on this page)</span>
+                <span className="px-2.5 py-1 rounded-full bg-[var(--pms-soft-lavender)] text-[var(--pms-violet)] text-[11px] font-bold">
+                  <AnimatedNumber value={wordCount} /> words on this page
+                </span>
               </div>
 
-              {/* Document Canvas */}
-              <div className={`p-4 rounded-2xl border shadow-xl flex items-center justify-center overflow-hidden max-w-full ${
-                theme === 'dark' ? 'bg-slate-900 border-slate-800' :
-                theme === 'sepia' ? 'bg-[#fbf0d9] border-[#e8d5b5]' :
-                theme === 'oled' ? 'bg-black border-slate-900' : 'bg-slate-50 border-slate-200'
-              }`}>
+              {/* Document Canvas (Crisp bg-white for Day theme) */}
+              <div
+                className={`p-4 rounded-2xl border shadow-xl flex items-center justify-center overflow-hidden max-w-full ${
+                  theme === 'dark'
+                    ? 'bg-slate-900 border-slate-800'
+                    : theme === 'sepia'
+                    ? 'bg-[#fbf0d9] border-[#e8d5b5]'
+                    : theme === 'oled'
+                    ? 'bg-black border-slate-900'
+                    : 'bg-white border-slate-200'
+                }`}
+              >
                 <canvas ref={canvasRef} className="shadow-lg max-h-[75vh] object-contain rounded" />
               </div>
             </div>
 
             {/* Study Notes & Bookmarks Sidebar */}
-            <div className="lg:col-span-4 bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-4 max-h-[85vh] overflow-y-auto">
+            <div className="lg:col-span-4 pms-glass-panel p-5 rounded-3xl space-y-4 max-h-[85vh] overflow-y-auto">
               <h3 className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-2">
-                <Bookmark className="w-4 h-4 text-blue-600" />
-                Study Notes & Bookmarks ({bookmarks.length})
+                <Bookmark className="w-4 h-4 text-[var(--pms-blue)]" />
+                Study Notes &amp; Bookmarks (<AnimatedNumber value={bookmarks.length} />)
               </h3>
 
               {/* Add Note Input */}
-              <div className="space-y-2 border-b pb-4 dark:border-slate-800">
+              <div className="space-y-2.5 border-b border-[var(--pms-border)] pb-4">
                 <textarea
                   rows={2}
                   value={noteText}
                   onChange={e => setNoteText(e.target.value)}
                   placeholder={`Add a note for Page ${current + 1}...`}
-                  className="w-full p-2.5 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white outline-none resize-none"
+                  className="w-full p-3 text-xs rounded-xl border border-[var(--pms-border)] bg-white/90 dark:bg-slate-800/80 text-slate-900 dark:text-white outline-none resize-none focus:ring-2 focus:ring-sky-400"
                 />
-                <button
+                <motion.button
+                  whileHover={prefersReduced ? undefined : { scale: 1.01 }}
+                  whileTap={prefersReduced ? undefined : { scale: 0.985 }}
                   onClick={addBookmark}
-                  className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-sm transition-all"
+                  className="w-full pms-btn-primary py-2.5 font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer"
                 >
                   <StickyNote className="w-3.5 h-3.5" />
                   Save Note for Page {current + 1}
-                </button>
+                </motion.button>
               </div>
 
               {/* Bookmark List */}
@@ -346,12 +426,12 @@ export default function ReadingTracker() {
                   {bookmarks.map((b, idx) => (
                     <div
                       key={idx}
-                      className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-100 dark:border-slate-800 text-xs space-y-1 group"
+                      className="p-3 bg-white/75 dark:bg-slate-800/60 rounded-xl border border-[var(--pms-border)] text-xs space-y-1 group"
                     >
                       <div className="flex items-center justify-between">
                         <button
                           onClick={() => setCurrent(b.page - 1)}
-                          className="font-bold text-blue-600 hover:underline"
+                          className="font-bold text-[var(--pms-blue)] hover:underline cursor-pointer"
                         >
                           Page {b.page}
                         </button>
@@ -359,7 +439,8 @@ export default function ReadingTracker() {
                           <span className="text-[10px] text-slate-400">{b.addedAt}</span>
                           <button
                             onClick={() => removeBookmark(idx)}
-                            className="text-red-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity"
+                            className="text-rose-400 hover:text-rose-600 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                            aria-label="Delete bookmark"
                           >
                             <Trash2 className="w-3 h-3" />
                           </button>
@@ -371,7 +452,7 @@ export default function ReadingTracker() {
 
                   <button
                     onClick={exportStudyNotes}
-                    className="w-full mt-2 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-700 dark:text-slate-200 font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 transition-colors"
+                    className="w-full mt-2 py-2.5 bg-[var(--pms-soft-blue)] hover:brightness-95 text-[var(--pms-blue)] border border-[var(--pms-border)] font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer"
                   >
                     <Download className="w-3.5 h-3.5" />
                     Export Study Notes (.md)
@@ -380,8 +461,8 @@ export default function ReadingTracker() {
               )}
             </div>
           </div>
-        </div>
+        </motion.div>
       )}
-    </div>
+    </ToolWorkspaceShell>
   );
 }

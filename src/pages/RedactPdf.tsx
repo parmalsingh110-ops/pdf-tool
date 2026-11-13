@@ -1,10 +1,11 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { 
-  ShieldOff, Download, Loader2, Plus, Undo2, Trash2, Search, 
-  Sparkles, Check, ChevronLeft, ChevronRight, Eye, ShieldAlert, AlertCircle, FileText
+import {
+  ShieldOff, Download, Loader2, Undo2, Trash2, Search,
+  Sparkles, Check, ChevronLeft, ChevronRight, ShieldAlert, FileText
 } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
 import { PDFDocument } from 'pdf-lib';
+import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import '../lib/pdfWorker';
 import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
@@ -12,6 +13,8 @@ import { useSEO } from '../hooks/useSEO';
 import { dataUrlToBytes } from '../lib/utils';
 import { useToast } from '../components/Toast';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { AnimatedNumber, PearlScanOverlay } from '../components/pearl/PearlMotion';
+import { toArrayBufferBytes } from '../lib/blobUrl';
 
 type RedactStyle = 'blackout' | 'whiteout' | 'confidential' | 'pixelate';
 
@@ -72,6 +75,7 @@ export default function RedactPdf() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   const toast = useToast();
+  const prefersReduced = useReducedMotion();
 
   useEffect(() => {
     return () => {
@@ -507,7 +511,7 @@ export default function RedactPdf() {
 
       const bytes = await newDoc.save();
       if (resultUrl) URL.revokeObjectURL(resultUrl);
-      setResultUrl(URL.createObjectURL(new Blob([bytes as any], { type: 'application/pdf' })));
+      setResultUrl(URL.createObjectURL(new Blob([toArrayBufferBytes(bytes)], { type: 'application/pdf' })));
       toast.success(`Successfully redacted ${rects.length} region(s)!`);
     } catch (e: any) {
       toast.error(`Redaction failed: ${e?.message || 'Unknown error'}`);
@@ -530,81 +534,122 @@ export default function RedactPdf() {
       <div className="flex flex-col items-center w-full">
 
       {!file ? (
-        <div className="w-full max-w-2xl space-y-6">
-          <FileDropzone 
-            onDrop={handleDrop} 
-            multiple={false} 
-            title="Select PDF Document to Redact" 
-          />
+        <motion.div
+          initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+          className="w-full max-w-2xl space-y-6"
+        >
+          <div className="pms-glass-panel rounded-3xl p-4 sm:p-5">
+            <FileDropzone
+              onDrop={handleDrop}
+              multiple={false}
+              title="Select PDF Document to Redact"
+            />
+          </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
-            <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 text-center">
-              <Sparkles className="w-6 h-6 text-red-600 dark:text-red-400 mx-auto mb-2" />
-              <h3 className="font-bold text-sm text-slate-800 dark:text-slate-200">Auto PII Detection</h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Detects Aadhaar, PAN, SSN, Credit Cards & Phone numbers.</p>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="pms-glass-panel p-4 rounded-2xl text-center">
+              <div className="w-10 h-10 rounded-xl bg-[var(--pms-soft-rose)] text-[var(--pms-rose)] flex items-center justify-center mx-auto mb-2.5">
+                <Sparkles className="w-5 h-5" />
+              </div>
+              <h3 className="font-bold text-sm text-[var(--pms-ink)]">Auto PII Detection</h3>
+              <p className="text-xs text-[var(--pms-muted)] mt-1">Detects Aadhaar, PAN, SSN, Credit Cards &amp; Phone numbers.</p>
             </div>
-            <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 text-center">
-              <Search className="w-6 h-6 text-blue-600 dark:text-blue-400 mx-auto mb-2" />
-              <h3 className="font-bold text-sm text-slate-800 dark:text-slate-200">Search & Redact</h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Find any keyword or name and redact across all pages.</p>
+            <div className="pms-glass-panel p-4 rounded-2xl text-center">
+              <div className="w-10 h-10 rounded-xl bg-[var(--pms-soft-blue)] text-[var(--pms-blue)] flex items-center justify-center mx-auto mb-2.5">
+                <Search className="w-5 h-5" />
+              </div>
+              <h3 className="font-bold text-sm text-[var(--pms-ink)]">Search &amp; Redact</h3>
+              <p className="text-xs text-[var(--pms-muted)] mt-1">Find any keyword or name and redact across all pages.</p>
             </div>
-            <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 text-center">
-              <ShieldAlert className="w-6 h-6 text-emerald-600 dark:text-emerald-400 mx-auto mb-2" />
-              <h3 className="font-bold text-sm text-slate-800 dark:text-slate-200">Zero Leakage</h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Underlying text is wiped clean. Copy-paste proof.</p>
+            <div className="pms-glass-panel p-4 rounded-2xl text-center">
+              <div className="w-10 h-10 rounded-xl bg-[var(--pms-soft-mint)] text-emerald-600 dark:text-emerald-400 flex items-center justify-center mx-auto mb-2.5">
+                <ShieldAlert className="w-5 h-5" />
+              </div>
+              <h3 className="font-bold text-sm text-[var(--pms-ink)]">Zero Leakage</h3>
+              <p className="text-xs text-[var(--pms-muted)] mt-1">Underlying text is wiped clean. Copy-paste proof.</p>
             </div>
           </div>
-        </div>
+        </motion.div>
       ) : loading ? (
-        <div className="p-12 text-center bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
-          <Loader2 className="w-10 h-10 animate-spin text-red-600 mx-auto" />
-          <h3 className="text-lg font-bold text-slate-900 dark:text-white">Rendering Pages for Redaction...</h3>
-          <p className="text-xs text-slate-500">Preparing high-resolution inspection viewport...</p>
-        </div>
+        <motion.div
+          initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="relative w-full max-w-2xl pms-glass-panel rounded-3xl p-12 text-center overflow-hidden min-h-[280px] flex flex-col items-center justify-center space-y-4"
+        >
+          <PearlScanOverlay active={loading} label="Rendering high-resolution pages…" />
+          <Loader2 className="w-10 h-10 animate-spin text-[var(--pms-rose)] mx-auto" />
+          <h3 className="text-lg font-bold text-[var(--pms-ink)]">Rendering Pages for Redaction…</h3>
+          <p className="text-xs text-[var(--pms-muted)]">Preparing high-resolution inspection viewport locally.</p>
+        </motion.div>
       ) : resultUrl ? (
         /* Result Screen */
-        <div className="w-full max-w-xl bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-8 shadow-xl text-center space-y-6">
-          <div className="w-20 h-20 bg-emerald-100 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400 rounded-full flex items-center justify-center mx-auto shadow-inner">
+        <motion.div
+          initial={prefersReduced ? false : { opacity: 0, scale: 0.98, y: 12 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+          className="w-full max-w-xl pms-glass-panel rounded-3xl border border-emerald-200/80 dark:border-emerald-800/70 p-8 text-center space-y-6"
+        >
+          <motion.div
+            initial={prefersReduced ? false : { scale: 0.45, rotate: -10 }}
+            animate={{ scale: 1, rotate: 0 }}
+            transition={{ type: 'spring', stiffness: 420, damping: 20 }}
+            className="w-20 h-20 bg-emerald-100/90 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 rounded-2xl flex items-center justify-center mx-auto shadow-inner border border-emerald-200/70 dark:border-emerald-800/60"
+          >
             <Check className="w-10 h-10" />
-          </div>
+          </motion.div>
 
           <div>
-            <span className="inline-block px-3 py-1 bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300 rounded-full text-xs font-bold uppercase tracking-wider mb-2">
+            <span className="inline-block px-3 py-1 bg-[var(--pms-soft-rose)] text-[var(--pms-rose)] rounded-full text-xs font-bold uppercase tracking-wider mb-2">
               Permanently Redacted
             </span>
-            <h2 className="text-2xl font-extrabold text-slate-900 dark:text-white">
+            <h2 className="text-2xl font-extrabold text-[var(--pms-ink)]">
               Document Redacted Successfully!
             </h2>
-            <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-400 mt-1">
-              Applied {rects.length} permanent redaction box{rects.length === 1 ? '' : 'es'}. The sensitive content has been permanently obliterated.
+            <p className="text-xs sm:text-sm text-[var(--pms-muted)] mt-1.5">
+              Applied{' '}
+              <span className="font-bold text-[var(--pms-ink)] tabular-nums">
+                <AnimatedNumber value={rects.length} />
+              </span>{' '}
+              permanent redaction box{rects.length === 1 ? '' : 'es'}. Sensitive pixels and text layers are permanently wiped.
             </p>
           </div>
 
           <div className="flex flex-col sm:flex-row gap-3 pt-2">
-            <a
+            <motion.a
+              whileHover={prefersReduced ? undefined : { scale: 1.015 }}
+              whileTap={prefersReduced ? undefined : { scale: 0.985 }}
               href={resultUrl}
               download={`${file.name.replace(/\.pdf$/i, '')}_Redacted.pdf`}
-              className="flex-1 py-4 px-6 bg-red-600 hover:bg-red-700 text-white font-bold rounded-2xl shadow-lg shadow-red-600/20 flex items-center justify-center gap-2 text-base transition-all"
+              className="pms-btn-primary flex-1 py-4 px-6 rounded-2xl font-bold flex items-center justify-center gap-2 text-base"
             >
               <Download className="w-5 h-5" />
               Download Redacted PDF
-            </a>
-            <button
+            </motion.a>
+            <motion.button
+              whileHover={prefersReduced ? undefined : { scale: 1.015 }}
+              whileTap={prefersReduced ? undefined : { scale: 0.985 }}
               onClick={() => { setFile(null); setResultUrl(null); }}
-              className="py-4 px-6 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold rounded-2xl transition-all text-sm"
+              className="py-4 px-6 bg-[var(--pms-pearl)] dark:bg-slate-800/90 hover:bg-[var(--pms-soft-lavender)] dark:hover:bg-slate-700 text-[var(--pms-ink)] font-bold rounded-2xl border border-[var(--pms-border)] transition-colors text-sm"
             >
               Redact Another
-            </button>
+            </motion.button>
           </div>
-        </div>
+        </motion.div>
       ) : (
         /* Interactive Redaction Canvas Workspace */
-        <div className="w-full space-y-4">
+        <motion.div
+          initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+          className="w-full space-y-4"
+        >
           {/* Top Control Bar */}
-          <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-wrap items-center justify-between gap-4">
+          <div className="pms-glass-panel p-4 sm:p-5 rounded-3xl flex flex-wrap items-center justify-between gap-4">
             {/* Style Selector */}
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-bold text-slate-700 dark:text-slate-300 mr-1">Style:</span>
+            <div className="flex flex-wrap items-center gap-1.5 bg-[var(--pms-pearl)]/80 dark:bg-slate-900/70 p-1.5 rounded-2xl border border-[var(--pms-border)]">
+              <span className="text-xs font-bold text-[var(--pms-muted)] px-2">Style:</span>
               {[
                 { id: 'blackout', label: 'Blackout' },
                 { id: 'confidential', label: '[CONFIDENTIAL]' },
@@ -616,8 +661,8 @@ export default function RedactPdf() {
                   onClick={() => setSelectedStyle(s.id as RedactStyle)}
                   className={`py-1.5 px-3 rounded-xl text-xs font-bold transition-all ${
                     selectedStyle === s.id
-                      ? 'bg-red-600 text-white shadow-sm'
-                      : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200'
+                      ? 'bg-[var(--pms-rose)] text-white shadow-sm'
+                      : 'text-[var(--pms-muted)] hover:text-[var(--pms-ink)] hover:bg-[var(--pms-white)] dark:hover:bg-slate-800'
                   }`}
                 >
                   {s.label}
@@ -627,16 +672,20 @@ export default function RedactPdf() {
 
             {/* Smart Tools: Auto PII & Search */}
             <div className="flex flex-wrap items-center gap-2">
-              <button
+              <motion.button
+                whileHover={prefersReduced ? undefined : { scale: 1.02 }}
+                whileTap={prefersReduced ? undefined : { scale: 0.98 }}
                 onClick={scanForPii}
                 disabled={isScanningPii}
-                className="py-2 px-3.5 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-sm transition-all disabled:opacity-50"
+                className="py-2 px-3.5 bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-700 hover:to-pink-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-sm transition-all disabled:opacity-50"
               >
                 {isScanningPii && !ocrStatus ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
                 Auto PII Scanner
-              </button>
+              </motion.button>
 
-              <button
+              <motion.button
+                whileHover={prefersReduced ? undefined : { scale: 1.02 }}
+                whileTap={prefersReduced ? undefined : { scale: 0.98 }}
                 onClick={scanWithOcr}
                 disabled={isScanningPii}
                 className="py-2 px-3 bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-sm transition-all disabled:opacity-50"
@@ -644,7 +693,7 @@ export default function RedactPdf() {
               >
                 {ocrStatus ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileText className="w-4 h-4" />}
                 OCR Deep Scan
-              </button>
+              </motion.button>
 
               <div className="flex items-center gap-1">
                 <input
@@ -653,12 +702,12 @@ export default function RedactPdf() {
                   value={customSearchTerm}
                   onChange={e => setCustomSearchTerm(e.target.value)}
                   onKeyDown={e => e.key === 'Enter' && redactByKeyword()}
-                  className="px-3 py-1.5 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-none w-36"
+                  className="px-3 py-1.5 text-xs rounded-xl border border-[var(--pms-border-strong)] bg-[var(--pms-white)] dark:bg-slate-900 text-[var(--pms-ink)] placeholder:text-[var(--pms-subtle-text)] outline-none focus:ring-2 focus:ring-[var(--pms-rose)]/30 w-36"
                 />
                 <button
                   onClick={redactByKeyword}
                   disabled={!customSearchTerm.trim()}
-                  className="p-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold disabled:opacity-50"
+                  className="p-2 bg-[var(--pms-blue)] hover:opacity-90 text-white rounded-xl text-xs font-bold disabled:opacity-40 transition-opacity"
                   title="Redact All Matches"
                 >
                   <Search className="w-3.5 h-3.5" />
@@ -671,7 +720,7 @@ export default function RedactPdf() {
               <button
                 onClick={undoLast}
                 disabled={rects.length === 0}
-                className="p-2 text-slate-600 hover:text-slate-900 border rounded-xl disabled:opacity-30"
+                className="p-2 text-[var(--pms-muted)] hover:text-[var(--pms-ink)] border border-[var(--pms-border)] bg-[var(--pms-white)] dark:bg-slate-900 rounded-xl disabled:opacity-30 transition-colors"
                 title="Undo Last Box"
               >
                 <Undo2 className="w-4 h-4" />
@@ -679,46 +728,62 @@ export default function RedactPdf() {
               <button
                 onClick={clearCurrentPage}
                 disabled={currentRects.length === 0}
-                className="p-2 text-red-600 hover:bg-red-50 border border-red-200 rounded-xl disabled:opacity-30"
+                className="p-2 text-rose-600 dark:text-rose-400 hover:bg-[var(--pms-soft-rose)] border border-rose-200 dark:border-rose-900/60 rounded-xl disabled:opacity-30 transition-colors"
                 title="Clear Page Boxes"
               >
                 <Trash2 className="w-4 h-4" />
               </button>
-              <button
+              <motion.button
+                whileHover={prefersReduced ? undefined : { scale: 1.02 }}
+                whileTap={prefersReduced ? undefined : { scale: 0.98 }}
                 onClick={applyRedaction}
                 disabled={busy || rects.length === 0}
-                className="py-2 px-5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-md flex items-center gap-1.5 transition-all disabled:opacity-40"
+                className="pms-btn-primary py-2.5 px-5 text-xs font-bold rounded-xl flex items-center gap-1.5 disabled:opacity-40"
               >
                 {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShieldOff className="w-4 h-4" />}
                 Apply {rects.length} Redactions
-              </button>
+              </motion.button>
             </div>
           </div>
 
           {/* Page Navigation & Canvas Area */}
-          <div className="flex flex-col items-center gap-3">
-            <div className="flex items-center gap-3 text-xs font-bold text-slate-600 dark:text-slate-400">
+          <div className="relative pms-glass-panel rounded-3xl p-4 sm:p-6 flex flex-col items-center gap-4 overflow-hidden min-h-[420px]">
+            <PearlScanOverlay
+              active={busy || isScanningPii}
+              label={
+                ocrStatus ||
+                (isScanningPii
+                  ? 'Scanning document text layers for PII…'
+                  : 'Burning permanent redactions into PDF…')
+              }
+            />
+
+            <div className="flex flex-wrap items-center justify-center gap-3 text-xs font-bold text-[var(--pms-muted)]">
               <button
                 onClick={() => setCurrentPage(p => Math.max(p - 1, 0))}
                 disabled={currentPage === 0}
-                className="p-1.5 rounded-lg border hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-30"
+                className="p-1.5 rounded-xl border border-[var(--pms-border)] bg-[var(--pms-white)] dark:bg-slate-900 hover:bg-[var(--pms-soft-lavender)] disabled:opacity-30 transition-colors"
               >
-                <ChevronLeft className="w-4 h-4" />
+                <ChevronLeft className="w-4 h-4 text-[var(--pms-ink)]" />
               </button>
-              <span>Page {currentPage + 1} of {pageImages.length}</span>
+              <span className="text-[var(--pms-ink)]">
+                Page {currentPage + 1} of {pageImages.length}
+              </span>
               <button
                 onClick={() => setCurrentPage(p => Math.min(p + 1, pageImages.length - 1))}
                 disabled={currentPage === pageImages.length - 1}
-                className="p-1.5 rounded-lg border hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-30"
+                className="p-1.5 rounded-xl border border-[var(--pms-border)] bg-[var(--pms-white)] dark:bg-slate-900 hover:bg-[var(--pms-soft-lavender)] disabled:opacity-30 transition-colors"
               >
-                <ChevronRight className="w-4 h-4" />
+                <ChevronRight className="w-4 h-4 text-[var(--pms-ink)]" />
               </button>
-              <span className="text-slate-400 ml-2">({currentRects.length} redaction boxes on this page)</span>
+              <span className="px-2.5 py-0.5 rounded-full bg-[var(--pms-soft-rose)] text-[var(--pms-rose)] font-semibold tabular-nums">
+                {currentRects.length} box{currentRects.length === 1 ? '' : 'es'} on this page
+              </span>
             </div>
 
-            {/* Document Page Viewport with Redaction Overlay */}
+            {/* Document Page Viewport with Redaction Overlay (keep bg-white crisp paper surface) */}
             <div
-              className="relative border shadow-xl bg-white select-none cursor-crosshair overflow-hidden rounded-lg max-w-full"
+              className="relative border border-[var(--pms-border-strong)] shadow-xl bg-white select-none cursor-crosshair overflow-hidden rounded-xl max-w-full"
               onMouseDown={onMouseDown}
               onMouseUp={onMouseUp}
             >
@@ -754,130 +819,145 @@ export default function RedactPdf() {
           </div>
 
           {/* Detected PII Modal */}
-          {showPiiModal && (
-            <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-              <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-xl w-full p-6 border border-slate-200 dark:border-slate-800 shadow-2xl space-y-4">
-                <div className="flex items-center justify-between border-b pb-3 dark:border-slate-800">
-                  <div className="flex items-center gap-2">
-                    <Sparkles className="w-5 h-5 text-red-600" />
-                    <h3 className="font-bold text-base text-slate-900 dark:text-white">Smart PII Auto-Detection</h3>
+          <AnimatePresence>
+            {showPiiModal && (
+              <motion.div
+                initial={prefersReduced ? false : { opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={prefersReduced ? undefined : { opacity: 0 }}
+                className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4"
+              >
+                <motion.div
+                  initial={prefersReduced ? false : { opacity: 0, scale: 0.96, y: 12 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={prefersReduced ? undefined : { opacity: 0, scale: 0.96, y: 8 }}
+                  transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
+                  className="pms-glass-panel rounded-3xl max-w-xl w-full p-6 shadow-2xl space-y-4 bg-white/95 dark:bg-slate-900/95"
+                >
+                  <div className="flex items-center justify-between border-b border-[var(--pms-border)] pb-3">
+                    <div className="flex items-center gap-2">
+                      <Sparkles className="w-5 h-5 text-[var(--pms-rose)]" />
+                      <h3 className="font-bold text-base text-[var(--pms-ink)]">Smart PII Auto-Detection</h3>
+                    </div>
+                    <button onClick={() => setShowPiiModal(false)} className="text-xs text-[var(--pms-subtle-text)] hover:text-[var(--pms-ink)]">✕</button>
                   </div>
-                  <button onClick={() => setShowPiiModal(false)} className="text-xs text-slate-400 hover:text-slate-600">✕</button>
-                </div>
 
-                {detectedPiiList.length === 0 ? (
-                  <div className="text-center py-6 space-y-3">
-                    <p className="text-sm text-slate-500">No common PII patterns (Aadhaar, PAN, SSN, Credit Cards) detected in text layers.</p>
-                    <p className="text-xs text-slate-400">If this is a scanned document photo, try using <strong>OCR Deep Scan</strong> on the toolbar.</p>
-                  </div>
-                ) : (
-                  <>
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <p className="text-xs text-slate-600 dark:text-slate-400">
-                        Found <strong className="text-red-600">{detectedPiiList.length}</strong> items across document:
-                      </p>
-                      <div className="flex items-center gap-2 text-xs">
-                        <button onClick={() => toggleAllPii(true)} className="text-indigo-600 hover:underline font-semibold">Select All</button>
-                        <span>•</span>
-                        <button onClick={() => toggleAllPii(false)} className="text-slate-500 hover:underline">Unselect All</button>
+                  {detectedPiiList.length === 0 ? (
+                    <div className="text-center py-6 space-y-3">
+                      <p className="text-sm text-[var(--pms-muted)]">No common PII patterns (Aadhaar, PAN, SSN, Credit Cards) detected in text layers.</p>
+                      <p className="text-xs text-[var(--pms-subtle-text)]">If this is a scanned document photo, try using <strong>OCR Deep Scan</strong> on the toolbar.</p>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-xs text-[var(--pms-muted)]">
+                          Found <strong className="text-[var(--pms-rose)]">{detectedPiiList.length}</strong> items across document:
+                        </p>
+                        <div className="flex items-center gap-2 text-xs">
+                          <button onClick={() => toggleAllPii(true)} className="text-[var(--pms-blue)] hover:underline font-semibold">Select All</button>
+                          <span className="text-[var(--pms-subtle-text)]">•</span>
+                          <button onClick={() => toggleAllPii(false)} className="text-[var(--pms-muted)] hover:underline">Unselect All</button>
+                        </div>
                       </div>
-                    </div>
 
-                    {/* Filter Pills */}
-                    <div className="flex flex-wrap gap-1.5 pb-1">
-                      <button
-                        onClick={() => setSelectedPiiFilter('all')}
-                        className={`px-2.5 py-1 rounded-lg text-xs font-semibold ${selectedPiiFilter === 'all' ? 'bg-red-600 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'}`}
-                      >
-                        All ({detectedPiiList.length})
-                      </button>
-                      {Array.from(new Set(detectedPiiList.map(d => d.type))).map(cat => {
-                        const count = detectedPiiList.filter(d => d.type === cat).length;
-                        return (
-                          <button
-                            key={cat}
-                            onClick={() => setSelectedPiiFilter(cat)}
-                            className={`px-2.5 py-1 rounded-lg text-xs font-semibold ${selectedPiiFilter === cat ? 'bg-red-600 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'}`}
-                          >
-                            {cat} ({count})
-                          </button>
-                        );
-                      })}
-                    </div>
-
-                    <div className="max-h-64 overflow-y-auto space-y-2 pr-1">
-                      {detectedPiiList
-                        .filter(item => selectedPiiFilter === 'all' || item.type === selectedPiiFilter)
-                        .map((item) => {
-                          const maskText = (type: string, text: string) => {
-                            if (type.includes('Aadhaar')) return `•••• •••• ${text.slice(-4)}`;
-                            if (type.includes('PAN')) return `${text.slice(0, 3)}•••••${text.slice(-1)}`;
-                            if (type.includes('Phone')) return `+91 ••••• ${text.slice(-4)}`;
-                            if (type.includes('Email')) {
-                              const parts = text.split('@');
-                              return `${parts[0].slice(0, 2)}••••@${parts[1] || ''}`;
-                            }
-                            if (text.length > 8) return `${text.slice(0, 3)}••••${text.slice(-3)}`;
-                            return '••••••••';
-                          };
-
+                      {/* Filter Pills */}
+                      <div className="flex flex-wrap gap-1.5 pb-1">
+                        <button
+                          onClick={() => setSelectedPiiFilter('all')}
+                          className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors ${selectedPiiFilter === 'all' ? 'bg-[var(--pms-rose)] text-white' : 'bg-[var(--pms-pearl)] dark:bg-slate-800 text-[var(--pms-muted)]'}`}
+                        >
+                          All ({detectedPiiList.length})
+                        </button>
+                        {Array.from(new Set(detectedPiiList.map(d => d.type))).map(cat => {
+                          const count = detectedPiiList.filter(d => d.type === cat).length;
                           return (
-                            <label
-                              key={item.id}
-                              className={`p-2.5 rounded-xl border flex items-center justify-between text-xs cursor-pointer transition-colors ${
-                                item.selected !== false
-                                  ? 'bg-red-50/50 dark:bg-red-950/20 border-red-200 dark:border-red-900/50'
-                                  : 'bg-slate-50 dark:bg-slate-800/40 border-slate-200 dark:border-slate-800 opacity-60'
-                              }`}
+                            <button
+                              key={cat}
+                              onClick={() => setSelectedPiiFilter(cat)}
+                              className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors ${selectedPiiFilter === cat ? 'bg-[var(--pms-rose)] text-white' : 'bg-[var(--pms-pearl)] dark:bg-slate-800 text-[var(--pms-muted)]'}`}
                             >
-                              <div className="flex items-center gap-3">
-                                <input
-                                  type="checkbox"
-                                  checked={item.selected !== false}
-                                  onChange={() => togglePiiItem(item.id)}
-                                  className="w-4 h-4 rounded text-red-600 accent-red-600 cursor-pointer"
-                                />
-                                <div>
-                                  <span className="font-bold text-slate-800 dark:text-slate-200">{item.type}</span>
-                                  <p className="font-mono text-[11px] text-slate-500">{maskText(item.type, item.text)}</p>
-                                </div>
-                              </div>
-                              <span className="text-[10px] bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300 px-2 py-0.5 rounded-full font-bold">
-                                Page {item.pageIndex + 1}
-                              </span>
-                            </label>
+                              {cat} ({count})
+                            </button>
                           );
                         })}
-                    </div>
-                  </>
-                )}
+                      </div>
 
-                <div className="flex items-center justify-between pt-2 border-t dark:border-slate-800">
-                  <span className="text-xs text-slate-500">
-                    Selected: <strong>{detectedPiiList.filter(d => d.selected !== false).length}</strong> / {detectedPiiList.length}
-                  </span>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => setShowPiiModal(false)}
-                      className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl"
-                    >
-                      Cancel
-                    </button>
-                    {detectedPiiList.length > 0 && (
+                      <div className="max-h-64 overflow-y-auto space-y-2 pr-1">
+                        {detectedPiiList
+                          .filter(item => selectedPiiFilter === 'all' || item.type === selectedPiiFilter)
+                          .map((item) => {
+                            const maskText = (type: string, text: string) => {
+                              if (type.includes('Aadhaar')) return `•••• •••• ${text.slice(-4)}`;
+                              if (type.includes('PAN')) return `${text.slice(0, 3)}•••••${text.slice(-1)}`;
+                              if (type.includes('Phone')) return `+91 ••••• ${text.slice(-4)}`;
+                              if (type.includes('Email')) {
+                                const parts = text.split('@');
+                                return `${parts[0].slice(0, 2)}••••@${parts[1] || ''}`;
+                              }
+                              if (text.length > 8) return `${text.slice(0, 3)}••••${text.slice(-3)}`;
+                              return '••••••••';
+                            };
+
+                            return (
+                              <label
+                                key={item.id}
+                                className={`p-2.5 rounded-xl border flex items-center justify-between text-xs cursor-pointer transition-colors ${
+                                  item.selected !== false
+                                    ? 'bg-[var(--pms-soft-rose)]/70 border-rose-200 dark:border-rose-900/50'
+                                    : 'bg-[var(--pms-pearl)]/50 dark:bg-slate-800/40 border-[var(--pms-border)] opacity-60'
+                                }`}
+                              >
+                                <div className="flex items-center gap-3">
+                                  <input
+                                    type="checkbox"
+                                    checked={item.selected !== false}
+                                    onChange={() => togglePiiItem(item.id)}
+                                    className="w-4 h-4 rounded text-[var(--pms-rose)] accent-rose-600 cursor-pointer"
+                                  />
+                                  <div>
+                                    <span className="font-bold text-[var(--pms-ink)]">{item.type}</span>
+                                    <p className="font-mono text-[11px] text-[var(--pms-muted)]">{maskText(item.type, item.text)}</p>
+                                  </div>
+                                </div>
+                                <span className="text-[10px] bg-[var(--pms-soft-rose)] text-[var(--pms-rose)] px-2 py-0.5 rounded-full font-bold">
+                                  Page {item.pageIndex + 1}
+                                </span>
+                              </label>
+                            );
+                          })}
+                      </div>
+                    </>
+                  )}
+
+                  <div className="flex items-center justify-between pt-2 border-t border-[var(--pms-border)]">
+                    <span className="text-xs text-[var(--pms-muted)]">
+                      Selected: <strong className="text-[var(--pms-ink)]">{detectedPiiList.filter(d => d.selected !== false).length}</strong> / {detectedPiiList.length}
+                    </span>
+                    <div className="flex items-center gap-2">
                       <button
-                        onClick={applyDetectedPii}
-                        disabled={detectedPiiList.filter(d => d.selected !== false).length === 0}
-                        className="px-5 py-2 text-xs font-bold bg-red-600 hover:bg-red-700 text-white rounded-xl shadow-md disabled:opacity-40"
+                        onClick={() => setShowPiiModal(false)}
+                        className="px-4 py-2 text-xs font-bold text-[var(--pms-muted)] hover:bg-[var(--pms-pearl)] dark:hover:bg-slate-800 rounded-xl transition-colors"
                       >
-                        Redact Selected ({detectedPiiList.filter(d => d.selected !== false).length}) Items
+                        Cancel
                       </button>
-                    )}
+                      {detectedPiiList.length > 0 && (
+                        <motion.button
+                          whileHover={prefersReduced ? undefined : { scale: 1.02 }}
+                          whileTap={prefersReduced ? undefined : { scale: 0.98 }}
+                          onClick={applyDetectedPii}
+                          disabled={detectedPiiList.filter(d => d.selected !== false).length === 0}
+                          className="pms-btn-primary px-5 py-2 text-xs font-bold rounded-xl disabled:opacity-40"
+                        >
+                          Redact Selected ({detectedPiiList.filter(d => d.selected !== false).length}) Items
+                        </motion.button>
+                      )}
+                    </div>
                   </div>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
+                </motion.div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </motion.div>
       )}
       </div>
     </ToolWorkspaceShell>

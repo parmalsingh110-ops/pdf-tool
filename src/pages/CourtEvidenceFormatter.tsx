@@ -1,21 +1,17 @@
 import React, { useState, useRef } from 'react';
 import {
   Scale,
-  Upload,
   Download,
-  FileCheck2,
-  Calendar,
-  User,
-  ShieldAlert,
-  Clock,
-  Sparkles,
   FileText,
-  Layers,
 } from 'lucide-react';
+import { motion, useReducedMotion } from 'motion/react';
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 import { useSEO } from '../hooks/useSEO';
 import { usePageSEO } from '../lib/usePageSEO';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { AnimatedNumber, PearlScanOverlay } from '../components/pearl/PearlMotion';
 import ToolSEOSection from '../components/ToolSEOSection';
+import { toArrayBufferBytes } from '../lib/blobUrl';
 import { downloadBlob } from '../lib/utils';
 import { embedSmartFont } from '../lib/pdfFontHelper';
 
@@ -62,6 +58,7 @@ export default function CourtEvidenceFormatter() {
   const [deviceModel, setDeviceModel] = useState<string>('OnePlus / Samsung Galaxy / iPhone');
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
 
+  const prefersReduced = useReducedMotion();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Parse WhatsApp exported .txt chat format
@@ -323,7 +320,7 @@ export default function CourtEvidenceFormatter() {
       }
 
       const outBytes = await doc.save();
-      const blob = new Blob([outBytes as any], { type: 'application/pdf' });
+      const blob = new Blob([toArrayBufferBytes(outBytes)], { type: 'application/pdf' });
       downloadBlob(blob, `CourtEvidence_Sec63BSA_${deponentName.replace(/\s+/g, '_')}.pdf`);
     } catch (err) {
       console.error(err);
@@ -334,33 +331,33 @@ export default function CourtEvidenceFormatter() {
   };
 
   return (
-    <div className="w-full min-h-screen bg-slate-50 dark:bg-slate-950 py-10 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-5xl mx-auto space-y-8">
-        {/* Header */}
-        <div>
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-50 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-800 text-xs font-bold text-amber-700 dark:text-amber-300 mb-2">
-            <Scale className="w-3.5 h-3.5" /> Section 63 BSA &amp; 65B Indian Evidence Act Compliant
-          </div>
-          <h1 className="text-3xl font-extrabold text-slate-900 dark:text-white">
-            WhatsApp Chat to Court Evidence Formatter
-          </h1>
-          <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
-            Convert WhatsApp chat exports into certified legal green paper PDFs with continuous exhibit numbers and an automated Section 63 BSA Electronic Evidence Certificate.
-          </p>
-        </div>
-
+    <ToolWorkspaceShell
+      title="WhatsApp Chat to Court Evidence Formatter"
+      subtitle="Convert WhatsApp chat exports into certified legal green paper PDFs with continuous exhibit numbers and an automated Section 63 BSA Electronic Evidence Certificate."
+      categoryLabel="Section 63 BSA & 65B Indian Evidence Act Compliant"
+      icon={Scale}
+      microVariant="convert"
+      tone="amber"
+      trustNote="Runs 100% locally in your browser • Confidential evidence never uploaded"
+    >
+      <div className="w-full max-w-5xl mx-auto space-y-8">
         {/* Studio Inputs */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+        <motion.div
+          initial={prefersReduced ? false : { opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: prefersReduced ? 0 : 0.24 }}
+          className="grid grid-cols-1 lg:grid-cols-12 gap-8"
+        >
           {/* Left Column: Chat Import & Preview */}
           <div className="lg:col-span-7 space-y-6">
-            <div className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-4 shadow-sm">
-              <div className="flex items-center justify-between">
-                <h4 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                  <FileText className="w-4 h-4 text-amber-600" /> WhatsApp Chat Text Export (.txt)
+            <div className="p-6 rounded-3xl pms-glass-panel space-y-4">
+              <div className="flex items-center justify-between gap-2">
+                <h4 className="text-sm font-bold text-[var(--pms-ink)] flex items-center gap-2">
+                  <FileText className="w-4 h-4 text-amber-600 dark:text-amber-400" /> WhatsApp Chat Text Export (.txt)
                 </h4>
                 <button
                   onClick={() => fileInputRef.current?.click()}
-                  className="text-xs font-bold text-amber-600 hover:underline"
+                  className="px-3 py-1.5 rounded-xl bg-amber-50/90 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 text-xs font-bold text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-950/60 transition-colors"
                 >
                   Upload .txt File
                 </button>
@@ -378,11 +375,13 @@ export default function CourtEvidenceFormatter() {
                 placeholder="Paste exported WhatsApp chat text here or upload file...&#10;e.g. 24/10/26, 10:15 pm - Ramesh: Please send the payment receipt&#10;24/10/26, 10:18 pm - Suresh: Sent via UPI..."
                 value={chatText}
                 onChange={(e) => parseWhatsAppTxt(e.target.value)}
-                className="w-full p-4 rounded-2xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-mono text-slate-800 dark:text-slate-200 focus:outline-none focus:border-amber-500"
+                className="w-full p-4 rounded-2xl bg-white/75 dark:bg-slate-900/75 border border-[var(--pms-border)] text-xs font-mono text-[var(--pms-ink)] focus:outline-none focus:ring-2 focus:ring-amber-500"
               />
 
-              <div className="flex items-center justify-between text-xs text-slate-400">
-                <span>{messages.length} Chat Messages Identified</span>
+              <div className="flex items-center justify-between text-xs text-[var(--pms-muted)]">
+                <span className="font-semibold text-[var(--pms-ink)]">
+                  <AnimatedNumber value={messages.length} suffix=" Chat Messages Identified" />
+                </span>
                 <span>Exported without media</span>
               </div>
             </div>
@@ -390,78 +389,80 @@ export default function CourtEvidenceFormatter() {
 
           {/* Right Column: Case & Section 63 Certificate Parameters */}
           <div className="lg:col-span-5 space-y-6">
-            <div className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-4 shadow-sm">
-              <h4 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                <Scale className="w-4 h-4 text-amber-600" /> Court &amp; Case Title Setup
+            <div className="p-6 rounded-3xl pms-glass-panel space-y-4 relative overflow-hidden">
+              <PearlScanOverlay active={isProcessing} label="Compiling legal annexures & Sec 63 BSA PDF..." />
+
+              <h4 className="text-sm font-bold text-[var(--pms-ink)] flex items-center gap-2">
+                <Scale className="w-4 h-4 text-amber-600 dark:text-amber-400" /> Court &amp; Case Title Setup
               </h4>
 
               <div className="space-y-3 text-xs">
                 <div>
-                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  <label className="block font-bold text-[var(--pms-ink)] mb-1">
                     Name of Court / Police Station
                   </label>
                   <input
                     type="text"
                     value={courtName}
                     onChange={(e) => setCourtName(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-semibold"
+                    className="w-full px-3 py-2 rounded-xl bg-white/75 dark:bg-slate-900/75 border border-[var(--pms-border)] text-[var(--pms-ink)] font-semibold outline-none focus:ring-2 focus:ring-amber-500"
                   />
                 </div>
 
                 <div>
-                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  <label className="block font-bold text-[var(--pms-ink)] mb-1">
                     Case / Complaint Number
                   </label>
                   <input
                     type="text"
                     value={caseNumber}
                     onChange={(e) => setCaseNumber(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-semibold"
+                    className="w-full px-3 py-2 rounded-xl bg-white/75 dark:bg-slate-900/75 border border-[var(--pms-border)] text-[var(--pms-ink)] font-semibold outline-none focus:ring-2 focus:ring-amber-500"
                   />
                 </div>
 
                 <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Petitioner</label>
+                    <label className="block font-bold text-[var(--pms-ink)] mb-1">Petitioner</label>
                     <input
                       type="text"
                       value={partyA}
                       onChange={(e) => setPartyA(e.target.value)}
-                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-semibold"
+                      className="w-full px-3 py-2 rounded-xl bg-white/75 dark:bg-slate-900/75 border border-[var(--pms-border)] text-[var(--pms-ink)] font-semibold outline-none focus:ring-2 focus:ring-amber-500"
                     />
                   </div>
                   <div>
-                    <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Respondent</label>
+                    <label className="block font-bold text-[var(--pms-ink)] mb-1">Respondent</label>
                     <input
                       type="text"
                       value={partyB}
                       onChange={(e) => setPartyB(e.target.value)}
-                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-semibold"
+                      className="w-full px-3 py-2 rounded-xl bg-white/75 dark:bg-slate-900/75 border border-[var(--pms-border)] text-[var(--pms-ink)] font-semibold outline-none focus:ring-2 focus:ring-amber-500"
                     />
                   </div>
                 </div>
 
-                <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-2">
+                <div className="pt-2 border-t border-[var(--pms-border)] space-y-2">
                   <div>
-                    <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    <label className="block font-bold text-[var(--pms-ink)] mb-1">
                       Deponent Name (Phone Owner)
                     </label>
                     <input
                       type="text"
                       value={deponentName}
                       onChange={(e) => setDeponentName(e.target.value)}
-                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-semibold"
+                      className="w-full px-3 py-2 rounded-xl bg-white/75 dark:bg-slate-900/75 border border-[var(--pms-border)] text-[var(--pms-ink)] font-semibold outline-none focus:ring-2 focus:ring-amber-500"
                     />
                   </div>
                   <div>
-                    <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    <label className="block font-bold text-[var(--pms-ink)] mb-1">
                       Mobile Device Brand / Model
                     </label>
                     <input
                       type="text"
                       value={deviceModel}
                       onChange={(e) => setDeviceModel(e.target.value)}
-                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-semibold"
+                      className="w-full px-3 py-2 rounded-xl bg-white/75 dark:bg-slate-900/75 border border-[var(--pms-border)] text-[var(--pms-ink)] font-semibold outline-none focus:ring-2 focus:ring-amber-500"
                     />
                   </div>
                 </div>
@@ -471,7 +472,7 @@ export default function CourtEvidenceFormatter() {
                 <button
                   onClick={handleGenerateLegalPdf}
                   disabled={isProcessing || messages.length === 0}
-                  className="w-full py-3.5 rounded-2xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-lg shadow-amber-900/20 disabled:opacity-50 transition-all"
+                  className="pms-btn-primary w-full py-3.5 rounded-2xl font-bold text-xs flex items-center justify-center gap-2 disabled:opacity-50"
                 >
                   <Download className="w-4 h-4" />
                   {isProcessing ? 'Compiling Legal PDF...' : 'Download Section 63 BSA Evidence PDF'}
@@ -479,7 +480,7 @@ export default function CourtEvidenceFormatter() {
               </div>
             </div>
           </div>
-        </div>
+        </motion.div>
 
         {/* SEO Information */}
         <ToolSEOSection
@@ -488,7 +489,7 @@ export default function CourtEvidenceFormatter() {
           description="A specialized judicial tool for advocates, legal chambers, law enforcement, and litigants. Transforms exported WhatsApp and SMS threads into formal legal petition annexures. Formats each communication with timestamps, sender tags, running exhibit serials, and appends an auto-drafted Certificate under Section 63 of Bharatiya Sakshya Adhiniyam, 2023 (formerly Section 65B IEA) with custody verifications."
         />
       </div>
-    </div>
+    </ToolWorkspaceShell>
   );
 }
 

@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { motion, useReducedMotion } from 'motion/react';
 import { createWorker, PSM } from 'tesseract.js';
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
@@ -12,11 +13,12 @@ import {
   RotateCw,
   ZoomIn,
   Columns2,
-  Zap,
 } from 'lucide-react';
 import FileDropzone from '../components/FileDropzone';
 import { extractTextRegions, isVisionAiEnabled } from '../lib/advancedVisionEngine';
 import { useSEO } from '../hooks/useSEO';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { AnimatedNumber, PearlScanOverlay } from '../components/pearl/PearlMotion';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
@@ -214,6 +216,9 @@ export default function ImageTextEditor() {
   const workerRef = useRef<Awaited<ReturnType<typeof createWorker>> | null>(null);
   const imgRef = useRef<HTMLImageElement>(null);
   const previewBoxRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const prefersReduced = useReducedMotion();
 
   const maxPreviewWidth = 880;
   const baseScale = natural ? Math.min(1, maxPreviewWidth / natural.w) : 1;
@@ -306,8 +311,6 @@ export default function ImageTextEditor() {
     if (f) void processFile(f);
   };
 
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
   const pushUndo = useCallback(() => {
     undoStackRef.current.push(wordsRef.current.map((w) => ({ ...w, bbox: { ...w.bbox } })));
     if (undoStackRef.current.length > 40) undoStackRef.current.shift();
@@ -326,7 +329,6 @@ export default function ImageTextEditor() {
   const sampleBgColor = useCallback((ctx: CanvasRenderingContext2D, bbox: Bbox, imgW: number, imgH: number): string => {
     const samples: number[][] = [];
     const pad = 4;
-    // Gather pixels from edges around the bbox
     const positions = [
       [bbox.x0 - pad, bbox.y0 - pad],
       [bbox.x1 + pad, bbox.y0 - pad],
@@ -343,12 +345,17 @@ export default function ImageTextEditor() {
       try {
         const id = ctx.getImageData(sx, sy, 1, 1);
         samples.push([id.data[0], id.data[1], id.data[2]]);
-      } catch { /* cross-origin or empty */ }
+      } catch {
+        /* cross-origin or empty */
+      }
     }
     if (samples.length === 0) return '#ffffff';
-    // Average
     const avg = [0, 0, 0];
-    for (const s of samples) { avg[0] += s[0]; avg[1] += s[1]; avg[2] += s[2]; }
+    for (const s of samples) {
+      avg[0] += s[0];
+      avg[1] += s[1];
+      avg[2] += s[2];
+    }
     avg[0] = Math.round(avg[0] / samples.length);
     avg[1] = Math.round(avg[1] / samples.length);
     avg[2] = Math.round(avg[2] / samples.length);
@@ -467,15 +474,16 @@ export default function ImageTextEditor() {
           }
 
           if (aiWords.length > 0) {
-            const mapped = coordScale === 1 ? aiWords : aiWords.map((w) => ({ ...w, bbox: scaleBbox(w.bbox, coordScale) }));
+            const mapped =
+              coordScale === 1 ? aiWords : aiWords.map((w) => ({ ...w, bbox: scaleBbox(w.bbox, coordScale) }));
             setWords(mapped);
             setOcrBusy(false);
             setOcrProgress(100);
-            return; // Exit early
+            return;
           }
         }
       } catch (aiError) {
-        console.warn("Advanced engine failed, falling back to local OCR", aiError);
+        console.warn('Advanced engine failed, falling back to local OCR', aiError);
       }
 
       const worker = await createWorker(lang, 1, {
@@ -514,7 +522,7 @@ export default function ImageTextEditor() {
       setWords(combined);
       if (combined.length === 0) {
         setOcrError(
-          'No text detected. Try Lines mode, “Sparse” layout, enable 2× OCR upscale, or draw a box (Add region) for manual text.',
+          'No text detected. Try Lines mode, “Sparse” layout, enable 2× OCR upscale, or draw a box (Add text region) for manual text.',
         );
       }
     } catch (e) {
@@ -538,7 +546,6 @@ export default function ImageTextEditor() {
     const ch = ctx.canvas.height;
     for (const w of dirty) {
       const { bbox: b } = w;
-      // Use auto-detected background color from surrounding pixels
       const bg = srcCtx ? sampleBgColor(srcCtx, b, cw, ch) : '#ffffff';
       ctx.fillStyle = bg;
       ctx.fillRect(b.x0 - pad, b.y0 - pad, b.x1 - b.x0 + pad * 2, b.y1 - b.y0 + pad * 2);
@@ -663,315 +670,361 @@ export default function ImageTextEditor() {
     }
   };
 
+  const busyAny = ocrBusy || rasterBusy || exportBusy;
+  const busyLabel = ocrBusy
+    ? `Recognizing text (${ocrProgress}%)…`
+    : rasterBusy
+      ? 'Preparing preview…'
+      : 'Exporting edited image…';
+
   return (
-    <div className="flex-1 flex flex-col bg-slate-900 text-slate-100 min-h-[calc(100vh-4rem)]">
-      <div className="max-w-[1400px] mx-auto w-full px-4 py-6 flex flex-col gap-4">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <h1 className="text-2xl md:text-3xl font-extrabold flex items-center gap-3">
-              <ScanText className="w-8 h-8 text-sky-400" />
-              Image &amp; screenshot text edit
-            </h1>
-            <p className="mt-2 text-slate-400 max-w-3xl text-sm leading-relaxed">
-              Upload a <strong className="text-slate-300">PNG, JPG, WebP, GIF</strong>, or{' '}
-              <strong className="text-slate-300">PDF</strong> (first page is converted to an image for OCR).
-              Runs in your browser: OCR finds words, you edit text and style, then we clean &amp; redraw matching text locally. For full scanned-PDF texture synthesis, server-side processing is optional.
-            </p>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 xl:grid-cols-12 gap-4 flex-1 min-h-0 xl:items-start">
-          <aside className="xl:col-span-3 flex flex-col gap-3 min-h-[200px] xl:sticky xl:top-20 xl:z-30 xl:max-h-[calc(100dvh-5.5rem)] xl:overflow-y-auto">
-            <div className="rounded-2xl border border-slate-700 bg-slate-800/80 p-4">
-              {!file ? (
-                <FileDropzone
-                  onDrop={handleDrop}
-                  multiple={false}
-                  maxFiles={1}
-                  accept={IMAGE_AND_PDF_ACCEPT}
-                  variant="dark"
-                  title="Image or PDF"
-                  subtitle="Click below or drop — PNG, JPG, WebP, GIF, PDF"
-                  buttonLabel="Choose from device"
-                />
-              ) : (
-                <div className="space-y-3 text-sm">
-                  <p className="text-slate-300 truncate" title={file.name}>
-                    {file.name}
+    <ToolWorkspaceShell
+      title="Image & Screenshot Text Editor"
+      subtitle="Upload a PNG, JPG, WebP, GIF, or PDF (page 1) — local OCR finds words so you can edit text, font & style, and export cleanly."
+      categoryLabel="OCR Inpaint Studio"
+      icon={ScanText}
+      microVariant="ocr"
+      tone="sky"
+      trustNote="Local Tesseract OCR & pixel background sampling · 100% browser-only"
+    >
+      <motion.div
+        initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.25 }}
+        className="w-full grid grid-cols-1 xl:grid-cols-[270px_minmax(0,1fr)_270px] gap-5 items-start"
+      >
+        {/* Left Sidebar: Source & OCR Settings + Word List */}
+        <aside className="flex flex-col gap-4 min-h-[200px] xl:sticky xl:top-20 xl:z-20 xl:max-h-[calc(100dvh-5.5rem)] xl:overflow-y-auto">
+          <div className="pms-glass-panel rounded-3xl p-4 space-y-3">
+            {!file ? (
+              <FileDropzone
+                onDrop={handleDrop}
+                multiple={false}
+                maxFiles={1}
+                accept={IMAGE_AND_PDF_ACCEPT}
+                title="Image or PDF"
+                subtitle="PNG, JPG, WebP, GIF, PDF"
+                buttonLabel="Choose file"
+              />
+            ) : (
+              <div className="space-y-3 text-sm">
+                <p className="font-bold text-gray-900 dark:text-slate-100 truncate" title={file.name}>
+                  {file.name}
+                </p>
+                {sourceWasPdf && (
+                  <p className="text-xs text-amber-800 dark:text-amber-200 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 rounded-xl px-2.5 py-2">
+                    PDF: only <strong>page 1</strong> is shown and used for OCR. Export is PNG/JPG.
                   </p>
-                  {sourceWasPdf && (
-                    <p className="text-xs text-amber-200/90 bg-amber-950/40 border border-amber-800/60 rounded-lg px-2 py-1.5">
-                      PDF: only <strong>page 1</strong> is shown and used for OCR. Export is always PNG.
-                    </p>
-                  )}
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      className="px-3 py-2 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold"
-                      onClick={() => fileInputRef.current?.click()}
-                    >
-                      Change file
-                    </button>
-                    <button
-                      type="button"
-                      className="text-rose-400 font-semibold px-2 py-2 text-xs"
-                      onClick={() => {
-                        setExportUrl((p) => {
-                          if (p) URL.revokeObjectURL(p);
-                          return null;
-                        });
-                        setObjectUrl((p) => {
-                          if (p) URL.revokeObjectURL(p);
-                          return null;
-                        });
-                        setFile(null);
-                        setNatural(null);
-                        setWords([]);
-                        setSelectedId(null);
-                        setFileError(null);
-                        setOcrError(null);
-                        setSourceWasPdf(false);
-                      }}
-                    >
-                      Remove
-                    </button>
-                  </div>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    className="hidden"
-                    accept="image/png,image/jpeg,image/webp,image/gif,.pdf,application/pdf"
-                    onChange={(e) => {
-                      const next = e.target.files?.[0];
-                      if (next) void processFile(next);
-                      e.target.value = '';
-                    }}
-                  />
-                  <div>
-                    <label className="text-xs text-slate-500">OCR language</label>
-                    <select
-                      className="mt-1 w-full rounded-lg bg-slate-900 border border-slate-600 px-3 py-2"
-                      value={lang}
-                      onChange={(e) => setLang(e.target.value)}
-                      disabled={ocrBusy}
-                    >
-                      <option value="eng">English</option>
-                      <option value="hin">Hindi</option>
-                      <option value="eng+hin">English + Hindi</option>
-                      <option value="spa">Spanish</option>
-                      <option value="fra">French</option>
-                      <option value="deu">German</option>
-                      <option value="ara">Arabic</option>
-                      <option value="chi_sim">Chinese (Simplified)</option>
-                      <option value="jpn">Japanese</option>
-                      <option value="rus">Russian</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="text-xs text-slate-500">Detect as</label>
-                    <select
-                      className="mt-1 w-full rounded-lg bg-slate-900 border border-slate-600 px-3 py-2"
-                      value={ocrGranularity}
-                      onChange={(e) => setOcrGranularity(e.target.value as 'words' | 'lines')}
-                      disabled={ocrBusy}
-                    >
-                      <option value="words">Words (fine edit)</option>
-                      <option value="lines">Lines (more text found)</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="text-xs text-slate-500">Page layout (PSM)</label>
-                    <select
-                      className="mt-1 w-full rounded-lg bg-slate-900 border border-slate-600 px-3 py-2"
-                      value={psmChoice}
-                      onChange={(e) =>
-                        setPsmChoice(e.target.value as 'auto' | 'block' | 'sparse' | 'line')
-                      }
-                      disabled={ocrBusy}
-                    >
-                      <option value="auto">Auto</option>
-                      <option value="block">Single block</option>
-                      <option value="sparse">Sparse / UI text</option>
-                      <option value="line">Single line</option>
-                    </select>
-                  </div>
-                  <label className="flex items-start gap-2 text-xs text-slate-400 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      className="mt-0.5 rounded border-slate-500"
-                      checked={extraSparsePass}
-                      onChange={(e) => setExtraSparsePass(e.target.checked)}
-                      disabled={ocrBusy || psmChoice === 'sparse'}
-                    />
-                    <span>
-                      Second pass (sparse) to catch missed snippets
-                      {psmChoice === 'sparse' ? ' — off when layout is already Sparse' : ''}
-                    </span>
-                  </label>
-                  <label className="flex items-start gap-2 text-xs text-slate-400 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      className="mt-0.5 rounded border-slate-500"
-                      checked={upscaleOcr}
-                      onChange={(e) => setUpscaleOcr(e.target.checked)}
-                      disabled={ocrBusy}
-                    />
-                    <span>2× upscale before OCR (better for small text; slower)</span>
-                  </label>
-                  <button
-                    type="button"
-                    disabled={ocrBusy || !objectUrl || rasterBusy || !natural}
-                    onClick={runOcr}
-                    className="w-full py-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 font-bold disabled:opacity-40 flex items-center justify-center gap-2"
-                  >
-                    {ocrBusy ? (
-                      <>
-                        <Loader2 className="w-5 h-5 animate-spin" />
-                        OCR {ocrProgress}%
-                      </>
-                    ) : (
-                      'Run OCR'
-                    )}
-                  </button>
-                  {fileError && (
-                    <p className="text-xs text-rose-200 bg-rose-950/50 border border-rose-800 rounded-lg p-2">
-                      {fileError}
-                    </p>
-                  )}
-                  {ocrError && (
-                    <p className="text-xs text-amber-300 bg-amber-950/50 border border-amber-800 rounded-lg p-2">
-                      {ocrError}
-                    </p>
-                  )}
-                </div>
-              )}
-            </div>
-
-            <div className="rounded-2xl border border-slate-700 bg-slate-800/80 p-3 flex-1 overflow-hidden flex flex-col min-h-[160px]">
-              <h2 className="text-xs font-bold uppercase tracking-wide text-slate-500 mb-2">
-                Detected words ({words.length})
-              </h2>
-              <div className="flex-1 overflow-y-auto space-y-1 pr-1">
-                {words.map((w) => (
-                  <button
-                    key={w.id}
-                    type="button"
-                    onClick={() => setSelectedId(w.id)}
-                    className={`w-full text-left px-2 py-1.5 rounded-lg text-xs truncate border flex items-center gap-1.5 ${selectedId === w.id
-                        ? 'border-sky-500 bg-sky-950/50 text-sky-100'
-                        : 'border-transparent hover:bg-slate-700/80 text-slate-300'
-                      }`}
-                  >
-                    {/* Confidence dot */}
-                    <span className={`inline-block w-1.5 h-1.5 rounded-full shrink-0 ${w.confidence >= 85 ? 'bg-emerald-400' : w.confidence >= 60 ? 'bg-amber-400' : 'bg-rose-400'
-                      }`} title={`Confidence: ${Math.round(w.confidence)}%`} />
-                    {w.dirty ? '✎ ' : ''}
-                    <span className="truncate">{w.text}</span>
-                    <button
-                      type="button"
-                      onClick={(e) => { e.stopPropagation(); deleteWord(w.id); }}
-                      className="ml-auto shrink-0 w-4 h-4 rounded bg-rose-600/70 hover:bg-rose-500 text-white flex items-center justify-center text-[8px] font-bold opacity-0 group-hover:opacity-100 transition-opacity"
-                      title="Delete this word"
-                    >
-                      ×
-                    </button>
-                  </button>
-                ))}
-              </div>
-            </div>
-          </aside>
-
-          <section className="xl:col-span-6 flex flex-col items-center justify-start gap-2 min-w-0 xl:max-h-none">
-            {objectUrl && natural && !rasterBusy && (
-              <div className="flex flex-wrap items-center justify-center gap-2 w-full shrink-0">
-                <button
-                  type="button"
-                  onClick={() => setToolMode('select')}
-                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold ${toolMode === 'select' ? 'bg-sky-600 text-white' : 'bg-slate-800 text-slate-300 border border-slate-600'
-                    }`}
-                >
-                  <MousePointer2 className="w-3.5 h-3.5" />
-                  Select
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setToolMode('draw');
-                    setSelectedId(null);
-                  }}
-                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold ${toolMode === 'draw' ? 'bg-amber-600 text-white' : 'bg-slate-800 text-slate-300 border border-slate-600'
-                    }`}
-                >
-                  <SquareDashed className="w-3.5 h-3.5" />
-                  Add text region
-                </button>
-                {toolMode === 'draw' && (
-                  <span className="text-xs text-amber-200/90">Drag on the image to draw a box, then type text on the right.</span>
                 )}
-                <button
-                  type="button"
-                  onClick={undoLast}
-                  className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-800 text-slate-200 border border-slate-600"
-                  title="Undo last text / layout change"
-                >
-                  <Undo2 className="w-3.5 h-3.5" />
-                  Undo
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void rotateImage('cw')}
-                  className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-800 text-slate-200 border border-slate-600"
-                  title="Rotate 90° clockwise (re-raster, re-OCR)"
-                >
-                  <RotateCw className="w-3.5 h-3.5" />
-                  90°
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void rotateImage('ccw')}
-                  className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-800 text-slate-200 border border-slate-600"
-                  title="Rotate 90° counter-clockwise"
-                >
-                  <RotateCw className="w-3.5 h-3.5 scale-x-[-1]" />
-                  90°↺
-                </button>
-                <label className="inline-flex items-center gap-2 text-[11px] text-slate-400">
-                  <ZoomIn className="w-3.5 h-3.5" />
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    className="px-3 py-1.5 rounded-xl bg-[var(--pms-soft-blue)] text-[var(--pms-blue)] text-xs font-bold hover:opacity-90 transition-opacity cursor-pointer"
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    Change file
+                  </button>
+                  <button
+                    type="button"
+                    className="text-rose-600 dark:text-rose-400 font-semibold px-2 py-1.5 text-xs hover:underline cursor-pointer"
+                    onClick={() => {
+                      setExportUrl((p) => {
+                        if (p) URL.revokeObjectURL(p);
+                        return null;
+                      });
+                      setObjectUrl((p) => {
+                        if (p) URL.revokeObjectURL(p);
+                        return null;
+                      });
+                      setFile(null);
+                      setNatural(null);
+                      setWords([]);
+                      setSelectedId(null);
+                      setFileError(null);
+                      setOcrError(null);
+                      setSourceWasPdf(false);
+                    }}
+                  >
+                    Remove
+                  </button>
+                </div>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  className="hidden"
+                  accept="image/png,image/jpeg,image/webp,image/gif,.pdf,application/pdf"
+                  onChange={(e) => {
+                    const next = e.target.files?.[0];
+                    if (next) void processFile(next);
+                    e.target.value = '';
+                  }}
+                />
+                <div>
+                  <label className="text-xs font-bold text-gray-600 dark:text-slate-400">OCR language</label>
+                  <select
+                    className="mt-1 w-full rounded-xl bg-white/85 dark:bg-slate-900/75 border border-[var(--pms-border)] px-3 py-2 text-gray-900 dark:text-slate-100 text-xs font-semibold"
+                    value={lang}
+                    onChange={(e) => setLang(e.target.value)}
+                    disabled={ocrBusy}
+                  >
+                    <option value="eng">English</option>
+                    <option value="hin">Hindi</option>
+                    <option value="eng+hin">English + Hindi</option>
+                    <option value="spa">Spanish</option>
+                    <option value="fra">French</option>
+                    <option value="deu">German</option>
+                    <option value="ara">Arabic</option>
+                    <option value="chi_sim">Chinese (Simplified)</option>
+                    <option value="jpn">Japanese</option>
+                    <option value="rus">Russian</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-gray-600 dark:text-slate-400">Detect as</label>
+                  <select
+                    className="mt-1 w-full rounded-xl bg-white/85 dark:bg-slate-900/75 border border-[var(--pms-border)] px-3 py-2 text-gray-900 dark:text-slate-100 text-xs font-semibold"
+                    value={ocrGranularity}
+                    onChange={(e) => setOcrGranularity(e.target.value as 'words' | 'lines')}
+                    disabled={ocrBusy}
+                  >
+                    <option value="words">Words (fine edit)</option>
+                    <option value="lines">Lines (more text found)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-gray-600 dark:text-slate-400">Page layout (PSM)</label>
+                  <select
+                    className="mt-1 w-full rounded-xl bg-white/85 dark:bg-slate-900/75 border border-[var(--pms-border)] px-3 py-2 text-gray-900 dark:text-slate-100 text-xs font-semibold"
+                    value={psmChoice}
+                    onChange={(e) =>
+                      setPsmChoice(e.target.value as 'auto' | 'block' | 'sparse' | 'line')
+                    }
+                    disabled={ocrBusy}
+                  >
+                    <option value="auto">Auto</option>
+                    <option value="block">Single block</option>
+                    <option value="sparse">Sparse / UI text</option>
+                    <option value="line">Single line</option>
+                  </select>
+                </div>
+                <label className="flex items-start gap-2 text-xs text-gray-600 dark:text-slate-400 cursor-pointer">
                   <input
-                    type="range"
-                    min={50}
-                    max={200}
-                    value={zoomPct}
-                    onChange={(e) => setZoomPct(Number(e.target.value))}
-                    className="w-24 accent-sky-500"
+                    type="checkbox"
+                    className="mt-0.5 accent-sky-600 rounded"
+                    checked={extraSparsePass}
+                    onChange={(e) => setExtraSparsePass(e.target.checked)}
+                    disabled={ocrBusy || psmChoice === 'sparse'}
                   />
-                  <span className="tabular-nums w-8">{zoomPct}%</span>
+                  <span>
+                    Second pass (sparse) to catch missed snippets
+                    {psmChoice === 'sparse' ? ' — off when layout is already Sparse' : ''}
+                  </span>
                 </label>
-                <button
+                <label className="flex items-start gap-2 text-xs text-gray-600 dark:text-slate-400 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 accent-sky-600 rounded"
+                    checked={upscaleOcr}
+                    onChange={(e) => setUpscaleOcr(e.target.checked)}
+                    disabled={ocrBusy}
+                  />
+                  <span>2× upscale before OCR (better for small text; slower)</span>
+                </label>
+
+                <motion.button
                   type="button"
-                  onClick={() => setCompareSplit((v) => !v)}
-                  className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold border ${compareSplit
-                      ? 'bg-violet-600 text-white border-violet-500'
-                      : 'bg-slate-800 text-slate-200 border-slate-600'
-                    }`}
+                  whileHover={prefersReduced || ocrBusy || !objectUrl || rasterBusy || !natural ? undefined : { scale: 1.01 }}
+                  whileTap={prefersReduced || ocrBusy || !objectUrl || rasterBusy || !natural ? undefined : { scale: 0.985 }}
+                  disabled={ocrBusy || !objectUrl || rasterBusy || !natural}
+                  onClick={runOcr}
+                  className="w-full pms-btn-primary py-2.5 rounded-2xl font-bold text-sm disabled:opacity-40 flex items-center justify-center gap-2 cursor-pointer"
                 >
-                  <Columns2 className="w-3.5 h-3.5" />
-                  Compare
-                </button>
+                  {ocrBusy ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      OCR <AnimatedNumber value={ocrProgress} suffix="%" />
+                    </>
+                  ) : (
+                    <>
+                      <ScanText className="w-4 h-4" />
+                      Run OCR
+                    </>
+                  )}
+                </motion.button>
+
+                {fileError && (
+                  <p className="text-xs text-rose-700 dark:text-rose-200 bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 rounded-xl p-2.5">
+                    {fileError}
+                  </p>
+                )}
+                {ocrError && (
+                  <p className="text-xs text-amber-800 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800 rounded-xl p-2.5">
+                    {ocrError}
+                  </p>
+                )}
               </div>
             )}
-            {rasterBusy ? (
-              <div className="flex-1 min-h-[280px] w-full flex flex-col items-center justify-center gap-3 border border-dashed border-slate-600 rounded-2xl bg-slate-800/40">
-                <Loader2 className="w-10 h-10 text-sky-400 animate-spin" />
-                <p className="text-slate-400 text-sm">Preparing preview…</p>
-                <p className="text-slate-500 text-xs">PDFs are converted to an image (page 1).</p>
-              </div>
-            ) : objectUrl && natural ? (
-              <div className="w-full flex justify-center overflow-auto max-h-[min(58vh,620px)] rounded-xl border border-slate-800/80 bg-slate-950/50 p-2">
+          </div>
+
+          <div className="pms-glass-panel rounded-3xl p-4 flex-1 overflow-hidden flex flex-col min-h-[170px]">
+            <div className="flex items-center justify-between mb-2">
+              <h2 className="text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-slate-400">
+                Detected words
+              </h2>
+              <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-[var(--pms-soft-blue)] text-[var(--pms-blue)]">
+                <AnimatedNumber value={words.length} />
+              </span>
+            </div>
+            <div className="flex-1 overflow-y-auto space-y-1 pr-1">
+              {words.map((w) => (
+                <div
+                  key={w.id}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setSelectedId(w.id)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      setSelectedId(w.id);
+                    }
+                  }}
+                  className={`group w-full text-left px-2.5 py-1.5 rounded-xl text-xs truncate border flex items-center gap-1.5 cursor-pointer transition-colors ${
+                    selectedId === w.id
+                      ? 'border-sky-500 bg-[var(--pms-soft-blue)] text-sky-900 dark:text-sky-100 font-bold'
+                      : 'border-transparent hover:bg-white/70 dark:hover:bg-slate-800/70 text-gray-700 dark:text-slate-300'
+                  }`}
+                >
+                  <span
+                    className={`inline-block w-1.5 h-1.5 rounded-full shrink-0 ${
+                      w.confidence >= 85 ? 'bg-emerald-500' : w.confidence >= 60 ? 'bg-amber-400' : 'bg-rose-400'
+                    }`}
+                    title={`Confidence: ${Math.round(w.confidence)}%`}
+                  />
+                  {w.dirty ? '✎ ' : ''}
+                  <span className="truncate">{w.text}</span>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      deleteWord(w.id);
+                    }}
+                    className="ml-auto shrink-0 w-4 h-4 rounded bg-rose-600/80 hover:bg-rose-600 text-white flex items-center justify-center text-[10px] font-bold opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                    title="Delete this word"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        </aside>
+
+        {/* Center Canvas Viewport */}
+        <section className="flex flex-col items-center justify-start gap-3 min-w-0">
+          {objectUrl && natural && !rasterBusy && (
+            <div className="pms-glass-panel rounded-2xl p-2.5 flex flex-wrap items-center justify-center gap-2 w-full shrink-0">
+              <button
+                type="button"
+                onClick={() => setToolMode('select')}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-colors cursor-pointer ${
+                  toolMode === 'select'
+                    ? 'bg-sky-600 text-white shadow-xs'
+                    : 'bg-white/75 dark:bg-slate-800 text-gray-700 dark:text-slate-300 border border-[var(--pms-border)]'
+                }`}
+              >
+                <MousePointer2 className="w-3.5 h-3.5" />
+                Select
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setToolMode('draw');
+                  setSelectedId(null);
+                }}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-colors cursor-pointer ${
+                  toolMode === 'draw'
+                    ? 'bg-amber-600 text-white shadow-xs'
+                    : 'bg-white/75 dark:bg-slate-800 text-gray-700 dark:text-slate-300 border border-[var(--pms-border)]'
+                }`}
+              >
+                <SquareDashed className="w-3.5 h-3.5" />
+                Add text region
+              </button>
+              {toolMode === 'draw' && (
+                <span className="text-xs text-amber-700 dark:text-amber-300 font-medium">
+                  Drag on image to draw a box, then edit on the right.
+                </span>
+              )}
+              <button
+                type="button"
+                onClick={undoLast}
+                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold bg-white/75 dark:bg-slate-800 text-gray-700 dark:text-slate-200 border border-[var(--pms-border)] hover:bg-gray-100 dark:hover:bg-slate-700 cursor-pointer"
+                title="Undo last text / layout change"
+              >
+                <Undo2 className="w-3.5 h-3.5" />
+                Undo
+              </button>
+              <button
+                type="button"
+                onClick={() => void rotateImage('cw')}
+                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold bg-white/75 dark:bg-slate-800 text-gray-700 dark:text-slate-200 border border-[var(--pms-border)] hover:bg-gray-100 dark:hover:bg-slate-700 cursor-pointer"
+                title="Rotate 90° clockwise"
+              >
+                <RotateCw className="w-3.5 h-3.5" />
+                90°
+              </button>
+              <button
+                type="button"
+                onClick={() => void rotateImage('ccw')}
+                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold bg-white/75 dark:bg-slate-800 text-gray-700 dark:text-slate-200 border border-[var(--pms-border)] hover:bg-gray-100 dark:hover:bg-slate-700 cursor-pointer"
+                title="Rotate 90° counter-clockwise"
+              >
+                <RotateCw className="w-3.5 h-3.5 scale-x-[-1]" />
+                90°↺
+              </button>
+              <label className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-gray-600 dark:text-slate-400">
+                <ZoomIn className="w-3.5 h-3.5" />
+                <input
+                  type="range"
+                  min={50}
+                  max={200}
+                  value={zoomPct}
+                  onChange={(e) => setZoomPct(Number(e.target.value))}
+                  className="w-20 accent-sky-600 cursor-pointer"
+                />
+                <span className="tabular-nums w-8">{zoomPct}%</span>
+              </label>
+              <button
+                type="button"
+                onClick={() => setCompareSplit((v) => !v)}
+                className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold border transition-colors cursor-pointer ${
+                  compareSplit
+                    ? 'bg-violet-600 text-white border-violet-500'
+                    : 'bg-white/75 dark:bg-slate-800 text-gray-700 dark:text-slate-200 border-[var(--pms-border)]'
+                }`}
+              >
+                <Columns2 className="w-3.5 h-3.5" />
+                Compare
+              </button>
+            </div>
+          )}
+
+          {rasterBusy ? (
+            <div className="relative pms-glass-panel flex-1 min-h-[300px] w-full flex flex-col items-center justify-center gap-3 rounded-3xl overflow-hidden">
+              <PearlScanOverlay active={true} label="Rasterizing preview…" />
+              <Loader2 className="w-10 h-10 text-sky-500 animate-spin" />
+              <p className="text-gray-700 dark:text-slate-300 text-sm font-semibold">Preparing preview…</p>
+              <p className="text-gray-500 dark:text-slate-400 text-xs">PDFs are converted to an image (page 1).</p>
+            </div>
+          ) : objectUrl && natural ? (
+            <div className="relative pms-glass-panel rounded-3xl p-3 sm:p-4 w-full overflow-hidden">
+              <PearlScanOverlay active={busyAny} label={busyLabel} />
+              <div className="w-full flex flex-col items-center overflow-auto max-h-[min(60vh,640px)] rounded-2xl border border-[var(--pms-border)] pms-checkerboard bg-white dark:bg-slate-950 p-3">
                 <div
                   ref={previewBoxRef}
-                  className={`relative rounded-lg border border-slate-700 bg-slate-950 overflow-hidden shadow-xl shrink-0 ${toolMode === 'draw' ? 'cursor-crosshair' : ''
-                    }`}
+                  className={`relative rounded-lg border border-gray-300 dark:border-slate-700 bg-white overflow-hidden shadow-md shrink-0 ${
+                    toolMode === 'draw' ? 'cursor-crosshair' : ''
+                  }`}
                   style={{ width: viewW, height: viewH }}
                   onMouseDown={(e) => {
                     if (toolMode !== 'draw' || !previewBoxRef.current) return;
@@ -1069,10 +1122,11 @@ export default function ImageTextEditor() {
                           if (toolMode === 'draw') return;
                           setSelectedId(w.id);
                         }}
-                        className={`absolute z-20 box-border transition-colors ${selectedId === w.id
+                        className={`absolute z-20 box-border transition-colors ${
+                          selectedId === w.id
                             ? 'bg-sky-500/35 border-2 border-sky-400'
                             : 'bg-sky-400/10 border border-sky-500/40 hover:bg-sky-400/25'
-                          } ${toolMode === 'draw' ? 'pointer-events-none opacity-40' : ''}`}
+                        } ${toolMode === 'draw' ? 'pointer-events-none opacity-40' : ''}`}
                         style={{
                           left: b.x0 * viewScale,
                           top: b.y0 * viewScale,
@@ -1128,12 +1182,15 @@ export default function ImageTextEditor() {
                     />
                   )}
                 </div>
+
                 {compareSplit && (
-                  <div className="mt-4 flex flex-col sm:flex-row gap-4 justify-center items-start w-full max-w-[920px] mx-auto">
+                  <div className="mt-4 flex flex-col sm:flex-row gap-4 justify-center items-start w-full mx-auto">
                     <div className="text-center shrink-0">
-                      <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500 mb-1">Original</p>
+                      <p className="text-[10px] font-bold uppercase tracking-wide text-gray-500 dark:text-slate-400 mb-1">
+                        Original
+                      </p>
                       <div
-                        className="relative rounded-lg border border-slate-700 bg-slate-950 overflow-hidden mx-auto"
+                        className="relative rounded-lg border border-[var(--pms-border)] bg-white overflow-hidden mx-auto"
                         style={{ width: viewW, height: viewH }}
                       >
                         <img
@@ -1145,9 +1202,11 @@ export default function ImageTextEditor() {
                       </div>
                     </div>
                     <div className="text-center shrink-0">
-                      <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500 mb-1">Regions</p>
+                      <p className="text-[10px] font-bold uppercase tracking-wide text-gray-500 dark:text-slate-400 mb-1">
+                        Regions
+                      </p>
                       <div
-                        className="relative rounded-lg border border-slate-700 bg-slate-950 overflow-hidden mx-auto"
+                        className="relative rounded-lg border border-[var(--pms-border)] bg-white overflow-hidden mx-auto"
                         style={{ width: viewW, height: viewH }}
                       >
                         <img
@@ -1176,186 +1235,195 @@ export default function ImageTextEditor() {
                   </div>
                 )}
               </div>
-            ) : (
-              <div className="flex-1 min-h-[280px] w-full flex flex-col gap-4 border border-dashed border-slate-600 rounded-2xl bg-slate-800/30 p-4">
-                <p className="text-center text-slate-400 text-sm">
-                  No preview yet — choose a file with the button below or from the left panel.
+            </div>
+          ) : (
+            <div className="pms-glass-panel flex-1 min-h-[300px] w-full flex flex-col gap-4 rounded-3xl p-6">
+              <p className="text-center text-gray-500 dark:text-slate-400 text-sm font-medium">
+                No preview yet — choose an image or PDF below or from the left panel.
+              </p>
+              <FileDropzone
+                onDrop={handleDrop}
+                multiple={false}
+                maxFiles={1}
+                accept={IMAGE_AND_PDF_ACCEPT}
+                title="Select image or PDF"
+                subtitle="Drag & drop or click to browse"
+                buttonLabel="Browse files"
+              />
+              {fileError && (
+                <p className="text-sm text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 rounded-xl p-3 text-center">
+                  {fileError}
                 </p>
-                <FileDropzone
-                  onDrop={handleDrop}
-                  multiple={false}
-                  maxFiles={1}
-                  accept={IMAGE_AND_PDF_ACCEPT}
-                  variant="dark"
-                  title="Select image or PDF"
-                  subtitle="Opens file picker — or drag a file here"
-                  buttonLabel="Browse files"
-                />
-                {fileError && (
-                  <p className="text-sm text-rose-300 bg-rose-950/40 border border-rose-800 rounded-lg p-3 text-center">
-                    {fileError}
-                  </p>
-                )}
-              </div>
-            )}
-          </section>
-
-          <aside className="xl:col-span-3 rounded-2xl border border-slate-700 bg-slate-800/80 p-4 space-y-4 xl:sticky xl:top-20 xl:z-30 xl:max-h-[calc(100dvh-5.5rem)] xl:overflow-y-auto">
-            <h2 className="text-sm font-bold text-slate-200">Text style</h2>
-            {!selected ? (
-              <p className="text-sm text-slate-500">Select a word on the image or from the list.</p>
-            ) : (
-              <>
-                <div>
-                  <label className="text-xs text-slate-500">Replacement text</label>
-                  <textarea
-                    className="mt-1 w-full rounded-lg bg-slate-900 border border-slate-600 px-3 py-2 text-sm min-h-[72px]"
-                    value={selected.text}
-                    onChange={(e) => updateWordText(selected.id, e.target.value)}
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-slate-500">Font size (px)</label>
-                  <input
-                    type="number"
-                    min={6}
-                    max={200}
-                    className="mt-1 w-full rounded-lg bg-slate-900 border border-slate-600 px-3 py-2 text-sm"
-                    value={selected.fontSize}
-                    onChange={(e) =>
-                      updateWord(selected.id, { fontSize: Math.max(6, parseInt(e.target.value, 10) || 12) })
-                    }
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-slate-500">Font</label>
-                  <select
-                    className="mt-1 w-full rounded-lg bg-slate-900 border border-slate-600 px-3 py-2 text-sm"
-                    value={selected.fontFamily || 'system-ui, sans-serif'}
-                    onChange={(e) => updateWord(selected.id, { fontFamily: e.target.value })}
-                  >
-                    <option value="system-ui, sans-serif">Sans (system)</option>
-                    <option value="Arial, Helvetica, sans-serif">Arial / Helvetica</option>
-                    <option value="Georgia, 'Times New Roman', serif">Georgia / Times</option>
-                    <option value="ui-monospace, SFMono-Regular, monospace">Monospace</option>
-                    <option value="'Courier New', Courier, monospace">Courier</option>
-                  </select>
-                </div>
-                <div className="flex gap-4">
-                  <label className="inline-flex items-center gap-2 text-sm cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={selected.bold}
-                      onChange={(e) => updateWord(selected.id, { bold: e.target.checked })}
-                    />
-                    Bold
-                  </label>
-                  <label className="inline-flex items-center gap-2 text-sm cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={selected.italic}
-                      onChange={(e) => updateWord(selected.id, { italic: e.target.checked })}
-                    />
-                    Italic
-                  </label>
-                </div>
-                <div>
-                  <label className="text-xs text-slate-500">Color</label>
-                  <input
-                    type="color"
-                    className="mt-1 w-full h-10 rounded-lg cursor-pointer border border-slate-600 bg-slate-900"
-                    value={selected.color}
-                    onChange={(e) => updateWord(selected.id, { color: e.target.value })}
-                  />
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-xs text-slate-500">Line height</label>
-                    <input
-                      type="number"
-                      step={0.05}
-                      min={0.8}
-                      max={3}
-                      className="mt-1 w-full rounded-lg bg-slate-900 border border-slate-600 px-3 py-2 text-sm"
-                      value={selected.lineHeight ?? 1.25}
-                      onChange={(e) =>
-                        updateWord(selected.id, {
-                          lineHeight: Math.min(3, Math.max(0.8, parseFloat(e.target.value) || 1.25)),
-                        })
-                      }
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs text-slate-500">Letter spacing (px)</label>
-                    <input
-                      type="number"
-                      step={0.5}
-                      min={-2}
-                      max={12}
-                      className="mt-1 w-full rounded-lg bg-slate-900 border border-slate-600 px-3 py-2 text-sm"
-                      value={selected.letterSpacing ?? 0}
-                      onChange={(e) =>
-                        updateWord(selected.id, {
-                          letterSpacing: Math.min(12, Math.max(-2, parseFloat(e.target.value) || 0)),
-                        })
-                      }
-                    />
-                  </div>
-                </div>
-                <div>
-                  <label className="text-xs text-slate-500">Text align</label>
-                  <select
-                    className="mt-1 w-full rounded-lg bg-slate-900 border border-slate-600 px-3 py-2 text-sm"
-                    value={selected.textAlign || 'left'}
-                    onChange={(e) =>
-                      updateWord(selected.id, {
-                        textAlign: e.target.value as 'left' | 'center' | 'right',
-                      })
-                    }
-                  >
-                    <option value="left">Left</option>
-                    <option value="center">Center</option>
-                    <option value="right">Right</option>
-                  </select>
-                </div>
-                <p className="text-xs text-slate-500">
-                  Original OCR: <span className="text-slate-400">{selected.origText}</span>
-                </p>
-              </>
-            )}
-
-            <div className="pt-4 border-t border-slate-700 space-y-2">
-              <button
-                type="button"
-                disabled={exportBusy || !objectUrl || words.length === 0}
-                onClick={() => void exportRaster('image/png')}
-                className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 font-bold disabled:opacity-40 flex items-center justify-center gap-2"
-              >
-                {exportBusy ? <Loader2 className="w-5 h-5 animate-spin" /> : <Download className="w-5 h-5" />}
-                Export PNG
-              </button>
-              <button
-                type="button"
-                disabled={exportBusy || !objectUrl || words.length === 0}
-                onClick={() => void exportRaster('image/jpeg')}
-                className="w-full py-3 rounded-xl bg-slate-700 hover:bg-slate-600 font-bold disabled:opacity-40 flex items-center justify-center gap-2 border border-slate-600"
-              >
-                Export JPG
-              </button>
-              {exportUrl && (
-                <a
-                  href={exportUrl}
-                  download={`edited_${file?.name?.replace(/\.[^.]+$/, '') || 'image'}.${exportExt}`}
-                  className="w-full py-2.5 px-4 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-semibold text-xs inline-flex items-center justify-center gap-2 transition-colors shadow-sm"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  Download Last Export
-                </a>
               )}
             </div>
-          </aside>
-        </div>
-      </div>
-    </div>
+          )}
+        </section>
+
+        {/* Right Sidebar: Text Style Inspector */}
+        <aside className="pms-glass-panel rounded-3xl p-4 space-y-4 xl:sticky xl:top-20 xl:z-20 xl:max-h-[calc(100dvh-5.5rem)] xl:overflow-y-auto">
+          <h2 className="text-sm font-extrabold text-gray-900 dark:text-white">Text style</h2>
+          {!selected ? (
+            <p className="text-xs sm:text-sm text-gray-500 dark:text-slate-400">
+              Run OCR and select a word on the image or from the detected list.
+            </p>
+          ) : (
+            <>
+              <div>
+                <label className="text-xs font-bold text-gray-600 dark:text-slate-400">Replacement text</label>
+                <textarea
+                  className="mt-1 w-full rounded-xl bg-white/85 dark:bg-slate-900/75 border border-[var(--pms-border)] px-3 py-2 text-sm text-gray-900 dark:text-slate-100 min-h-[72px]"
+                  value={selected.text}
+                  onChange={(e) => updateWordText(selected.id, e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-gray-600 dark:text-slate-400">Font size (px)</label>
+                <input
+                  type="number"
+                  min={6}
+                  max={200}
+                  className="mt-1 w-full rounded-xl bg-white/85 dark:bg-slate-900/75 border border-[var(--pms-border)] px-3 py-2 text-sm text-gray-900 dark:text-slate-100"
+                  value={selected.fontSize}
+                  onChange={(e) =>
+                    updateWord(selected.id, { fontSize: Math.max(6, parseInt(e.target.value, 10) || 12) })
+                  }
+                />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-gray-600 dark:text-slate-400">Font</label>
+                <select
+                  className="mt-1 w-full rounded-xl bg-white/85 dark:bg-slate-900/75 border border-[var(--pms-border)] px-3 py-2 text-sm text-gray-900 dark:text-slate-100"
+                  value={selected.fontFamily || 'system-ui, sans-serif'}
+                  onChange={(e) => updateWord(selected.id, { fontFamily: e.target.value })}
+                >
+                  <option value="system-ui, sans-serif">Sans (system)</option>
+                  <option value="Arial, Helvetica, sans-serif">Arial / Helvetica</option>
+                  <option value="Georgia, 'Times New Roman', serif">Georgia / Times</option>
+                  <option value="ui-monospace, SFMono-Regular, monospace">Monospace</option>
+                  <option value="'Courier New', Courier, monospace">Courier</option>
+                </select>
+              </div>
+              <div className="flex gap-4 text-gray-800 dark:text-slate-200">
+                <label className="inline-flex items-center gap-2 text-sm font-medium cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="accent-sky-600"
+                    checked={selected.bold}
+                    onChange={(e) => updateWord(selected.id, { bold: e.target.checked })}
+                  />
+                  Bold
+                </label>
+                <label className="inline-flex items-center gap-2 text-sm font-medium cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="accent-sky-600"
+                    checked={selected.italic}
+                    onChange={(e) => updateWord(selected.id, { italic: e.target.checked })}
+                  />
+                  Italic
+                </label>
+              </div>
+              <div>
+                <label className="text-xs font-bold text-gray-600 dark:text-slate-400">Color</label>
+                <input
+                  type="color"
+                  className="mt-1 w-full h-10 rounded-xl cursor-pointer border border-[var(--pms-border)] bg-white dark:bg-slate-900"
+                  value={selected.color}
+                  onChange={(e) => updateWord(selected.id, { color: e.target.value })}
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-bold text-gray-600 dark:text-slate-400">Line height</label>
+                  <input
+                    type="number"
+                    step={0.05}
+                    min={0.8}
+                    max={3}
+                    className="mt-1 w-full rounded-xl bg-white/85 dark:bg-slate-900/75 border border-[var(--pms-border)] px-3 py-2 text-sm text-gray-900 dark:text-slate-100"
+                    value={selected.lineHeight ?? 1.25}
+                    onChange={(e) =>
+                      updateWord(selected.id, {
+                        lineHeight: Math.min(3, Math.max(0.8, parseFloat(e.target.value) || 1.25)),
+                      })
+                    }
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-gray-600 dark:text-slate-400">Letter spacing</label>
+                  <input
+                    type="number"
+                    step={0.5}
+                    min={-2}
+                    max={12}
+                    className="mt-1 w-full rounded-xl bg-white/85 dark:bg-slate-900/75 border border-[var(--pms-border)] px-3 py-2 text-sm text-gray-900 dark:text-slate-100"
+                    value={selected.letterSpacing ?? 0}
+                    onChange={(e) =>
+                      updateWord(selected.id, {
+                        letterSpacing: Math.min(12, Math.max(-2, parseFloat(e.target.value) || 0)),
+                      })
+                    }
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="text-xs font-bold text-gray-600 dark:text-slate-400">Text align</label>
+                <select
+                  className="mt-1 w-full rounded-xl bg-white/85 dark:bg-slate-900/75 border border-[var(--pms-border)] px-3 py-2 text-sm text-gray-900 dark:text-slate-100"
+                  value={selected.textAlign || 'left'}
+                  onChange={(e) =>
+                    updateWord(selected.id, {
+                      textAlign: e.target.value as 'left' | 'center' | 'right',
+                    })
+                  }
+                >
+                  <option value="left">Left</option>
+                  <option value="center">Center</option>
+                  <option value="right">Right</option>
+                </select>
+              </div>
+              <p className="text-xs text-gray-500 dark:text-slate-400">
+                Original OCR: <span className="text-gray-700 dark:text-slate-300 font-medium">{selected.origText}</span>
+              </p>
+            </>
+          )}
+
+          <div className="pt-4 border-t border-[var(--pms-border)] space-y-2.5">
+            <motion.button
+              type="button"
+              whileHover={prefersReduced || exportBusy || !objectUrl || words.length === 0 ? undefined : { scale: 1.01 }}
+              whileTap={prefersReduced || exportBusy || !objectUrl || words.length === 0 ? undefined : { scale: 0.985 }}
+              disabled={exportBusy || !objectUrl || words.length === 0}
+              onClick={() => void exportRaster('image/png')}
+              className="w-full py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold disabled:opacity-40 flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/20 transition-colors cursor-pointer"
+            >
+              {exportBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+              Export PNG
+            </motion.button>
+            <button
+              type="button"
+              disabled={exportBusy || !objectUrl || words.length === 0}
+              onClick={() => void exportRaster('image/jpeg')}
+              className="w-full py-2.5 rounded-2xl bg-white/80 dark:bg-slate-800 hover:bg-gray-100 dark:hover:bg-slate-700 text-gray-800 dark:text-slate-200 font-bold disabled:opacity-40 flex items-center justify-center gap-2 border border-[var(--pms-border)] transition-colors cursor-pointer"
+            >
+              Export JPG
+            </button>
+            {exportUrl && (
+              <motion.a
+                initial={prefersReduced ? false : { opacity: 0, y: 6, scale: 0.96 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                transition={{ type: 'spring', stiffness: 360, damping: 20 }}
+                href={exportUrl}
+                download={`edited_${file?.name?.replace(/\.[^.]+$/, '') || 'image'}.${exportExt}`}
+                className="w-full py-2.5 px-4 rounded-2xl bg-[var(--pms-soft-blue)] text-[var(--pms-blue)] border border-sky-200 dark:border-sky-800 font-bold text-xs inline-flex items-center justify-center gap-2 transition-opacity hover:opacity-90"
+              >
+                <Download className="w-3.5 h-3.5" />
+                Download Last Export
+              </motion.a>
+            )}
+          </div>
+        </aside>
+      </motion.div>
+    </ToolWorkspaceShell>
   );
 }

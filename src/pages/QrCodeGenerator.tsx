@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import {
   QrCode,
   Barcode,
@@ -6,8 +7,6 @@ import {
   Copy,
   Printer,
   CheckCircle2,
-  Sparkles,
-  RefreshCw,
   Globe,
   FileText,
   CreditCard,
@@ -18,13 +17,10 @@ import {
   User,
   AlertCircle,
   Eye,
-  Sliders,
   Palette,
   Check,
   Grid,
   FileCode,
-  ExternalLink,
-  ShieldCheck,
 } from 'lucide-react';
 import QRCode from 'qrcode';
 import JsBarcode from 'jsbarcode';
@@ -33,6 +29,7 @@ import { usePageSEO } from '../lib/usePageSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
 import { escapeHtml } from '../lib/utils';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { AnimatedNumber, PearlScanOverlay } from '../components/pearl/PearlMotion';
 
 // Color theme presets
 const COLOR_PRESETS = [
@@ -112,9 +109,12 @@ export default function QrCodeGenerator() {
   const [qrMargin, setQrMargin] = useState<number>(2);
   const [qrEcc, setQrEcc] = useState<'L' | 'M' | 'Q' | 'H'>('M');
 
+  const prefersReduced = useReducedMotion();
+
   // ── UI States ────────────────────────────────────────────────────────────
   const [activeError, setActiveError] = useState<string | null>(null);
   const [copiedToast, setCopiedToast] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
   const [showPrintModal, setShowPrintModal] = useState(false);
   const [printCols, setPrintCols] = useState<number>(3);
   const [printRows, setPrintRows] = useState<number>(8);
@@ -293,6 +293,7 @@ export default function QrCodeGenerator() {
   const handleDownloadSvg = useCallback(async () => {
     if (!finalPayload) return;
 
+    setIsExporting(true);
     try {
       let svgString = '';
 
@@ -331,6 +332,8 @@ export default function QrCodeGenerator() {
     } catch (e) {
       console.error(e);
       alert('Could not export SVG. Please try PNG download.');
+    } finally {
+      setIsExporting(false);
     }
   }, [
     mode,
@@ -519,46 +522,58 @@ export default function QrCodeGenerator() {
       <div className="max-w-6xl mx-auto space-y-8">
 
         {/* ── Mode Switcher ───────────────────────────────────────────────── */}
-        <div className="flex items-center justify-center">
-          <div className="inline-flex p-1.5 rounded-2xl bg-slate-200/80 dark:bg-slate-800 border border-slate-300/70 dark:border-slate-700 shadow-sm">
-            <button
+        <motion.div
+          initial={prefersReduced ? false : { opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.25 }}
+          className="flex items-center justify-center"
+        >
+          <div className="inline-flex p-1.5 rounded-2xl pms-glass-panel border border-[var(--pms-border)] shadow-sm">
+            <motion.button
+              whileTap={prefersReduced ? undefined : { scale: 0.97 }}
               type="button"
               onClick={() => { setMode('qr'); setActiveError(null); }}
               className={`flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-black transition-all ${
                 mode === 'qr'
-                  ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-sm'
-                  : 'text-slate-600 dark:text-slate-300 hover:text-slate-950 dark:hover:text-white'
+                  ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-sm border border-[var(--pms-border)]'
+                  : 'text-[var(--pms-muted)] hover:text-[var(--pms-ink)]'
               }`}
             >
               <QrCode className="w-4 h-4" />
               <span>QR Code (2D Matrix)</span>
-            </button>
+            </motion.button>
 
-            <button
+            <motion.button
+              whileTap={prefersReduced ? undefined : { scale: 0.97 }}
               type="button"
               onClick={() => { setMode('barcode'); setActiveError(null); }}
               className={`flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-black transition-all ${
                 mode === 'barcode'
-                  ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-sm'
-                  : 'text-slate-600 dark:text-slate-300 hover:text-slate-950 dark:hover:text-white'
+                  ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-sm border border-[var(--pms-border)]'
+                  : 'text-[var(--pms-muted)] hover:text-[var(--pms-ink)]'
               }`}
             >
               <Barcode className="w-4 h-4" />
               <span>Barcode (1D Linear)</span>
-            </button>
+            </motion.button>
           </div>
-        </div>
+        </motion.div>
 
         {/* ── Main Two-Column Studio ──────────────────────────────────────── */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
 
           {/* ── LEFT: Controls & Form Inputs ──────────────────────────────── */}
-          <div className="lg:col-span-7 bg-white dark:bg-slate-900 rounded-3xl border border-slate-200/90 dark:border-slate-800 p-6 sm:p-7 shadow-sm space-y-6">
+          <motion.div
+            initial={prefersReduced ? false : { opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.3 }}
+            className="lg:col-span-7 pms-glass-panel rounded-3xl border border-[var(--pms-border)] p-6 sm:p-7 shadow-sm space-y-6"
+          >
 
             {/* Mode A: QR Code Type Tabs */}
             {mode === 'qr' && (
               <div className="space-y-4">
-                <label className="block text-xs font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                <label className="block text-xs font-black uppercase tracking-wider text-[var(--pms-muted)]">
                   Select QR Content Type
                 </label>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
@@ -575,8 +590,9 @@ export default function QrCodeGenerator() {
                     const Icon = item.icon;
                     const isActive = qrType === item.id;
                     return (
-                      <button
+                      <motion.button
                         key={item.id}
+                        whileTap={prefersReduced ? undefined : { scale: 0.97 }}
                         type="button"
                         onClick={() => {
                           setQrType(item.id as any);
@@ -584,13 +600,13 @@ export default function QrCodeGenerator() {
                         }}
                         className={`flex items-center gap-2 p-2.5 rounded-xl border text-xs font-bold transition-all ${
                           isActive
-                            ? 'bg-indigo-50 dark:bg-indigo-950/60 border-indigo-500 text-indigo-700 dark:text-indigo-300 ring-2 ring-indigo-500/10'
-                            : 'bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:border-slate-400'
+                            ? 'bg-indigo-50/90 dark:bg-indigo-950/60 border-indigo-500 text-indigo-700 dark:text-indigo-300 ring-2 ring-indigo-500/15'
+                            : 'bg-white/75 dark:bg-slate-800/60 border-[var(--pms-border)] text-[var(--pms-ink)] hover:border-indigo-400/60'
                         }`}
                       >
-                        <Icon className={`w-3.5 h-3.5 shrink-0 ${isActive ? 'text-indigo-600' : 'text-slate-400'}`} />
+                        <Icon className={`w-3.5 h-3.5 shrink-0 ${isActive ? 'text-indigo-600 dark:text-indigo-400' : 'text-[var(--pms-muted)]'}`} />
                         <span className="truncate">{item.label}</span>
-                      </button>
+                      </motion.button>
                     );
                   })}
                 </div>
@@ -599,23 +615,23 @@ export default function QrCodeGenerator() {
                 <div className="pt-2">
                   {qrType === 'url' && (
                     <div className="space-y-1.5">
-                      <label className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center justify-between">
+                      <label className="text-xs font-bold text-[var(--pms-ink)] flex items-center justify-between">
                         <span>Target Website or Document Link</span>
-                        <span className="text-[10px] text-slate-400 font-normal">Auto-formats https://</span>
+                        <span className="text-[10px] text-[var(--pms-muted)] font-normal">Auto-formats https://</span>
                       </label>
                       <input
                         type="url"
                         value={urlInput}
                         onChange={(e) => setUrlInput(e.target.value)}
                         placeholder="https://yourwebsite.com or Google Drive link"
-                        className="w-full px-4 py-3 rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-sm font-semibold text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500 focus:bg-white dark:focus:bg-slate-900 transition"
+                        className="w-full px-4 py-3 rounded-2xl border border-[var(--pms-border)] bg-white/80 dark:bg-slate-800/80 text-sm font-semibold text-[var(--pms-ink)] focus:outline-none focus:border-indigo-500 focus:bg-white dark:focus:bg-slate-900 transition"
                       />
                     </div>
                   )}
 
                   {qrType === 'text' && (
                     <div className="space-y-1.5">
-                      <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                      <label className="text-xs font-bold text-[var(--pms-ink)]">
                         Plain Text Message
                       </label>
                       <textarea
@@ -623,20 +639,20 @@ export default function QrCodeGenerator() {
                         value={plainText}
                         onChange={(e) => setPlainText(e.target.value)}
                         placeholder="Type any message, serial number, or note..."
-                        className="w-full px-4 py-3 rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-sm font-semibold text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500 focus:bg-white dark:focus:bg-slate-900 transition"
+                        className="w-full px-4 py-3 rounded-2xl border border-[var(--pms-border)] bg-white/80 dark:bg-slate-800/80 text-sm font-semibold text-[var(--pms-ink)] focus:outline-none focus:border-indigo-500 focus:bg-white dark:focus:bg-slate-900 transition"
                       />
                     </div>
                   )}
 
                   {qrType === 'upi' && (
-                    <div className="space-y-3 p-4 rounded-2xl bg-indigo-50/50 dark:bg-indigo-950/20 border border-indigo-100 dark:border-indigo-900/60">
+                    <div className="space-y-3 p-4 rounded-2xl bg-indigo-50/50 dark:bg-indigo-950/25 border border-indigo-200/70 dark:border-indigo-900/60">
                       <div className="flex items-center gap-2 text-xs font-bold text-indigo-700 dark:text-indigo-300">
-                        <CreditCard className="w-4 h-4 text-indigo-600" />
+                        <CreditCard className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
                         <span>Instant UPI Payment QR (Paytm, GPay, PhonePe, BHIM)</span>
                       </div>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div>
-                          <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                          <label className="block text-[11px] font-bold text-[var(--pms-muted)] mb-1">
                             UPI ID / VPA *
                           </label>
                           <input
@@ -644,11 +660,11 @@ export default function QrCodeGenerator() {
                             value={upiVpa}
                             onChange={(e) => setUpiVpa(e.target.value)}
                             placeholder="e.g. shopname@upi or 9876543210@paytm"
-                            className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-mono font-bold text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500"
+                            className="w-full px-3 py-2 rounded-xl border border-[var(--pms-border)] bg-white/90 dark:bg-slate-900/80 text-xs font-mono font-bold text-[var(--pms-ink)] focus:outline-none focus:border-indigo-500"
                           />
                         </div>
                         <div>
-                          <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                          <label className="block text-[11px] font-bold text-[var(--pms-muted)] mb-1">
                             Payee / Shop Name
                           </label>
                           <input
@@ -656,11 +672,11 @@ export default function QrCodeGenerator() {
                             value={upiName}
                             onChange={(e) => setUpiName(e.target.value)}
                             placeholder="e.g. Sharma Cyber Cafe"
-                            className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500"
+                            className="w-full px-3 py-2 rounded-xl border border-[var(--pms-border)] bg-white/90 dark:bg-slate-900/80 text-xs font-bold text-[var(--pms-ink)] focus:outline-none focus:border-indigo-500"
                           />
                         </div>
                         <div>
-                          <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                          <label className="block text-[11px] font-bold text-[var(--pms-muted)] mb-1">
                             Amount (₹ INR - Optional)
                           </label>
                           <input
@@ -669,11 +685,11 @@ export default function QrCodeGenerator() {
                             value={upiAmount}
                             onChange={(e) => setUpiAmount(e.target.value)}
                             placeholder="Leave empty for customer-entered amount"
-                            className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-mono font-bold text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500"
+                            className="w-full px-3 py-2 rounded-xl border border-[var(--pms-border)] bg-white/90 dark:bg-slate-900/80 text-xs font-mono font-bold text-[var(--pms-ink)] focus:outline-none focus:border-indigo-500"
                           />
                         </div>
                         <div>
-                          <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                          <label className="block text-[11px] font-bold text-[var(--pms-muted)] mb-1">
                             Remark / Note
                           </label>
                           <input
@@ -681,7 +697,7 @@ export default function QrCodeGenerator() {
                             value={upiNote}
                             onChange={(e) => setUpiNote(e.target.value)}
                             placeholder="e.g. Printing Charges"
-                            className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500"
+                            className="w-full px-3 py-2 rounded-xl border border-[var(--pms-border)] bg-white/90 dark:bg-slate-900/80 text-xs font-bold text-[var(--pms-ink)] focus:outline-none focus:border-indigo-500"
                           />
                         </div>
                       </div>
@@ -689,14 +705,14 @@ export default function QrCodeGenerator() {
                   )}
 
                   {qrType === 'wifi' && (
-                    <div className="space-y-3 p-4 rounded-2xl bg-indigo-50/50 dark:bg-indigo-950/20 border border-indigo-100 dark:border-indigo-900/60">
+                    <div className="space-y-3 p-4 rounded-2xl bg-indigo-50/50 dark:bg-indigo-950/25 border border-indigo-200/70 dark:border-indigo-900/60">
                       <div className="flex items-center gap-2 text-xs font-bold text-indigo-700 dark:text-indigo-300">
-                        <Wifi className="w-4 h-4 text-indigo-600" />
+                        <Wifi className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
                         <span>Instant Wi-Fi Auto-Connect (Zero typing for customers)</span>
                       </div>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div>
-                          <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                          <label className="block text-[11px] font-bold text-[var(--pms-muted)] mb-1">
                             Network Name (SSID) *
                           </label>
                           <input
@@ -704,11 +720,11 @@ export default function QrCodeGenerator() {
                             value={wifiSsid}
                             onChange={(e) => setWifiSsid(e.target.value)}
                             placeholder="e.g. MyShop_Guest_WiFi"
-                            className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500"
+                            className="w-full px-3 py-2 rounded-xl border border-[var(--pms-border)] bg-white/90 dark:bg-slate-900/80 text-xs font-bold text-[var(--pms-ink)] focus:outline-none focus:border-indigo-500"
                           />
                         </div>
                         <div>
-                          <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                          <label className="block text-[11px] font-bold text-[var(--pms-muted)] mb-1">
                             Password
                           </label>
                           <input
@@ -716,17 +732,17 @@ export default function QrCodeGenerator() {
                             value={wifiPassword}
                             onChange={(e) => setWifiPassword(e.target.value)}
                             placeholder="Wi-Fi Password"
-                            className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-mono font-bold text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500"
+                            className="w-full px-3 py-2 rounded-xl border border-[var(--pms-border)] bg-white/90 dark:bg-slate-900/80 text-xs font-mono font-bold text-[var(--pms-ink)] focus:outline-none focus:border-indigo-500"
                           />
                         </div>
                         <div>
-                          <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                          <label className="block text-[11px] font-bold text-[var(--pms-muted)] mb-1">
                             Security Type
                           </label>
                           <select
                             value={wifiType}
                             onChange={(e) => setWifiType(e.target.value as any)}
-                            className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500"
+                            className="w-full px-3 py-2 rounded-xl border border-[var(--pms-border)] bg-white/90 dark:bg-slate-900/80 text-xs font-bold text-[var(--pms-ink)] focus:outline-none focus:border-indigo-500"
                           >
                             <option value="WPA">WPA / WPA2 / WPA3 (Standard)</option>
                             <option value="WEP">WEP (Older)</option>
@@ -734,7 +750,7 @@ export default function QrCodeGenerator() {
                           </select>
                         </div>
                         <div className="flex items-center pt-5">
-                          <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-slate-700 dark:text-slate-300">
+                          <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-[var(--pms-ink)]">
                             <input
                               type="checkbox"
                               checked={wifiHidden}
@@ -749,14 +765,14 @@ export default function QrCodeGenerator() {
                   )}
 
                   {qrType === 'whatsapp' && (
-                    <div className="space-y-3 p-4 rounded-2xl bg-indigo-50/50 dark:bg-indigo-950/20 border border-indigo-100 dark:border-indigo-900/60">
+                    <div className="space-y-3 p-4 rounded-2xl bg-indigo-50/50 dark:bg-indigo-950/25 border border-indigo-200/70 dark:border-indigo-900/60">
                       <div className="flex items-center gap-2 text-xs font-bold text-indigo-700 dark:text-indigo-300">
-                        <MessageSquare className="w-4 h-4 text-emerald-600" />
+                        <MessageSquare className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
                         <span>Direct WhatsApp Chat (No need to save contact)</span>
                       </div>
                       <div className="space-y-2">
                         <div>
-                          <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                          <label className="block text-[11px] font-bold text-[var(--pms-muted)] mb-1">
                             Phone Number (With Country Code, e.g. 919876543210) *
                           </label>
                           <input
@@ -764,11 +780,11 @@ export default function QrCodeGenerator() {
                             value={waPhone}
                             onChange={(e) => setWaPhone(e.target.value)}
                             placeholder="e.g. 919876543210"
-                            className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-mono font-bold text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500"
+                            className="w-full px-3 py-2 rounded-xl border border-[var(--pms-border)] bg-white/90 dark:bg-slate-900/80 text-xs font-mono font-bold text-[var(--pms-ink)] focus:outline-none focus:border-indigo-500"
                           />
                         </div>
                         <div>
-                          <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                          <label className="block text-[11px] font-bold text-[var(--pms-muted)] mb-1">
                             Pre-filled Message (Optional)
                           </label>
                           <input
@@ -776,7 +792,7 @@ export default function QrCodeGenerator() {
                             value={waMessage}
                             onChange={(e) => setWaMessage(e.target.value)}
                             placeholder="e.g. Hello, I want to send a document for print"
-                            className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-medium text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500"
+                            className="w-full px-3 py-2 rounded-xl border border-[var(--pms-border)] bg-white/90 dark:bg-slate-900/80 text-xs font-medium text-[var(--pms-ink)] focus:outline-none focus:border-indigo-500"
                           />
                         </div>
                       </div>
@@ -785,7 +801,7 @@ export default function QrCodeGenerator() {
 
                   {qrType === 'phone' && (
                     <div className="space-y-1.5">
-                      <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                      <label className="text-xs font-bold text-[var(--pms-ink)]">
                         Phone Number (Direct Dial on Scan)
                       </label>
                       <input
@@ -793,7 +809,7 @@ export default function QrCodeGenerator() {
                         value={phoneNumber}
                         onChange={(e) => setPhoneNumber(e.target.value)}
                         placeholder="e.g. +919876543210"
-                        className="w-full px-4 py-3 rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-sm font-semibold text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500"
+                        className="w-full px-4 py-3 rounded-2xl border border-[var(--pms-border)] bg-white/80 dark:bg-slate-800/80 text-sm font-semibold text-[var(--pms-ink)] focus:outline-none focus:border-indigo-500"
                       />
                     </div>
                   )}
@@ -801,7 +817,7 @@ export default function QrCodeGenerator() {
                   {qrType === 'email' && (
                     <div className="space-y-2">
                       <div>
-                        <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                        <label className="block text-[11px] font-bold text-[var(--pms-muted)] mb-1">
                           Email Recipient *
                         </label>
                         <input
@@ -809,7 +825,7 @@ export default function QrCodeGenerator() {
                           value={emailTo}
                           onChange={(e) => setEmailTo(e.target.value)}
                           placeholder="support@example.com"
-                          className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs font-medium text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500"
+                          className="w-full px-3 py-2 rounded-xl border border-[var(--pms-border)] bg-white/80 dark:bg-slate-800/80 text-xs font-medium text-[var(--pms-ink)] focus:outline-none focus:border-indigo-500"
                         />
                       </div>
                       <div className="grid grid-cols-2 gap-2">
@@ -818,49 +834,49 @@ export default function QrCodeGenerator() {
                           value={emailSubject}
                           onChange={(e) => setEmailSubject(e.target.value)}
                           placeholder="Subject"
-                          className="px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500"
+                          className="px-3 py-2 rounded-xl border border-[var(--pms-border)] bg-white/80 dark:bg-slate-800/80 text-xs text-[var(--pms-ink)] focus:outline-none focus:border-indigo-500"
                         />
                         <input
                           type="text"
                           value={emailBody}
                           onChange={(e) => setEmailBody(e.target.value)}
                           placeholder="Body message"
-                          className="px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500"
+                          className="px-3 py-2 rounded-xl border border-[var(--pms-border)] bg-white/80 dark:bg-slate-800/80 text-xs text-[var(--pms-ink)] focus:outline-none focus:border-indigo-500"
                         />
                       </div>
                     </div>
                   )}
 
                   {qrType === 'vcard' && (
-                    <div className="space-y-2 p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
+                    <div className="space-y-2 p-3.5 rounded-2xl bg-white/60 dark:bg-slate-800/60 border border-[var(--pms-border)]">
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                         <input
                           type="text"
                           value={vcardName}
                           onChange={(e) => setVcardName(e.target.value)}
                           placeholder="Full Name"
-                          className="px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-bold text-slate-900 dark:text-white"
+                          className="px-3 py-2 rounded-xl border border-[var(--pms-border)] bg-white dark:bg-slate-900 text-xs font-bold text-[var(--pms-ink)]"
                         />
                         <input
                           type="text"
                           value={vcardOrg}
                           onChange={(e) => setVcardOrg(e.target.value)}
                           placeholder="Organization"
-                          className="px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-medium text-slate-900 dark:text-white"
+                          className="px-3 py-2 rounded-xl border border-[var(--pms-border)] bg-white dark:bg-slate-900 text-xs font-medium text-[var(--pms-ink)]"
                         />
                         <input
                           type="tel"
                           value={vcardPhone}
                           onChange={(e) => setVcardPhone(e.target.value)}
                           placeholder="Phone Number"
-                          className="px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-mono text-slate-900 dark:text-white"
+                          className="px-3 py-2 rounded-xl border border-[var(--pms-border)] bg-white dark:bg-slate-900 text-xs font-mono text-[var(--pms-ink)]"
                         />
                         <input
                           type="email"
                           value={vcardEmail}
                           onChange={(e) => setVcardEmail(e.target.value)}
                           placeholder="Email"
-                          className="px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs text-slate-900 dark:text-white"
+                          className="px-3 py-2 rounded-xl border border-[var(--pms-border)] bg-white dark:bg-slate-900 text-xs text-[var(--pms-ink)]"
                         />
                       </div>
                     </div>
@@ -874,7 +890,7 @@ export default function QrCodeGenerator() {
               <div className="space-y-4">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    <label className="block text-xs font-bold text-[var(--pms-ink)] mb-1">
                       Barcode Standard Format
                     </label>
                     <select
@@ -890,7 +906,7 @@ export default function QrCodeGenerator() {
                           setBarcodeText('89012345');
                         }
                       }}
-                      className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs font-bold text-slate-900 dark:text-white outline-none focus:border-indigo-500"
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-[var(--pms-border)] bg-white/80 dark:bg-slate-800/80 text-xs font-bold text-[var(--pms-ink)] outline-none focus:border-indigo-500"
                     >
                       <option value="CODE128">CODE 128 (Universal - Letters &amp; Numbers)</option>
                       <option value="EAN13">EAN-13 (Standard Retail Product - 13 Digits)</option>
@@ -904,7 +920,7 @@ export default function QrCodeGenerator() {
                   </div>
 
                   <div>
-                    <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    <label className="block text-xs font-bold text-[var(--pms-ink)] mb-1">
                       Barcode Data / Serial Number
                     </label>
                     <input
@@ -912,13 +928,13 @@ export default function QrCodeGenerator() {
                       value={barcodeText}
                       onChange={(e) => setBarcodeText(e.target.value)}
                       placeholder="e.g. PMS-2026-98432 or 8901234567890"
-                      className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs font-mono font-bold text-slate-900 dark:text-white outline-none focus:border-indigo-500"
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-[var(--pms-border)] bg-white/80 dark:bg-slate-800/80 text-xs font-mono font-bold text-[var(--pms-ink)] outline-none focus:border-indigo-500"
                     />
                   </div>
                 </div>
 
                 {/* Format Helper Hint */}
-                <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-xs text-slate-500 flex items-start gap-2">
+                <div className="p-3 rounded-2xl bg-white/60 dark:bg-slate-800/60 border border-[var(--pms-border)] text-xs text-[var(--pms-muted)] flex items-start gap-2">
                   <AlertCircle className="w-4 h-4 text-indigo-500 shrink-0 mt-0.5" />
                   <div>
                     {barcodeFormat === 'CODE128' && (
@@ -942,7 +958,7 @@ export default function QrCodeGenerator() {
                 {/* Barcode Dimensions */}
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-1">
                   <div>
-                    <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                    <label className="block text-[11px] font-bold text-[var(--pms-muted)] mb-1">
                       Bar Thickness ({barWidth}px)
                     </label>
                     <input
@@ -956,7 +972,7 @@ export default function QrCodeGenerator() {
                   </div>
 
                   <div>
-                    <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                    <label className="block text-[11px] font-bold text-[var(--pms-muted)] mb-1">
                       Bar Height ({barHeight}px)
                     </label>
                     <input
@@ -970,7 +986,7 @@ export default function QrCodeGenerator() {
                   </div>
 
                   <div>
-                    <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                    <label className="block text-[11px] font-bold text-[var(--pms-muted)] mb-1">
                       Text Size ({barcodeFontSize}px)
                     </label>
                     <input
@@ -984,7 +1000,7 @@ export default function QrCodeGenerator() {
                   </div>
 
                   <div className="flex items-center pt-4">
-                    <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-slate-700 dark:text-slate-300">
+                    <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-[var(--pms-ink)]">
                       <input
                         type="checkbox"
                         checked={showBarcodeText}
@@ -999,13 +1015,13 @@ export default function QrCodeGenerator() {
             )}
 
             {/* ── Visual Styling & Color Palettes ──────────────────────────── */}
-            <div className="pt-4 border-t border-slate-100 dark:border-slate-800 space-y-4">
+            <div className="pt-4 border-t border-[var(--pms-border)] space-y-4">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
-                  <Palette className="w-3.5 h-3.5 text-indigo-600" /> Color &amp; Reliability Options
+                <span className="text-xs font-black uppercase tracking-wider text-[var(--pms-muted)] flex items-center gap-1.5">
+                  <Palette className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" /> Color &amp; Reliability Options
                 </span>
                 {mode === 'qr' && (
-                  <span className="text-[11px] font-bold text-slate-400">
+                  <span className="text-[11px] font-bold text-[var(--pms-muted)]">
                     ECC Level: {qrEcc === 'H' ? 'High (30% Recovery)' : qrEcc === 'Q' ? 'Quartile (25%)' : qrEcc === 'M' ? 'Medium (15%)' : 'Low (7%)'}
                   </span>
                 )}
@@ -1014,8 +1030,9 @@ export default function QrCodeGenerator() {
               {/* Color Preset Chips */}
               <div className="flex items-center gap-2 flex-wrap">
                 {COLOR_PRESETS.map((preset) => (
-                  <button
+                  <motion.button
                     key={preset.name}
+                    whileTap={prefersReduced ? undefined : { scale: 0.96 }}
                     type="button"
                     onClick={() => {
                       setFgColor(preset.fg);
@@ -1023,61 +1040,61 @@ export default function QrCodeGenerator() {
                     }}
                     className={`flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-bold border transition ${
                       fgColor === preset.fg && bgColor === preset.bg
-                        ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300'
-                        : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300'
+                        ? 'border-indigo-500 bg-indigo-50/90 dark:bg-indigo-950/70 text-indigo-700 dark:text-indigo-300'
+                        : 'border-[var(--pms-border)] bg-white/80 dark:bg-slate-800/80 text-[var(--pms-ink)]'
                     }`}
                   >
                     <span
-                      className="w-3.5 h-3.5 rounded-full border border-slate-300 shrink-0"
+                      className="w-3.5 h-3.5 rounded-full border border-slate-300 dark:border-slate-600 shrink-0"
                       style={{ background: preset.fg }}
                     />
                     <span>{preset.name}</span>
-                  </button>
+                  </motion.button>
                 ))}
               </div>
 
               {/* Custom Color Pickers & Sliders */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-1">
                 <div>
-                  <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                  <label className="block text-[11px] font-bold text-[var(--pms-muted)] mb-1">
                     Foreground Color
                   </label>
-                  <div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-800 p-1.5 rounded-xl border border-slate-200 dark:border-slate-700">
+                  <div className="flex items-center gap-2 bg-white/80 dark:bg-slate-800/80 p-1.5 rounded-xl border border-[var(--pms-border)]">
                     <input
                       type="color"
                       value={fgColor}
                       onChange={(e) => setFgColor(e.target.value)}
                       className="w-8 h-8 rounded-lg cursor-pointer border-0 bg-transparent"
                     />
-                    <span className="text-xs font-mono font-bold text-slate-700 dark:text-slate-300 uppercase">{fgColor}</span>
+                    <span className="text-xs font-mono font-bold text-[var(--pms-ink)] uppercase">{fgColor}</span>
                   </div>
                 </div>
 
                 <div>
-                  <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                  <label className="block text-[11px] font-bold text-[var(--pms-muted)] mb-1">
                     Background Color
                   </label>
-                  <div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-800 p-1.5 rounded-xl border border-slate-200 dark:border-slate-700">
+                  <div className="flex items-center gap-2 bg-white/80 dark:bg-slate-800/80 p-1.5 rounded-xl border border-[var(--pms-border)]">
                     <input
                       type="color"
                       value={bgColor}
                       onChange={(e) => setBgColor(e.target.value)}
                       className="w-8 h-8 rounded-lg cursor-pointer border-0 bg-transparent"
                     />
-                    <span className="text-xs font-mono font-bold text-slate-700 dark:text-slate-300 uppercase">{bgColor}</span>
+                    <span className="text-xs font-mono font-bold text-[var(--pms-ink)] uppercase">{bgColor}</span>
                   </div>
                 </div>
 
                 {mode === 'qr' ? (
                   <>
                     <div>
-                      <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                      <label className="block text-[11px] font-bold text-[var(--pms-muted)] mb-1">
                         Margin / Quiet Zone
                       </label>
                       <select
                         value={qrMargin}
                         onChange={(e) => setQrMargin(Number(e.target.value))}
-                        className="w-full px-2.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs font-bold text-slate-900 dark:text-white"
+                        className="w-full px-2.5 py-2.5 rounded-xl border border-[var(--pms-border)] bg-white/80 dark:bg-slate-800/80 text-xs font-bold text-[var(--pms-ink)]"
                       >
                         <option value={1}>Compact (1 Module)</option>
                         <option value={2}>Standard (2 Modules)</option>
@@ -1086,13 +1103,13 @@ export default function QrCodeGenerator() {
                     </div>
 
                     <div>
-                      <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                      <label className="block text-[11px] font-bold text-[var(--pms-muted)] mb-1">
                         Damage Recovery (ECC)
                       </label>
                       <select
                         value={qrEcc}
                         onChange={(e) => setQrEcc(e.target.value as any)}
-                        className="w-full px-2.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs font-bold text-slate-900 dark:text-white"
+                        className="w-full px-2.5 py-2.5 rounded-xl border border-[var(--pms-border)] bg-white/80 dark:bg-slate-800/80 text-xs font-bold text-[var(--pms-ink)]"
                       >
                         <option value="L">L — 7% Recovery</option>
                         <option value="M">M — 15% (Recommended)</option>
@@ -1103,13 +1120,13 @@ export default function QrCodeGenerator() {
                   </>
                 ) : (
                   <div>
-                    <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                    <label className="block text-[11px] font-bold text-[var(--pms-muted)] mb-1">
                       Side Margin
                     </label>
                     <select
                       value={qrMargin}
                       onChange={(e) => setQrMargin(Number(e.target.value))}
-                      className="w-full px-2.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs font-bold text-slate-900 dark:text-white"
+                      className="w-full px-2.5 py-2.5 rounded-xl border border-[var(--pms-border)] bg-white/80 dark:bg-slate-800/80 text-xs font-bold text-[var(--pms-ink)]"
                     >
                       <option value={1}>Compact (4px)</option>
                       <option value={2}>Standard (8px)</option>
@@ -1119,51 +1136,62 @@ export default function QrCodeGenerator() {
                 )}
               </div>
             </div>
-          </div>
+          </motion.div>
 
           {/* ── RIGHT: Real-Time Preview & Export Panel ───────────────────── */}
-          <div className="lg:col-span-5 space-y-5 sticky top-20">
-            <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200/90 dark:border-slate-800 p-6 shadow-sm flex flex-col items-center space-y-4">
+          <motion.div
+            initial={prefersReduced ? false : { opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.3, delay: prefersReduced ? 0 : 0.05 }}
+            className="lg:col-span-5 space-y-5 sticky top-20"
+          >
+            <div className="relative overflow-hidden min-h-[420px] pms-glass-panel rounded-3xl border border-[var(--pms-border)] p-6 shadow-sm flex flex-col items-center space-y-4">
+              <PearlScanOverlay active={isExporting} label="Rendering vector SVG export..." />
 
               {/* Verified Badge */}
-              <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300 text-xs font-bold">
-                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+              <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-50/90 dark:bg-emerald-950/60 border border-emerald-200/80 dark:border-emerald-800/70 text-emerald-700 dark:text-emerald-300 text-xs font-bold">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
                 <span>100% Real Standard ISO/IEC Scannable</span>
               </div>
 
               {/* Canvas Preview Box */}
               <div
-                className="p-6 rounded-2xl border-2 border-dashed border-slate-200 dark:border-slate-800 flex items-center justify-center min-h-[280px] w-full overflow-hidden transition-all shadow-inner"
+                className="p-6 rounded-2xl border-2 border-dashed border-[var(--pms-border-strong)] flex items-center justify-center min-h-[280px] w-full overflow-hidden transition-all shadow-inner"
                 style={{ backgroundColor: bgColor }}
               >
-                {activeError ? (
+                {activeError && (
                   <div className="text-center p-4 space-y-2 max-w-xs">
                     <AlertCircle className="w-8 h-8 text-rose-500 mx-auto" />
-                    <p className="text-xs font-bold text-rose-600">{activeError}</p>
+                    <p className="text-xs font-bold text-rose-600 dark:text-rose-400">{activeError}</p>
                     {mode === 'barcode' && barcodeFormat !== 'CODE128' && (
-                      <button
+                      <motion.button
+                        whileTap={prefersReduced ? undefined : { scale: 0.96 }}
                         type="button"
                         onClick={() => setBarcodeFormat('CODE128')}
-                        className="px-3 py-1 rounded-lg bg-indigo-600 text-white text-xs font-bold hover:bg-indigo-700 transition"
+                        className="pms-btn-primary px-3 py-1.5 rounded-lg text-xs font-bold"
                       >
                         Switch to CODE128 (Any Text)
-                      </button>
+                      </motion.button>
                     )}
                   </div>
-                ) : (
-                  <canvas ref={canvasRef} className="max-w-full h-auto drop-shadow-sm" />
                 )}
+                <canvas
+                  ref={canvasRef}
+                  className={activeError ? 'hidden' : 'max-w-full h-auto drop-shadow-sm'}
+                />
               </div>
 
               {/* Decoded Data Preview (Shows exactly what scanner reads!) */}
-              <div className="w-full bg-slate-50 dark:bg-slate-800/80 rounded-2xl p-3.5 border border-slate-200 dark:border-slate-700 space-y-1">
-                <div className="flex items-center justify-between text-[10px] font-black uppercase tracking-wider text-slate-400">
+              <div className="w-full bg-white/75 dark:bg-slate-800/75 rounded-2xl p-3.5 border border-[var(--pms-border)] space-y-1">
+                <div className="flex items-center justify-between text-[10px] font-black uppercase tracking-wider text-[var(--pms-muted)]">
                   <span className="flex items-center gap-1">
                     <Eye className="w-3 h-3 text-indigo-500" /> Scanner Will Read:
                   </span>
-                  <span>{finalPayload.length} Chars</span>
+                  <span>
+                    <AnimatedNumber value={finalPayload.length} /> Chars
+                  </span>
                 </div>
-                <div className="font-mono text-xs font-bold text-slate-800 dark:text-slate-200 break-all select-all max-h-16 overflow-y-auto">
+                <div className="font-mono text-xs font-bold text-[var(--pms-ink)] break-all select-all max-h-16 overflow-y-auto">
                   {finalPayload}
                 </div>
               </div>
@@ -1171,161 +1199,185 @@ export default function QrCodeGenerator() {
               {/* Action Buttons */}
               <div className="w-full space-y-2.5 pt-1">
                 <div className="grid grid-cols-2 gap-2">
-                  <button
+                  <motion.button
+                    whileTap={prefersReduced ? undefined : { scale: 0.97 }}
                     type="button"
                     onClick={handleDownloadPng}
-                    className="py-3 rounded-2xl bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white font-extrabold text-xs shadow-md transition flex items-center justify-center gap-1.5"
+                    className="pms-btn-primary py-3 rounded-2xl font-extrabold text-xs shadow-md transition flex items-center justify-center gap-1.5"
                   >
                     <Download className="w-4 h-4" /> Download PNG
-                  </button>
+                  </motion.button>
 
-                  <button
+                  <motion.button
+                    whileTap={prefersReduced ? undefined : { scale: 0.97 }}
                     type="button"
                     onClick={handleDownloadSvg}
-                    className="py-3 rounded-2xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 font-extrabold text-xs shadow-md hover:opacity-90 active:scale-95 transition flex items-center justify-center gap-1.5"
+                    disabled={isExporting}
+                    className="py-3 rounded-2xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 font-extrabold text-xs shadow-md hover:opacity-90 transition flex items-center justify-center gap-1.5 disabled:opacity-60"
                     title="Scalable Vector Graphics for CorelDraw, Illustrator, Flex & Print"
                   >
                     <FileCode className="w-4 h-4" /> Vector SVG
-                  </button>
+                  </motion.button>
                 </div>
 
                 <div className="grid grid-cols-3 gap-2">
-                  <button
+                  <motion.button
+                    whileTap={prefersReduced ? undefined : { scale: 0.97 }}
                     type="button"
                     onClick={handleCopyImage}
-                    className="py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 hover:border-indigo-400 bg-white dark:bg-slate-800 text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center justify-center gap-1.5 transition active:scale-95"
+                    className="py-2.5 rounded-xl border border-[var(--pms-border)] hover:border-indigo-400 bg-white/85 dark:bg-slate-800/85 text-xs font-bold text-[var(--pms-ink)] flex items-center justify-center gap-1.5 transition"
                   >
-                    {copiedToast ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                    {copiedToast ? <Check className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
                     <span>{copiedToast ? 'Copied!' : 'Copy'}</span>
-                  </button>
+                  </motion.button>
 
-                  <button
+                  <motion.button
+                    whileTap={prefersReduced ? undefined : { scale: 0.97 }}
                     type="button"
                     onClick={handleDownloadJpeg}
-                    className="py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 hover:border-indigo-400 bg-white dark:bg-slate-800 text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center justify-center gap-1.5 transition active:scale-95"
+                    className="py-2.5 rounded-xl border border-[var(--pms-border)] hover:border-indigo-400 bg-white/85 dark:bg-slate-800/85 text-xs font-bold text-[var(--pms-ink)] flex items-center justify-center gap-1.5 transition"
                   >
                     <Download className="w-3.5 h-3.5" /> JPEG
-                  </button>
+                  </motion.button>
 
-                  <button
+                  <motion.button
+                    whileTap={prefersReduced ? undefined : { scale: 0.97 }}
                     type="button"
                     onClick={() => setShowPrintModal(true)}
-                    className="py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 hover:border-indigo-400 bg-white dark:bg-slate-800 text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center justify-center gap-1.5 transition active:scale-95"
+                    className="py-2.5 rounded-xl border border-[var(--pms-border)] hover:border-indigo-400 bg-white/85 dark:bg-slate-800/85 text-xs font-bold text-[var(--pms-ink)] flex items-center justify-center gap-1.5 transition"
                   >
-                    <Printer className="w-3.5 h-3.5 text-indigo-600" /> Print
-                  </button>
+                    <Printer className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" /> Print
+                  </motion.button>
                 </div>
               </div>
             </div>
-          </div>
+          </motion.div>
         </div>
 
         {/* ── Print Sticker Sheet / Standee Modal ──────────────────────────── */}
-        {showPrintModal && (
-          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-            <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-6 sm:p-7 max-w-lg w-full shadow-2xl space-y-5 animate-in fade-in zoom-in-95 duration-150">
-              <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-10 h-10 rounded-2xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 flex items-center justify-center">
-                    <Printer className="w-5 h-5" />
+        <AnimatePresence>
+          {showPrintModal && (
+            <motion.div
+              initial={prefersReduced ? false : { opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={prefersReduced ? undefined : { opacity: 0 }}
+              transition={{ duration: 0.18 }}
+              className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4"
+            >
+              <motion.div
+                initial={prefersReduced ? false : { opacity: 0, scale: 0.96, y: 8 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={prefersReduced ? undefined : { opacity: 0, scale: 0.96, y: 8 }}
+                transition={{ duration: 0.2 }}
+                className="pms-glass-panel bg-white/95 dark:bg-slate-900/95 rounded-3xl border border-[var(--pms-border-strong)] p-6 sm:p-7 max-w-lg w-full shadow-2xl space-y-5"
+              >
+                <div className="flex items-center justify-between pb-3 border-b border-[var(--pms-border)]">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-10 h-10 rounded-2xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center border border-indigo-200/70 dark:border-indigo-800/60">
+                      <Printer className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h3 className="text-base font-extrabold text-[var(--pms-ink)]">Print Labels &amp; Sticker Sheets</h3>
+                      <p className="text-xs text-[var(--pms-muted)]">Perfect for A4 sticker sheets or counter cards</p>
+                    </div>
                   </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowPrintModal(false)}
+                    className="p-2 rounded-xl text-[var(--pms-muted)] hover:text-[var(--pms-ink)] transition"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                <div className="space-y-4">
                   <div>
-                    <h3 className="text-base font-extrabold text-slate-900 dark:text-white">Print Labels &amp; Sticker Sheets</h3>
-                    <p className="text-xs text-slate-500">Perfect for A4 sticker sheets or counter cards</p>
+                    <label className="block text-xs font-bold text-[var(--pms-ink)] mb-1">
+                      Label Header Title (e.g. Price Tag, Counter QR, WiFi)
+                    </label>
+                    <input
+                      type="text"
+                      value={printLabelTitle}
+                      onChange={(e) => setPrintLabelTitle(e.target.value)}
+                      placeholder="e.g. Scan to Pay / Item SKU"
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-[var(--pms-border)] bg-white/80 dark:bg-slate-800/80 text-xs font-bold text-[var(--pms-ink)]"
+                    />
                   </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setShowPrintModal(false)}
-                  className="p-2 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
-                >
-                  ✕
-                </button>
-              </div>
 
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    Label Header Title (e.g. Price Tag, Counter QR, WiFi)
-                  </label>
-                  <input
-                    type="text"
-                    value={printLabelTitle}
-                    onChange={(e) => setPrintLabelTitle(e.target.value)}
-                    placeholder="e.g. Scan to Pay / Item SKU"
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs font-bold text-slate-900 dark:text-white"
-                  />
-                </div>
+                  <div className="p-3.5 rounded-2xl bg-indigo-50/50 dark:bg-indigo-950/25 border border-indigo-200/70 dark:border-indigo-900/60 space-y-3">
+                    <span className="text-xs font-bold text-indigo-900 dark:text-indigo-200 block">
+                      Choose Print Format:
+                    </span>
 
-                <div className="p-3.5 rounded-2xl bg-indigo-50/50 dark:bg-indigo-950/20 border border-indigo-100 dark:border-indigo-900/60 space-y-3">
-                  <span className="text-xs font-bold text-indigo-900 dark:text-indigo-200 block">
-                    Choose Print Format:
-                  </span>
+                    <div className="grid grid-cols-2 gap-3">
+                      <motion.button
+                        whileTap={prefersReduced ? undefined : { scale: 0.97 }}
+                        type="button"
+                        onClick={() => handlePrintStickerSheet(false)}
+                        className="p-3.5 rounded-2xl border-2 border-[var(--pms-border)] hover:border-indigo-500 bg-white/90 dark:bg-slate-800/90 text-left transition"
+                      >
+                        <div className="font-extrabold text-xs text-[var(--pms-ink)]">📄 Single Standee</div>
+                        <div className="text-[11px] text-[var(--pms-muted)] mt-1">Large centered card for shop counter, acrylic stand, or table.</div>
+                      </motion.button>
 
-                  <div className="grid grid-cols-2 gap-3">
-                    <button
-                      type="button"
-                      onClick={() => handlePrintStickerSheet(false)}
-                      className="p-3.5 rounded-2xl border-2 border-slate-200 dark:border-slate-700 hover:border-indigo-500 bg-white dark:bg-slate-800 text-left transition"
-                    >
-                      <div className="font-extrabold text-xs text-slate-900 dark:text-white">📄 Single Standee</div>
-                      <div className="text-[11px] text-slate-400 mt-1">Large centered card for shop counter, acrylic stand, or table.</div>
-                    </button>
+                      <motion.button
+                        whileTap={prefersReduced ? undefined : { scale: 0.97 }}
+                        type="button"
+                        onClick={() => handlePrintStickerSheet(true)}
+                        className="p-3.5 rounded-2xl border-2 border-indigo-500 bg-indigo-50/70 dark:bg-indigo-950/45 text-left transition"
+                      >
+                        <div className="font-extrabold text-xs text-indigo-700 dark:text-indigo-300 flex items-center gap-1">
+                          <Grid className="w-3.5 h-3.5" /> A4 Sticker Sheet
+                        </div>
+                        <div className="text-[11px] text-[var(--pms-muted)] mt-1">
+                          Repeating grid of <AnimatedNumber value={printCols * printRows} /> stickers for inventory &amp; product labels.
+                        </div>
+                      </motion.button>
+                    </div>
 
-                    <button
-                      type="button"
-                      onClick={() => handlePrintStickerSheet(true)}
-                      className="p-3.5 rounded-2xl border-2 border-indigo-500 bg-indigo-50/60 dark:bg-indigo-950/40 text-left transition"
-                    >
-                      <div className="font-extrabold text-xs text-indigo-700 dark:text-indigo-300 flex items-center gap-1">
-                        <Grid className="w-3.5 h-3.5" /> A4 Sticker Sheet
+                    <div className="flex items-center gap-4 text-xs font-bold pt-1 text-[var(--pms-ink)]">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[var(--pms-muted)]">Columns:</span>
+                        <select
+                          value={printCols}
+                          onChange={(e) => setPrintCols(Number(e.target.value))}
+                          className="px-2 py-1 rounded-lg border border-[var(--pms-border)] bg-white dark:bg-slate-800 text-[var(--pms-ink)]"
+                        >
+                          <option value={2}>2</option>
+                          <option value={3}>3 (Standard)</option>
+                          <option value={4}>4</option>
+                        </select>
                       </div>
-                      <div className="text-[11px] text-slate-500 mt-1">Repeating grid of {printCols * printRows} stickers for inventory &amp; product labels.</div>
-                    </button>
-                  </div>
 
-                  <div className="flex items-center gap-4 text-xs font-bold pt-1">
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-slate-500">Columns:</span>
-                      <select
-                        value={printCols}
-                        onChange={(e) => setPrintCols(Number(e.target.value))}
-                        className="px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
-                      >
-                        <option value={2}>2</option>
-                        <option value={3}>3 (Standard)</option>
-                        <option value={4}>4</option>
-                      </select>
-                    </div>
-
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-slate-500">Rows:</span>
-                      <select
-                        value={printRows}
-                        onChange={(e) => setPrintRows(Number(e.target.value))}
-                        className="px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
-                      >
-                        <option value={6}>6 (18 stickers)</option>
-                        <option value={8}>8 (24 stickers)</option>
-                        <option value={10}>10 (30 stickers)</option>
-                      </select>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[var(--pms-muted)]">Rows:</span>
+                        <select
+                          value={printRows}
+                          onChange={(e) => setPrintRows(Number(e.target.value))}
+                          className="px-2 py-1 rounded-lg border border-[var(--pms-border)] bg-white dark:bg-slate-800 text-[var(--pms-ink)]"
+                        >
+                          <option value={6}>6 (18 stickers)</option>
+                          <option value={8}>8 (24 stickers)</option>
+                          <option value={10}>10 (30 stickers)</option>
+                        </select>
+                      </div>
                     </div>
                   </div>
                 </div>
-              </div>
 
-              <div className="flex items-center justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowPrintModal(false)}
-                  className="px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-50"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
+                <div className="flex items-center justify-end gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowPrintModal(false)}
+                    className="px-4 py-2.5 rounded-xl border border-[var(--pms-border)] text-xs font-bold text-[var(--pms-muted)] hover:text-[var(--pms-ink)] hover:bg-white/60 dark:hover:bg-slate-800/60 transition"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* ── SEO Section ─────────────────────────────────────────────────── */}
         <ToolSEOSection

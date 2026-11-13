@@ -1,7 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { FileText, CheckCircle2, Download, RotateCcw, AlertTriangle } from 'lucide-react';
+import { motion, useReducedMotion } from 'motion/react';
 import FileDropzone from '../components/FileDropzone';
 import BackendLoader from '../components/BackendLoader';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { PearlStageSwitch, PearlScanOverlay } from '../components/pearl/PearlMotion';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { apiFetch } from '../lib/api';
@@ -15,6 +18,8 @@ export default function WordToPdfExact() {
     'Office to PDF Converter — Exact Formatting',
     'Convert Word, Excel, and PowerPoint files to PDF with 100% perfect formatting using our powerful backend.',
   );
+
+  const prefersReduced = useReducedMotion();
 
   const [file, setFile] = useState<File | null>(null);
   const [stage, setStage] = useState<Stage>('idle');
@@ -30,7 +35,7 @@ export default function WordToPdfExact() {
   const handleDrop = async (files: File[]) => {
     if (!files.length) return;
     const f = files[0];
-    
+
     // Check if it's an office file
     const ext = f.name.split('.').pop()?.toLowerCase();
     const validExts = ['docx', 'doc', 'pptx', 'ppt', 'xlsx', 'xls', 'odt', 'odp'];
@@ -78,80 +83,110 @@ export default function WordToPdfExact() {
   };
 
   return (
-    <div className="flex-1 w-full bg-gradient-to-br from-slate-50 to-indigo-50 dark:from-slate-950 dark:to-slate-900 min-h-screen">
-      <div className="max-w-3xl mx-auto px-4 py-10">
-        <div className="text-center mb-10">
-          <div className="w-14 h-14 bg-indigo-600 rounded-2xl flex items-center justify-center shadow-lg shadow-indigo-200 dark:shadow-indigo-900 mx-auto mb-4">
-            <FileText className="w-7 h-7 text-white" />
-          </div>
-          <h1 className="text-4xl font-extrabold text-slate-900 dark:text-white mb-3">Office to PDF</h1>
-          <p className="text-lg text-slate-600 dark:text-slate-400 max-w-xl mx-auto">
-            Convert Word, Excel, and PowerPoint files to PDF.
-            Uses LibreOffice backend for 100% exact formatting preservation.
-          </p>
-        </div>
+    <ToolWorkspaceShell
+      title="Office to PDF"
+      subtitle="Convert Word, Excel, and PowerPoint files to PDF using LibreOffice for 100% exact formatting preservation."
+      categoryLabel="Convert to PDF"
+      icon={FileText}
+      microVariant="convert"
+      tone="indigo"
+      trustNote="LibreOffice exact layout engine • Files deleted immediately after conversion"
+    >
+      <div className="max-w-3xl mx-auto">
+        <PearlStageSwitch stageKey={stage}>
+          {stage === 'idle' && (
+            <div className="pms-glass-panel rounded-3xl p-4 sm:p-6">
+              <FileDropzone
+                onDrop={handleDrop}
+                multiple={false}
+                title="Drop your Office file here"
+                subtitle="Supports .docx, .pptx, .xlsx, .doc, .ppt, .xls, .odt, .odp"
+              />
+            </div>
+          )}
 
-        {stage === 'idle' && (
-          <FileDropzone onDrop={handleDrop} multiple={false} title="Drop your Office file here" subtitle="Supports .docx, .pptx, .xlsx, .doc, .ppt, .xls" />
-        )}
+          {stage === 'processing' && (
+            <div className="pms-glass-panel rounded-3xl p-4 sm:p-6 relative overflow-hidden">
+              <PearlScanOverlay active label="Rendering pixel-perfect PDF via LibreOffice..." />
+              <BackendLoader
+                title="Converting to PDF…"
+                accentColor="indigo"
+                steps={[
+                  { icon: '📤', label: 'Uploading', detail: 'Sending your Office file to server...' },
+                  { icon: '📚', label: 'Loading', detail: 'LibreOffice engine initializing...' },
+                  { icon: '🖨️', label: 'Rendering', detail: 'Rendering to pixel-perfect PDF...' },
+                  { icon: '🎯', label: 'Done', detail: 'Packaging your PDF output...' },
+                ]}
+                tips={[
+                  '📚 LibreOffice preserves 100% of your original formatting.',
+                  '📄 Supports .docx .pptx .xlsx .doc .ppt .xls .odt and more.',
+                  '⚡ Same engine used by enterprise PDF workflows globally.',
+                  '🔒 File is deleted from server immediately after download.',
+                  '🎨 Fonts, tables, images — everything rendered precisely.',
+                ]}
+              />
+            </div>
+          )}
 
-        {stage === 'processing' && (
-          <BackendLoader
-            title="Converting to PDF…"
-            accentColor="indigo"
-            steps={[
-              { icon: '📤', label: 'Uploading', detail: 'Sending your Office file to server...' },
-              { icon: '📚', label: 'Loading', detail: 'LibreOffice engine initializing...' },
-              { icon: '🖨️', label: 'Rendering', detail: 'Rendering to pixel-perfect PDF...' },
-              { icon: '🎯', label: 'Done', detail: 'Packaging your PDF output...' },
-            ]}
-            tips={[
-              '📚 LibreOffice preserves 100% of your original formatting.',
-              '📄 Supports .docx .pptx .xlsx .doc .ppt .xls .odt and more.',
-              '⚡ Same engine used by enterprise PDF workflows globally.',
-              '🔒 File is deleted from server immediately after download.',
-              '🎨 Fonts, tables, images — everything rendered precisely.',
-            ]}
-          />
-        )}
-
-        {stage === 'done' && resultUrl && file && (
-          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-emerald-200 dark:border-emerald-800 shadow-lg overflow-hidden">
-            <div className="bg-emerald-50 dark:bg-emerald-950/40 px-6 py-5 border-b border-emerald-200 dark:border-emerald-800 flex items-center gap-3">
-              <CheckCircle2 className="w-8 h-8 text-emerald-500" />
-              <div>
-                <h3 className="text-xl font-bold text-emerald-900 dark:text-emerald-200">Conversion Complete!</h3>
-                <p className="text-sm text-emerald-700 dark:text-emerald-400">Your perfectly formatted PDF is ready.</p>
+          {stage === 'done' && resultUrl && file && (
+            <div className="pms-glass-panel rounded-3xl overflow-hidden border border-emerald-200/80 dark:border-emerald-800/60 bg-emerald-50/70 dark:bg-emerald-950/25 shadow-lg">
+              <div className="px-6 py-5 border-b border-emerald-200/70 dark:border-emerald-800/50 flex items-center gap-4">
+                <motion.div
+                  initial={prefersReduced ? false : { scale: 0.7, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  transition={{ type: 'spring', stiffness: 360, damping: 24 }}
+                  className="w-12 h-12 rounded-2xl bg-emerald-500/15 dark:bg-emerald-500/20 border border-emerald-300/60 dark:border-emerald-700/60 flex items-center justify-center shrink-0"
+                >
+                  <CheckCircle2 className="w-7 h-7 text-emerald-600 dark:text-emerald-400" />
+                </motion.div>
+                <div className="min-w-0">
+                  <h3 className="text-xl font-bold text-emerald-950 dark:text-emerald-100">Conversion Complete!</h3>
+                  <p className="text-sm text-emerald-700 dark:text-emerald-300 truncate">
+                    {file.name.replace(/\.[^/.]+$/, '')}.pdf is ready for download.
+                  </p>
+                </div>
+              </div>
+              <div className="p-6 space-y-3 bg-white/60 dark:bg-slate-900/50">
+                <a
+                  href={resultUrl}
+                  download={file.name.replace(/\.[^/.]+$/, '') + '.pdf'}
+                  className="pms-btn-primary flex items-center justify-center gap-2 w-full px-6 py-4 rounded-xl font-bold"
+                >
+                  <Download className="w-5 h-5" /> Download PDF File
+                </a>
+                <button
+                  type="button"
+                  onClick={reset}
+                  className="flex items-center justify-center gap-2 w-full px-6 py-3 bg-white/80 dark:bg-slate-800/80 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 font-semibold rounded-xl border border-slate-200/80 dark:border-slate-700 transition-colors"
+                >
+                  <RotateCcw className="w-4 h-4" /> Convert Another File
+                </button>
               </div>
             </div>
-            <div className="p-6 space-y-4">
-              <a href={resultUrl} download={file.name.replace(/\.[^/.]+$/, '') + '.pdf'}
-                className="flex items-center justify-center gap-2 w-full px-6 py-4 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md transition-all hover:scale-[1.01]">
-                <Download className="w-5 h-5" /> Download PDF File
-              </a>
-              <button onClick={reset}
-                className="flex items-center justify-center gap-2 w-full px-6 py-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-semibold rounded-xl border border-slate-200 dark:border-slate-700 transition-colors">
-                <RotateCcw className="w-4 h-4" /> Convert Another File
+          )}
+
+          {stage === 'error' && (
+            <div className="pms-glass-panel rounded-3xl border border-rose-200/80 dark:border-rose-800/60 bg-rose-50/60 dark:bg-rose-950/20 p-6 sm:p-8">
+              <div className="flex items-start gap-3.5 mb-5">
+                <div className="w-10 h-10 rounded-xl bg-rose-500/15 flex items-center justify-center shrink-0">
+                  <AlertTriangle className="w-5 h-5 text-rose-600 dark:text-rose-400" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-rose-900 dark:text-rose-200 text-lg">Conversion Failed</h3>
+                  <p className="text-sm text-rose-700 dark:text-rose-300 mt-1">{errorMsg}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={reset}
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-white/90 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+              >
+                <RotateCcw className="w-4 h-4" /> Try again
               </button>
             </div>
-          </div>
-        )}
-
-        {stage === 'error' && (
-          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-red-200 dark:border-red-800 p-6">
-            <div className="flex items-start gap-3 mb-4">
-              <AlertTriangle className="w-6 h-6 text-red-500 shrink-0 mt-0.5" />
-              <div>
-                <h3 className="font-bold text-red-800 dark:text-red-200">Conversion Failed</h3>
-                <p className="text-sm text-red-700 dark:text-red-300 mt-1">{errorMsg}</p>
-              </div>
-            </div>
-            <button onClick={reset} className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white font-medium">
-              <RotateCcw className="w-4 h-4" /> Try again
-            </button>
-          </div>
-        )}
+          )}
+        </PearlStageSwitch>
       </div>
-    </div>
+    </ToolWorkspaceShell>
   );
 }

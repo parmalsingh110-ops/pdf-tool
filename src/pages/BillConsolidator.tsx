@@ -1,20 +1,12 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Upload,
   Download,
-  Printer,
   Receipt,
-  FileSpreadsheet,
-  Plus,
   Trash2,
-  ArrowUp,
-  ArrowDown,
   Sliders,
-  DollarSign,
   Smartphone,
   Eye,
-  CheckCircle2,
-  Building2,
 } from 'lucide-react';
 import { PDFDocument } from 'pdf-lib';
 import * as pdfjsLib from 'pdfjs-dist';
@@ -25,6 +17,9 @@ import ToolSEOSection from '../components/ToolSEOSection';
 import ShareQrModal from '../components/ShareQrModal';
 import { dataUrlToBytes, downloadBlob } from '../lib/utils';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { motion, useReducedMotion } from 'motion/react';
+import { AnimatedNumber, PearlScanOverlay, PearlStageSwitch } from '../components/pearl/PearlMotion';
+import { toArrayBufferBytes } from '../lib/blobUrl';
 
 interface BillItem {
   id: string;
@@ -51,6 +46,7 @@ export default function BillConsolidator() {
   );
 
   const [bills, setBills] = useState<BillItem[]>([]);
+  const prefersReduced = useReducedMotion();
   const [layout, setLayout] = useState<GridLayout>('4_per_page');
   const [employeeName, setEmployeeName] = useState('Pankaj Meena');
   const [claimTitle, setClaimTitle] = useState('Monthly Travel & Fuel Expense Claim');
@@ -300,7 +296,7 @@ export default function BillConsolidator() {
       }
 
       const outBytes = await pdfDoc.save();
-      const blob = new Blob([outBytes as any], { type: 'application/pdf' });
+      const blob = new Blob([toArrayBufferBytes(outBytes)], { type: 'application/pdf' });
       downloadBlob(blob, `expense-claim-${Date.now()}.pdf`);
     } catch (err) {
       console.error('Error generating bill voucher PDF:', err);
@@ -320,212 +316,255 @@ export default function BillConsolidator() {
     >
       <div className="max-w-6xl mx-auto space-y-8 text-slate-900 dark:text-slate-100">
 
-        {/* Upload State */}
-        {bills.length === 0 ? (
-          <div className="max-w-2xl mx-auto">
-            <label className="flex flex-col items-center justify-center p-12 border-2 border-dashed border-slate-300 dark:border-slate-700 hover:border-emerald-500 rounded-3xl cursor-pointer bg-white dark:bg-slate-900 transition-all shadow-sm group">
-              <input
-                type="file"
-                multiple
-                accept=".pdf,image/png,image/jpeg,image/webp"
-                onChange={handleUploadFiles}
-                className="hidden"
-              />
-              <div className="w-16 h-16 rounded-2xl bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-                <Upload className="w-8 h-8" />
-              </div>
-              <span className="text-base font-bold text-slate-900 dark:text-white mb-1">
-                Drop Receipt Photos or PDF Invoices Here
-              </span>
-              <span className="text-xs text-slate-400 text-center max-w-xs">
-                Upload petrol slips, toll plaza receipts, hotel bills, taxi slips, or GST invoices.
-              </span>
-            </label>
-          </div>
-        ) : (
-          /* Editor Layout */
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-            {/* Left Controls & Bill List */}
-            <div className="lg:col-span-6 space-y-5 bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm">
-              <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
-                <span className="text-sm font-bold flex items-center gap-2">
-                  <Sliders className="w-4 h-4 text-emerald-500" /> Voucher Details ({bills.length} Bills)
-                </span>
-                <button
-                  onClick={() => setBills([])}
-                  className="text-xs text-rose-500 hover:text-rose-600 font-semibold"
-                >
-                  Clear All
-                </button>
-              </div>
-
-              {/* Grid Layout Picker */}
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">
-                  Sheet Layout
-                </label>
-                <div className="grid grid-cols-3 gap-2 text-xs">
-                  {[
-                    { id: '4_per_page', label: '4 Bills (2×2 Grid)' },
-                    { id: '6_per_page', label: '6 Bills (3×2 Grid)' },
-                    { id: '2_per_page', label: '2 Bills (Large)' },
-                  ].map((opt) => (
-                    <button
-                      key={opt.id}
-                      onClick={() => setLayout(opt.id as GridLayout)}
-                      className={`p-2 rounded-xl border text-center font-bold transition ${
-                        layout === opt.id
-                          ? 'border-emerald-500 bg-emerald-600 text-white shadow-sm'
-                          : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800'
-                      }`}
-                    >
-                      {opt.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Claim Metadata Inputs */}
-              <div className="space-y-2.5 p-3.5 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200 dark:border-slate-700 text-xs">
-                <div>
-                  <label className="block text-[11px] font-semibold text-slate-500 mb-1">
-                    Claim Title / Month
-                  </label>
+        <PearlStageSwitch stageKey={bills.length === 0 ? 'upload' : 'editor'}>
+          {bills.length === 0 ? (
+            <div className="max-w-2xl mx-auto">
+              <div className="pms-glass-panel rounded-3xl p-4 sm:p-6">
+                <label className="flex flex-col items-center justify-center p-12 border-2 border-dashed border-[var(--pms-border)] hover:border-emerald-500 rounded-2xl cursor-pointer bg-white/75 dark:bg-slate-900/75 transition-all group">
                   <input
-                    type="text"
-                    value={claimTitle}
-                    onChange={(e) => setClaimTitle(e.target.value)}
-                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 font-semibold"
+                    type="file"
+                    multiple
+                    accept=".pdf,image/png,image/jpeg,image/webp"
+                    onChange={handleUploadFiles}
+                    className="hidden"
                   />
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="block text-[11px] font-semibold text-slate-500 mb-1">
-                      Employee / Claimant
-                    </label>
-                    <input
-                      type="text"
-                      value={employeeName}
-                      onChange={(e) => setEmployeeName(e.target.value)}
-                      className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[11px] font-semibold text-slate-500 mb-1">
-                      Department / Company
-                    </label>
-                    <input
-                      type="text"
-                      value={companyName}
-                      onChange={(e) => setCompanyName(e.target.value)}
-                      className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Bill Items Editable List */}
-              <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
-                <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                  Receipt Breakdown & Amounts (₹)
-                </span>
-                {bills.map((bill, index) => (
                   <div
-                    key={bill.id}
-                    className="flex items-center gap-2 p-2.5 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700 text-xs"
+                    className="w-16 h-16 rounded-2xl text-emerald-600 dark:text-emerald-400 flex items-center justify-center mb-4 group-hover:scale-105 transition-transform shadow-xs"
+                    style={{ backgroundColor: 'var(--pms-soft-mint)' }}
                   >
-                    <span className="font-bold text-slate-400 w-5 text-center">#{index + 1}</span>
+                    <Upload className="w-8 h-8" />
+                  </div>
+                  <span className="text-base font-bold text-slate-900 dark:text-white mb-1">
+                    Drop Receipt Photos or PDF Invoices Here
+                  </span>
+                  <span className="text-xs text-slate-500 dark:text-slate-400 text-center max-w-xs">
+                    Upload petrol slips, toll plaza receipts, hotel bills, taxi slips, or GST invoices.
+                  </span>
+                </label>
+              </div>
+            </div>
+          ) : (
+            /* Editor Layout */
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+              {/* Left Controls & Bill List */}
+              <div className="lg:col-span-6 relative overflow-hidden pms-glass-panel space-y-5 p-6 rounded-3xl">
+                <PearlScanOverlay active={isProcessing} label="Generating A4 expense voucher PDF…" />
+
+                <div className="flex items-center justify-between pb-3 border-b border-[var(--pms-border)]">
+                  <span className="text-sm font-bold flex items-center gap-2">
+                    <Sliders className="w-4 h-4 text-emerald-500" />
+                    <span>
+                      Voucher Details (<AnimatedNumber value={bills.length} /> Bills)
+                    </span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setBills([])}
+                    className="text-xs text-rose-500 hover:text-rose-600 font-semibold"
+                  >
+                    Clear All
+                  </button>
+                </div>
+
+                {/* Grid Layout Picker */}
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2">
+                    Sheet Layout
+                  </label>
+                  <div className="grid grid-cols-3 gap-2 text-xs">
+                    {[
+                      { id: '4_per_page', label: '4 Bills (2×2 Grid)' },
+                      { id: '6_per_page', label: '6 Bills (3×2 Grid)' },
+                      { id: '2_per_page', label: '2 Bills (Large)' },
+                    ].map((opt) => {
+                      const active = layout === opt.id;
+                      return (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          onClick={() => setLayout(opt.id as GridLayout)}
+                          className={`relative p-2.5 rounded-xl border text-center font-bold transition-colors ${
+                            active
+                              ? 'border-emerald-500 text-emerald-950 dark:text-white shadow-xs'
+                              : 'bg-white/75 dark:bg-slate-900/75 border-[var(--pms-border)] text-slate-700 dark:text-slate-300 hover:border-slate-300 dark:hover:border-slate-600'
+                          }`}
+                        >
+                          {active && (
+                            <motion.span
+                              layoutId="bill-layout-pill"
+                              transition={prefersReduced ? { duration: 0 } : { type: 'spring', stiffness: 420, damping: 32 }}
+                              className="absolute inset-0 rounded-xl -z-0"
+                              style={{ backgroundColor: 'var(--pms-soft-mint)' }}
+                            />
+                          )}
+                          <span className="relative z-10">{opt.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Claim Metadata Inputs */}
+                <div className="space-y-2.5 p-3.5 bg-white/75 dark:bg-slate-900/75 rounded-2xl border border-[var(--pms-border)] text-xs">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-500 dark:text-slate-400 mb-1">
+                      Claim Title / Month
+                    </label>
                     <input
                       type="text"
-                      value={bill.desc}
-                      onChange={(e) => {
-                        const updated = [...bills];
-                        updated[index].desc = e.target.value;
-                        setBills(updated);
-                      }}
-                      className="flex-1 px-2 py-1 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 font-medium"
-                      placeholder="Receipt Description"
+                      value={claimTitle}
+                      onChange={(e) => setClaimTitle(e.target.value)}
+                      className="w-full px-2.5 py-1.5 rounded-lg border border-[var(--pms-border)] bg-white/90 dark:bg-slate-950/70 font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-400"
                     />
-                    <div className="flex items-center w-24">
-                      <span className="text-slate-400 font-bold px-1.5">₹</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-500 dark:text-slate-400 mb-1">
+                        Employee / Claimant
+                      </label>
                       <input
-                        type="number"
-                        value={bill.amount || ''}
-                        onChange={(e) => {
-                          const updated = [...bills];
-                          updated[index].amount = parseFloat(e.target.value) || 0;
-                          setBills(updated);
-                        }}
-                        className="w-full px-1.5 py-1 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 font-bold text-emerald-600"
-                        placeholder="0"
+                        type="text"
+                        value={employeeName}
+                        onChange={(e) => setEmployeeName(e.target.value)}
+                        className="w-full px-2.5 py-1.5 rounded-lg border border-[var(--pms-border)] bg-white/90 dark:bg-slate-950/70 focus:outline-none focus:ring-2 focus:ring-emerald-400"
                       />
                     </div>
-                    <button
-                      onClick={() => setBills(bills.filter((_, i) => i !== index))}
-                      className="text-slate-400 hover:text-rose-500 p-1"
-                      title="Remove"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-500 dark:text-slate-400 mb-1">
+                        Department / Company
+                      </label>
+                      <input
+                        type="text"
+                        value={companyName}
+                        onChange={(e) => setCompanyName(e.target.value)}
+                        className="w-full px-2.5 py-1.5 rounded-lg border border-[var(--pms-border)] bg-white/90 dark:bg-slate-950/70 focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                      />
+                    </div>
                   </div>
-                ))}
+                </div>
+
+                {/* Bill Items Editable List */}
+                <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
+                  <span className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                    Receipt Breakdown & Amounts (₹)
+                  </span>
+                  {bills.map((bill, index) => (
+                    <div
+                      key={bill.id}
+                      className="flex items-center gap-2 p-2.5 bg-white/75 dark:bg-slate-900/75 rounded-xl border border-[var(--pms-border)] text-xs"
+                    >
+                      <span className="font-bold text-slate-400 w-5 text-center">#{index + 1}</span>
+                      <input
+                        type="text"
+                        value={bill.desc}
+                        onChange={(e) => {
+                          const updated = [...bills];
+                          updated[index].desc = e.target.value;
+                          setBills(updated);
+                        }}
+                        className="flex-1 px-2 py-1 rounded border border-[var(--pms-border)] bg-white/90 dark:bg-slate-950/70 font-medium"
+                        placeholder="Receipt Description"
+                      />
+                      <div className="flex items-center w-24">
+                        <span className="text-slate-400 font-bold px-1.5">₹</span>
+                        <input
+                          type="number"
+                          value={bill.amount || ''}
+                          onChange={(e) => {
+                            const updated = [...bills];
+                            updated[index].amount = parseFloat(e.target.value) || 0;
+                            setBills(updated);
+                          }}
+                          className="w-full px-1.5 py-1 rounded border border-[var(--pms-border)] bg-white/90 dark:bg-slate-950/70 font-bold text-emerald-600 dark:text-emerald-400"
+                          placeholder="0"
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setBills(bills.filter((_, i) => i !== index))}
+                        className="text-slate-400 hover:text-rose-500 p-1"
+                        title="Remove"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Total Claim Banner */}
+                <div
+                  className="p-3.5 rounded-2xl border border-emerald-300/70 dark:border-emerald-800/70 flex items-center justify-between"
+                  style={{ backgroundColor: 'var(--pms-soft-mint)' }}
+                >
+                  <span className="text-xs font-bold text-emerald-900 dark:text-emerald-200">
+                    Total Claim Summary (<AnimatedNumber value={bills.length} /> Receipts)
+                  </span>
+                  <span className="text-base font-extrabold text-emerald-700 dark:text-emerald-300 tabular-nums">
+                    <AnimatedNumber
+                      value={totalExpense}
+                      decimals={totalExpense % 1 === 0 ? 0 : 2}
+                      prefix="₹"
+                    />
+                  </span>
+                </div>
+
+                {/* Export Buttons */}
+                <div className="pt-2 border-t border-[var(--pms-border)] space-y-2">
+                  <motion.button
+                    type="button"
+                    whileTap={prefersReduced ? undefined : { scale: 0.98 }}
+                    onClick={handleDownloadPdf}
+                    disabled={isProcessing}
+                    className="pms-btn-primary w-full flex items-center justify-center gap-2 py-3.5 px-4 rounded-xl font-bold text-sm shadow-md disabled:opacity-50"
+                  >
+                    <Download className="w-4 h-4" /> Download Expense Voucher PDF
+                  </motion.button>
+                  <motion.button
+                    type="button"
+                    whileTap={prefersReduced ? undefined : { scale: 0.98 }}
+                    onClick={() => setShowQrModal(true)}
+                    className="w-full flex items-center justify-center gap-1.5 py-2.5 px-3 bg-white/75 dark:bg-slate-900/75 border border-[var(--pms-border)] hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-800 dark:text-slate-200 rounded-xl font-semibold text-xs transition"
+                  >
+                    <Smartphone className="w-3.5 h-3.5" /> Send to Mobile Phone
+                  </motion.button>
+                </div>
               </div>
 
-              {/* Total Claim Banner */}
-              <div className="p-3 bg-emerald-50 dark:bg-emerald-950/40 rounded-xl border border-emerald-200 dark:border-emerald-800 flex items-center justify-between">
-                <span className="text-xs font-bold text-emerald-800 dark:text-emerald-300">
-                  Total Claim Summary ({bills.length} Receipts)
-                </span>
-                <span className="text-base font-extrabold text-emerald-600 dark:text-emerald-400">
-                  ₹{totalExpense.toLocaleString('en-IN')}
-                </span>
-              </div>
+              {/* Right Live Preview */}
+              <div className="lg:col-span-6 relative overflow-hidden pms-glass-panel p-6 rounded-3xl flex flex-col items-center">
+                <PearlScanOverlay active={isProcessing} label="Rendering claim sheets…" />
 
-              {/* Export Buttons */}
-              <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-2">
-                <button
-                  onClick={handleDownloadPdf}
-                  disabled={isProcessing}
-                  className="w-full flex items-center justify-center gap-2 py-3.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-sm shadow-md transition disabled:opacity-50"
-                >
-                  <Download className="w-4 h-4" /> Download Expense Voucher PDF
-                </button>
-                <button
-                  onClick={() => setShowQrModal(true)}
-                  className="w-full flex items-center justify-center gap-1.5 py-2 px-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-xl font-semibold text-xs transition"
-                >
-                  <Smartphone className="w-3.5 h-3.5" /> Send to Mobile Phone
-                </button>
+                <div className="w-full flex items-center justify-between mb-4">
+                  <span className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+                    <Eye className="w-4 h-4 text-emerald-500" /> A4 Expense Claim Sheet Preview
+                  </span>
+                  <span
+                    className="text-xs font-semibold px-2.5 py-1 text-emerald-800 dark:text-emerald-200 rounded-lg border border-emerald-300/60 dark:border-emerald-800/60"
+                    style={{ backgroundColor: 'var(--pms-soft-mint)' }}
+                  >
+                    Audited Format
+                  </span>
+                </div>
+
+                {previewDataUrl ? (
+                  <div className="w-full max-h-[640px] overflow-auto flex items-center justify-center p-4 bg-slate-100/70 dark:bg-slate-950/60 rounded-2xl border border-[var(--pms-border)]">
+                    <div className="p-2 bg-white rounded-xl shadow-lg border border-slate-200">
+                      <img
+                        src={previewDataUrl}
+                        alt="Expense Claim Sheet Preview"
+                        className="max-h-[560px] w-auto object-contain rounded"
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <div className="w-full h-96 flex items-center justify-center text-slate-400 text-xs">
+                    Generating expense voucher preview...
+                  </div>
+                )}
               </div>
             </div>
-
-            {/* Right Live Preview */}
-            <div className="lg:col-span-6 bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col items-center">
-              <div className="w-full flex items-center justify-between mb-4">
-                <span className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-                  <Eye className="w-4 h-4 text-emerald-500" /> A4 Expense Claim Sheet Preview
-                </span>
-                <span className="text-xs font-semibold px-2.5 py-1 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 rounded-lg">
-                  Audited Format
-                </span>
-              </div>
-
-              {previewDataUrl ? (
-                <div className="w-full max-h-[640px] overflow-auto flex items-center justify-center p-4 bg-slate-100 dark:bg-slate-950 rounded-2xl border border-slate-200 dark:border-slate-800">
-                  <img
-                    src={previewDataUrl}
-                    alt="Expense Claim Sheet Preview"
-                    className="max-h-[580px] w-auto object-contain rounded shadow-lg border border-slate-300 dark:border-slate-700"
-                  />
-                </div>
-              ) : (
-                <div className="w-full h-96 flex items-center justify-center text-slate-400 text-xs">
-                  Generating expense voucher preview...
-                </div>
-              )}
-            </div>
-          </div>
-        )}
+          )}
+        </PearlStageSwitch>
 
         {/* SEO Section */}
         <ToolSEOSection

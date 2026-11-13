@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
-import { 
-  Crop, Download, Loader2, Sparkles, Sliders, ChevronLeft, ChevronRight, 
-  Check, FileText, ArrowRight, Eye, Server, Cpu
+import { useState, useEffect } from 'react';
+import {
+  Crop, Download, Loader2, Sparkles, Sliders, ChevronLeft, ChevronRight,
+  Check, Eye
 } from 'lucide-react';
+import { motion, useReducedMotion } from 'motion/react';
 import * as pdfjsLib from 'pdfjs-dist';
 import { PDFDocument } from 'pdf-lib';
 import '../lib/pdfWorker';
@@ -10,7 +11,9 @@ import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { apiFetch } from '../lib/api';
+import { toArrayBufferBytes } from '../lib/blobUrl';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { PearlScanOverlay, PearlStageSwitch } from '../components/pearl/PearlMotion';
 
 export default function AutoCropMargins() {
   useSEO(
@@ -35,6 +38,7 @@ export default function AutoCropMargins() {
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [resultFileName, setResultFileName] = useState('');
   const [engineUsed, setEngineUsed] = useState<'backend' | 'client-vector'>('backend');
+  const prefersReduced = useReducedMotion();
 
   useEffect(() => {
     return () => {
@@ -176,7 +180,7 @@ export default function AutoCropMargins() {
       }
 
       const cleanBytes = await pdfDoc.save();
-      const blob = new Blob([cleanBytes as any], { type: 'application/pdf' });
+      const blob = new Blob([toArrayBufferBytes(cleanBytes)], { type: 'application/pdf' });
       setResultUrl(URL.createObjectURL(blob));
       setResultFileName(`autocropped_${file.name}`);
       setEngineUsed('client-vector');
@@ -204,161 +208,186 @@ export default function AutoCropMargins() {
       tone="rose"
     >
       <div className="flex flex-col items-center justify-start max-w-6xl mx-auto w-full">
+        <PearlStageSwitch
+          stageKey={!file ? 'upload' : resultUrl ? 'result' : 'workspace'}
+          className="w-full"
+        >
+          {!file ? (
+            <div className="w-full max-w-2xl mx-auto space-y-6">
+              <FileDropzone
+                onDrop={handleDrop}
+                multiple={false}
+                title="Select PDF Document to Auto-Crop Margins"
+              />
 
-      {!file ? (
-        <div className="w-full max-w-2xl space-y-6">
-          <FileDropzone 
-            onDrop={handleDrop} 
-            multiple={false} 
-            title="Select PDF Document to Auto-Crop Margins" 
-          />
-
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
-            <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 text-center">
-              <Sparkles className="w-6 h-6 text-rose-600 dark:text-rose-400 mx-auto mb-2" />
-              <h3 className="font-bold text-sm text-slate-800 dark:text-slate-200">Lossless Vector Crop</h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Sets CropBox metadata so vector text and hyperlinks stay crisp.</p>
-            </div>
-            <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 text-center">
-              <Sliders className="w-6 h-6 text-blue-600 dark:text-blue-400 mx-auto mb-2" />
-              <h3 className="font-bold text-sm text-slate-800 dark:text-slate-200">Adjustable Padding</h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Leave breathing room around your content with custom point padding.</p>
-            </div>
-            <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 text-center">
-              <Eye className="w-6 h-6 text-emerald-600 dark:text-emerald-400 mx-auto mb-2" />
-              <h3 className="font-bold text-sm text-slate-800 dark:text-slate-200">Compact File Size</h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Zero re-encoding means file size never blows up.</p>
-            </div>
-          </div>
-        </div>
-      ) : resultUrl ? (
-        /* Result Screen */
-        <div className="w-full max-w-xl bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-8 shadow-xl text-center space-y-6">
-          <div className="w-20 h-20 bg-emerald-100 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400 rounded-full flex items-center justify-center mx-auto shadow-inner">
-            <Check className="w-10 h-10" />
-          </div>
-
-          <div>
-            <span className="inline-block px-3 py-1 bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 rounded-full text-xs font-bold uppercase tracking-wider mb-2">
-              Auto-Crop Complete
-            </span>
-            <h2 className="text-2xl font-extrabold text-slate-900 dark:text-white">
-              Cropped PDF Ready!
-            </h2>
-            <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-400 mt-1">
-              White margins have been trimmed cleanly.
-              <br />
-              <span className="text-emerald-600 font-semibold text-xs mt-1 inline-block">
-                {engineUsed === 'backend' 
-                  ? 'Processed with PyMuPDF High-Precision Vector Engine.' 
-                  : 'Processed with Non-Destructive Vector CropBox Engine.'}
-              </span>
-            </p>
-          </div>
-
-          <div className="flex flex-col sm:flex-row gap-3 pt-2">
-            <a
-              href={resultUrl}
-              download={resultFileName}
-              className="flex-1 py-3 px-6 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl flex items-center justify-center gap-2 shadow-lg transition-all"
-            >
-              <Download className="w-4 h-4" /> Download Cropped PDF
-            </a>
-            <button
-              onClick={reset}
-              className="py-3 px-6 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-semibold rounded-xl transition-colors"
-            >
-              Crop Another PDF
-            </button>
-          </div>
-        </div>
-      ) : (
-        /* Adjust Settings & Preview */
-        <div className="w-full flex flex-col lg:flex-row gap-6">
-          {/* Controls */}
-          <div className="w-full lg:w-80 shrink-0 space-y-5">
-            <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 shadow-sm space-y-4">
-              <h3 className="text-sm font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                Crop Settings
-              </h3>
-
-              <div className="space-y-3">
-                <div>
-                  <div className="flex justify-between text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                    <span>Content Padding</span>
-                    <span className="text-rose-600 font-bold">{paddingPt} pt</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="0"
-                    max="50"
-                    value={paddingPt}
-                    onChange={(e) => setPaddingPt(parseInt(e.target.value))}
-                    className="w-full accent-rose-600"
-                  />
-                  <p className="text-[11px] text-slate-400 mt-1">
-                    Adds safety margin around text so letters never touch the page edge.
-                  </p>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
+                <div className="pms-glass-panel p-4 rounded-2xl text-center">
+                  <Sparkles className="w-6 h-6 text-[var(--pms-rose)] mx-auto mb-2" />
+                  <h3 className="font-bold text-sm text-slate-800 dark:text-slate-200">Lossless Vector Crop</h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Sets CropBox metadata so vector text and hyperlinks stay crisp.</p>
                 </div>
-
-                <div className="pt-3 border-t border-slate-100 dark:border-slate-800">
-                  <div className="flex items-center gap-2 text-xs font-medium text-emerald-600 dark:text-emerald-400">
-                    <Sparkles className="w-4 h-4" /> Non-Destructive Vector Mode Active
-                  </div>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
-                    Your PDF vector text, searchable words, and crisp fonts will be 100% preserved.
-                  </p>
+                <div className="pms-glass-panel p-4 rounded-2xl text-center">
+                  <Sliders className="w-6 h-6 text-[var(--pms-blue)] mx-auto mb-2" />
+                  <h3 className="font-bold text-sm text-slate-800 dark:text-slate-200">Adjustable Padding</h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Leave breathing room around your content with custom point padding.</p>
+                </div>
+                <div className="pms-glass-panel p-4 rounded-2xl text-center">
+                  <Eye className="w-6 h-6 text-emerald-600 dark:text-emerald-400 mx-auto mb-2" />
+                  <h3 className="font-bold text-sm text-slate-800 dark:text-slate-200">Compact File Size</h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Zero re-encoding means file size never blows up.</p>
                 </div>
               </div>
-
-              <button
-                onClick={executeAutoCrop}
-                disabled={busy}
-                className="w-full py-3 px-4 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-rose-600/20 disabled:opacity-50 transition-all text-sm"
-              >
-                {busy ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" /> {progressMsg || 'Cropping Margins...'}
-                  </>
-                ) : (
-                  <>
-                    <Crop className="w-4 h-4" /> Auto-Crop Margins
-                  </>
-                )}
-              </button>
             </div>
-          </div>
+          ) : resultUrl ? (
+            /* Result Screen */
+            <div className="w-full max-w-xl mx-auto p-8 rounded-3xl bg-gradient-to-br from-emerald-50/90 via-white/85 to-teal-50/80 dark:from-emerald-950/45 dark:via-slate-900/85 dark:to-teal-950/35 border border-emerald-200/80 dark:border-emerald-800/70 backdrop-blur-md shadow-xl text-center space-y-6">
+              <motion.div
+                initial={prefersReduced ? false : { scale: 0.6, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                transition={prefersReduced ? { duration: 0 } : { type: 'spring', stiffness: 260, damping: 18 }}
+                className="w-20 h-20 bg-emerald-100/90 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 rounded-full flex items-center justify-center mx-auto shadow-inner"
+              >
+                <Check className="w-10 h-10" />
+              </motion.div>
 
-          {/* Document Preview */}
-          <div className="flex-1 flex flex-col items-center">
-            <div className="flex items-center gap-3 mb-3 text-xs font-semibold text-slate-600 dark:text-slate-400">
-              <button
-                onClick={() => setCurrentPage(p => Math.max(p - 1, 0))}
-                disabled={currentPage === 0}
-                className="p-1.5 rounded-lg border hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-30"
-              >
-                <ChevronLeft className="w-4 h-4" />
-              </button>
-              <span>Page {currentPage + 1} of {pageImages.length}</span>
-              <button
-                onClick={() => setCurrentPage(p => Math.min(p + 1, pageImages.length - 1))}
-                disabled={currentPage === pageImages.length - 1}
-                className="p-1.5 rounded-lg border hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-30"
-              >
-                <ChevronRight className="w-4 h-4" />
-              </button>
+              <div>
+                <span className="inline-block px-3 py-1 bg-emerald-100/90 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 rounded-full text-xs font-bold uppercase tracking-wider mb-2">
+                  Auto-Crop Complete
+                </span>
+                <h2 className="text-2xl font-extrabold text-emerald-950 dark:text-white">
+                  Cropped PDF Ready!
+                </h2>
+                <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-300 mt-1">
+                  White margins have been trimmed cleanly.
+                  <br />
+                  <span className="text-emerald-600 dark:text-emerald-400 font-semibold text-xs mt-1 inline-block">
+                    {engineUsed === 'backend'
+                      ? 'Processed with PyMuPDF High-Precision Vector Engine.'
+                      : 'Processed with Non-Destructive Vector CropBox Engine.'}
+                  </span>
+                </p>
+              </div>
+
+              <div className="flex flex-col sm:flex-row gap-3 pt-2">
+                <motion.a
+                  whileHover={prefersReduced ? undefined : { scale: 1.02 }}
+                  whileTap={prefersReduced ? undefined : { scale: 0.98 }}
+                  href={resultUrl}
+                  download={resultFileName}
+                  className="pms-btn-primary relative overflow-hidden flex-1 py-3.5 px-6 text-white font-bold rounded-2xl flex items-center justify-center gap-2"
+                >
+                  <span className="pms-shimmer" aria-hidden="true" />
+                  <Download className="w-4 h-4 relative z-10" />
+                  <span className="relative z-10">Download Cropped PDF</span>
+                </motion.a>
+                <button
+                  onClick={reset}
+                  className="py-3.5 px-6 bg-white/85 hover:bg-white dark:bg-slate-800/85 dark:hover:bg-slate-800 border border-[var(--pms-border)] text-slate-700 dark:text-slate-200 font-semibold rounded-2xl transition-colors"
+                >
+                  Crop Another PDF
+                </button>
+              </div>
             </div>
-
-            <div className="relative border shadow-xl bg-white select-none overflow-hidden rounded-xl max-w-full">
-              <img
-                src={pageImages[currentPage]}
-                alt={`Page ${currentPage + 1}`}
-                className="max-h-[75vh] object-contain mx-auto block pointer-events-none"
+          ) : (
+            /* Adjust Settings & Preview */
+            <div className="w-full pms-glass-panel rounded-3xl p-5 md:p-7 relative overflow-hidden">
+              <PearlScanOverlay
+                active={busy}
+                label={progressMsg || 'Detecting content bounds & cropping margins...'}
               />
+
+              <div className="w-full flex flex-col lg:flex-row gap-6">
+                {/* Controls */}
+                <div className="w-full lg:w-80 shrink-0 space-y-5">
+                  <div className="bg-white/75 dark:bg-slate-900/75 rounded-2xl border border-[var(--pms-border)] p-5 shadow-xs space-y-4">
+                    <h3 className="text-sm font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                      Crop Settings
+                    </h3>
+
+                    <div className="space-y-3">
+                      <div>
+                        <div className="flex justify-between text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                          <span>Content Padding</span>
+                          <span className="text-[var(--pms-rose)] font-bold">{paddingPt} pt</span>
+                        </div>
+                        <input
+                          type="range"
+                          min="0"
+                          max="50"
+                          value={paddingPt}
+                          onChange={(e) => setPaddingPt(parseInt(e.target.value))}
+                          className="w-full accent-rose-600"
+                        />
+                        <p className="text-[11px] text-slate-400 mt-1">
+                          Adds safety margin around text so letters never touch the page edge.
+                        </p>
+                      </div>
+
+                      <div className="pt-3 border-t border-[var(--pms-border)]">
+                        <div className="flex items-center gap-2 text-xs font-medium text-emerald-600 dark:text-emerald-400">
+                          <Sparkles className="w-4 h-4" /> Non-Destructive Vector Mode Active
+                        </div>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+                          Your PDF vector text, searchable words, and crisp fonts will be 100% preserved.
+                        </p>
+                      </div>
+                    </div>
+
+                    <motion.button
+                      whileHover={prefersReduced ? undefined : { scale: 1.01 }}
+                      whileTap={prefersReduced ? undefined : { scale: 0.99 }}
+                      onClick={executeAutoCrop}
+                      disabled={busy}
+                      className="pms-btn-primary relative overflow-hidden w-full py-3.5 px-4 text-white font-bold rounded-2xl flex items-center justify-center gap-2 disabled:opacity-50 text-sm"
+                    >
+                      <span className="pms-shimmer" aria-hidden="true" />
+                      {busy ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin relative z-10" />
+                          <span className="relative z-10">{progressMsg || 'Cropping Margins...'}</span>
+                        </>
+                      ) : (
+                        <>
+                          <Crop className="w-4 h-4 relative z-10" />
+                          <span className="relative z-10">Auto-Crop Margins</span>
+                        </>
+                      )}
+                    </motion.button>
+                  </div>
+                </div>
+
+                {/* Document Preview */}
+                <div className="flex-1 flex flex-col items-center">
+                  <div className="flex items-center gap-3 mb-3 text-xs font-semibold text-slate-600 dark:text-slate-400">
+                    <button
+                      onClick={() => setCurrentPage(p => Math.max(p - 1, 0))}
+                      disabled={currentPage === 0}
+                      className="p-1.5 rounded-xl border border-[var(--pms-border)] bg-white/75 dark:bg-slate-900/75 hover:bg-white dark:hover:bg-slate-800 disabled:opacity-30 transition-colors"
+                    >
+                      <ChevronLeft className="w-4 h-4" />
+                    </button>
+                    <span>Page {currentPage + 1} of {pageImages.length}</span>
+                    <button
+                      onClick={() => setCurrentPage(p => Math.min(p + 1, pageImages.length - 1))}
+                      disabled={currentPage === pageImages.length - 1}
+                      className="p-1.5 rounded-xl border border-[var(--pms-border)] bg-white/75 dark:bg-slate-900/75 hover:bg-white dark:hover:bg-slate-800 disabled:opacity-30 transition-colors"
+                    >
+                      <ChevronRight className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  <div className="relative border border-slate-200 dark:border-slate-700 shadow-xl bg-white select-none overflow-hidden rounded-xl max-w-full">
+                    <img
+                      src={pageImages[currentPage]}
+                      alt={`Page ${currentPage + 1}`}
+                      className="max-h-[75vh] object-contain mx-auto block pointer-events-none"
+                    />
+                  </div>
+                </div>
+              </div>
             </div>
-          </div>
-        </div>
-      )}
+          )}
+        </PearlStageSwitch>
       </div>
     </ToolWorkspaceShell>
   );

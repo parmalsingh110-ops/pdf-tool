@@ -1,27 +1,24 @@
-import React, { useState, useRef } from 'react';
+import React, { useState } from 'react';
 import {
   GraduationCap,
-  Upload,
   Download,
   MapPin,
-  QrCode,
   CheckCircle2,
-  Image as ImageIcon,
   FileText,
-  Sparkles,
-  Scissors,
-  Check,
-  Navigation,
 } from 'lucide-react';
+import { motion, useReducedMotion } from 'motion/react';
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 import QRCode from 'qrcode';
 import * as pdfjsLib from 'pdfjs-dist';
 import '../lib/pdfWorker';
 import { useSEO } from '../hooks/useSEO';
 import { usePageSEO } from '../lib/usePageSEO';
+import FileDropzone from '../components/FileDropzone';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { AnimatedNumber, PearlScanOverlay } from '../components/pearl/PearlMotion';
 import ToolSEOSection from '../components/ToolSEOSection';
 import { downloadBlob } from '../lib/utils';
-import { useAutoRevokeUrl } from '../lib/blobUrl';
+import { toArrayBufferBytes, useAutoRevokeUrl } from '../lib/blobUrl';
 
 export default function AdmitCardOptimizer() {
   useSEO(
@@ -46,9 +43,8 @@ export default function AdmitCardOptimizer() {
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
+  const prefersReduced = useReducedMotion();
   useAutoRevokeUrl(previewUrl);
-
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileUpload = async (file: File) => {
     if (file.type !== 'application/pdf') {
@@ -259,7 +255,7 @@ export default function AdmitCardOptimizer() {
       }
 
       const outBytes = await outDoc.save();
-      const blob = new Blob([outBytes as any], { type: 'application/pdf' });
+      const blob = new Blob([toArrayBufferBytes(outBytes)], { type: 'application/pdf' });
       downloadBlob(blob, `1Page_AdmitCard_${fileName}`);
       setPreviewUrl(URL.createObjectURL(blob));
     } catch (err) {
@@ -271,65 +267,60 @@ export default function AdmitCardOptimizer() {
   };
 
   return (
-    <div className="w-full min-h-screen bg-slate-50 dark:bg-slate-950 py-10 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-5xl mx-auto space-y-8">
-        {/* Header */}
-        <div>
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-50 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-800 text-xs font-bold text-blue-700 dark:text-blue-300 mb-2">
-            <GraduationCap className="w-3.5 h-3.5" /> Exam Day Buddy • Save ₹20+ Print Costs
-          </div>
-          <h1 className="text-3xl font-extrabold text-slate-900 dark:text-white">
-            Smart Admit Card 1-Page Optimizer + Exam Center GPS QR
-          </h1>
-          <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
-            Extracts vital hall ticket onto 1 clean page, adds Google Maps navigation QR for your exam center, and stamps official photo/thumb guideline boxes.
-          </p>
-        </div>
-
+    <ToolWorkspaceShell
+      title="Smart Admit Card 1-Page Optimizer + Exam Center GPS QR"
+      subtitle="Extracts vital hall ticket onto 1 clean page, adds Google Maps navigation QR for your exam center, and stamps official photo/thumb guideline boxes."
+      categoryLabel="Exam Day Buddy • Save ₹20+ Print Costs"
+      icon={GraduationCap}
+      microVariant="compress"
+      tone="blue"
+      trustNote="100% offline in your browser • Your admit card details stay private"
+    >
+      <div className="w-full max-w-4xl mx-auto space-y-8">
         {/* Upload State */}
         {!pdfBytes && (
-          <div
-            onClick={() => fileInputRef.current?.click()}
-            className="border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-3xl p-12 text-center bg-white dark:bg-slate-900 hover:border-blue-500 hover:bg-blue-50/20 dark:hover:bg-blue-950/20 cursor-pointer transition-all group"
+          <motion.div
+            initial={prefersReduced ? false : { opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: prefersReduced ? 0 : 0.22 }}
+            className="w-full max-w-2xl mx-auto"
           >
-            <input
-              type="file"
-              ref={fileInputRef}
-              onChange={(e) => e.target.files?.[0] && handleFileUpload(e.target.files[0])}
-              accept="application/pdf"
-              className="hidden"
+            <FileDropzone
+              onDrop={(files) => files[0] && handleFileUpload(files[0])}
+              multiple={false}
+              accept={{ 'application/pdf': ['.pdf'] }}
+              title="Drop 4-5 Page Admit Card PDF Here"
+              subtitle="Works for NTA, UPSC, SSC, NEET, JEE, CUET, Police & Railway hall tickets. Strips T&C pages automatically."
             />
-            <div className="w-16 h-16 rounded-2xl bg-blue-50 dark:bg-blue-950/50 text-blue-600 dark:text-blue-400 flex items-center justify-center mx-auto mb-4 group-hover:scale-110 transition-transform">
-              <Upload className="w-8 h-8" />
-            </div>
-            <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-2">
-              Drop 4-5 Page Admit Card PDF Here
-            </h3>
-            <p className="text-sm text-slate-500 dark:text-slate-400 max-w-md mx-auto">
-              Works for NTA, UPSC, SSC, NEET, JEE, CUET, Police, and Railway hall tickets. Discards irrelevant terms &amp; conditions automatically.
-            </p>
-          </div>
+          </motion.div>
         )}
 
         {/* Form & Settings */}
         {pdfBytes && (
-          <div className="p-8 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-6 shadow-sm">
-            <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-800">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-blue-950/60 text-blue-600 flex items-center justify-center">
+          <motion.div
+            initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: prefersReduced ? 0 : 0.24 }}
+            className="p-6 sm:p-8 rounded-3xl pms-glass-panel space-y-6 relative overflow-hidden"
+          >
+            <PearlScanOverlay active={isProcessing} label="Compiling 1-page exam-day hall ticket & GPS QR..." />
+
+            <div className="flex items-center justify-between pb-4 border-b border-[var(--pms-border)]">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 border border-blue-200/70 dark:border-blue-800/50 flex items-center justify-center shrink-0">
                   <FileText className="w-5 h-5" />
                 </div>
-                <div>
-                  <h4 className="text-sm font-bold text-slate-900 dark:text-white">{fileName}</h4>
-                  <p className="text-xs text-slate-400">
-                    Original: {totalPages} Pages • Compressing to exactly 1 Page
+                <div className="min-w-0">
+                  <h4 className="text-sm font-bold text-[var(--pms-ink)] truncate">{fileName}</h4>
+                  <p className="text-xs text-[var(--pms-muted)]">
+                    Original: <AnimatedNumber value={totalPages} suffix=" Pages" /> • Compressing to exactly 1 Page
                   </p>
                 </div>
               </div>
 
               <button
                 onClick={() => setPdfBytes(null)}
-                className="text-xs font-semibold text-slate-500 hover:underline"
+                className="text-xs font-semibold text-[var(--pms-muted)] hover:text-[var(--pms-ink)] underline shrink-0"
               >
                 Upload Different File
               </button>
@@ -337,13 +328,13 @@ export default function AdmitCardOptimizer() {
 
             {/* Exam Center GPS QR Setup */}
             <div className="space-y-4">
-              <h4 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                <MapPin className="w-4 h-4 text-emerald-600" /> Exam Center GPS QR Code
+              <h4 className="text-sm font-bold text-[var(--pms-ink)] flex items-center gap-2">
+                <MapPin className="w-4 h-4 text-emerald-600 dark:text-emerald-400" /> Exam Center GPS QR Code
               </h4>
 
               <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
                 <div className="md:col-span-8">
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  <label className="block text-xs font-bold text-[var(--pms-ink)] mb-1">
                     Exam Center Name / Address (for Google Maps Navigation)
                   </label>
                   <input
@@ -351,16 +342,16 @@ export default function AdmitCardOptimizer() {
                     value={examCenterAddress}
                     onChange={(e) => setExamCenterAddress(e.target.value)}
                     placeholder="e.g. Modern Public School, Sector 4, Rohini, New Delhi"
-                    className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 text-sm text-slate-900 dark:text-white"
+                    className="w-full px-4 py-2.5 rounded-xl border border-[var(--pms-border)] bg-white/75 dark:bg-slate-900/75 text-sm text-[var(--pms-ink)] outline-none focus:ring-2 focus:ring-blue-500"
                   />
-                  <p className="mt-1 text-[11px] text-slate-400">
+                  <p className="mt-1.5 text-[11px] text-[var(--pms-muted)]">
                     Students can scan this QR code on the physical printout on exam day to open live turn-by-turn Google Maps navigation.
                   </p>
                 </div>
 
                 <div className="md:col-span-4 flex items-center">
-                  <div className="w-full p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-2 text-xs">
-                    <label className="flex items-center gap-2 font-bold text-slate-700 dark:text-slate-300 cursor-pointer">
+                  <div className="w-full p-4 rounded-2xl bg-white/60 dark:bg-slate-900/60 border border-[var(--pms-border)] space-y-2.5 text-xs">
+                    <label className="flex items-center gap-2 font-bold text-[var(--pms-ink)] cursor-pointer">
                       <input
                         type="checkbox"
                         checked={includeGpsQr}
@@ -370,7 +361,7 @@ export default function AdmitCardOptimizer() {
                       Embed GPS Map QR Code
                     </label>
 
-                    <label className="flex items-center gap-2 font-bold text-slate-700 dark:text-slate-300 cursor-pointer">
+                    <label className="flex items-center gap-2 font-bold text-[var(--pms-ink)] cursor-pointer">
                       <input
                         type="checkbox"
                         checked={includePhotoBox}
@@ -380,7 +371,7 @@ export default function AdmitCardOptimizer() {
                       Add Photo Paste Box
                     </label>
 
-                    <label className="flex items-center gap-2 font-bold text-slate-700 dark:text-slate-300 cursor-pointer">
+                    <label className="flex items-center gap-2 font-bold text-[var(--pms-ink)] cursor-pointer">
                       <input
                         type="checkbox"
                         checked={includeThumbBox}
@@ -394,17 +385,33 @@ export default function AdmitCardOptimizer() {
               </div>
             </div>
 
-            <div className="pt-4 border-t border-slate-100 dark:border-slate-800 flex justify-end">
+            {previewUrl && (
+              <div className="p-3 rounded-2xl bg-emerald-50/90 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 flex items-center justify-between gap-3 text-xs">
+                <span className="font-semibold text-emerald-700 dark:text-emerald-300 flex items-center gap-1.5">
+                  <CheckCircle2 className="w-4 h-4 shrink-0" />
+                  1-Page Admit Card ready and downloaded!
+                </span>
+                <a
+                  href={previewUrl}
+                  download={`1Page_AdmitCard_${fileName}`}
+                  className="font-bold text-emerald-700 dark:text-emerald-300 underline shrink-0"
+                >
+                  Download Again
+                </a>
+              </div>
+            )}
+
+            <div className="pt-4 border-t border-[var(--pms-border)] flex justify-end">
               <button
                 onClick={handleProcessAdmitCard}
                 disabled={isProcessing}
-                className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl text-sm font-bold bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-600/20 disabled:opacity-50 transition-all"
+                className="pms-btn-primary inline-flex items-center gap-2 px-6 py-3 rounded-2xl text-sm font-bold disabled:opacity-50"
               >
                 <Download className="w-4 h-4" />
                 {isProcessing ? 'Generating 1-Page Admit Card...' : 'Generate 1-Page Exam-Day PDF'}
               </button>
             </div>
-          </div>
+          </motion.div>
         )}
 
         {/* SEO Information */}
@@ -414,7 +421,7 @@ export default function AdmitCardOptimizer() {
           description="A vital utility for government exam aspirants (UPSC, SSC, Railway, NEET, JEE, CUET). Automatically prunes irrelevant multi-page exam guidelines to compact the admit card onto a single crisp A4 page. Generates a live Google Maps navigation QR code so students and parents can reach the center without confusion on exam day."
         />
       </div>
-    </div>
+    </ToolWorkspaceShell>
   );
 }
 

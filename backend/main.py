@@ -86,7 +86,21 @@ _raw_origins = os.environ.get(
     "ALLOWED_ORIGINS",
     "https://www.pdfmediasuite.in,https://pdfmediasuite.in,http://localhost:3000,http://localhost:4173,http://127.0.0.1:3000"
 )
-ALLOWED_ORIGINS: list[str] = [o.strip() for o in _raw_origins.split(",") if o.strip()]
+ALLOWED_ORIGINS_SET = {
+    "https://www.pdfmediasuite.in",
+    "https://pdfmediasuite.in",
+    "http://localhost:3000",
+    "http://localhost:4173",
+    "http://127.0.0.1:3000",
+}
+for o in _raw_origins.split(","):
+    cleaned = o.strip().strip('"').strip("'").rstrip("/")
+    if cleaned:
+        ALLOWED_ORIGINS_SET.add(cleaned)
+        if "pdfmediasuite.in" in cleaned:
+            ALLOWED_ORIGINS_SET.add("https://pdfmediasuite.in")
+            ALLOWED_ORIGINS_SET.add("https://www.pdfmediasuite.in")
+ALLOWED_ORIGINS: list[str] = list(ALLOWED_ORIGINS_SET)
 
 # LibreOffice concurrency: limit concurrent soffice processes to avoid RAM exhaustion
 LIBREOFFICE_SEMAPHORE = asyncio.Semaphore(int(os.environ.get("MAX_CONCURRENT_LIBREOFFICE", "2")))
@@ -198,10 +212,11 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 # 1. GZip compression
 app.add_middleware(GZipMiddleware, minimum_size=500)
 
-# 2. CORS — restricted to known production origins
+# 2. CORS — restricted to known production origins & subdomains
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
+    allow_origin_regex=r"^https:\/\/([a-zA-Z0-9-]+\.)*pdfmediasuite\.in$",
     allow_methods=["GET", "POST", "HEAD", "OPTIONS"],
     allow_headers=[
         "Content-Type",

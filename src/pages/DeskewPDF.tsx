@@ -1,13 +1,16 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { Download, FileText, CheckCircle2, Eye, Loader2, Sparkles, Compass, RotateCw, Grid, Sliders, Wand2, RefreshCw, Layers } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Download, FileText, CheckCircle2, Eye, Loader2, Compass, RotateCw, Grid, Wand2 } from 'lucide-react';
+import { motion, AnimatePresence, useReducedMotion } from 'motion/react';
 import { PDFDocument } from 'pdf-lib';
 import * as pdfjsLib from 'pdfjs-dist';
 import '../lib/pdfWorker';
 import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
+import { toArrayBufferBytes } from '../lib/blobUrl';
 import ToolSEOSection from '../components/ToolSEOSection';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { PearlScanOverlay, PearlStageSwitch } from '../components/pearl/PearlMotion';
 
 interface PageItem {
   num: number;
@@ -41,6 +44,7 @@ export default function DeskewPDF() {
 
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [resultName, setResultName] = useState('');
+  const prefersReduced = useReducedMotion();
 
   const currentAngle = pages[currentPage - 1]?.angle || 0;
   const currentRot90 = pages[currentPage - 1]?.rotation90 || 0;
@@ -250,7 +254,7 @@ export default function DeskewPDF() {
       }
 
       const outBytes = await outDoc.save();
-      const blob = new Blob([outBytes as any], { type: 'application/pdf' });
+      const blob = new Blob([toArrayBufferBytes(outBytes)], { type: 'application/pdf' });
       const url = URL.createObjectURL(blob);
       setResultUrl(url);
       setResultName(`${file.name.replace(/\.pdf$/i, '')}_deskewed.pdf`);
@@ -272,6 +276,7 @@ export default function DeskewPDF() {
       tone="amber"
     >
 
+      <PearlStageSwitch stageKey={!file ? 'upload' : 'workspace'}>
         {!file ? (
           <div className="max-w-2xl mx-auto">
             <FileDropzone
@@ -285,25 +290,30 @@ export default function DeskewPDF() {
         ) : (
           <div className="space-y-8">
             {/* Control Panel */}
-            <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800 p-6">
-              <div className="flex flex-wrap items-center justify-between gap-4 pb-6 border-b border-slate-100 dark:border-slate-800">
+            <div className="pms-glass-panel rounded-3xl p-6 relative overflow-hidden">
+              <PearlScanOverlay
+                active={busy || analyzing}
+                label={analyzing ? 'Analyzing text line orientation...' : 'Straightening PDF pages...'}
+              />
+
+              <div className="flex flex-wrap items-center justify-between gap-4 pb-6 border-b border-[var(--pms-border)]">
                 <div className="flex items-center gap-3">
-                  <div className="p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/50 text-amber-600 dark:text-amber-400">
+                  <div className="p-2.5 rounded-xl bg-[var(--pms-soft-rose)] text-[var(--pms-rose)] border border-[var(--pms-border)]">
                     <FileText className="w-6 h-6" />
                   </div>
                   <div>
                     <h3 className="font-bold text-slate-800 dark:text-slate-200">{file.name}</h3>
-                    <p className="text-xs text-slate-500">{pageCount} page{pageCount > 1 ? 's' : ''}</p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">{pageCount} page{pageCount > 1 ? 's' : ''}</p>
                   </div>
                 </div>
 
                 <div className="flex items-center gap-2">
                   <button
                     onClick={() => setShowGrid(!showGrid)}
-                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
+                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-colors ${
                       showGrid
-                        ? 'border-amber-500 bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400'
-                        : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400'
+                        ? 'border-[var(--pms-blue)] bg-[var(--pms-soft-blue)] text-sky-700 dark:text-sky-300'
+                        : 'border-[var(--pms-border)] bg-white/75 dark:bg-slate-900/75 text-slate-600 dark:text-slate-400'
                     }`}
                   >
                     <Grid className="w-3.5 h-3.5" /> Alignment Grid {showGrid ? 'ON' : 'OFF'}
@@ -314,7 +324,7 @@ export default function DeskewPDF() {
                       setFile(null);
                       setResultUrl(null);
                     }}
-                    className="px-3.5 py-1.5 text-xs font-semibold text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                    className="px-3.5 py-1.5 text-xs font-semibold text-slate-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40 rounded-xl transition-colors"
                   >
                     Change File
                   </button>
@@ -324,33 +334,35 @@ export default function DeskewPDF() {
               {/* Angle Control Tools */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-6">
                 {/* 1. Auto-Detect */}
-                <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/40 flex flex-col justify-between">
+                <div className="p-4 rounded-2xl border border-[var(--pms-border)] bg-white/75 dark:bg-slate-900/75 flex flex-col justify-between">
                   <div>
-                    <span className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-2">
+                    <span className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block mb-2">
                       Auto-Straighten
                     </span>
-                    <p className="text-xs text-slate-500 mb-3">
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
                       Analyzes text line orientations to automatically detect skew angle.
                     </p>
                   </div>
-                  <button
+                  <motion.button
+                    whileHover={prefersReduced ? undefined : { scale: 1.01 }}
+                    whileTap={prefersReduced ? undefined : { scale: 0.99 }}
                     type="button"
                     onClick={detectAngle}
                     disabled={analyzing}
-                    className="w-full inline-flex items-center justify-center gap-2 py-2 px-3 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white shadow-xs transition-colors disabled:opacity-50"
+                    className="w-full inline-flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-xs font-bold bg-[var(--pms-soft-lavender)] hover:bg-[var(--pms-soft-rose)] text-slate-900 dark:text-slate-100 border border-[var(--pms-border-strong)] shadow-xs transition-colors disabled:opacity-50"
                   >
-                    {analyzing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Wand2 className="w-3.5 h-3.5" />}
+                    {analyzing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Wand2 className="w-3.5 h-3.5 text-[var(--pms-violet)]" />}
                     Auto-Detect Angle
-                  </button>
+                  </motion.button>
                 </div>
 
                 {/* 2. Manual Fine-Tuning Slider */}
-                <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/40">
+                <div className="p-4 rounded-2xl border border-[var(--pms-border)] bg-white/75 dark:bg-slate-900/75">
                   <div className="flex justify-between items-center mb-2">
-                    <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                    <span className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
                       Fine-Tune Tilt Angle
                     </span>
-                    <span className="text-xs font-bold text-amber-600 bg-amber-100 dark:bg-amber-950 px-2 py-0.5 rounded font-mono">
+                    <span className="text-xs font-bold text-[var(--pms-rose)] bg-[var(--pms-soft-rose)] px-2 py-0.5 rounded-md font-mono border border-[var(--pms-border)]">
                       {currentAngle > 0 ? `+${currentAngle}` : currentAngle}°
                     </span>
                   </div>
@@ -361,13 +373,13 @@ export default function DeskewPDF() {
                     step={0.1}
                     value={currentAngle}
                     onChange={(e) => updateCurrentPage({ angle: parseFloat(e.target.value) })}
-                    className="w-full h-2 bg-slate-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer accent-amber-600"
+                    className="w-full h-2 bg-slate-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer accent-rose-600"
                   />
                   <div className="flex justify-between text-[11px] text-slate-400 mt-1">
                     <span>-10° Counter-Clockwise</span>
                     <button
                       onClick={() => updateCurrentPage({ angle: 0 })}
-                      className="text-amber-600 hover:underline font-semibold"
+                      className="text-[var(--pms-rose)] hover:underline font-semibold"
                     >
                       Reset 0°
                     </button>
@@ -376,16 +388,16 @@ export default function DeskewPDF() {
                 </div>
 
                 {/* 3. 90-Degree Rotation & Batch */}
-                <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/40 flex flex-col justify-between">
+                <div className="p-4 rounded-2xl border border-[var(--pms-border)] bg-white/75 dark:bg-slate-900/75 flex flex-col justify-between">
                   <div>
-                    <span className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-2">
+                    <span className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block mb-2">
                       Page Rotation & Batch
                     </span>
                     <div className="flex gap-2 mb-2">
                       <button
                         type="button"
                         onClick={() => updateCurrentPage({ rotation90: (currentRot90 + 90) % 360 })}
-                        className="flex-1 py-1.5 px-2 rounded-lg border text-xs font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-100 flex items-center justify-center gap-1"
+                        className="flex-1 py-1.5 px-2 rounded-xl border border-[var(--pms-border)] bg-white/80 dark:bg-slate-800/80 text-xs font-semibold text-slate-700 dark:text-slate-300 hover:border-[var(--pms-border-strong)] flex items-center justify-center gap-1 transition-colors"
                       >
                         <RotateCw className="w-3.5 h-3.5" /> Rotate 90°
                       </button>
@@ -395,7 +407,7 @@ export default function DeskewPDF() {
                     <button
                       type="button"
                       onClick={applyCurrentToAll}
-                      className="text-xs text-amber-600 hover:underline font-semibold text-left"
+                      className="text-xs text-[var(--pms-rose)] hover:underline font-semibold text-left"
                     >
                       Apply this {currentAngle}° angle to all {pageCount} pages
                     </button>
@@ -404,30 +416,35 @@ export default function DeskewPDF() {
               </div>
 
               {/* Action Button */}
-              <div className="mt-6 pt-6 border-t border-slate-100 dark:border-slate-800 flex justify-end">
-                <button
+              <div className="mt-6 pt-6 border-t border-[var(--pms-border)] flex justify-end">
+                <motion.button
+                  whileHover={prefersReduced ? undefined : { scale: 1.01 }}
+                  whileTap={prefersReduced ? undefined : { scale: 0.99 }}
                   onClick={processDeskew}
                   disabled={busy}
-                  className="inline-flex items-center gap-2 px-6 py-2.5 rounded-xl font-bold text-white bg-amber-600 hover:bg-amber-700 disabled:opacity-50 transition-colors shadow-sm"
+                  className="pms-btn-primary relative overflow-hidden inline-flex items-center gap-2 px-7 py-3 rounded-2xl font-bold text-white disabled:opacity-50"
                 >
+                  <span className="pms-shimmer" aria-hidden="true" />
                   {busy ? (
                     <>
-                      <Loader2 className="w-4 h-4 animate-spin" /> Straightening PDF...
+                      <Loader2 className="w-4 h-4 animate-spin relative z-10" />
+                      <span className="relative z-10">Straightening PDF...</span>
                     </>
                   ) : (
                     <>
-                      <Compass className="w-4 h-4" /> Save Deskewed PDF
+                      <Compass className="w-4 h-4 relative z-10" />
+                      <span className="relative z-10">Save Deskewed PDF</span>
                     </>
                   )}
-                </button>
+                </motion.button>
               </div>
             </div>
 
             {/* Live Interactive Page Visualizer */}
-            <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800 p-6 text-center">
+            <div className="pms-glass-panel rounded-3xl p-6 text-center relative overflow-hidden">
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
-                  <Eye className="w-4 h-4 text-amber-600" />
+                  <Eye className="w-4 h-4 text-[var(--pms-rose)]" />
                   <h4 className="text-sm font-bold text-slate-800 dark:text-slate-200">
                     Live Straightening View (Page {currentPage} of {pageCount})
                   </h4>
@@ -448,7 +465,7 @@ export default function DeskewPDF() {
                           console.error('Failed to switch deskew preview page:', err);
                         }
                       }}
-                      className="px-2 py-1 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 text-xs"
+                      className="px-2.5 py-1 rounded-lg border border-[var(--pms-border)] bg-white/85 dark:bg-slate-800/85 text-slate-800 dark:text-slate-200 text-xs"
                     >
                       {Array.from({ length: Math.min(pageCount, 50) }, (_, i) => i + 1).map((n) => (
                         <option key={n} value={n}>
@@ -492,36 +509,56 @@ export default function DeskewPDF() {
             </div>
 
             {/* Success Box */}
-            {resultUrl && (
-              <div className="p-6 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-center animate-fade-in">
-                <CheckCircle2 className="w-10 h-10 text-emerald-600 dark:text-emerald-400 mx-auto mb-2" />
-                <h3 className="text-xl font-bold text-emerald-900 dark:text-emerald-100 mb-1">
-                  Deskewing Complete!
-                </h3>
-                <p className="text-sm text-emerald-700 dark:text-emerald-300 mb-4">
-                  All crooked pages have been rotated into perfect horizontal alignment.
-                </p>
-                <div className="flex items-center justify-center gap-3">
-                  <a
-                    href={resultUrl}
-                    download={resultName}
-                    className="inline-flex items-center gap-2 px-6 py-2.5 rounded-xl font-bold text-white bg-emerald-600 hover:bg-emerald-700 shadow-md transition-colors"
+            <AnimatePresence>
+              {resultUrl && (
+                <motion.div
+                  initial={prefersReduced ? false : { opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={prefersReduced ? undefined : { opacity: 0, y: -8 }}
+                  transition={prefersReduced ? { duration: 0 } : { duration: 0.25 }}
+                  className="p-6 md:p-8 rounded-3xl bg-gradient-to-br from-emerald-50/90 via-white/85 to-teal-50/80 dark:from-emerald-950/45 dark:via-slate-900/85 dark:to-teal-950/35 border border-emerald-200/80 dark:border-emerald-800/70 backdrop-blur-md shadow-lg text-center"
+                >
+                  <motion.div
+                    initial={prefersReduced ? false : { scale: 0.6, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    transition={prefersReduced ? { duration: 0 } : { type: 'spring', stiffness: 260, damping: 18 }}
+                    className="w-14 h-14 bg-emerald-100/90 dark:bg-emerald-900/50 text-emerald-600 dark:text-emerald-400 rounded-full flex items-center justify-center mx-auto mb-3 shadow-sm"
                   >
-                    <Download className="w-4 h-4" /> Download Straightened PDF
-                  </a>
-                  <a
-                    href={resultUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-emerald-800 dark:text-emerald-200 bg-white dark:bg-slate-800 border border-emerald-300 dark:border-emerald-700 hover:bg-emerald-100/50 transition-colors"
-                  >
-                    <Eye className="w-4 h-4" /> Preview in Browser
-                  </a>
-                </div>
-              </div>
-            )}
+                    <CheckCircle2 className="w-8 h-8" />
+                  </motion.div>
+                  <h3 className="text-xl font-bold text-emerald-950 dark:text-emerald-100 mb-1">
+                    Deskewing Complete!
+                  </h3>
+                  <p className="text-sm text-emerald-700 dark:text-emerald-300 mb-5">
+                    All crooked pages have been rotated into perfect horizontal alignment.
+                  </p>
+                  <div className="flex flex-wrap items-center justify-center gap-3">
+                    <motion.a
+                      whileHover={prefersReduced ? undefined : { scale: 1.02 }}
+                      whileTap={prefersReduced ? undefined : { scale: 0.98 }}
+                      href={resultUrl}
+                      download={resultName}
+                      className="pms-btn-primary relative overflow-hidden inline-flex items-center gap-2 px-7 py-3 rounded-2xl font-bold text-white"
+                    >
+                      <span className="pms-shimmer" aria-hidden="true" />
+                      <Download className="w-4 h-4 relative z-10" />
+                      <span className="relative z-10">Download Straightened PDF</span>
+                    </motion.a>
+                    <a
+                      href={resultUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-2 px-5 py-3 rounded-2xl font-semibold text-emerald-800 dark:text-emerald-200 bg-white/85 dark:bg-slate-800/85 border border-[var(--pms-border)] hover:bg-white dark:hover:bg-slate-800 transition-colors shadow-xs"
+                    >
+                      <Eye className="w-4 h-4" /> Preview in Browser
+                    </a>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
         )}
+      </PearlStageSwitch>
 
         <ToolSEOSection
           toolName="Deskew PDF"

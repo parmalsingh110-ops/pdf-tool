@@ -1,19 +1,17 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Upload,
   Download,
-  Printer,
   BookMarked,
   Sliders,
-  CheckCircle2,
   Smartphone,
   Eye,
-  FileText,
   ChevronLeft,
   ChevronRight,
-  Maximize2,
-  Scale,
 } from 'lucide-react';
+import { motion, useReducedMotion } from 'motion/react';
+import { AnimatedNumber, PearlScanOverlay, PearlStageSwitch } from '../components/pearl/PearlMotion';
+import { toArrayBufferBytes } from '../lib/blobUrl';
 import { PDFDocument } from 'pdf-lib';
 import * as pdfjsLib from 'pdfjs-dist';
 import '../lib/pdfWorker';
@@ -40,6 +38,7 @@ export default function BindingMargin() {
   );
 
   const [file, setFile] = useState<File | null>(null);
+  const prefersReduced = useReducedMotion();
   const [pdfBytes, setPdfBytes] = useState<Uint8Array | null>(null);
   const [pageCount, setPageCount] = useState<number>(0);
   const [bindingMode, setBindingMode] = useState<BindingMode>('single_sided');
@@ -298,7 +297,7 @@ export default function BindingMargin() {
       }
 
       const outBytes = await outPdf.save();
-      const blob = new Blob([outBytes as any], { type: 'application/pdf' });
+      const blob = new Blob([toArrayBufferBytes(outBytes)], { type: 'application/pdf' });
       downloadBlob(blob, `binding-margin-${Date.now()}.pdf`);
     } catch (err) {
       console.error('Error generating bound PDF:', err);
@@ -318,221 +317,274 @@ export default function BindingMargin() {
     >
       <div className="max-w-6xl mx-auto space-y-8 text-slate-900 dark:text-slate-100">
 
-        {/* Upload State */}
-        {!pdfBytes ? (
-          <div className="max-w-2xl mx-auto">
-            <label className="flex flex-col items-center justify-center p-12 border-2 border-dashed border-slate-300 dark:border-slate-700 hover:border-cyan-500 rounded-3xl cursor-pointer bg-white dark:bg-slate-900 transition-all shadow-sm group">
-              <input
-                type="file"
-                accept=".pdf"
-                onChange={handleFileUpload}
-                className="hidden"
-              />
-              <div className="w-16 h-16 rounded-2xl bg-cyan-50 dark:bg-cyan-950/50 text-cyan-600 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-                <Upload className="w-8 h-8" />
-              </div>
-              <span className="text-base font-bold text-slate-900 dark:text-white mb-1">
-                Drop Thesis, Project Report, or Book PDF Here
-              </span>
-              <span className="text-xs text-slate-400 text-center max-w-xs">
-                Supports university project reports, PhD dissertations, court briefs, or novel drafts.
-              </span>
-            </label>
-          </div>
-        ) : (
-          /* Editor Layout */
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-            {/* Left Controls */}
-            <div className="lg:col-span-5 space-y-5 bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm">
-              <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
-                <span className="text-sm font-bold flex items-center gap-2">
-                  <Sliders className="w-4 h-4 text-cyan-500" /> Binding Gutter Options
-                </span>
-                <button
-                  onClick={() => {
-                    setFile(null);
-                    setPdfBytes(null);
-                  }}
-                  className="text-xs text-rose-500 hover:text-rose-600 font-semibold"
-                >
-                  Change PDF
-                </button>
-              </div>
-
-              {/* Binding Modes */}
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">
-                  Print & Binding Method
-                </label>
-                <div className="grid grid-cols-1 gap-2 text-xs">
-                  {[
-                    {
-                      id: 'single_sided',
-                      title: 'Single-Sided Print (Left Gutter)',
-                      desc: 'Standard spiral & comb binding. Adds margin to the left of every page.',
-                    },
-                    {
-                      id: 'double_sided',
-                      title: 'Double-Sided / Book Binding (Mirrored Margins)',
-                      desc: 'Odd pages get Left margin, Even pages get Right margin (Inner spine space).',
-                    },
-                    {
-                      id: 'top_binding',
-                      title: 'Top Binding (Legal Pad / Notary)',
-                      desc: 'Adds margin to the top of all pages for vertical clipboard or pad filing.',
-                    },
-                  ].map((m) => (
-                    <button
-                      key={m.id}
-                      onClick={() => setBindingMode(m.id as BindingMode)}
-                      className={`p-3 rounded-2xl border text-left transition ${
-                        bindingMode === m.id
-                          ? 'border-cyan-500 bg-cyan-50/50 dark:bg-cyan-950/40 text-cyan-900 dark:text-cyan-300'
-                          : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800'
-                      }`}
-                    >
-                      <div className="font-bold">{m.title}</div>
-                      <div className="text-[11px] text-slate-400 mt-0.5">{m.desc}</div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Gutter Margin Width Presets & Slider */}
-              <div className="p-4 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-3">
-                <div className="flex justify-between items-center text-xs font-semibold">
-                  <span className="text-slate-700 dark:text-slate-300">Gutter Margin Width</span>
-                  <span className="px-2 py-0.5 bg-cyan-600 text-white rounded font-mono text-[11px]">
-                    {gutterInches.toFixed(2)}" ({Math.round(gutterInches * 25.4)} mm)
-                  </span>
-                </div>
-                <div className="grid grid-cols-4 gap-1.5">
-                  {[
-                    { label: '0.5"', val: 0.5 },
-                    { label: '0.75"', val: 0.75 },
-                    { label: '1.0" (Thesis)', val: 1.0 },
-                    { label: '1.5"', val: 1.5 },
-                  ].map((p) => (
-                    <button
-                      key={p.label}
-                      onClick={() => setGutterInches(p.val)}
-                      className={`py-1.5 px-1 rounded-lg border text-[11px] font-bold text-center transition ${
-                        gutterInches === p.val
-                          ? 'border-cyan-500 bg-cyan-600 text-white'
-                          : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900'
-                      }`}
-                    >
-                      {p.label}
-                    </button>
-                  ))}
-                </div>
-                <input
-                  type="range"
-                  min="0.25"
-                  max="2.0"
-                  step="0.05"
-                  value={gutterInches}
-                  onChange={(e) => setGutterInches(parseFloat(e.target.value))}
-                  className="w-full accent-cyan-600"
-                />
-              </div>
-
-              {/* Toggles */}
-              <div className="space-y-2 pt-1">
-                <label className="flex items-center gap-2.5 text-xs text-slate-700 dark:text-slate-300 cursor-pointer">
+        <PearlStageSwitch stageKey={!pdfBytes ? 'upload' : 'editor'}>
+          {!pdfBytes ? (
+            <div className="max-w-2xl mx-auto">
+              <div className="pms-glass-panel rounded-3xl p-4 sm:p-6">
+                <label className="flex flex-col items-center justify-center p-12 border-2 border-dashed border-[var(--pms-border)] hover:border-sky-500 rounded-2xl cursor-pointer bg-white/75 dark:bg-slate-900/75 transition-all group">
                   <input
-                    type="checkbox"
-                    checked={scaleContent}
-                    onChange={(e) => setScaleContent(e.target.checked)}
-                    className="w-4 h-4 rounded text-cyan-600 accent-cyan-600"
+                    type="file"
+                    accept=".pdf"
+                    onChange={handleFileUpload}
+                    className="hidden"
                   />
-                  <span>Proportionally scale content (Guarantees no text is cut off)</span>
-                </label>
-                <label className="flex items-center gap-2.5 text-xs text-slate-700 dark:text-slate-300 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={showSpiralGuide}
-                    onChange={(e) => setShowSpiralGuide(e.target.checked)}
-                    className="w-4 h-4 rounded text-cyan-600 accent-cyan-600"
-                  />
-                  <span>Show simulated spiral binding rings on preview</span>
-                </label>
-              </div>
-
-              {/* Page Navigator */}
-              {pageCount > 1 && (
-                <div className="flex items-center justify-between p-3 bg-slate-100 dark:bg-slate-800 rounded-xl text-xs font-semibold">
-                  <button
-                    onClick={() => setActivePageIndex(Math.max(0, activePageIndex - 1))}
-                    disabled={activePageIndex === 0}
-                    className="p-1 rounded hover:bg-white dark:hover:bg-slate-700 disabled:opacity-30"
+                  <div
+                    className="w-16 h-16 rounded-2xl text-sky-600 dark:text-sky-400 flex items-center justify-center mb-4 group-hover:scale-105 transition-transform shadow-xs"
+                    style={{ backgroundColor: 'var(--pms-soft-blue)' }}
                   >
-                    <ChevronLeft className="w-4 h-4" />
-                  </button>
-                  <span>
-                    Viewing Page {activePageIndex + 1} of {pageCount} (
-                    {bindingMode === 'double_sided'
-                      ? (activePageIndex + 1) % 2 !== 0
-                        ? 'Front / Odd Page'
-                        : 'Back / Even Page'
-                      : 'Single Page'}
-                    )
+                    <Upload className="w-8 h-8" />
+                  </div>
+                  <span className="text-base font-bold text-slate-900 dark:text-white mb-1">
+                    Drop Thesis, Project Report, or Book PDF Here
                   </span>
-                  <button
-                    onClick={() => setActivePageIndex(Math.min(pageCount - 1, activePageIndex + 1))}
-                    disabled={activePageIndex === pageCount - 1}
-                    className="p-1 rounded hover:bg-white dark:hover:bg-slate-700 disabled:opacity-30"
-                  >
-                    <ChevronRight className="w-4 h-4" />
-                  </button>
-                </div>
-              )}
-
-              {/* Export Buttons */}
-              <div className="pt-3 border-t border-slate-100 dark:border-slate-800 space-y-2">
-                <button
-                  onClick={handleDownloadPdf}
-                  disabled={isProcessing}
-                  className="w-full flex items-center justify-center gap-2 py-3.5 px-4 bg-cyan-600 hover:bg-cyan-700 text-white rounded-xl font-bold text-sm shadow-md transition disabled:opacity-50"
-                >
-                  <Download className="w-4 h-4" /> Download Print-Ready Bound PDF ({pageCount} Pages)
-                </button>
-                <button
-                  onClick={() => setShowQrModal(true)}
-                  className="w-full flex items-center justify-center gap-1.5 py-2 px-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-xl font-semibold text-xs transition"
-                >
-                  <Smartphone className="w-3.5 h-3.5" /> Send to Mobile Phone
-                </button>
+                  <span className="text-xs text-slate-500 dark:text-slate-400 text-center max-w-xs">
+                    Supports university project reports, PhD dissertations, court briefs, or novel drafts.
+                  </span>
+                </label>
               </div>
             </div>
+          ) : (
+            /* Editor Layout */
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+              {/* Left Controls */}
+              <div className="lg:col-span-5 relative overflow-hidden pms-glass-panel space-y-5 p-6 rounded-3xl">
+                <PearlScanOverlay active={isProcessing} label="Applying binding gutter margins…" />
 
-            {/* Right Live Preview */}
-            <div className="lg:col-span-7 bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col items-center">
-              <div className="w-full flex items-center justify-between mb-4">
-                <span className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-                  <Eye className="w-4 h-4 text-cyan-500" /> Binding Gutter Live Simulation
-                </span>
-                <span className="text-xs font-semibold px-2.5 py-1 bg-cyan-50 dark:bg-cyan-950/40 text-cyan-700 dark:text-cyan-400 rounded-lg">
-                  {bindingMode === 'double_sided' ? 'Mirrored Margin' : 'Standard Gutter'}
-                </span>
-              </div>
+                <div className="flex items-center justify-between pb-3 border-b border-[var(--pms-border)]">
+                  <span className="text-sm font-bold flex items-center gap-2">
+                    <Sliders className="w-4 h-4 text-sky-500" /> Binding Gutter Options
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFile(null);
+                      setPdfBytes(null);
+                    }}
+                    className="text-xs text-rose-500 hover:text-rose-600 font-semibold"
+                  >
+                    Change PDF
+                  </button>
+                </div>
 
-              {previewDataUrl ? (
-                <div className="w-full max-h-[640px] overflow-auto flex items-center justify-center p-4 bg-slate-100 dark:bg-slate-950 rounded-2xl border border-slate-200 dark:border-slate-800">
-                  <img
-                    src={previewDataUrl}
-                    alt="Binding Margin Preview"
-                    className="max-h-[580px] w-auto object-contain rounded shadow-lg border border-slate-300 dark:border-slate-700"
+                {/* Binding Modes */}
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2">
+                    Print & Binding Method
+                  </label>
+                  <div className="grid grid-cols-1 gap-2 text-xs">
+                    {[
+                      {
+                        id: 'single_sided',
+                        title: 'Single-Sided Print (Left Gutter)',
+                        desc: 'Standard spiral & comb binding. Adds margin to the left of every page.',
+                      },
+                      {
+                        id: 'double_sided',
+                        title: 'Double-Sided / Book Binding (Mirrored Margins)',
+                        desc: 'Odd pages get Left margin, Even pages get Right margin (Inner spine space).',
+                      },
+                      {
+                        id: 'top_binding',
+                        title: 'Top Binding (Legal Pad / Notary)',
+                        desc: 'Adds margin to the top of all pages for vertical clipboard or pad filing.',
+                      },
+                    ].map((m) => {
+                      const active = bindingMode === m.id;
+                      return (
+                        <button
+                          key={m.id}
+                          type="button"
+                          onClick={() => setBindingMode(m.id as BindingMode)}
+                          className={`relative p-3 rounded-2xl border text-left transition-colors ${
+                            active
+                              ? 'border-sky-500 text-slate-900 dark:text-white'
+                              : 'bg-white/75 dark:bg-slate-900/75 border-[var(--pms-border)] text-slate-700 dark:text-slate-300 hover:border-slate-300 dark:hover:border-slate-600'
+                          }`}
+                        >
+                          {active && (
+                            <motion.span
+                              layoutId="binding-mode-pill"
+                              transition={prefersReduced ? { duration: 0 } : { type: 'spring', stiffness: 420, damping: 32 }}
+                              className="absolute inset-0 rounded-2xl -z-0"
+                              style={{ backgroundColor: 'var(--pms-soft-blue)' }}
+                            />
+                          )}
+                          <div className="relative z-10 font-bold">{m.title}</div>
+                          <div className="relative z-10 text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">{m.desc}</div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Gutter Margin Width Presets & Slider */}
+                <div className="p-4 bg-white/75 dark:bg-slate-900/75 rounded-2xl border border-[var(--pms-border)] space-y-3">
+                  <div className="flex justify-between items-center text-xs font-semibold">
+                    <span className="text-slate-700 dark:text-slate-300">Gutter Margin Width</span>
+                    <span
+                      className="px-2.5 py-0.5 rounded-lg font-mono text-[11px] font-bold text-sky-800 dark:text-sky-200 border border-sky-300/60 dark:border-sky-800/60 tabular-nums"
+                      style={{ backgroundColor: 'var(--pms-soft-blue)' }}
+                    >
+                      <AnimatedNumber value={gutterInches} decimals={2} suffix='"' /> (
+                      <AnimatedNumber value={Math.round(gutterInches * 25.4)} suffix=" mm" />)
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {[
+                      { label: '0.5"', val: 0.5 },
+                      { label: '0.75"', val: 0.75 },
+                      { label: '1.0" (Thesis)', val: 1.0 },
+                      { label: '1.5"', val: 1.5 },
+                    ].map((p) => {
+                      const active = gutterInches === p.val;
+                      return (
+                        <button
+                          key={p.label}
+                          type="button"
+                          onClick={() => setGutterInches(p.val)}
+                          className={`relative py-1.5 px-1 rounded-lg border text-[11px] font-bold text-center transition-colors ${
+                            active
+                              ? 'border-sky-500 text-sky-900 dark:text-white'
+                              : 'border-[var(--pms-border)] bg-white/80 dark:bg-slate-950/70 text-slate-700 dark:text-slate-300'
+                          }`}
+                        >
+                          {active && (
+                            <motion.span
+                              layoutId="binding-gutter-pill"
+                              transition={prefersReduced ? { duration: 0 } : { type: 'spring', stiffness: 420, damping: 32 }}
+                              className="absolute inset-0 rounded-lg -z-0"
+                              style={{ backgroundColor: 'var(--pms-soft-blue)' }}
+                            />
+                          )}
+                          <span className="relative z-10">{p.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <input
+                    type="range"
+                    min="0.25"
+                    max="2.0"
+                    step="0.05"
+                    value={gutterInches}
+                    onChange={(e) => setGutterInches(parseFloat(e.target.value))}
+                    className="w-full accent-sky-600"
                   />
                 </div>
-              ) : (
-                <div className="w-full h-96 flex items-center justify-center text-slate-400 text-xs">
-                  Generating binding preview...
+
+                {/* Toggles */}
+                <div className="space-y-2.5 p-3.5 bg-white/75 dark:bg-slate-900/75 rounded-2xl border border-[var(--pms-border)]">
+                  <label className="flex items-center gap-2.5 text-xs text-slate-700 dark:text-slate-300 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={scaleContent}
+                      onChange={(e) => setScaleContent(e.target.checked)}
+                      className="w-4 h-4 rounded text-sky-600 accent-sky-600"
+                    />
+                    <span>Proportionally scale content (Guarantees no text is cut off)</span>
+                  </label>
+                  <label className="flex items-center gap-2.5 text-xs text-slate-700 dark:text-slate-300 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={showSpiralGuide}
+                      onChange={(e) => setShowSpiralGuide(e.target.checked)}
+                      className="w-4 h-4 rounded text-sky-600 accent-sky-600"
+                    />
+                    <span>Show simulated spiral binding rings on preview</span>
+                  </label>
                 </div>
-              )}
+
+                {/* Page Navigator */}
+                {pageCount > 1 && (
+                  <div className="flex items-center justify-between p-3 bg-white/75 dark:bg-slate-900/75 border border-[var(--pms-border)] rounded-xl text-xs font-semibold">
+                    <button
+                      type="button"
+                      onClick={() => setActivePageIndex(Math.max(0, activePageIndex - 1))}
+                      disabled={activePageIndex === 0}
+                      className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-30 transition"
+                    >
+                      <ChevronLeft className="w-4 h-4" />
+                    </button>
+                    <span>
+                      Viewing Page {activePageIndex + 1} of <AnimatedNumber value={pageCount} /> (
+                      {bindingMode === 'double_sided'
+                        ? (activePageIndex + 1) % 2 !== 0
+                          ? 'Front / Odd Page'
+                          : 'Back / Even Page'
+                        : 'Single Page'}
+                      )
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setActivePageIndex(Math.min(pageCount - 1, activePageIndex + 1))}
+                      disabled={activePageIndex === pageCount - 1}
+                      className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-30 transition"
+                    >
+                      <ChevronRight className="w-4 h-4" />
+                    </button>
+                  </div>
+                )}
+
+                {/* Export Buttons */}
+                <div className="pt-3 border-t border-[var(--pms-border)] space-y-2">
+                  <motion.button
+                    type="button"
+                    whileTap={prefersReduced ? undefined : { scale: 0.98 }}
+                    onClick={handleDownloadPdf}
+                    disabled={isProcessing}
+                    className="pms-btn-primary w-full flex items-center justify-center gap-2 py-3.5 px-4 rounded-xl font-bold text-sm shadow-md disabled:opacity-50"
+                  >
+                    <Download className="w-4 h-4" />
+                    <span>
+                      Download Print-Ready Bound PDF (<AnimatedNumber value={pageCount} /> Pages)
+                    </span>
+                  </motion.button>
+                  <motion.button
+                    type="button"
+                    whileTap={prefersReduced ? undefined : { scale: 0.98 }}
+                    onClick={() => setShowQrModal(true)}
+                    className="w-full flex items-center justify-center gap-1.5 py-2.5 px-3 bg-white/75 dark:bg-slate-900/75 border border-[var(--pms-border)] hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-800 dark:text-slate-200 rounded-xl font-semibold text-xs transition"
+                  >
+                    <Smartphone className="w-3.5 h-3.5" /> Send to Mobile Phone
+                  </motion.button>
+                </div>
+              </div>
+
+              {/* Right Live Preview */}
+              <div className="lg:col-span-7 relative overflow-hidden pms-glass-panel p-6 rounded-3xl flex flex-col items-center">
+                <PearlScanOverlay active={isProcessing} label="Simulating binding sheet…" />
+
+                <div className="w-full flex items-center justify-between mb-4">
+                  <span className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+                    <Eye className="w-4 h-4 text-sky-500" /> Binding Gutter Live Simulation
+                  </span>
+                  <span
+                    className="text-xs font-semibold px-2.5 py-1 text-sky-800 dark:text-sky-200 rounded-lg border border-sky-300/60 dark:border-sky-800/60"
+                    style={{ backgroundColor: 'var(--pms-soft-blue)' }}
+                  >
+                    {bindingMode === 'double_sided' ? 'Mirrored Margin' : 'Standard Gutter'}
+                  </span>
+                </div>
+
+                {previewDataUrl ? (
+                  <div className="w-full max-h-[640px] overflow-auto flex items-center justify-center p-4 bg-slate-100/70 dark:bg-slate-950/60 rounded-2xl border border-[var(--pms-border)]">
+                    <div className="p-2 bg-white rounded-xl shadow-lg border border-slate-200">
+                      <img
+                        src={previewDataUrl}
+                        alt="Binding Margin Preview"
+                        className="max-h-[560px] w-auto object-contain rounded"
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <div className="w-full h-96 flex items-center justify-center text-slate-400 text-xs">
+                    Generating binding preview...
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
-        )}
+          )}
+        </PearlStageSwitch>
 
         {/* SEO Section */}
         <ToolSEOSection
