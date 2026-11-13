@@ -21,6 +21,7 @@ import { useSEO } from '../hooks/useSEO';
 import { usePageSEO } from '../lib/usePageSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
 import { downloadBlob } from '../lib/utils';
+import { useAutoRevokeUrl } from '../lib/blobUrl';
 
 export default function AdmitCardOptimizer() {
   useSEO(
@@ -44,6 +45,8 @@ export default function AdmitCardOptimizer() {
   const [includeThumbBox, setIncludeThumbBox] = useState<boolean>(true);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+
+  useAutoRevokeUrl(previewUrl);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 

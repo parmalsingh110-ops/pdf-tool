@@ -10,6 +10,7 @@ import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { dataUrlToBytes } from '../lib/utils';
+import { useAutoRevokeUrl } from '../lib/blobUrl';
 
 interface HighlightMatch {
   pageIndex: number;
@@ -43,6 +44,8 @@ export default function HighlightText() {
   const [busy, setBusy] = useState(false);
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [resultFileName, setResultFileName] = useState('');
+
+  useAutoRevokeUrl(resultUrl);
 
   const colors = [
     { hex: '#fef08a', label: 'Neon Yellow', border: '#eab308' },

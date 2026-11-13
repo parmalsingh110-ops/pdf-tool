@@ -71,6 +71,20 @@ export default function PrintCostCalculator() {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Clear saved shop preferences on shared PCs
+  const handleClearSettings = () => {
+    ['pms_rate_bw_single', 'pms_rate_bw_duplex', 'pms_rate_color_single', 'pms_rate_color_duplex', 'pms_shop_upi', 'pms_shop_name'].forEach((k) => {
+      try { localStorage.removeItem(k); } catch {}
+    });
+    setRateBwSingle(2);
+    setRateBwDuplex(3);
+    setRateColorSingle(10);
+    setRateColorDuplex(15);
+    setUpiId('example@upi');
+    setShopName('Xerox & Print Center');
+    setSavedSettingsSuccess(false);
+  };
+
   // Save Shopkeeper Preferences
   const handleSaveSettings = () => {
     localStorage.setItem('pms_rate_bw_single', String(rateBwSingle));
@@ -469,6 +483,13 @@ export default function PrintCostCalculator() {
             </div>
 
             <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={handleClearSettings}
+                className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-xs font-bold border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-950/30 transition-all"
+              >
+                Clear Saved Shop Info
+              </button>
               <button
                 onClick={handleSaveSettings}
                 className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl text-xs font-bold bg-slate-900 dark:bg-white text-white dark:text-slate-900 hover:opacity-90 transition-all"

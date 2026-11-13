@@ -7,6 +7,7 @@ import '../lib/pdfWorker';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { dataUrlToBytes } from '../lib/utils';
+import { useAutoRevokeUrl } from '../lib/blobUrl';
 
 export default function PdfOverlay() {
   useSEO(
@@ -32,6 +33,8 @@ export default function PdfOverlay() {
 
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [showResultPreview, setShowResultPreview] = useState(true);
+
+  useAutoRevokeUrl(resultUrl);
 
   // Cached Page 1 canvases for fast slider updates
   const canvasARef = useRef<HTMLCanvasElement | null>(null);

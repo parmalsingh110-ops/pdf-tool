@@ -101,8 +101,8 @@ export default function ExactImageSize() {
   return (
     <div className="flex-1 flex flex-col items-center justify-center p-8">
       <div className="text-center mb-8">
-        <h1 className="text-4xl font-bold text-gray-900 mb-4">Exact Image Size</h1>
-        <p className="text-xl text-gray-600">Compress images to a strict size limit (e.g., under 50KB).</p>
+        <h1 className="text-4xl font-bold text-gray-900 dark:text-white mb-4">Exact Image Size</h1>
+        <p className="text-xl text-gray-600 dark:text-slate-400">Compress images to a strict size limit (e.g., under 50KB).</p>
       </div>
 
       {!file ? (
@@ -113,33 +113,33 @@ export default function ExactImageSize() {
           title="Select Image file" 
         />
       ) : (
-        <div className="w-full max-w-4xl bg-white rounded-2xl shadow-sm border border-gray-200 p-8 flex flex-col md:flex-row gap-8">
+        <div className="w-full max-w-4xl bg-white dark:bg-slate-900 rounded-2xl shadow-sm border border-gray-200 dark:border-slate-700 p-8 flex flex-col md:flex-row gap-8">
           <div className="flex-1">
-            <div className="flex items-center gap-4 p-6 bg-gray-50 rounded-xl border border-gray-200 mb-8">
-              <div className="w-16 h-16 bg-teal-100 text-teal-600 rounded-xl flex items-center justify-center shrink-0">
+            <div className="flex items-center gap-4 p-6 bg-gray-50 dark:bg-slate-800 rounded-xl border border-gray-200 dark:border-slate-700 mb-8">
+              <div className="w-16 h-16 bg-teal-100 dark:bg-teal-950/50 text-teal-600 dark:text-teal-400 rounded-xl flex items-center justify-center shrink-0">
                 <ImageIcon className="w-8 h-8" />
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-lg font-semibold text-gray-900 truncate">{file.name}</p>
-                <p className="text-sm text-gray-500">{(file.size / 1024).toFixed(2)} KB</p>
+                <p className="text-lg font-semibold text-gray-900 dark:text-white truncate">{file.name}</p>
+                <p className="text-sm text-gray-500 dark:text-slate-400">{(file.size / 1024).toFixed(2)} KB</p>
               </div>
             </div>
 
             {!compressedUrl ? (
               <div className="space-y-6">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">
                     Max Target Size (KB)
                   </label>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                      <ImageMinus className="h-5 w-5 text-gray-400" />
+                      <ImageMinus className="h-5 w-5 text-gray-400 dark:text-slate-500" />
                     </div>
                     <input
                       type="number"
                       value={targetSizeKB}
                       onChange={(e) => setTargetSizeKB(Number(e.target.value))}
-                      className="w-full pl-11 pr-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-shadow"
+                      className="w-full pl-11 pr-4 py-3 rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-shadow"
                       placeholder="50"
                       min="1"
                     />
@@ -156,7 +156,7 @@ export default function ExactImageSize() {
                   </button>
                   <button
                     onClick={() => { setFile(null); }}
-                    className="px-6 py-4 bg-gray-100 text-gray-700 text-lg font-semibold rounded-xl hover:bg-gray-200 transition-colors"
+                    className="px-6 py-4 bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-slate-300 text-lg font-semibold rounded-xl hover:bg-gray-200 dark:hover:bg-slate-700 transition-colors"
                   >
                     Cancel
                   </button>
@@ -164,21 +164,21 @@ export default function ExactImageSize() {
               </div>
             ) : (
               <div className="space-y-6 text-center">
-                <div className="p-8 bg-green-50 rounded-xl border border-green-200">
-                  <h3 className="text-2xl font-bold text-green-800 mb-4">Image compressed!</h3>
+                <div className="p-8 bg-green-50 dark:bg-green-950/30 rounded-xl border border-green-200 dark:border-green-800">
+                  <h3 className="text-2xl font-bold text-green-800 dark:text-green-300 mb-4">Image compressed!</h3>
                   {stats && (
                     <div className="flex justify-center gap-8 mb-6 text-sm">
                       <div>
-                        <p className="text-gray-500">Original</p>
-                        <p className="font-semibold text-gray-900">{(stats.original / 1024).toFixed(2)} KB</p>
+                        <p className="text-gray-500 dark:text-slate-400">Original</p>
+                        <p className="font-semibold text-gray-900 dark:text-white">{(stats.original / 1024).toFixed(2)} KB</p>
                       </div>
                       <div>
-                        <p className="text-gray-500">Compressed</p>
-                        <p className="font-semibold text-green-700">{(stats.compressed / 1024).toFixed(2)} KB</p>
+                        <p className="text-gray-500 dark:text-slate-400">Compressed</p>
+                        <p className="font-semibold text-green-700 dark:text-green-400">{(stats.compressed / 1024).toFixed(2)} KB</p>
                       </div>
                       <div>
-                        <p className="text-gray-500">Target Max</p>
-                        <p className="font-semibold text-teal-700">{targetSizeKB} KB</p>
+                        <p className="text-gray-500 dark:text-slate-400">Target Max</p>
+                        <p className="font-semibold text-teal-700 dark:text-teal-400">{targetSizeKB} KB</p>
                       </div>
                     </div>
                   )}
@@ -193,7 +193,7 @@ export default function ExactImageSize() {
                 </div>
                 <button
                   onClick={() => { setFile(null); setCompressedUrl(null); setStats(null); }}
-                  className="text-gray-600 hover:text-gray-900 font-medium"
+                  className="text-gray-600 dark:text-slate-400 hover:text-gray-900 dark:hover:text-white font-medium"
                 >
                   Compress another Image
                 </button>
@@ -202,7 +202,7 @@ export default function ExactImageSize() {
           </div>
           
           {/* Preview */}
-          <div className="flex-1 flex flex-col items-center justify-center bg-gray-100 rounded-xl border border-gray-200 p-4 overflow-hidden">
+          <div className="flex-1 flex flex-col items-center justify-center bg-gray-100 dark:bg-slate-800 rounded-xl border border-gray-200 dark:border-slate-700 p-4 overflow-hidden">
             {compressedUrl ? (
               <img src={compressedUrl} alt="Compressed preview" className="max-w-full max-h-[400px] object-contain" />
             ) : previewUrl ? (

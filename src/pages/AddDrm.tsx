@@ -8,6 +8,7 @@ import { rgb, StandardFonts } from 'pdf-lib';
 import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
+import { useAutoRevokeUrl } from '../lib/blobUrl';
 
 export default function AddDrm() {
   useSEO(
@@ -34,6 +35,8 @@ export default function AddDrm() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [resultFileName, setResultFileName] = useState('');
+
+  useAutoRevokeUrl(resultUrl);
 
   const handleDrop = (acceptedFiles: File[]) => {
     if (acceptedFiles.length > 0) {

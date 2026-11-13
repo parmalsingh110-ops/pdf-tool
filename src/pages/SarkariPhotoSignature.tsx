@@ -6,6 +6,7 @@ import ToolSEOSection from '../components/ToolSEOSection';
 import { PDFDocument } from 'pdf-lib';
 import { dataUrlToBytes } from '../lib/utils';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { triggerBlobDownload, useAutoRevokeUrl } from '../lib/blobUrl';
 
 type LayoutMode = 'ssc_combo' | 'side_by_side' | 'photo_only' | 'sign_only';
 
@@ -25,6 +26,9 @@ export default function SarkariPhotoSignature() {
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   const [signFile, setSignFile] = useState<File | null>(null);
   const [signUrl, setSignUrl] = useState<string | null>(null);
+
+  useAutoRevokeUrl(photoUrl);
+  useAutoRevokeUrl(signUrl);
 
   // Text inputs
   const [candidateName, setCandidateName] = useState('ANURAG SHARMA');
@@ -372,11 +376,7 @@ export default function SarkariPhotoSignature() {
 
       const pdfBytes = await pdfDoc.save();
       const blob = new Blob([pdfBytes as any], { type: 'application/pdf' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `sarkari_document_${candidateName.replace(/\s+/g, '_') || 'exam'}.pdf`;
-      a.click();
+      triggerBlobDownload(blob, `sarkari_document_${candidateName.replace(/\s+/g, '_') || 'exam'}.pdf`);
     }
   };
 

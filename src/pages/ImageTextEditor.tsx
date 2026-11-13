@@ -675,17 +675,7 @@ export default function ImageTextEditor() {
             <p className="mt-2 text-slate-400 max-w-3xl text-sm leading-relaxed">
               Upload a <strong className="text-slate-300">PNG, JPG, WebP, GIF</strong>, or{' '}
               <strong className="text-slate-300">PDF</strong> (first page is converted to an image for OCR).
-              Runs in your browser: OCR finds words, you edit text and style, then we white out those boxes and
-              redraw text. This is not AI inpainting — for seamless edits similar to{' '}
-              <a
-                href="https://photext.shop/"
-                className="text-sky-400 hover:underline"
-                target="_blank"
-                rel="noreferrer"
-              >
-                PhoText
-              </a>
-              , a server-side model would be required.
+              Runs in your browser: OCR finds words, you edit text and style, then we clean &amp; redraw matching text locally. For full scanned-PDF texture synthesis, server-side processing is optional.
             </p>
           </div>
         </div>

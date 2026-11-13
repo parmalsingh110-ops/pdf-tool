@@ -110,9 +110,9 @@ export default function CompressPDF() {
           const canvasToJpegBytes = (canvas: HTMLCanvasElement, q: number) =>
             new Promise<ArrayBuffer>((resolve, reject) => {
               canvas.toBlob(
-                async (blob) => {
+                (blob) => {
                   if (!blob) reject(new Error('jpeg'));
-                  else resolve(await blob.arrayBuffer());
+                  else blob.arrayBuffer().then(resolve, reject);
                 },
                 'image/jpeg',
                 q,

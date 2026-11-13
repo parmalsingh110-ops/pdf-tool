@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Download, LucideIcon, FileText, AlertTriangle } from 'lucide-react';
 import FileDropzone from './FileDropzone';
+import { useAutoRevokeUrl } from '../lib/blobUrl';
 
 interface GenericToolUIProps {
   title: string;
@@ -33,6 +34,8 @@ export default function GenericToolUI({
   const [isProcessing, setIsProcessing] = useState(false);
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  useAutoRevokeUrl(resultUrl);
 
   const handleDrop = (acceptedFiles: File[]) => {
     if (acceptedFiles.length > 0) {

@@ -7,6 +7,7 @@ import '../lib/pdfWorker';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { useAutoRevokeUrl } from '../lib/blobUrl';
 
 type PrintPermission = 'none' | 'low' | 'high';
 
@@ -56,6 +57,8 @@ export default function ProtectPDF() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [protectedUrl, setProtectedUrl] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  useAutoRevokeUrl(protectedUrl);
 
   const pwdStrength = evaluateStrength(userPassword);
   const passwordsMatch = userPassword.length > 0 && confirmPassword.length > 0 && userPassword === confirmPassword;

@@ -7,6 +7,7 @@ import '../lib/pdfWorker';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { useAutoRevokeUrl } from '../lib/blobUrl';
 
 type NumberPosition = 'bottom-center' | 'bottom-right' | 'bottom-left' | 'top-center' | 'top-right' | 'top-left';
 type NumberFormat = 'page-n-of-total' | 'n-of-total' | 'page-n' | 'just-n' | 'dash-n-dash';
@@ -58,6 +59,8 @@ export default function PageNumbersPDF() {
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [numberedUrl, setNumberedUrl] = useState<string | null>(null);
+
+  useAutoRevokeUrl(numberedUrl);
 
   const getFormattedText = (pageIdx: number, total: number) => {
     const num = pageIdx + startNumber;

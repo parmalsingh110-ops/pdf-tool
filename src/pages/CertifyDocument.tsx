@@ -9,6 +9,7 @@ import FileDropzone from '../components/FileDropzone';
 import * as Zga from 'zgapdfsigner';
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 import { useSEO } from '../hooks/useSEO';
+import { toArrayBufferBytes, useAutoRevokeUrl } from '../lib/blobUrl';
 
 type CertMode = 'instant' | 'custom_p12';
 
@@ -44,6 +45,8 @@ export default function CertifyDocument() {
     timestamp: string;
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  useAutoRevokeUrl(certifiedUrl);
 
   const handlePdfDrop = (acceptedFiles: File[]) => {
     if (acceptedFiles.length > 0) {
@@ -98,7 +101,7 @@ export default function CertifyDocument() {
         };
 
         const signer = new Zga.PdfSigner(options);
-        const signedPdfBytes = await signer.sign(pdfBuffer);
+        const signedPdfBytes = toArrayBufferBytes(await signer.sign(pdfBuffer));
         const blob = new Blob([signedPdfBytes], { type: 'application/pdf' });
         setCertifiedUrl(URL.createObjectURL(blob));
         setAuditInfo({
@@ -189,8 +192,8 @@ export default function CertifyDocument() {
         `Timestamp:${nowIso}`,
       ]);
 
-      const certifiedBytes = await pdfDoc.save();
-      const blob = new Blob([certifiedBytes as any], { type: 'application/pdf' });
+      const certifiedBytes = toArrayBufferBytes(await pdfDoc.save());
+      const blob = new Blob([certifiedBytes], { type: 'application/pdf' });
       setCertifiedUrl(URL.createObjectURL(blob));
       setAuditInfo({
         sha256: sha256Hex,

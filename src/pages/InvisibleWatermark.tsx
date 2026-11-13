@@ -9,6 +9,7 @@ import '../lib/pdfWorker';
 import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
+import { useAutoRevokeUrl } from '../lib/blobUrl';
 
 // ─── Zero-Width Steganography Engine ────────────────────────────────
 // Encodes alphanumeric tracking payloads into zero-width Unicode characters
@@ -85,6 +86,8 @@ export default function InvisibleWatermark() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [resultName, setResultName] = useState('');
+
+  useAutoRevokeUrl(resultUrl);
 
   // Decode Mode State
   const [decodeFile, setDecodeFile] = useState<File | null>(null);

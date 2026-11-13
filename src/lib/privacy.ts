@@ -171,6 +171,21 @@ export async function decryptBytesWithKey(
 }
 
 /**
+ * Scrubs API keys, URL secret fragments (#k=, #t=), query tokens, and local OS user paths
+ * from error messages or stack traces before persisting or dispatching telemetry.
+ */
+export function sanitizeSensitiveText(input: string, maxLen = 2000): string {
+  if (!input) return '';
+  return String(input)
+    .replace(/AIza[0-9A-Za-z\-_]{20,}/g, '[REDACTED_KEY]')
+    .replace(/Bearer\s+[A-Za-z0-9\-._~+/]+=*/gi, 'Bearer [REDACTED]')
+    .replace(/#(?:k|t|key|token)=[^&\s"']+/gi, '#[REDACTED]')
+    .replace(/([?&](?:token|key|secret|passcode|auth|read_token)=)[^&\s"']+/gi, '$1[REDACTED]')
+    .replace(/(?:\/Users\/|C:\\Users\\)[^/\\\s:)]+/gi, '[USER_HOME]')
+    .slice(0, maxLen);
+}
+
+/**
  * Clears all document caches, queues, device IDs, and session tokens on shared / cyber-cafe PCs.
  */
 export async function wipeAllBrowserTraces(): Promise<number> {
@@ -209,8 +224,13 @@ export async function wipeAllBrowserTraces(): Promise<number> {
 
   try {
     if ('caches' in window) {
-      const deleted = await caches.delete('pms-share-cache-v2');
-      if (deleted) clearedCount++;
+      const names = await caches.keys();
+      for (const name of names) {
+        if (name === 'pms-share-cache-v2' || name.startsWith('pms-')) {
+          const deleted = await caches.delete(name);
+          if (deleted) clearedCount++;
+        }
+      }
     }
   } catch {}
 

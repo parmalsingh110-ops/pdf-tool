@@ -124,37 +124,37 @@ export default function SmartImageToPdf() {
   return (
     <div className="flex-1 flex flex-col items-center p-8">
       <div className="text-center mb-8">
-        <h1 className="text-4xl font-bold text-gray-900 mb-4">Smart Image to PDF</h1>
-        <p className="text-xl text-gray-600">Convert multiple images to a single PDF with auto-rotation, reordering, and sizing.</p>
+        <h1 className="text-4xl font-bold text-gray-900 dark:text-white mb-4">Smart Image to PDF</h1>
+        <p className="text-xl text-gray-600 dark:text-slate-400">Convert multiple images to a single PDF with auto-rotation, reordering, and sizing.</p>
       </div>
 
       <div className="w-full max-w-4xl space-y-6">
         {images.length === 0 ? (
-          <label className="flex flex-col items-center justify-center w-full h-64 border-2 border-dashed border-gray-300 rounded-2xl bg-gray-50 cursor-pointer hover:bg-gray-100">
-            <FileImage className="w-12 h-12 text-gray-400 mb-3" />
-            <span className="text-gray-600 font-semibold">Select images</span>
-            <span className="text-xs text-gray-400 mt-1">JPG, PNG, WEBP — multiple allowed</span>
+          <label className="flex flex-col items-center justify-center w-full h-64 border-2 border-dashed border-gray-300 dark:border-slate-700 rounded-2xl bg-gray-50 dark:bg-slate-900 cursor-pointer hover:bg-gray-100 dark:hover:bg-slate-800">
+            <FileImage className="w-12 h-12 text-gray-400 dark:text-slate-500 mb-3" />
+            <span className="text-gray-600 dark:text-slate-300 font-semibold">Select images</span>
+            <span className="text-xs text-gray-400 dark:text-slate-500 mt-1">JPG, PNG, WEBP — multiple allowed</span>
             <input type="file" accept="image/*" multiple className="hidden" onChange={handleFiles} />
           </label>
         ) : (
           <>
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
               {images.map((item, idx) => (
-                <div key={item.id} className="relative bg-white rounded-xl border border-gray-200 overflow-hidden group shadow-sm">
-                  <img src={item.url} alt="" className="w-full h-32 object-contain bg-gray-50 p-2"
+                <div key={item.id} className="relative bg-white dark:bg-slate-900 rounded-xl border border-gray-200 dark:border-slate-700 overflow-hidden group shadow-sm">
+                  <img src={item.url} alt="" className="w-full h-32 object-contain bg-gray-50 dark:bg-slate-800 p-2"
                     style={{ transform: `rotate(${item.rotation}deg)` }} />
-                  <div className="p-2 flex items-center justify-between bg-gray-50">
-                    <span className="text-[10px] text-gray-500 truncate flex-1">{idx + 1}. {item.file.name}</span>
+                  <div className="p-2 flex items-center justify-between bg-gray-50 dark:bg-slate-800">
+                    <span className="text-[10px] text-gray-500 dark:text-slate-400 truncate flex-1">{idx + 1}. {item.file.name}</span>
                   </div>
                   <div className="absolute top-1 right-1 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button onClick={() => rotateImage(item.id)} className="p-1 bg-white rounded-full shadow text-gray-600 hover:text-blue-600"><RotateCw className="w-3 h-3" /></button>
-                    <button onClick={() => removeImage(item.id)} className="p-1 bg-white rounded-full shadow text-gray-600 hover:text-red-600"><Trash2 className="w-3 h-3" /></button>
+                    <button onClick={() => rotateImage(item.id)} className="p-1 bg-white dark:bg-slate-800 rounded-full shadow text-gray-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400"><RotateCw className="w-3 h-3" /></button>
+                    <button onClick={() => removeImage(item.id)} className="p-1 bg-white dark:bg-slate-800 rounded-full shadow text-gray-600 dark:text-slate-300 hover:text-red-600 dark:hover:text-red-400"><Trash2 className="w-3 h-3" /></button>
                   </div>
                   {idx > 0 && (
-                    <button onClick={() => moveImage(idx, idx - 1)} className="absolute top-1 left-1 p-1 bg-white rounded-full shadow opacity-0 group-hover:opacity-100 text-gray-600 hover:text-blue-600 text-xs font-bold">↑</button>
+                    <button onClick={() => moveImage(idx, idx - 1)} className="absolute top-1 left-1 p-1 bg-white dark:bg-slate-800 rounded-full shadow opacity-0 group-hover:opacity-100 text-gray-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 text-xs font-bold">↑</button>
                   )}
                   {idx < images.length - 1 && (
-                    <button onClick={() => moveImage(idx, idx + 1)} className="absolute bottom-8 left-1 p-1 bg-white rounded-full shadow opacity-0 group-hover:opacity-100 text-gray-600 hover:text-blue-600 text-xs font-bold">↓</button>
+                    <button onClick={() => moveImage(idx, idx + 1)} className="absolute bottom-8 left-1 p-1 bg-white dark:bg-slate-800 rounded-full shadow opacity-0 group-hover:opacity-100 text-gray-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 text-xs font-bold">↓</button>
                   )}
                 </div>
               ))}
@@ -165,25 +165,25 @@ export default function SmartImageToPdf() {
                 + Add more <input type="file" accept="image/*" multiple className="hidden" onChange={handleFiles} />
               </label>
               <button onClick={() => { images.forEach(i => URL.revokeObjectURL(i.url)); setImages([]); }}
-                className="px-4 py-2 bg-gray-100 text-gray-700 rounded-xl font-semibold text-sm hover:bg-gray-200">Clear all</button>
+                className="px-4 py-2 bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-slate-300 rounded-xl font-semibold text-sm hover:bg-gray-200 dark:hover:bg-slate-700">Clear all</button>
             </div>
 
-            <div className="grid grid-cols-3 gap-4 bg-gray-50 rounded-2xl border border-gray-200 p-4">
+            <div className="grid grid-cols-3 gap-4 bg-gray-50 dark:bg-slate-900 rounded-2xl border border-gray-200 dark:border-slate-700 p-4">
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Page Size</label>
-                <select value={pageSize} onChange={e => setPageSize(e.target.value as any)} className="w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm">
+                <label className="block text-xs font-medium text-gray-700 dark:text-slate-300 mb-1">Page Size</label>
+                <select value={pageSize} onChange={e => setPageSize(e.target.value as any)} className="w-full px-2 py-1.5 border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-gray-900 dark:text-white rounded-lg text-sm">
                   <option value="a4">A4</option>
                   <option value="letter">US Letter</option>
                   <option value="fit">Fit to image</option>
                 </select>
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Margin (pt)</label>
-                <input type="number" value={margin} min={0} max={100} onChange={e => setMargin(Number(e.target.value))} className="w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm" />
+                <label className="block text-xs font-medium text-gray-700 dark:text-slate-300 mb-1">Margin (pt)</label>
+                <input type="number" value={margin} min={0} max={100} onChange={e => setMargin(Number(e.target.value))} className="w-full px-2 py-1.5 border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-gray-900 dark:text-white rounded-lg text-sm" />
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Quality</label>
-                <input type="number" value={quality} min={30} max={100} onChange={e => setQuality(Number(e.target.value))} className="w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm" />
+                <label className="block text-xs font-medium text-gray-700 dark:text-slate-300 mb-1">Quality</label>
+                <input type="number" value={quality} min={30} max={100} onChange={e => setQuality(Number(e.target.value))} className="w-full px-2 py-1.5 border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-gray-900 dark:text-white rounded-lg text-sm" />
               </div>
             </div>
 

@@ -6,6 +6,7 @@ import { BrowserRouter } from 'react-router-dom';
 import App from './App.tsx';
 import './index.css';
 import { ThemeProvider } from './context/ThemeContext';
+import ErrorBoundary from './components/ErrorBoundary';
 import { initGlobalErrorLogging } from './lib/telemetry';
 import { initDomResilience } from './lib/domResilience';
 import { initChunkReloader } from './lib/chunkReloader';
@@ -26,9 +27,11 @@ initGlobalErrorLogging();
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <BrowserRouter>
-      <ThemeProvider>
-        <App />
-      </ThemeProvider>
+      <ErrorBoundary locationKey="root">
+        <ThemeProvider>
+          <App />
+        </ThemeProvider>
+      </ErrorBoundary>
     </BrowserRouter>
   </StrictMode>,
 );

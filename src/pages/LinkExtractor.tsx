@@ -8,6 +8,7 @@ import '../lib/pdfWorker';
 import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
+import { triggerBlobDownload } from '../lib/blobUrl';
 
 interface LinkItem {
   id: string;
@@ -126,19 +127,13 @@ export default function LinkExtractor() {
     if (!links.length) return;
     const csv = 'Page,Type,Domain,URL\n' + links.map(l => `${l.pageIndex},${l.type},"${l.domain}","${l.url}"`).join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `${file?.name.replace(/\.pdf$/i, '')}_Links.csv`;
-    a.click();
+    triggerBlobDownload(blob, `${file?.name.replace(/\.pdf$/i, '')}_Links.csv`);
   };
 
   const downloadJson = () => {
     if (!links.length) return;
     const blob = new Blob([JSON.stringify(links, null, 2)], { type: 'application/json' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `${file?.name.replace(/\.pdf$/i, '')}_Links.json`;
-    a.click();
+    triggerBlobDownload(blob, `${file?.name.replace(/\.pdf$/i, '')}_Links.json`);
   };
 
   const reset = () => {

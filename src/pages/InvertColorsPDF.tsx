@@ -8,6 +8,7 @@ import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { dataUrlToBytes } from '../lib/utils';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { useAutoRevokeUrl } from '../lib/blobUrl';
 
 export default function InvertColorsPDF() {
   useSEO(
@@ -37,6 +38,8 @@ export default function InvertColorsPDF() {
   const [progressPercent, setProgressPercent] = useState(0);
   const [invertedUrl, setInvertedUrl] = useState<string | null>(null);
   const [showResultPreview, setShowResultPreview] = useState(true);
+
+  useAutoRevokeUrl(invertedUrl);
 
   // Canvases for preview
   const origCanvasRef = useRef<HTMLCanvasElement | null>(null);

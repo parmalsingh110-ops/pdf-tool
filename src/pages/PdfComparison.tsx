@@ -12,6 +12,7 @@ import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { dataUrlToBytes } from '../lib/utils';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { triggerBlobDownload } from '../lib/blobUrl';
 
 type ViewMode = 'slider' | 'side-by-side' | 'diff-overlay' | 'text-diff';
 
@@ -364,10 +365,7 @@ export default function PdfComparison() {
 
       const finalBytes = await pdfDoc.save();
       const blob = new Blob([finalBytes as any], { type: 'application/pdf' });
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = `PDF_Audit_Report_${fileA.name.replace(/\.pdf$/i, '')}_vs_${fileB.name.replace(/\.pdf$/i, '')}.pdf`;
-      a.click();
+      triggerBlobDownload(blob, `PDF_Audit_Report_${fileA.name.replace(/\.pdf$/i, '')}_vs_${fileB.name.replace(/\.pdf$/i, '')}.pdf`);
     } catch (err) {
       console.error('Export report error:', err);
       alert('Failed to generate audit report.');

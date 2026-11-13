@@ -10,6 +10,7 @@ import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { dataUrlToBytes } from '../lib/utils';
+import { triggerBlobDownload } from '../lib/blobUrl';
 
 interface ExtractedImage {
   id: string;
@@ -172,10 +173,7 @@ export default function ExtractAllImages() {
       });
 
       const zipBlob = await zip.generateAsync({ type: 'blob' });
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(zipBlob);
-      a.download = `${file?.name.replace(/\.pdf$/i, '')}_All_Images.zip`;
-      a.click();
+      triggerBlobDownload(zipBlob, `${file?.name.replace(/\.pdf$/i, '')}_All_Images.zip`);
     } catch (err) {
       console.error('ZIP compilation error:', err);
     } finally {

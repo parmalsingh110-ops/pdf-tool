@@ -6,6 +6,7 @@ import "../lib/pdfWorker";
 import FileDropzone from "../components/FileDropzone";
 import { usePageSEO } from "../lib/usePageSEO";
 import { useSEO } from '../hooks/useSEO';
+import { toArrayBufferBytes, useAutoRevokeUrl } from "../lib/blobUrl";
 
 interface SanitizeReport {
   metadata: number;
@@ -36,6 +37,8 @@ export default function PdfSanitizer() {
   const [report, setReport] = useState<SanitizeReport | null>(null);
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  useAutoRevokeUrl(resultUrl);
 
   const handleDrop = (files: File[]) => {
     if (files[0]) { setFile(files[0]); setReport(null); setResultUrl(null); setError(null); }
@@ -165,7 +168,7 @@ export default function PdfSanitizer() {
       } catch { /* best-effort */ }
 
       // 10. Save
-      const outBytes = await pdfDoc.save({ useObjectStreams: false });
+      const outBytes = toArrayBufferBytes(await pdfDoc.save({ useObjectStreams: false }));
       const blob = new Blob([outBytes], { type: "application/pdf" });
       rep.newSize = (outBytes.length / 1024).toFixed(1);
       rep.savings = Math.max(0, (file.size - outBytes.length) / 1024).toFixed(1);

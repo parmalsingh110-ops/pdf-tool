@@ -5,6 +5,7 @@ import '../lib/pdfWorker';
 import { PDFDocument } from 'pdf-lib';
 import FileDropzone from '../components/FileDropzone';
 import { useSEO } from '../hooks/useSEO';
+import { toArrayBufferBytes, useAutoRevokeUrl } from '../lib/blobUrl';
 
 export default function PdfPageCropper() {
   useSEO('Pdf Page Cropper Online Free | PDF Media Suite', 'Free online Pdf Page Cropper tool. No signup or installation required.');
@@ -17,6 +18,7 @@ export default function PdfPageCropper() {
   const [pageDim, setPageDim] = useState({ w: 0, h: 0 });
   const [renderScale, setRenderScale] = useState(1);
   const [resultUrl, setResultUrl] = useState<string | null>(null);
+  useAutoRevokeUrl(resultUrl);
   const [applyToAll, setApplyToAll] = useState(true);
 
   // Crop rect in percentages (0-100)
@@ -99,9 +101,8 @@ export default function PdfPageCropper() {
         page.setMediaBox(newX, newY, newW, newH);
       }
 
-      const pdfBytes = await pdfDoc.save();
+      const pdfBytes = toArrayBufferBytes(await pdfDoc.save());
       const blob = new Blob([pdfBytes], { type: 'application/pdf' });
-      if (resultUrl) URL.revokeObjectURL(resultUrl);
       setResultUrl(URL.createObjectURL(blob));
     } catch (e: any) {
       alert(e?.message || 'Crop failed.');
@@ -116,8 +117,8 @@ export default function PdfPageCropper() {
   return (
     <div className="flex-1 flex flex-col items-center p-8">
       <div className="text-center mb-8">
-        <h1 className="text-4xl font-bold text-gray-900 mb-4">PDF Page Cropper</h1>
-        <p className="text-xl text-gray-600">Visually crop PDF pages — remove margins, trim whitespace.</p>
+        <h1 className="text-4xl font-bold text-gray-900 dark:text-white mb-4">PDF Page Cropper</h1>
+        <p className="text-xl text-gray-600 dark:text-slate-400">Visually crop PDF pages — remove margins, trim whitespace.</p>
       </div>
 
       {!file ? (
@@ -126,13 +127,13 @@ export default function PdfPageCropper() {
         <div className="w-full max-w-5xl grid grid-cols-1 lg:grid-cols-[1fr_280px] gap-6">
           {/* Preview with crop overlay */}
           <div className="space-y-4">
-            <div className="flex items-center gap-2 justify-center text-sm">
-              <button onClick={() => navigatePage(-1)} disabled={currentPage <= 1 || busy} className="px-3 py-1.5 bg-gray-100 rounded-lg font-bold disabled:opacity-30">←</button>
+            <div className="flex items-center gap-2 justify-center text-sm text-gray-700 dark:text-slate-300">
+              <button onClick={() => navigatePage(-1)} disabled={currentPage <= 1 || busy} className="px-3 py-1.5 bg-gray-100 dark:bg-slate-800 rounded-lg font-bold disabled:opacity-30 hover:bg-gray-200 dark:hover:bg-slate-700">←</button>
               <span className="font-semibold">Page {currentPage} of {pageCount}</span>
-              <button onClick={() => navigatePage(1)} disabled={currentPage >= pageCount || busy} className="px-3 py-1.5 bg-gray-100 rounded-lg font-bold disabled:opacity-30">→</button>
+              <button onClick={() => navigatePage(1)} disabled={currentPage >= pageCount || busy} className="px-3 py-1.5 bg-gray-100 dark:bg-slate-800 rounded-lg font-bold disabled:opacity-30 hover:bg-gray-200 dark:hover:bg-slate-700">→</button>
             </div>
 
-            <div ref={containerRef} className="relative mx-auto bg-gray-100 rounded-xl overflow-hidden border border-gray-200 flex items-center justify-center" 
+            <div ref={containerRef} className="relative mx-auto bg-gray-100 dark:bg-slate-800 rounded-xl overflow-hidden border border-gray-200 dark:border-slate-700 flex items-center justify-center" 
               style={{ width: displayW + 2, height: displayH + 2 }}>
               {pageImage && <img src={pageImage} alt="Page" className="block" style={{ width: displayW, height: displayH }} draggable={false} />}
               
@@ -153,12 +154,12 @@ export default function PdfPageCropper() {
           </div>
 
           {/* Controls */}
-          <div className="bg-white rounded-2xl border border-gray-200 p-5 space-y-4 h-fit">
-            <h3 className="font-bold text-gray-900">Crop Margins</h3>
-            <p className="text-xs text-gray-500">Adjust how much to trim from each edge (in %).</p>
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-gray-200 dark:border-slate-700 p-5 space-y-4 h-fit">
+            <h3 className="font-bold text-gray-900 dark:text-white">Crop Margins</h3>
+            <p className="text-xs text-gray-500 dark:text-slate-400">Adjust how much to trim from each edge (in %).</p>
 
             {([['Top', cropTop, setCropTop], ['Bottom', cropBottom, setCropBottom], ['Left', cropLeft, setCropLeft], ['Right', cropRight, setCropRight]] as const).map(([label, val, setter]) => (
-              <label key={label} className="block text-sm font-medium text-gray-700">
+              <label key={label} className="block text-sm font-medium text-gray-700 dark:text-slate-300">
                 {label}: {val}%
                 <input type="range" min={0} max={45} value={val} onChange={e => setter(Number(e.target.value))} className="mt-1 w-full" />
               </label>
@@ -166,14 +167,14 @@ export default function PdfPageCropper() {
 
             <div className="flex gap-2">
               <button onClick={() => { setCropTop(5); setCropBottom(5); setCropLeft(5); setCropRight(5); }}
-                className="flex-1 px-2 py-1.5 text-xs font-bold bg-gray-100 rounded-lg hover:bg-gray-200">5% all sides</button>
+                className="flex-1 px-2 py-1.5 text-xs font-bold bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-slate-300 rounded-lg hover:bg-gray-200 dark:hover:bg-slate-700">5% all sides</button>
               <button onClick={() => { setCropTop(10); setCropBottom(10); setCropLeft(10); setCropRight(10); }}
-                className="flex-1 px-2 py-1.5 text-xs font-bold bg-gray-100 rounded-lg hover:bg-gray-200">10% all sides</button>
+                className="flex-1 px-2 py-1.5 text-xs font-bold bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-slate-300 rounded-lg hover:bg-gray-200 dark:hover:bg-slate-700">10% all sides</button>
               <button onClick={() => { setCropTop(0); setCropBottom(0); setCropLeft(0); setCropRight(0); }}
-                className="flex-1 px-2 py-1.5 text-xs font-bold bg-gray-100 rounded-lg hover:bg-gray-200">Reset</button>
+                className="flex-1 px-2 py-1.5 text-xs font-bold bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-slate-300 rounded-lg hover:bg-gray-200 dark:hover:bg-slate-700">Reset</button>
             </div>
 
-            <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+            <label className="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-slate-300">
               <input type="checkbox" checked={applyToAll} onChange={e => setApplyToAll(e.target.checked)} className="rounded" />
               Apply to all pages
             </label>
@@ -192,7 +193,7 @@ export default function PdfPageCropper() {
             )}
 
             <button onClick={() => { setFile(null); setPageImage(null); if (resultUrl) URL.revokeObjectURL(resultUrl); setResultUrl(null); }}
-              className="w-full py-2 bg-gray-100 text-gray-700 rounded-xl font-semibold text-sm hover:bg-gray-200">New PDF</button>
+              className="w-full py-2 bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-slate-300 rounded-xl font-semibold text-sm hover:bg-gray-200 dark:hover:bg-slate-700">New PDF</button>
           </div>
         </div>
       )}

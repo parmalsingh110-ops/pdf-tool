@@ -183,21 +183,21 @@ export default function ImageNoiseReduction() {
   return (
     <div className="flex-1 flex flex-col items-center p-8">
       <div className="text-center mb-8">
-        <h1 className="text-4xl font-bold text-gray-900 mb-4">Image Noise Reduction</h1>
-        <p className="text-xl text-gray-600">Remove noise from photos using advanced filtering algorithms.</p>
+        <h1 className="text-4xl font-bold text-gray-900 dark:text-white mb-4">Image Noise Reduction</h1>
+        <p className="text-xl text-gray-600 dark:text-slate-400">Remove noise from photos using advanced filtering algorithms.</p>
       </div>
 
       {!file ? (
-        <label className="flex flex-col items-center justify-center w-full max-w-xl h-64 border-2 border-dashed border-gray-300 rounded-2xl bg-gray-50 cursor-pointer hover:bg-gray-100">
-          <Sparkles className="w-12 h-12 text-gray-400 mb-3" />
-          <span className="text-gray-600 font-semibold">Select a noisy image</span>
-          <span className="text-xs text-gray-400 mt-1">JPG, PNG, WEBP</span>
+        <label className="flex flex-col items-center justify-center w-full max-w-xl h-64 border-2 border-dashed border-gray-300 dark:border-slate-700 rounded-2xl bg-gray-50 dark:bg-slate-900 cursor-pointer hover:bg-gray-100 dark:hover:bg-slate-800">
+          <Sparkles className="w-12 h-12 text-gray-400 dark:text-slate-500 mb-3" />
+          <span className="text-gray-600 dark:text-slate-300 font-semibold">Select a noisy image</span>
+          <span className="text-xs text-gray-400 dark:text-slate-500 mt-1">JPG, PNG, WEBP</span>
           <input type="file" accept="image/*" className="hidden" onChange={handleFile} />
         </label>
       ) : (
         <div className="w-full max-w-4xl space-y-6">
           {/* Compare view */}
-          <div ref={containerRef} className="relative bg-gray-100 rounded-2xl border border-gray-200 overflow-hidden cursor-col-resize"
+          <div ref={containerRef} className="relative bg-gray-100 dark:bg-slate-800 rounded-2xl border border-gray-200 dark:border-slate-700 overflow-hidden cursor-col-resize"
             style={{ minHeight: 350 }} onMouseMove={handleMouseMove}>
             {/* Original (full width) */}
             <img src={imgUrl!} alt="Original" className="w-full max-h-[450px] object-contain" />
@@ -220,31 +220,31 @@ export default function ImageNoiseReduction() {
 
             {!resultUrl && (
               <div className="absolute inset-0 flex items-center justify-center">
-                <span className="text-gray-400 font-semibold bg-white/80 px-4 py-2 rounded-xl">Adjust settings and click "Denoise"</span>
+                <span className="text-gray-500 dark:text-slate-300 font-semibold bg-white/85 dark:bg-slate-900/85 px-4 py-2 rounded-xl border border-gray-200/70 dark:border-slate-700/70">Adjust settings and click "Denoise"</span>
               </div>
             )}
           </div>
 
           {/* Controls */}
-          <div className="bg-white rounded-2xl border border-gray-200 p-6 space-y-4">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-gray-200 dark:border-slate-700 p-6 space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Algorithm</label>
-                <select value={mode} onChange={e => setMode(e.target.value as any)} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
+                <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">Algorithm</label>
+                <select value={mode} onChange={e => setMode(e.target.value as any)} className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-gray-900 dark:text-white rounded-lg text-sm">
                   <option value="bilateral">Bilateral (edge-preserving) ★</option>
                   <option value="median">Median (salt & pepper)</option>
                   <option value="gaussian">Gaussian (general smooth)</option>
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Strength: {strength}</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">Strength: {strength}</label>
                 <input type="range" min={1} max={15} value={strength} onChange={e => setStrength(Number(e.target.value))} className="w-full mt-1" />
-                <div className="flex justify-between text-[10px] text-gray-400">
+                <div className="flex justify-between text-[10px] text-gray-400 dark:text-slate-500">
                   <span>Subtle</span><span>Strong</span>
                 </div>
               </div>
               <div className="flex items-end gap-2">
-                <label className="flex items-center gap-2 text-sm font-medium text-gray-700 cursor-pointer">
+                <label className="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-slate-300 cursor-pointer">
                   <input type="checkbox" checked={compareView} onChange={e => setCompareView(e.target.checked)} className="rounded" />
                   Split compare
                 </label>
@@ -263,7 +263,7 @@ export default function ImageNoiseReduction() {
                   <Download className="w-5 h-5" /> Save
                 </a>
               )}
-              <label className="px-4 py-3 bg-gray-100 text-gray-700 rounded-xl font-semibold text-sm cursor-pointer hover:bg-gray-200 flex items-center">
+              <label className="px-4 py-3 bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-slate-300 rounded-xl font-semibold text-sm cursor-pointer hover:bg-gray-200 dark:hover:bg-slate-700 flex items-center">
                 New <input type="file" accept="image/*" className="hidden" onChange={handleFile} />
               </label>
             </div>

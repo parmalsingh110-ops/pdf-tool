@@ -60,39 +60,39 @@ export default function ConvertToWebP() {
   return (
     <div className="flex-1 flex flex-col items-center justify-center p-8">
       <div className="text-center mb-8">
-        <h1 className="text-4xl font-bold text-gray-900 mb-4">Convert to WebP</h1>
-        <p className="text-xl text-gray-600">Convert JPG or PNG images to next-gen WebP format for smaller file sizes.</p>
+        <h1 className="text-4xl font-bold text-gray-900 dark:text-white mb-4">Convert to WebP</h1>
+        <p className="text-xl text-gray-600 dark:text-slate-400">Convert JPG or PNG images to next-gen WebP format for smaller file sizes.</p>
       </div>
 
       {!file ? (
         <FileDropzone onDrop={handleDrop} multiple={false} title="Select image file" accept={{ "image/*": [".png", ".jpg", ".jpeg"] }} />
       ) : (
-        <div className="w-full max-w-3xl bg-white rounded-2xl shadow-sm border border-gray-200 p-8">
+        <div className="w-full max-w-3xl bg-white dark:bg-slate-900 rounded-2xl shadow-sm border border-gray-200 dark:border-slate-700 p-8">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
             {/* Original */}
             <div>
-              <p className="text-sm font-semibold text-gray-700 mb-2">Original ({(file.size / 1024).toFixed(1)} KB)</p>
-              <div className="rounded-xl border border-gray-200 overflow-hidden bg-gray-50">
+              <p className="text-sm font-semibold text-gray-700 dark:text-slate-300 mb-2">Original ({(file.size / 1024).toFixed(1)} KB)</p>
+              <div className="rounded-xl border border-gray-200 dark:border-slate-700 overflow-hidden bg-gray-50 dark:bg-slate-800">
                 {previewUrl && <img src={previewUrl} alt="Original" className="w-full h-48 object-contain" />}
               </div>
             </div>
             {/* Result */}
             <div>
-              <p className="text-sm font-semibold text-gray-700 mb-2">
+              <p className="text-sm font-semibold text-gray-700 dark:text-slate-300 mb-2">
                 WebP {resultSize ? `(${(resultSize / 1024).toFixed(1)} KB — ${Math.round((1 - resultSize / file.size) * 100)}% smaller)` : ''}
               </p>
-              <div className="rounded-xl border border-gray-200 overflow-hidden bg-gray-50 flex items-center justify-center h-48">
+              <div className="rounded-xl border border-gray-200 dark:border-slate-700 overflow-hidden bg-gray-50 dark:bg-slate-800 flex items-center justify-center h-48">
                 {resultUrl ? (
                   <img src={resultUrl} alt="WebP" className="w-full h-48 object-contain" />
                 ) : (
-                  <span className="text-gray-400 text-sm">Convert to see preview</span>
+                  <span className="text-gray-400 dark:text-slate-500 text-sm">Convert to see preview</span>
                 )}
               </div>
             </div>
           </div>
 
           <div className="mb-6">
-            <label className="block text-sm font-medium text-gray-700 mb-2">Quality: {quality}%</label>
+            <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">Quality: {quality}%</label>
             <input
               type="range"
               min={10}
@@ -102,7 +102,7 @@ export default function ConvertToWebP() {
               onChange={e => setQuality(Number(e.target.value))}
               className="w-full"
             />
-            <div className="flex justify-between text-xs text-gray-400 mt-1">
+            <div className="flex justify-between text-xs text-gray-400 dark:text-slate-500 mt-1">
               <span>10% (smallest)</span>
               <span>100% (best quality)</span>
             </div>
@@ -127,7 +127,7 @@ export default function ConvertToWebP() {
                 Download
               </a>
             )}
-            <button onClick={() => { setFile(null); if (resultUrl) URL.revokeObjectURL(resultUrl); setResultUrl(null); }} className="px-5 py-3 bg-gray-100 text-gray-700 font-semibold rounded-xl hover:bg-gray-200">Reset</button>
+            <button onClick={() => { setFile(null); if (resultUrl) URL.revokeObjectURL(resultUrl); setResultUrl(null); }} className="px-5 py-3 bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-slate-300 font-semibold rounded-xl hover:bg-gray-200 dark:hover:bg-slate-700">Reset</button>
           </div>
         </div>
       )}

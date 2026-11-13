@@ -7,6 +7,7 @@ import { PDFDocument, rgb, StandardFonts, PDFName, PDFString } from 'pdf-lib';
 import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
+import { useAutoRevokeUrl } from '../lib/blobUrl';
 
 type ExpiryAction = 'alert-only' | 'watermark-overlay' | 'full-protection';
 
@@ -33,6 +34,8 @@ export default function SelfDestruct() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [resultFileName, setResultFileName] = useState('');
+
+  useAutoRevokeUrl(resultUrl);
 
   const handleDrop = (acceptedFiles: File[]) => {
     if (acceptedFiles.length > 0) {

@@ -8,6 +8,7 @@ import '../lib/pdfWorker';
 import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
+import { useAutoRevokeUrls } from '../lib/blobUrl';
 
 interface ExtractedMediaItem {
   id: string;
@@ -33,6 +34,8 @@ export default function ExtractMedia() {
   const [isExtracting, setIsExtracting] = useState(false);
   const [extractedItems, setExtractedItems] = useState<ExtractedMediaItem[]>([]);
   const [hasScanned, setHasScanned] = useState(false);
+
+  useAutoRevokeUrls(extractedItems.map(item => item.blobUrl));
 
   const handleDrop = async (acceptedFiles: File[]) => {
     if (acceptedFiles.length > 0) {

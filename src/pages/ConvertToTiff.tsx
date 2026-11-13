@@ -7,6 +7,7 @@ import * as UTIF from 'utif';
 import { PDFDocument } from 'pdf-lib';
 import FileDropzone from '../components/FileDropzone';
 import { useSEO } from '../hooks/useSEO';
+import { useAutoRevokeUrl } from '../lib/blobUrl';
 
 type Mode = 'pdf-to-images' | 'tiff-to-pdf';
 
@@ -20,6 +21,8 @@ export default function ConvertToTiff() {
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [resultName, setResultName] = useState('');
   const [scale, setScale] = useState(2.0);
+
+  useAutoRevokeUrl(resultUrl);
 
   const handleDrop = (files: File[]) => {
     if (files[0]) { setFile(files[0]); setResultUrl(null); setProgress(''); }
@@ -129,26 +132,26 @@ export default function ConvertToTiff() {
     : { 'application/pdf': ['.pdf'] };
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-start p-8 min-h-screen bg-gradient-to-br from-slate-50 to-indigo-50">
+    <div className="flex-1 flex flex-col items-center justify-start p-8 min-h-screen">
       {/* Header */}
       <div className="text-center mb-8 max-w-2xl">
         <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-600 shadow-lg mb-4">
           <FileImage className="w-8 h-8 text-white" />
         </div>
-        <h1 className="text-4xl font-bold text-gray-900 mb-3">TIFF Image Converter</h1>
-        <p className="text-lg text-gray-600">
+        <h1 className="text-4xl font-bold text-gray-900 dark:text-white mb-3">TIFF Image Converter</h1>
+        <p className="text-lg text-gray-600 dark:text-slate-400">
           Convert PDF pages to high-quality images — or convert TIFF images (including multi-page) to PDF.
         </p>
       </div>
 
       {/* Mode Toggle */}
-      <div className="flex gap-2 mb-8 p-1.5 bg-white rounded-2xl shadow-sm border border-gray-200">
+      <div className="flex gap-2 mb-8 p-1.5 bg-white dark:bg-slate-900 rounded-2xl shadow-sm border border-gray-200 dark:border-slate-700">
         <button
           onClick={() => { setMode('pdf-to-images'); setFile(null); setResultUrl(null); setProgress(''); }}
           className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-sm transition-all ${
             mode === 'pdf-to-images'
               ? 'bg-indigo-600 text-white shadow-md'
-              : 'text-gray-600 hover:text-indigo-600 hover:bg-indigo-50'
+              : 'text-gray-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/40'
           }`}
         >
           <FileType2 className="w-4 h-4" />
@@ -159,7 +162,7 @@ export default function ConvertToTiff() {
           className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-sm transition-all ${
             mode === 'tiff-to-pdf'
               ? 'bg-violet-600 text-white shadow-md'
-              : 'text-gray-600 hover:text-violet-600 hover:bg-violet-50'
+              : 'text-gray-600 dark:text-slate-300 hover:text-violet-600 dark:hover:text-violet-400 hover:bg-violet-50 dark:hover:bg-violet-950/40'
           }`}
         >
           <ArrowRightLeft className="w-4 h-4" />
@@ -170,8 +173,8 @@ export default function ConvertToTiff() {
       {/* Info chip */}
       <div className={`mb-6 px-4 py-2 rounded-full text-sm font-medium ${
         mode === 'tiff-to-pdf'
-          ? 'bg-violet-100 text-violet-700'
-          : 'bg-indigo-100 text-indigo-700'
+          ? 'bg-violet-100 dark:bg-violet-950/50 text-violet-700 dark:text-violet-300'
+          : 'bg-indigo-100 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300'
       }`}>
         {mode === 'tiff-to-pdf'
           ? '✦ Supports multi-page TIFF — each frame becomes a PDF page'
@@ -187,17 +190,17 @@ export default function ConvertToTiff() {
           />
         </div>
       ) : (
-        <div className="w-full max-w-2xl bg-white rounded-2xl shadow-sm border border-gray-200 p-8">
+        <div className="w-full max-w-2xl bg-white dark:bg-slate-900 rounded-2xl shadow-sm border border-gray-200 dark:border-slate-700 p-8">
           {/* File info */}
-          <div className="flex items-center gap-3 mb-6 p-4 bg-gray-50 rounded-xl">
-            <FileImage className="w-8 h-8 text-indigo-500 flex-shrink-0" />
+          <div className="flex items-center gap-3 mb-6 p-4 bg-gray-50 dark:bg-slate-800 rounded-xl border border-gray-100 dark:border-slate-700">
+            <FileImage className="w-8 h-8 text-indigo-500 dark:text-indigo-400 flex-shrink-0" />
             <div className="min-w-0">
-              <p className="font-semibold text-gray-900 truncate">{file.name}</p>
-              <p className="text-sm text-gray-500">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
+              <p className="font-semibold text-gray-900 dark:text-white truncate">{file.name}</p>
+              <p className="text-sm text-gray-500 dark:text-slate-400">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
             </div>
             <button
               onClick={() => { setFile(null); setResultUrl(null); setProgress(''); }}
-              className="ml-auto text-sm text-gray-500 hover:text-red-500 font-medium transition-colors"
+              className="ml-auto text-sm text-gray-500 dark:text-slate-400 hover:text-red-500 dark:hover:text-red-400 font-medium transition-colors"
             >
               Remove
             </button>
@@ -206,11 +209,11 @@ export default function ConvertToTiff() {
           {/* Render quality (PDF → images only) */}
           {mode === 'pdf-to-images' && (
             <div className="mb-6">
-              <label className="block text-sm font-medium text-gray-700 mb-1">Render Quality</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">Render Quality</label>
               <select
                 value={scale}
                 onChange={e => setScale(Number(e.target.value))}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-300 outline-none"
+                className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-gray-900 dark:text-white rounded-lg focus:ring-2 focus:ring-indigo-300 outline-none"
               >
                 <option value={1.0}>Standard (72 DPI equivalent)</option>
                 <option value={1.5}>Good (108 DPI)</option>
@@ -222,7 +225,7 @@ export default function ConvertToTiff() {
           )}
 
           {progress && (
-            <p className="text-sm text-blue-700 bg-blue-50 rounded-lg px-4 py-2 mb-4">{progress}</p>
+            <p className="text-sm text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/40 rounded-lg px-4 py-2 mb-4">{progress}</p>
           )}
 
           <div className="flex gap-3">
@@ -242,15 +245,15 @@ export default function ConvertToTiff() {
             </button>
             <button
               onClick={() => { setFile(null); setResultUrl(null); setProgress(''); }}
-              className="px-5 py-3 bg-gray-100 text-gray-700 font-semibold rounded-xl hover:bg-gray-200 transition-colors"
+              className="px-5 py-3 bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-slate-300 font-semibold rounded-xl hover:bg-gray-200 dark:hover:bg-slate-700 transition-colors"
             >
               Cancel
             </button>
           </div>
 
           {resultUrl && (
-            <div className="mt-6 p-6 bg-green-50 rounded-xl border border-green-200 text-center">
-              <p className="text-green-700 font-medium mb-3">✓ Conversion complete!</p>
+            <div className="mt-6 p-6 bg-green-50 dark:bg-green-950/30 rounded-xl border border-green-200 dark:border-green-800 text-center">
+              <p className="text-green-700 dark:text-green-300 font-medium mb-3">✓ Conversion complete!</p>
               <a
                 href={resultUrl}
                 download={resultName}

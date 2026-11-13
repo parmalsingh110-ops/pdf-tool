@@ -42,6 +42,7 @@ import FileDropzone from '../components/FileDropzone';
 import { useSEO } from '../hooks/useSEO';
 import { apiFetch } from '../lib/api';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { useAutoRevokeUrl } from '../lib/blobUrl';
 import {
   drawMatchedLatinText,
   drawVectorHarfbuzzText,
@@ -209,6 +210,8 @@ export default function AdvancedEditor() {
   const [savedEngineNote, setSavedEngineNote] = useState<string | null>(null);
   const [backendStatus, setBackendStatus] = useState<'waking' | 'ready' | 'offline'>('waking');
   const [editedUrl, setEditedUrl] = useState<string | null>(null);
+
+  useAutoRevokeUrl(editedUrl);
 
   // === Zoom ===
   const [zoomLevel, setZoomLevel] = useState(1.5);

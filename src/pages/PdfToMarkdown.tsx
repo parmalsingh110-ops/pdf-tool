@@ -8,6 +8,7 @@ import '../lib/pdfWorker';
 import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
+import { triggerBlobDownload } from '../lib/blobUrl';
 
 export default function PdfToMarkdown() {
   useSEO(
@@ -110,10 +111,7 @@ export default function PdfToMarkdown() {
 
   const downloadFile = () => {
     const blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `${file?.name.replace(/\.pdf$/i, '') || 'document'}.md`;
-    a.click();
+    triggerBlobDownload(blob, `${file?.name.replace(/\.pdf$/i, '') || 'document'}.md`);
   };
 
   const reset = () => {

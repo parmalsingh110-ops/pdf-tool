@@ -7,6 +7,7 @@ import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { useAutoRevokeUrl } from '../lib/blobUrl';
 
 interface RenderedImage {
   pageNumber: number;
@@ -38,6 +39,8 @@ export default function PdfToImages() {
 
   const [images, setImages] = useState<RenderedImage[]>([]);
   const [zipUrl, setZipUrl] = useState<string | null>(null);
+
+  useAutoRevokeUrl(zipUrl);
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
   const [activeLightbox, setActiveLightbox] = useState<RenderedImage | null>(null);
 

@@ -150,8 +150,8 @@ export default function PixelResizer() {
   return (
     <div className="flex-1 flex flex-col items-center justify-center p-8">
       <div className="text-center mb-8">
-        <h1 className="text-4xl font-bold text-gray-900 mb-4">Pixel Resizer</h1>
-        <p className="text-xl text-gray-600">Resize image height and width to exact pixel dimensions.</p>
+        <h1 className="text-4xl font-bold text-gray-900 dark:text-white mb-4">Pixel Resizer</h1>
+        <p className="text-xl text-gray-600 dark:text-slate-400">Resize image height and width to exact pixel dimensions.</p>
       </div>
 
       {/* Hidden canvas for processing */}
@@ -165,16 +165,16 @@ export default function PixelResizer() {
           title="Select Image file" 
         />
       ) : (
-        <div className="w-full max-w-4xl bg-white rounded-2xl shadow-sm border border-gray-200 p-8 flex flex-col md:flex-row gap-8">
+        <div className="w-full max-w-4xl bg-white dark:bg-slate-900 rounded-2xl shadow-sm border border-gray-200 dark:border-slate-700 p-8 flex flex-col md:flex-row gap-8">
           <div className="flex-1">
-            <div className="flex items-center gap-4 p-6 bg-gray-50 rounded-xl border border-gray-200 mb-8">
-              <div className="w-16 h-16 bg-sky-100 text-sky-600 rounded-xl flex items-center justify-center shrink-0">
+            <div className="flex items-center gap-4 p-6 bg-gray-50 dark:bg-slate-800 rounded-xl border border-gray-200 dark:border-slate-700 mb-8">
+              <div className="w-16 h-16 bg-sky-100 dark:bg-sky-950/50 text-sky-600 dark:text-sky-400 rounded-xl flex items-center justify-center shrink-0">
                 <ImageIcon className="w-8 h-8" />
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-lg font-semibold text-gray-900 truncate">{file.name}</p>
+                <p className="text-lg font-semibold text-gray-900 dark:text-white truncate">{file.name}</p>
                 {originalDimensions && (
-                  <p className="text-sm text-gray-500">
+                  <p className="text-sm text-gray-500 dark:text-slate-400">
                     Original: {originalDimensions.w} x {originalDimensions.h} px
                   </p>
                 )}
@@ -185,27 +185,27 @@ export default function PixelResizer() {
               <div className="space-y-6">
                 <div className="flex gap-4">
                   <div className="flex-1">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">
                       Width (px)
                     </label>
                     <input
                       type="number"
                       value={width}
                       onChange={(e) => handleWidthChange(e.target.value)}
-                      className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-sky-500 focus:border-sky-500 outline-none transition-shadow"
+                      className="w-full px-4 py-3 rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-sky-500 focus:border-sky-500 outline-none transition-shadow"
                       placeholder="e.g. 1920"
                       min="1"
                     />
                   </div>
                   <div className="flex-1">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">
                       Height (px)
                     </label>
                     <input
                       type="number"
                       value={height}
                       onChange={(e) => handleHeightChange(e.target.value)}
-                      className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-sky-500 focus:border-sky-500 outline-none transition-shadow"
+                      className="w-full px-4 py-3 rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-sky-500 focus:border-sky-500 outline-none transition-shadow"
                       placeholder="e.g. 1080"
                       min="1"
                     />
@@ -218,26 +218,26 @@ export default function PixelResizer() {
                     type="checkbox"
                     checked={maintainAspectRatio}
                     onChange={(e) => setMaintainAspectRatio(e.target.checked)}
-                    className="w-4 h-4 text-sky-600 bg-gray-100 border-gray-300 rounded focus:ring-sky-500"
+                    className="w-4 h-4 text-sky-600 bg-gray-100 dark:bg-slate-800 border-gray-300 dark:border-slate-600 rounded focus:ring-sky-500"
                   />
-                  <label htmlFor="aspect-ratio" className="ml-2 text-sm font-medium text-gray-700">
+                  <label htmlFor="aspect-ratio" className="ml-2 text-sm font-medium text-gray-700 dark:text-slate-300">
                     Maintain aspect ratio
                   </label>
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">
                     Max output size (optional, KB)
                   </label>
                   <input
                     type="number"
                     min={1}
-                    className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-sky-500 outline-none"
+                    className="w-full px-4 py-3 rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-sky-500 outline-none"
                     placeholder="e.g. 200 — uses JPEG tuning"
                     value={maxTargetKb}
                     onChange={(e) => setMaxTargetKb(e.target.value)}
                   />
-                  <p className="text-xs text-gray-500 mt-1">
+                  <p className="text-xs text-gray-500 dark:text-slate-400 mt-1">
                     When set, export uses the same byte-budget encoder as the form resizer (JPEG).
                   </p>
                 </div>
@@ -253,7 +253,7 @@ export default function PixelResizer() {
                   </button>
                   <button
                     onClick={() => { setFile(null); }}
-                    className="px-6 py-4 bg-gray-100 text-gray-700 text-lg font-semibold rounded-xl hover:bg-gray-200 transition-colors"
+                    className="px-6 py-4 bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-slate-300 text-lg font-semibold rounded-xl hover:bg-gray-200 dark:hover:bg-slate-700 transition-colors"
                   >
                     Cancel
                   </button>
@@ -261,17 +261,17 @@ export default function PixelResizer() {
               </div>
             ) : (
               <div className="space-y-6 text-center">
-                <div className="p-8 bg-green-50 rounded-xl border border-green-200">
-                  <h3 className="text-2xl font-bold text-green-800 mb-4">Image resized!</h3>
+                <div className="p-8 bg-green-50 dark:bg-green-950/30 rounded-xl border border-green-200 dark:border-green-800">
+                  <h3 className="text-2xl font-bold text-green-800 dark:text-green-300 mb-4">Image resized!</h3>
                   <div className="flex justify-center gap-8 mb-6 text-sm">
                     <div>
-                      <p className="text-gray-500">New Dimensions</p>
-                      <p className="font-semibold text-gray-900">{width} x {height} px</p>
+                      <p className="text-gray-500 dark:text-slate-400">New Dimensions</p>
+                      <p className="font-semibold text-gray-900 dark:text-white">{width} x {height} px</p>
                     </div>
                     {resizedFile && (
                       <div>
-                        <p className="text-gray-500">New Size</p>
-                        <p className="font-semibold text-gray-900">{(resizedFile.size / 1024).toFixed(2)} KB</p>
+                        <p className="text-gray-500 dark:text-slate-400">New Size</p>
+                        <p className="font-semibold text-gray-900 dark:text-white">{(resizedFile.size / 1024).toFixed(2)} KB</p>
                       </div>
                     )}
                   </div>
@@ -286,7 +286,7 @@ export default function PixelResizer() {
                 </div>
                 <button
                   onClick={() => { setFile(null); setResizedUrl(null); }}
-                  className="text-gray-600 hover:text-gray-900 font-medium"
+                  className="text-gray-600 dark:text-slate-400 hover:text-gray-900 dark:hover:text-white font-medium"
                 >
                   Resize another Image
                 </button>
@@ -295,7 +295,7 @@ export default function PixelResizer() {
           </div>
           
           {/* Preview */}
-          <div className="flex-1 flex flex-col items-center justify-center bg-gray-100 rounded-xl border border-gray-200 p-4 overflow-hidden">
+          <div className="flex-1 flex flex-col items-center justify-center bg-gray-100 dark:bg-slate-800 rounded-xl border border-gray-200 dark:border-slate-700 p-4 overflow-hidden">
             {resizedUrl ? (
               <img src={resizedUrl} alt="Resized preview" className="max-w-full max-h-[400px] object-contain" />
             ) : previewUrl ? (

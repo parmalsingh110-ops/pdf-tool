@@ -17,6 +17,7 @@ import { usePageSEO } from '../lib/usePageSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
 import { downloadBlob } from '../lib/utils';
 import { embedSmartFont } from '../lib/pdfFontHelper';
+import { useAutoRevokeUrl } from '../lib/blobUrl';
 
 type LeftPageType = 'green_graph' | 'blue_graph' | 'grey_grid' | 'blank_diagram';
 type RuledStyle = 'single_line' | 'engineering_ruled' | 'plain';
@@ -53,6 +54,8 @@ export default function LabJournalFormatter() {
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [generatedPdfBlob, setGeneratedPdfBlob] = useState<Blob | null>(null);
+
+  useAutoRevokeUrl(previewUrl);
 
   // Generate the complete Lab Journal PDF
   const handleGeneratePdf = async () => {

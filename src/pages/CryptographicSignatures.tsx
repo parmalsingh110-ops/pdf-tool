@@ -10,6 +10,7 @@ import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { dataUrlToBytes } from '../lib/utils';
+import { triggerBlobDownload, useAutoRevokeUrl } from '../lib/blobUrl';
 
 type StampStyle = 'corporate' | 'notary' | 'minimal' | 'legal';
 
@@ -38,6 +39,8 @@ export default function CryptographicSignatures() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [auditReceipt, setAuditReceipt] = useState<any | null>(null);
+
+  useAutoRevokeUrl(resultUrl);
 
   const handleDrop = async (acceptedFiles: File[]) => {
     if (acceptedFiles.length > 0) {
@@ -287,20 +290,14 @@ export default function CryptographicSignatures() {
   const downloadPublicKeyPem = () => {
     if (!auditReceipt || !(auditReceipt as any).publicKeyPem) return;
     const blob = new Blob([(auditReceipt as any).publicKeyPem], { type: 'application/x-pem-file' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `${file?.name.replace(/\.pdf$/i, '')}_Signer_PublicKey.pem`;
-    a.click();
+    triggerBlobDownload(blob, `${file?.name.replace(/\.pdf$/i, '')}_Signer_PublicKey.pem`);
   };
 
   const downloadAuditCertificate = () => {
     if (!auditReceipt) return;
     const jsonStr = JSON.stringify(auditReceipt, null, 2);
     const blob = new Blob([jsonStr], { type: 'application/json' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `${file?.name.replace(/\.pdf$/i, '')}_Signing_Audit_Receipt.json`;
-    a.click();
+    triggerBlobDownload(blob, `${file?.name.replace(/\.pdf$/i, '')}_Signing_Audit_Receipt.json`);
   };
 
   const reset = () => {

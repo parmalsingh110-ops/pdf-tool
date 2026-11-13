@@ -7,6 +7,7 @@ import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { useAutoRevokeUrl } from '../lib/blobUrl';
 
 // Initialize pdf.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
@@ -36,6 +37,8 @@ export default function OrganizePDF() {
   const [organizedUrl, setOrganizedUrl] = useState<string | null>(null);
   const [isLoadingPages, setIsLoadingPages] = useState(false);
   const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
+
+  useAutoRevokeUrl(organizedUrl);
 
   const handleDrop = async (acceptedFiles: File[]) => {
     if (acceptedFiles.length > 0) {

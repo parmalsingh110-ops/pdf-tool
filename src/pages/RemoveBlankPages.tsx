@@ -8,6 +8,7 @@ import { usePageSEO } from '../lib/usePageSEO';
 import { useToast } from '../components/Toast';
 import { useSEO } from '../hooks/useSEO';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { useAutoRevokeUrl } from '../lib/blobUrl';
 
 interface PageAnalysis {
   pageNum: number;
@@ -35,6 +36,8 @@ export default function RemoveBlankPages() {
   const [manualOverrides, setManualOverrides] = useState<Record<number, boolean>>({}); // pageNum -> isMarkedForDeletion
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [removedCount, setRemovedCount] = useState(0);
+
+  useAutoRevokeUrl(resultUrl);
 
   const toast = useToast();
 

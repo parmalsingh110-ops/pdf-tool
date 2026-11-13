@@ -1,6 +1,7 @@
 import React from 'react';
 import { AlertTriangle, RefreshCw, Home, Sparkles } from 'lucide-react';
 import { reportToolError } from '../lib/telemetry';
+import { sanitizeSensitiveText } from '../lib/privacy';
 import { isChunkLoadError, handleChunkLoadFailure } from '../lib/chunkReloader';
 import { isDomMutationError } from '../lib/domResilience';
 
@@ -51,8 +52,8 @@ export default class ErrorBoundary extends React.Component<Props, State> {
     // Automatically log actual crashes to telemetry database and send alert
     reportToolError({
       toolPath: window.location.pathname,
-      errorMessage: error.message || 'React rendering exception',
-      errorStack: error.stack || errorInfo.componentStack || '',
+      errorMessage: sanitizeSensitiveText(error.message || 'React rendering exception', 600),
+      errorStack: sanitizeSensitiveText(error.stack || errorInfo.componentStack || '', 2500),
     });
   }
 

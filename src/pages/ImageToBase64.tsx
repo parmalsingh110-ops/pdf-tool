@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Code, Copy, Check } from 'lucide-react';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
+import { useAutoRevokeUrl } from '../lib/blobUrl';
 
 export default function ImageToBase64() {
   useSEO('Image To Base64 Online Free | PDF Media Suite', 'Free online Image To Base64 tool. No signup or installation required.');
@@ -12,6 +13,8 @@ export default function ImageToBase64() {
   const [base64, setBase64] = useState('');
   const [dataUri, setDataUri] = useState('');
   const [copied, setCopied] = useState<string | null>(null);
+
+  useAutoRevokeUrl(preview);
 
   const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];

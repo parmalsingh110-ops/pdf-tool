@@ -5,6 +5,7 @@ import FileDropzone from "../components/FileDropzone";
 import { usePageSEO } from "../lib/usePageSEO";
 import { useSEO } from '../hooks/useSEO';
 import ToolSEOSection from "../components/ToolSEOSection";
+import { useAutoRevokeUrl } from "../lib/blobUrl";
 
 const PRESETS = [
   { n: 2, cols: 1, rows: 2, label: '2-Up' },
@@ -41,6 +42,8 @@ export default function NUpLayout() {
   const [busy, setBusy] = useState(false);
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  useAutoRevokeUrl(resultUrl);
 
   const activeN = useCustom ? (parseInt(customN) || 4) : mode;
 

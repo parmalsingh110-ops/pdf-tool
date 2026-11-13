@@ -71,14 +71,14 @@ export async function apiFetch(endpoint: string, options: ApiFetchOptions = {}):
     controller.abort(new DOMException('Request timeout', 'AbortError'));
   }, timeoutMs);
 
-  const signal = fetchOptions.signal
+  const combined = fetchOptions.signal
     ? anySignal([fetchOptions.signal, controller.signal])
-    : controller.signal;
+    : { signal: controller.signal, cleanup: () => {} };
 
   try {
     const response = await fetch(url, {
       ...fetchOptions,
-      signal,
+      signal: combined.signal,
     });
     return response;
   } catch (err: any) {
@@ -112,20 +112,37 @@ export async function apiFetch(endpoint: string, options: ApiFetchOptions = {}):
     throw err;
   } finally {
     clearTimeout(timeoutId);
+    combined.cleanup();
   }
 }
 
 /**
- * Helper to combine multiple abort signals safely
+ * Helper to combine multiple abort signals cleanly without listener leaks
  */
-function anySignal(signals: AbortSignal[]): AbortSignal {
+function anySignal(signals: AbortSignal[]): { signal: AbortSignal; cleanup: () => void } {
   const controller = new AbortController();
+  const listeners: Array<{ sig: AbortSignal; fn: () => void }> = [];
+
+  const cleanup = () => {
+    for (const { sig, fn } of listeners) {
+      try {
+        sig.removeEventListener('abort', fn);
+      } catch {}
+    }
+    listeners.length = 0;
+  };
+
   for (const sig of signals) {
     if (sig.aborted) {
       controller.abort(sig.reason || new DOMException('Request aborted', 'AbortError'));
-      return sig;
+      return { signal: controller.signal, cleanup };
     }
-    sig.addEventListener('abort', () => controller.abort(sig.reason || new DOMException('Request aborted', 'AbortError')), { once: true });
+    const onAbort = () => {
+      controller.abort(sig.reason || new DOMException('Request aborted', 'AbortError'));
+      cleanup();
+    };
+    sig.addEventListener('abort', onAbort, { once: true });
+    listeners.push({ sig, fn: onAbort });
   }
-  return controller.signal;
+  return { signal: controller.signal, cleanup };
 }

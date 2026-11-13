@@ -62,12 +62,17 @@ export default function Privacy() {
           byte size depends on format and content.
         </p>
         <p>
-          <strong>Recent tools</strong> (optional header list) stores only route names and titles in{' '}
-          <code className="bg-slate-100 dark:bg-slate-800 px-1 rounded">localStorage</code> — not your files.
+          <strong>Zero Permanent Storage &amp; Minimal Browser Storage:</strong> Preferences such as recent tools, theme,
+          or shop billing settings stay strictly inside your local browser storage (<code className="bg-slate-100 dark:bg-slate-800 px-1 rounded">localStorage</code> /{' '}
+          <code className="bg-slate-100 dark:bg-slate-800 px-1 rounded">sessionStorage</code>). Shared OS/WhatsApp
+          files cached via PWA Share Target auto-expire within 10 minutes or as soon as opened. You can wipe all
+          browser traces, queued logs, and local keys in 1 click using the <strong>Erase All Browser Traces</strong> button in the footer.
         </p>
         <p>
-          <strong>AI / cloud features</strong> (if enabled in a tool) would only send data when you explicitly
-          run that action; check each tool&apos;s on-screen notice.
+          <strong>Privacy-Safe Crash Diagnostics &amp; AI Features:</strong> Automated crash telemetry strips document
+          filenames, URL hash secrets (<code className="bg-slate-100 dark:bg-slate-800 px-1 rounded">#k=</code>), tokens,
+          and API keys before queuing or sending reports. Optional BYOK AI features send data only when explicitly
+          triggered using your session-scoped key.
         </p>
         <p className="text-xs text-slate-500 dark:text-slate-400">
           This page is informational and not legal advice. For questions about our privacy practices or data handling, contact us at{' '}

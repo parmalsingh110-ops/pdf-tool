@@ -8,6 +8,7 @@ import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { dataUrlToBytes } from '../lib/utils';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { useAutoRevokeUrl } from '../lib/blobUrl';
 
 export default function GrayscalePDF() {
   useSEO(
@@ -37,6 +38,8 @@ export default function GrayscalePDF() {
   const [progressPercent, setProgressPercent] = useState(0);
   const [grayscaleUrl, setGrayscaleUrl] = useState<string | null>(null);
   const [showResultPreview, setShowResultPreview] = useState(true);
+
+  useAutoRevokeUrl(grayscaleUrl);
 
   // Preview canvases
   const origCanvasRef = useRef<HTMLCanvasElement | null>(null);

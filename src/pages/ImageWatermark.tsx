@@ -2,6 +2,7 @@ import { useState, useRef } from 'react';
 import { Droplet, Download, Loader2 } from 'lucide-react';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
+import { useAutoRevokeUrl } from '../lib/blobUrl';
 
 type WatermarkPos = 'center' | 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' | 'tile';
 
@@ -19,6 +20,9 @@ export default function ImageWatermark() {
   const [rotation, setRotation] = useState(-30);
   const [busy, setBusy] = useState(false);
   const [resultUrl, setResultUrl] = useState<string | null>(null);
+
+  useAutoRevokeUrl(preview);
+  useAutoRevokeUrl(resultUrl);
 
   const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];

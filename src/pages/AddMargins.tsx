@@ -7,6 +7,7 @@ import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { useAutoRevokeUrl } from '../lib/blobUrl';
 
 // Initialize pdf.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
@@ -41,6 +42,8 @@ export default function AddMargins() {
   const [file, setFile] = useState<File | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [marginedUrl, setMarginedUrl] = useState<string | null>(null);
+
+  useAutoRevokeUrl(marginedUrl);
 
   // Margins in points (72 points = 1 inch)
   const [topMargin, setTopMargin] = useState<number>(36);

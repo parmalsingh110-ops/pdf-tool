@@ -16,6 +16,7 @@ import { useSEO } from '../hooks/useSEO';
 import { usePageSEO } from '../lib/usePageSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
 import { downloadBlob } from '../lib/utils';
+import { useAutoRevokeUrl } from '../lib/blobUrl';
 
 type LayoutMode = '4_up' | '8_up' | '16_up';
 type ImpositionOrder = 'sequential_cut' | 'standard_grid';
@@ -42,6 +43,8 @@ export default function MicroPocketNotes() {
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [processedPdfBlob, setProcessedPdfBlob] = useState<Blob | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+
+  useAutoRevokeUrl(previewUrl);
 
   // Load PDF and count pages
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {

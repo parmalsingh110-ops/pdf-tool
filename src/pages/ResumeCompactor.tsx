@@ -18,6 +18,7 @@ import { useSEO } from '../hooks/useSEO';
 import { usePageSEO } from '../lib/usePageSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
 import { downloadBlob } from '../lib/utils';
+import { useAutoRevokeUrl } from '../lib/blobUrl';
 
 type CompactionMode = 'smart_auto' | 'tight_margin' | 'extreme_single';
 
@@ -42,6 +43,8 @@ export default function ResumeCompactor() {
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [processedPdfBlob, setProcessedPdfBlob] = useState<Blob | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+
+  useAutoRevokeUrl(previewUrl);
 
   // Load PDF
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {

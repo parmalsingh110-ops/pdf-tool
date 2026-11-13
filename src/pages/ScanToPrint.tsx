@@ -1361,6 +1361,12 @@ export default function ScanToPrint() {
       }
     };
 
+    // Immediately register counter station room before the first poll cycle
+    void registerRoomWithBase(API_BASE);
+    if (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
+      void registerRoomWithBase('');
+    }
+
     pollTimerRef.current = setTimeout(poll, 200);
 
     return () => {
@@ -3085,7 +3091,9 @@ export default function ScanToPrint() {
               try {
                 if (job.dataUrl.startsWith('blob:')) { window.open(job.dataUrl, '_blank'); return; }
                 const { buffer, type } = await urlToArrayBuffer(job.dataUrl);
-                window.open(URL.createObjectURL(arrayBufferToBlob(buffer, type)), '_blank');
+                const tempUrl = URL.createObjectURL(arrayBufferToBlob(buffer, type));
+                window.open(tempUrl, '_blank');
+                setTimeout(() => { try { URL.revokeObjectURL(tempUrl); } catch {} }, 60000);
               } catch {
                 window.open(job.dataUrl, '_blank');
               }

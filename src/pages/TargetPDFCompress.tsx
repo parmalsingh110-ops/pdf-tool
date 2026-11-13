@@ -6,6 +6,7 @@ import * as pdfjsLib from 'pdfjs-dist';
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { useSEO } from '../hooks/useSEO';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { useAutoRevokeUrl } from '../lib/blobUrl';
 
 // Initialize pdf.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
@@ -14,6 +15,7 @@ export default function TargetPDFCompress() {
   useSEO('Target PDF Compress in KB & MB Online Free | PDF Media Suite', 'Free online Target PDF Compress tool. Compress PDF to exact file size in KB or MB. No signup required.');
 
   const [file, setFile] = useState<File | null>(null);
+  const [originalUrl, setOriginalUrl] = useState<string | null>(null);
   const [targetUnit, setTargetUnit] = useState<'KB' | 'MB'>('KB');
   const [targetInputVal, setTargetInputVal] = useState<string>('100');
   const [isProcessing, setIsProcessing] = useState(false);
@@ -23,6 +25,17 @@ export default function TargetPDFCompress() {
   const [numPages, setNumPages] = useState(1);
   const [pageFrom, setPageFrom] = useState(1);
   const [pageTo, setPageTo] = useState(1);
+
+  useAutoRevokeUrl(originalUrl);
+  useAutoRevokeUrl(compressedUrl);
+
+  useEffect(() => {
+    if (!file) {
+      setOriginalUrl(null);
+      return;
+    }
+    setOriginalUrl(URL.createObjectURL(file));
+  }, [file]);
 
   // Compute effective target size in KB (handling decimals in MB e.g. 1.5 MB = 1536 KB)
   const effectiveTargetKB = useMemo(() => {
@@ -121,9 +134,9 @@ export default function TargetPDFCompress() {
       const canvasToJpegBytes = (canvas: HTMLCanvasElement, q: number) =>
         new Promise<ArrayBuffer>((resolve, reject) => {
           canvas.toBlob(
-            async (blob) => {
+            (blob) => {
               if (!blob) reject(new Error('jpeg'));
-              else resolve(await blob.arrayBuffer());
+              else blob.arrayBuffer().then(resolve, reject);
             },
             'image/jpeg',
             q,
@@ -493,9 +506,9 @@ export default function TargetPDFCompress() {
                   className="absolute inset-0 w-full h-full"
                   title="Compressed PDF Preview"
                 />
-              ) : file ? (
+              ) : originalUrl ? (
                 <iframe 
-                  src={`${URL.createObjectURL(file)}#toolbar=0`} 
+                  src={`${originalUrl}#toolbar=0`} 
                   className="absolute inset-0 w-full h-full opacity-50"
                   title="Original PDF Preview"
                 />

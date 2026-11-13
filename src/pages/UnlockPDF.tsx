@@ -7,6 +7,7 @@ import { useSEO } from '../hooks/useSEO';
 import { dataUrlToBytes } from '../lib/utils';
 import { apiFetch } from '../lib/api';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { useAutoRevokeUrl } from '../lib/blobUrl';
 
 interface DocPreset {
   id: string;
@@ -383,6 +384,8 @@ export default function UnlockPDF() {
   const [progress, setProgress] = useState('');
   const [unlockedUrl, setUnlockedUrl] = useState<string | null>(null);
   const [showPreview, setShowPreview] = useState(true);
+
+  useAutoRevokeUrl(unlockedUrl);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [triedPasswords, setTriedPasswords] = useState<string[]>([]);
 

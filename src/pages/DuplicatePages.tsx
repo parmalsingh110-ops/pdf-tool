@@ -7,6 +7,7 @@ import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { useAutoRevokeUrl } from '../lib/blobUrl';
 
 interface PageInfo {
   index: number; // 1-based
@@ -43,6 +44,8 @@ export default function DuplicatePages() {
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [resultUrl, setResultUrl] = useState<string | null>(null);
+
+  useAutoRevokeUrl(resultUrl);
   const [showPreview, setShowPreview] = useState(true);
 
   const handleDrop = async (files: File[]) => {

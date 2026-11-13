@@ -11,6 +11,7 @@ import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { dataUrlToBytes } from '../lib/utils';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { useAutoRevokeUrl } from '../lib/blobUrl';
 
 interface ExtractedAcroField {
   name: string;
@@ -58,6 +59,8 @@ export default function PdfFormFiller() {
   const [busy, setBusy] = useState(false);
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [resultFileName, setResultFileName] = useState('');
+
+  useAutoRevokeUrl(resultUrl);
 
   const containerRef = useRef<HTMLDivElement>(null);
 

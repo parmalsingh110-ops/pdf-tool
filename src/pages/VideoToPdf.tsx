@@ -8,6 +8,7 @@ import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { dataUrlToBytes } from '../lib/utils';
+import { useAutoRevokeUrl } from '../lib/blobUrl';
 
 interface CapturedFrame {
   id: string;
@@ -41,6 +42,9 @@ export default function VideoToPdf() {
   const [progressMsg, setProgressMsg] = useState('');
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [resultFileName, setResultFileName] = useState('');
+
+  useAutoRevokeUrl(videoSrc);
+  useAutoRevokeUrl(resultUrl);
 
   const videoRef = useRef<HTMLVideoElement>(null);
 

@@ -5,6 +5,7 @@ import '../lib/pdfWorker';
 import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
+import { triggerBlobDownload } from '../lib/blobUrl';
 
 interface PageStat {
   pageNumber: number;
@@ -184,13 +185,7 @@ File Size: ${stats.fileSizeMB} MB`;
     });
 
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', `${file.name}_page_stats.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    triggerBlobDownload(blob, `${file.name}_page_stats.csv`);
   };
 
   const filteredPages = stats

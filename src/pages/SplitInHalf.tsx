@@ -432,9 +432,13 @@ export default function SplitInHalf() {
                       onChange={async (e) => {
                         const num = Number(e.target.value);
                         setPreviewPageNum(num);
-                        const ab = await file.arrayBuffer();
-                        const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(ab) }).promise;
-                        await renderPreviewPage(pdf, num);
+                        try {
+                          const ab = await file.arrayBuffer();
+                          const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(ab) }).promise;
+                          await renderPreviewPage(pdf, num);
+                        } catch (err) {
+                          console.error('Failed to switch split-in-half preview page:', err);
+                        }
                       }}
                       className="px-2 py-1 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 text-xs"
                     >

@@ -56,5 +56,5 @@ USER appuser
 EXPOSE 8000
 
 # ── Run with gunicorn (proper request timeout for heavy OCR tasks) ────────────
-# 2 workers default: enough for free Render tier (512 MB RAM), avoids OOM with concurrent OCR
-CMD ["sh", "-c", "gunicorn main:app -k uvicorn.workers.UvicornWorker -w ${WEB_CONCURRENCY:-2} --timeout 300 --bind 0.0.0.0:${PORT:-8000}"]
+# Single worker default: keeps in-memory rate limits unified & avoids duplicating ONNX/MuPDF RAM on 512 MB instances
+CMD ["sh", "-c", "gunicorn main:app -k uvicorn.workers.UvicornWorker -w ${WEB_CONCURRENCY:-1} --timeout 300 --bind 0.0.0.0:${PORT:-8000}"]

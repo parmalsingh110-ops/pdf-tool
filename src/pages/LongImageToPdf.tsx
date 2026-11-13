@@ -4,6 +4,7 @@ import { PDFDocument, rgb } from "pdf-lib";
 import FileDropzone from "../components/FileDropzone";
 import { usePageSEO } from "../lib/usePageSEO";
 import { useSEO } from '../hooks/useSEO';
+import { safeRevokeUrl, useAutoRevokeUrl } from "../lib/blobUrl";
 
 const PAGE_W = 595, PAGE_H = 842; // A4 pts at 72dpi
 const PAGE_W_PX = PAGE_W * 2, PAGE_H_PX = PAGE_H * 2; // 144dpi render
@@ -18,11 +19,13 @@ export default function LongImageToPdf() {
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [pageCount, setPageCount] = useState(0);
 
+  useAutoRevokeUrl(resultUrl);
+
   const process = async () => {
     if (!file) return;
     setBusy(true);
+    const imgUrl = URL.createObjectURL(file);
     try {
-      const imgUrl = URL.createObjectURL(file);
       const img = new window.Image();
       await new Promise<void>((res, rej) => { img.onload = () => res(); img.onerror = rej; img.src = imgUrl; });
 
@@ -56,7 +59,10 @@ export default function LongImageToPdf() {
       setPageCount(slices.length);
       setResultUrl(URL.createObjectURL(new Blob([pdfBytes as any], { type: "application/pdf" })));
     } catch (e: any) { alert(e?.message || "Processing failed."); }
-    finally { setBusy(false); }
+    finally {
+      safeRevokeUrl(imgUrl);
+      setBusy(false);
+    }
   };
 
   return (

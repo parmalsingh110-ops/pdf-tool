@@ -152,7 +152,10 @@ export default function CounterKiosk() {
   const [viewMode, setViewMode] = useState<'customer' | 'shopkeeper'>('customer');
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [pinInput, setPinInput] = useState('');
+  const [pinError, setPinError] = useState('');
   const [showPinModal, setShowPinModal] = useState(false);
+  const [newShopPin, setNewShopPin] = useState('');
+  const [pinSavedMsg, setPinSavedMsg] = useState('');
   const [queue, setQueue] = useState<KioskJob[]>(() => {
     try {
       // Wipe legacy unencrypted localStorage key if present
@@ -177,6 +180,17 @@ export default function CounterKiosk() {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const queueUrlsRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    const urls = queueUrlsRef.current;
+    return () => {
+      urls.forEach((u) => {
+        try { URL.revokeObjectURL(u); } catch {}
+      });
+      urls.clear();
+    };
+  }, []);
 
   // BroadcastChannel + Authenticated Cloud Relay Polling (Isolated per-shop room)
   useEffect(() => {
@@ -201,6 +215,9 @@ export default function CounterKiosk() {
         if (res.ok) isRegistered = true;
       } catch {}
     };
+
+    // Register immediately on mount so paired tablets or direct uploads never hit an inactive room window
+    void registerStation();
 
     const pollInterval = setInterval(async () => {
       try {
@@ -229,6 +246,7 @@ export default function CounterKiosk() {
                 const rawBuf = await fileRes.arrayBuffer();
                 const { buffer: plainBuf } = await decryptBytesWithKey(rawBuf, stationE2eeKey);
                 blobUrl = URL.createObjectURL(new Blob([plainBuf], { type: j.type || 'application/pdf' }));
+                queueUrlsRef.current.add(blobUrl);
               }
             } catch {}
             incomingJobs.push({
@@ -294,23 +312,22 @@ export default function CounterKiosk() {
 
   const handleFileChange = async (file: File) => {
     setUploadedFile(file);
-    const reader = new FileReader();
-    reader.onload = async (e) => {
-      const dataUrl = e.target?.result as string;
-      setFileDataUrl(dataUrl);
+    const nextBlobUrl = URL.createObjectURL(file);
+    queueUrlsRef.current.add(nextBlobUrl);
+    setFileDataUrl(nextBlobUrl);
 
-      if (file.type === 'application/pdf') {
-        try {
-          const doc = await pdfjsLib.getDocument({ data: atob(dataUrl.split(',')[1]) }).promise;
-          setPageCount(doc.numPages);
-        } catch {
-          setPageCount(1);
-        }
-      } else {
+    if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
+      try {
+        const buf = await file.arrayBuffer();
+        const doc = await pdfjsLib.getDocument({ data: new Uint8Array(buf) }).promise;
+        setPageCount(Math.max(1, doc.numPages));
+        try { await doc.destroy(); } catch {}
+      } catch {
         setPageCount(1);
       }
-    };
-    reader.readAsDataURL(file);
+    } else {
+      setPageCount(1);
+    }
   };
 
   // Cost calculation
@@ -388,6 +405,7 @@ export default function CounterKiosk() {
     try {
       if (job.fileDataUrl.startsWith('data:') || job.fileDataUrl.startsWith('blob:')) {
         let blobUrl = job.fileDataUrl;
+        let transient = false;
         if (job.fileDataUrl.startsWith('data:')) {
           const parts = job.fileDataUrl.split(';base64,');
           const mime = parts[0]?.split(':')[1] || 'application/pdf';
@@ -395,8 +413,12 @@ export default function CounterKiosk() {
           const arr = new Uint8Array(raw.length);
           for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
           blobUrl = URL.createObjectURL(new Blob([arr], { type: mime }));
+          transient = true;
         }
         window.open(blobUrl, '_blank');
+        if (transient) {
+          setTimeout(() => { try { URL.revokeObjectURL(blobUrl); } catch {} }, 60000);
+        }
       } else {
         window.open(job.fileDataUrl, '_blank');
       }
@@ -408,12 +430,23 @@ export default function CounterKiosk() {
   };
 
   const handleDismissJob = (jobId: string) => {
+    const target = queue.find((j) => j.id === jobId);
+    if (target?.fileDataUrl?.startsWith('blob:')) {
+      try { URL.revokeObjectURL(target.fileDataUrl); } catch {}
+      queueUrlsRef.current.delete(target.fileDataUrl);
+    }
     const updated = queue.filter((j) => j.id !== jobId);
     saveQueue(updated);
   };
 
   const handleClearAll = () => {
     if (confirm('Clear all completed and pending print queue items?')) {
+      queue.forEach((j) => {
+        if (j.fileDataUrl?.startsWith('blob:')) {
+          try { URL.revokeObjectURL(j.fileDataUrl); } catch {}
+          queueUrlsRef.current.delete(j.fileDataUrl);
+        }
+      });
       saveQueue([]);
     }
   };
@@ -667,7 +700,33 @@ export default function CounterKiosk() {
                 </p>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="inline-flex items-center gap-1.5 bg-slate-200/80 dark:bg-slate-800 px-2.5 py-1.5 rounded-xl">
+                  <input
+                    type="password"
+                    maxLength={4}
+                    inputMode="numeric"
+                    placeholder="New 4-digit PIN"
+                    value={newShopPin}
+                    onChange={(e) => setNewShopPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                    className="w-24 bg-transparent text-xs font-bold text-slate-800 dark:text-slate-100 outline-none placeholder:text-slate-400"
+                  />
+                  <button
+                    type="button"
+                    disabled={newShopPin.length !== 4}
+                    onClick={() => {
+                      try {
+                        localStorage.setItem(KIOSK_SHOP_PIN_KEY, newShopPin);
+                        setNewShopPin('');
+                        setPinSavedMsg('PIN updated');
+                        setTimeout(() => setPinSavedMsg(''), 2000);
+                      } catch {}
+                    }}
+                    className="px-2 py-1 rounded-lg text-[11px] font-bold bg-emerald-600 text-white disabled:opacity-40"
+                  >
+                    {pinSavedMsg || 'Set PIN'}
+                  </button>
+                </div>
                 <button
                   type="button"
                   onClick={() => {
@@ -773,7 +832,7 @@ export default function CounterKiosk() {
               </div>
               <div>
                 <h4 className="text-base font-bold text-white">Shopkeeper PIN</h4>
-                <p className="text-xs text-slate-400">Default PIN is 1234</p>
+                <p className="text-xs text-slate-400">Enter your 4-digit shopkeeper counter PIN</p>
               </div>
               <input
                 type="password"
@@ -781,12 +840,19 @@ export default function CounterKiosk() {
                 autoFocus
                 placeholder="PIN"
                 value={pinInput}
-                onChange={(e) => setPinInput(e.target.value)}
+                onChange={(e) => {
+                  setPinInput(e.target.value);
+                  if (pinError) setPinError('');
+                }}
                 className="w-full text-center tracking-widest text-xl py-2 bg-slate-800 border border-slate-700 rounded-xl text-white outline-none focus:border-emerald-500"
               />
+              {pinError && <p className="text-xs font-semibold text-rose-400">{pinError}</p>}
               <div className="grid grid-cols-2 gap-2">
                 <button
-                  onClick={() => setShowPinModal(false)}
+                  onClick={() => {
+                    setShowPinModal(false);
+                    setPinError('');
+                  }}
                   className="py-2.5 text-xs font-bold text-slate-400 hover:text-white"
                 >
                   Cancel
@@ -804,8 +870,9 @@ export default function CounterKiosk() {
                       setViewMode('shopkeeper');
                       setShowPinModal(false);
                       setPinInput('');
+                      setPinError('');
                     } else {
-                      alert('Incorrect PIN. Please enter your shopkeeper PIN.');
+                      setPinError('Incorrect PIN. Please enter your shopkeeper PIN.');
                     }
                   }}
                   className="py-2.5 text-xs font-bold bg-emerald-600 rounded-xl text-white"

@@ -238,16 +238,21 @@ export async function saveLaunchedFilesToCache(files: File[], title = 'Opened fr
   }[] = [];
 
   for (const f of files) {
-    const buffer = await f.arrayBuffer();
-    const name = f.name || 'document.pdf';
-    serializedFiles.push({
-      name,
-      type: inferMimeType(name, f.type),
-      size: f.size || buffer.byteLength,
-      lastModified: f.lastModified || now,
-      buffer,
-    });
+    try {
+      const buffer = await f.arrayBuffer();
+      const name = f.name || 'document.pdf';
+      serializedFiles.push({
+        name,
+        type: inferMimeType(name, f.type),
+        size: f.size || buffer.byteLength,
+        lastModified: f.lastModified || now,
+        buffer,
+      });
+    } catch {
+      // Skip unreadable file rather than failing the share batch
+    }
   }
+  if (!serializedFiles.length) return;
 
   // 1. Save to CacheStorage
   try {

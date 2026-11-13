@@ -10,6 +10,7 @@ import '../lib/pdfWorker';
 import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
+import { triggerBlobDownload } from '../lib/blobUrl';
 
 interface PageText {
   pageNumber: number;
@@ -307,10 +308,7 @@ export default function AiPdfSummarizer() {
 
     const pdfBytes = await pdfDoc.save();
     const blob = new Blob([pdfBytes as any], { type: 'application/pdf' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `summary_${file?.name || 'document'}.pdf`;
-    a.click();
+    triggerBlobDownload(blob, `summary_${file?.name || 'document'}.pdf`);
   };
 
   const reset = () => {

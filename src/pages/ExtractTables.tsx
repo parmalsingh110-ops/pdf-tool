@@ -11,6 +11,7 @@ import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { apiFetch } from '../lib/api';
+import { triggerBlobDownload } from '../lib/blobUrl';
 
 interface ExtractedTable {
   id: string;
@@ -228,10 +229,7 @@ export default function ExtractTables() {
       .join('\n');
 
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `${file?.name.replace(/\.pdf$/i, '')}_Table_${activeTableIdx + 1}.csv`;
-    a.click();
+    triggerBlobDownload(blob, `${file?.name.replace(/\.pdf$/i, '')}_Table_${activeTableIdx + 1}.csv`);
   };
 
   const downloadJson = () => {
@@ -249,10 +247,7 @@ export default function ExtractTables() {
     });
 
     const blob = new Blob([JSON.stringify(jsonRecords, null, 2)], { type: 'application/json' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `${file?.name.replace(/\.pdf$/i, '')}_Table_${activeTableIdx + 1}.json`;
-    a.click();
+    triggerBlobDownload(blob, `${file?.name.replace(/\.pdf$/i, '')}_Table_${activeTableIdx + 1}.json`);
   };
 
   const copyMarkdown = () => {

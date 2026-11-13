@@ -112,8 +112,8 @@ export default function ImageCollage() {
   return (
     <div className="flex-1 flex flex-col items-center p-8">
       <div className="text-center mb-8">
-        <h1 className="text-4xl font-bold text-gray-900 mb-4">Image Collage Maker</h1>
-        <p className="text-xl text-gray-600">Create beautiful photo collages from multiple images.</p>
+        <h1 className="text-4xl font-bold text-gray-900 dark:text-white mb-4">Image Collage Maker</h1>
+        <p className="text-xl text-gray-600 dark:text-slate-400">Create beautiful photo collages from multiple images.</p>
       </div>
 
       <div className="w-full max-w-5xl grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-8">
@@ -123,7 +123,7 @@ export default function ImageCollage() {
             <FileDropzone onDrop={handleDrop} multiple={true} title="Drop photos for collage" accept={{ 'image/*': ['.jpg', '.jpeg', '.png', '.webp'] }} />
           ) : (
             <>
-              <div className="bg-gray-100 rounded-2xl p-4 flex items-center justify-center min-h-[400px]">
+              <div className="bg-gray-100 dark:bg-slate-800 rounded-2xl p-4 flex items-center justify-center min-h-[400px] border border-gray-200 dark:border-slate-700">
                 <div
                   className="grid shadow-xl rounded-xl overflow-hidden"
                   style={{
@@ -137,7 +137,7 @@ export default function ImageCollage() {
                   }}
                 >
                   {Array.from({ length: totalCells }).map((_, i) => (
-                    <div key={i} className="relative aspect-[4/5] bg-gray-200 overflow-hidden group" style={{ borderRadius }}>
+                    <div key={i} className="relative aspect-[4/5] bg-gray-200 dark:bg-slate-700 overflow-hidden group" style={{ borderRadius }}>
                       {images[i] ? (
                         <>
                           <img src={images[i].url} alt="" className="w-full h-full object-cover" />
@@ -147,7 +147,7 @@ export default function ImageCollage() {
                           </button>
                         </>
                       ) : (
-                        <div className="flex items-center justify-center h-full text-gray-400 text-xs">Empty</div>
+                        <div className="flex items-center justify-center h-full text-gray-400 dark:text-slate-500 text-xs">Empty</div>
                       )}
                     </div>
                   ))}
@@ -161,48 +161,48 @@ export default function ImageCollage() {
                 <button onClick={exportCollage} className="px-6 py-2 bg-green-600 text-white rounded-xl font-bold text-sm hover:bg-green-700 flex items-center gap-2">
                   <Download className="w-4 h-4" /> Download Collage (PNG)
                 </button>
-                <button onClick={() => { images.forEach(i => URL.revokeObjectURL(i.url)); setImages([]); }} className="px-4 py-2 bg-gray-100 text-gray-700 rounded-xl font-semibold text-sm hover:bg-gray-200">Clear all</button>
+                <button onClick={() => { images.forEach(i => URL.revokeObjectURL(i.url)); setImages([]); }} className="px-4 py-2 bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-slate-300 rounded-xl font-semibold text-sm hover:bg-gray-200 dark:hover:bg-slate-700">Clear all</button>
               </div>
             </>
           )}
         </div>
 
         {/* Settings */}
-        <div className="bg-white rounded-2xl border border-gray-200 p-6 space-y-5 h-fit">
-          <h3 className="font-bold text-gray-900">Layout Template</h3>
+        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-gray-200 dark:border-slate-700 p-6 space-y-5 h-fit">
+          <h3 className="font-bold text-gray-900 dark:text-white">Layout Template</h3>
           <div className="grid grid-cols-3 gap-2">
             {TEMPLATES.filter(t => !t.custom).map(t => (
               <button key={t.name} onClick={() => { setCols(t.cols); setRows(t.rows); }}
-                className={`px-3 py-2 rounded-lg text-sm font-bold border ${cols === t.cols && rows === t.rows ? 'bg-blue-50 border-blue-500 text-blue-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
+                className={`px-3 py-2 rounded-lg text-sm font-bold border ${cols === t.cols && rows === t.rows ? 'bg-blue-50 dark:bg-blue-950/50 border-blue-500 text-blue-700 dark:text-blue-300' : 'border-gray-200 dark:border-slate-700 text-gray-600 dark:text-slate-300 hover:bg-gray-50 dark:hover:bg-slate-800'}`}>
                 {t.name}
               </button>
             ))}
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">Columns</label>
-              <input type="number" min={1} max={6} value={cols} onChange={e => setCols(Number(e.target.value))} className="w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm" />
+              <label className="block text-xs font-medium text-gray-700 dark:text-slate-300 mb-1">Columns</label>
+              <input type="number" min={1} max={6} value={cols} onChange={e => setCols(Number(e.target.value))} className="w-full px-2 py-1.5 border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-gray-900 dark:text-white rounded-lg text-sm" />
             </div>
             <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">Rows</label>
-              <input type="number" min={1} max={6} value={rows} onChange={e => setRows(Number(e.target.value))} className="w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm" />
+              <label className="block text-xs font-medium text-gray-700 dark:text-slate-300 mb-1">Rows</label>
+              <input type="number" min={1} max={6} value={rows} onChange={e => setRows(Number(e.target.value))} className="w-full px-2 py-1.5 border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-gray-900 dark:text-white rounded-lg text-sm" />
             </div>
           </div>
-          <label className="block text-sm font-medium text-gray-700">
+          <label className="block text-sm font-medium text-gray-700 dark:text-slate-300">
             Gap: {gap}px
             <input type="range" min={0} max={30} value={gap} onChange={e => setGap(Number(e.target.value))} className="mt-1 w-full" />
           </label>
-          <label className="block text-sm font-medium text-gray-700">
+          <label className="block text-sm font-medium text-gray-700 dark:text-slate-300">
             Corner Radius: {borderRadius}px
             <input type="range" min={0} max={30} value={borderRadius} onChange={e => setBorderRadius(Number(e.target.value))} className="mt-1 w-full" />
           </label>
-          <label className="block text-sm font-medium text-gray-700">
+          <label className="block text-sm font-medium text-gray-700 dark:text-slate-300">
             Background
-            <input type="color" value={bgColor} onChange={e => setBgColor(e.target.value)} className="mt-1 w-full h-10 rounded-lg border border-gray-300" />
+            <input type="color" value={bgColor} onChange={e => setBgColor(e.target.value)} className="mt-1 w-full h-10 rounded-lg border border-gray-300 dark:border-slate-600" />
           </label>
-          <label className="block text-sm font-medium text-gray-700">
+          <label className="block text-sm font-medium text-gray-700 dark:text-slate-300">
             Output Width
-            <select value={outputSize} onChange={e => setOutputSize(Number(e.target.value))} className="mt-1 w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm">
+            <select value={outputSize} onChange={e => setOutputSize(Number(e.target.value))} className="mt-1 w-full px-2 py-1.5 border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-gray-900 dark:text-white rounded-lg text-sm">
               <option value={1000}>1000px (web)</option>
               <option value={2000}>2000px (print)</option>
               <option value={3000}>3000px (high-res)</option>

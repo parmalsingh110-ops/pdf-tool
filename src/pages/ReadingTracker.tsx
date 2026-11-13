@@ -9,6 +9,7 @@ import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { hashStorageId } from '../lib/privacy';
+import { triggerBlobDownload } from '../lib/blobUrl';
 
 type ReadingTheme = 'light' | 'dark' | 'sepia' | 'oled';
 
@@ -176,10 +177,7 @@ export default function ReadingTracker() {
     const md = `# Study Notes & Bookmarks: ${file?.name}\n\n` +
       bookmarks.map(b => `### Page ${b.page} (${b.addedAt})\n${b.note}\n`).join('\n');
     const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `${file?.name.replace(/\.pdf$/i, '')}_Study_Notes.md`;
-    a.click();
+    triggerBlobDownload(blob, `${file?.name.replace(/\.pdf$/i, '')}_Study_Notes.md`);
   };
 
   const percentRead = totalPages > 0 ? Math.round(((current + 1) / totalPages) * 100) : 0;

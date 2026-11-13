@@ -4,6 +4,7 @@ import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { PDFDocument } from 'pdf-lib';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
+import { safeRevokeUrl, useAutoRevokeUrl, useAutoRevokeUrls } from '../lib/blobUrl';
 
 interface DocItem {
   id: string;
@@ -43,6 +44,9 @@ export default function ExamDocumentMerger() {
   const [progressMsg, setProgressMsg] = useState('');
   const [mergedPdfUrl, setMergedPdfUrl] = useState<string | null>(null);
   const [finalSizeKb, setFinalSizeKb] = useState<number | null>(null);
+
+  useAutoRevokeUrl(mergedPdfUrl);
+  useAutoRevokeUrls(docs.map(d => d.previewUrl));
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
@@ -126,17 +130,23 @@ export default function ExamDocumentMerger() {
           const img = new Image();
           img.crossOrigin = 'anonymous';
           const objectUrl = URL.createObjectURL(item.file);
-          await new Promise((resolve) => {
-            img.onload = resolve;
-            img.src = objectUrl;
-          });
+          try {
+            await new Promise<void>((resolve, reject) => {
+              img.onload = () => resolve();
+              img.onerror = () => reject(new Error(`Failed to decode image ${item.file.name}`));
+              img.src = objectUrl;
+            });
 
-          const canvas = document.createElement('canvas');
-          canvas.width = img.width;
-          canvas.height = img.height;
-          const ctx = canvas.getContext('2d')!;
-          ctx.drawImage(img, 0, 0);
-          extractedPages.push({ canvas, label: item.label });
+            const canvas = document.createElement('canvas');
+            canvas.width = img.width;
+            canvas.height = img.height;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) throw new Error('Unable to initialize canvas context.');
+            ctx.drawImage(img, 0, 0);
+            extractedPages.push({ canvas, label: item.label });
+          } finally {
+            safeRevokeUrl(objectUrl);
+          }
         } else {
           // PDF document
           const arrayBuffer = await item.file.arrayBuffer();

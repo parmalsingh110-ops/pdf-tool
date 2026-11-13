@@ -407,12 +407,12 @@ export default function IdCardJoiner() {
       const pdfDoc = await PDFDocument.create();
       const page = pdfDoc.addPage([595.28, 841.89]); // A4 in PDF points (72 DPI)
       const compositeBytes = await new Promise<Uint8Array>((res, rej) => {
-        compositeCanvas.toBlob(async (blob) => {
+        compositeCanvas.toBlob((blob) => {
           if (!blob) {
             rej(new Error('Canvas toBlob failed'));
             return;
           }
-          res(new Uint8Array(await blob.arrayBuffer()));
+          blob.arrayBuffer().then((buf) => res(new Uint8Array(buf)), rej);
         }, 'image/jpeg', 0.92);
       });
 

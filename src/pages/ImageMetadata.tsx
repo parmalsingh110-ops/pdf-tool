@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Info, Camera, MapPin, Calendar, Aperture } from 'lucide-react';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
+import { safeRevokeUrl, useAutoRevokeUrl } from '../lib/blobUrl';
 
 interface ExifData { [key: string]: string; }
 
@@ -82,14 +83,19 @@ function readExif(file: File): Promise<ExifData> {
 
       // Get image dimensions via bitmap
       const img = new Image();
+      const imgObjUrl = URL.createObjectURL(file);
       img.onload = () => {
+        safeRevokeUrl(imgObjUrl);
         meta['Image Width'] = meta['Image Width'] || `${img.naturalWidth}`;
         meta['Image Height'] = meta['Image Height'] || `${img.naturalHeight}`;
         meta['Aspect Ratio'] = `${(img.naturalWidth/img.naturalHeight).toFixed(2)}`;
         resolve(meta);
       };
-      img.onerror = () => resolve(meta);
-      img.src = URL.createObjectURL(file);
+      img.onerror = () => {
+        safeRevokeUrl(imgObjUrl);
+        resolve(meta);
+      };
+      img.src = imgObjUrl;
     };
     reader.readAsArrayBuffer(file);
   });
@@ -102,6 +108,8 @@ export default function ImageMetadata() {
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [metadata, setMetadata] = useState<ExifData | null>(null);
+
+  useAutoRevokeUrl(preview);
 
   const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];

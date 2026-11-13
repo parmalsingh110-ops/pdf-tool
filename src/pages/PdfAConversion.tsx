@@ -10,6 +10,7 @@ import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { dataUrlToBytes } from '../lib/utils';
+import { toArrayBufferBytes, useAutoRevokeUrl } from '../lib/blobUrl';
 
 type ConformanceLevel = 'PDF/A-1b' | 'PDF/A-2b' | 'PDF/A-3b';
 
@@ -43,6 +44,9 @@ export default function PdfAConversion() {
   const [origSize, setOrigSize] = useState(0);
   const [convertedSize, setConvertedSize] = useState(0);
 
+  useAutoRevokeUrl(resultUrl);
+  useAutoRevokeUrl(certUrl);
+
   const [auditItems, setAuditItems] = useState<AuditItem[]>([
     { id: 'xmp', name: 'XMP Archival Metadata Schema', desc: 'ISO 19005-1 pdfaid namespace with strict conformance tag', status: 'pending' },
     { id: 'intent', name: 'Color Space & OutputIntent', desc: 'sRGB IEC61966-2.1 color profile registered in catalog', status: 'pending' },
@@ -62,7 +66,16 @@ export default function PdfAConversion() {
     }
   };
 
+  const escapeXml = (str: string) =>
+    str
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&apos;');
+
   const createXmpPacket = (title: string, partNum: string, conformanceLetter: string, nowIso: string) => {
+    const safeTitle = escapeXml(title || 'Archived Document');
     return `<?xpacket begin="\uFEFF" id="W5M0MpCehiHzreSzNTczkc9d"?>
 <x:xmpmeta xmlns:x="adobe:ns:meta/">
   <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
@@ -75,7 +88,7 @@ export default function PdfAConversion() {
       <pdfaid:conformance>${conformanceLetter}</pdfaid:conformance>
       <dc:title>
         <rdf:Alt>
-          <rdf:li xml:lang="x-default">${title || 'Archived Document'}</rdf:li>
+          <rdf:li xml:lang="x-default">${safeTitle}</rdf:li>
         </rdf:Alt>
       </dc:title>
       <dc:creator>
@@ -204,8 +217,8 @@ export default function PdfAConversion() {
       ));
 
       setProgressMsg('Finalizing archival binary compilation...');
-      const finalPdfBytes = await pdfDoc.save({ useObjectStreams: false });
-      const blob = new Blob([finalPdfBytes as any], { type: 'application/pdf' });
+      const finalPdfBytes = toArrayBufferBytes(await pdfDoc.save({ useObjectStreams: false }));
+      const blob = new Blob([finalPdfBytes], { type: 'application/pdf' });
       setConvertedSize(blob.size);
       const url = URL.createObjectURL(blob);
       setResultUrl(url);
@@ -360,8 +373,8 @@ export default function PdfAConversion() {
             color: rgb(0.2, 0.25, 0.3),
           });
 
-          const certBytes = await certDoc.save();
-          const certBlob = new Blob([certBytes as any], { type: 'application/pdf' });
+          const certBytes = toArrayBufferBytes(await certDoc.save());
+          const certBlob = new Blob([certBytes], { type: 'application/pdf' });
           setCertUrl(URL.createObjectURL(certBlob));
         } catch (cErr) {
           console.error('Failed to create conformance certificate:', cErr);

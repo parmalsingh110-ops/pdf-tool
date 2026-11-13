@@ -483,21 +483,21 @@ export default function DocumentScanner() {
   };
 
   return (
-    <div className="flex-1 flex flex-col p-4 sm:p-8 bg-slate-50 min-h-screen">
+    <div className="flex-1 flex flex-col p-4 sm:p-8 bg-slate-50 dark:bg-slate-950 min-h-screen transition-colors">
       <div className="text-center mb-6">
-        <h1 className="text-3xl font-bold text-slate-800 mb-2">Document Scanner Pro</h1>
-        <p className="text-slate-500">Scan, crop, and automatically correct multi-page documents.</p>
+        <h1 className="text-3xl font-bold text-slate-800 dark:text-white mb-2">Document Scanner Pro</h1>
+        <p className="text-slate-500 dark:text-slate-400">Scan, crop, and automatically correct multi-page documents.</p>
       </div>
 
       <div className="w-full max-w-5xl mx-auto flex gap-6 flex-col xl:flex-row items-start">
-        <div className="w-full xl:w-64 bg-white rounded-2xl shadow-sm border border-slate-200 p-4 flex flex-col gap-4 sticky top-8">
-          <h3 className="font-bold text-slate-800 text-sm uppercase tracking-wider">Pages ({pages.length})</h3>
+        <div className="w-full xl:w-64 bg-white dark:bg-slate-900 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 p-4 flex flex-col gap-4 sticky top-8">
+          <h3 className="font-bold text-slate-800 dark:text-white text-sm uppercase tracking-wider">Pages ({pages.length})</h3>
           <div className="flex xl:flex-col gap-3 overflow-x-auto xl:overflow-y-auto max-h-[60vh] pb-2 xl:pb-0 scrollbar-hide">
             {pages.map((p, i) => (
               <div 
                 key={p.id} 
                 onClick={() => switchPage(p.id)}
-                className={`flex-shrink-0 relative w-24 xl:w-full aspect-[3/4] rounded-xl overflow-hidden cursor-pointer border-2 transition-all ${activePageId === p.id ? 'border-indigo-500 shadow-md scale-105 xl:scale-100' : 'border-slate-200 hover:border-indigo-300'}`}
+                className={`flex-shrink-0 relative w-24 xl:w-full aspect-[3/4] rounded-xl overflow-hidden cursor-pointer border-2 transition-all ${activePageId === p.id ? 'border-indigo-500 shadow-md scale-105 xl:scale-100' : 'border-slate-200 dark:border-slate-700 hover:border-indigo-300'}`}
               >
                 <img src={p.resultUrl || p.originalUrl} className="w-full h-full object-cover" />
                 <div className="absolute top-1 left-1 bg-black/50 text-white text-[10px] font-bold px-1.5 rounded">{i + 1}</div>
@@ -512,7 +512,7 @@ export default function DocumentScanner() {
               </div>
             ))}
             
-            <label className="flex-shrink-0 flex flex-col items-center justify-center w-24 xl:w-full aspect-[3/4] border-2 border-dashed border-indigo-200 rounded-xl bg-indigo-50/50 cursor-pointer hover:bg-indigo-50 text-indigo-500 transition-colors">
+            <label className="flex-shrink-0 flex flex-col items-center justify-center w-24 xl:w-full aspect-[3/4] border-2 border-dashed border-indigo-200 dark:border-indigo-800 rounded-xl bg-indigo-50/50 dark:bg-indigo-950/30 cursor-pointer hover:bg-indigo-50 dark:hover:bg-indigo-950/50 text-indigo-500 dark:text-indigo-400 transition-colors">
               <Plus className="w-6 h-6 mb-1" />
               <span className="text-[10px] font-bold uppercase tracking-wider">Add Page</span>
               <input type="file" multiple accept="image/*" className="hidden" onChange={handleFiles} />
@@ -521,17 +521,17 @@ export default function DocumentScanner() {
           
           {pages.length > 0 && (
             <div className="space-y-2 mt-2">
-              <button onClick={downloadAllAsPdf} disabled={busy} className="w-full py-2.5 bg-slate-800 text-white rounded-xl font-bold shadow hover:bg-slate-900 flex items-center justify-center gap-2 text-sm">
+              <button onClick={downloadAllAsPdf} disabled={busy} className="w-full py-2.5 bg-slate-800 dark:bg-indigo-600 text-white rounded-xl font-bold shadow hover:bg-slate-900 dark:hover:bg-indigo-700 flex items-center justify-center gap-2 text-sm">
                 <Download className="w-4 h-4"/> Save All as PDF
               </button>
-              <button onClick={downloadAllAsZip} disabled={busy} className="w-full py-2.5 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-xl font-bold hover:bg-indigo-100 flex items-center justify-center gap-2 text-sm">
+              <button onClick={downloadAllAsZip} disabled={busy} className="w-full py-2.5 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 rounded-xl font-bold hover:bg-indigo-100 dark:hover:bg-indigo-900/50 flex items-center justify-center gap-2 text-sm">
                 <Archive className="w-4 h-4"/> Download All (ZIP)
               </button>
             </div>
           )}
         </div>
 
-        <div className="flex-1 bg-white rounded-2xl shadow-xl overflow-hidden border border-slate-200 w-full min-h-[500px]">
+        <div className="flex-1 bg-white dark:bg-slate-900 rounded-2xl shadow-xl overflow-hidden border border-slate-200 dark:border-slate-700 w-full min-h-[500px]">
           {pages.length === 0 && step === 'upload' ? (
             <div className="p-8 sm:p-12 flex flex-col items-center justify-center min-h-[500px]">
               {useCamera ? (
@@ -542,22 +542,22 @@ export default function DocumentScanner() {
                   </div>
                   <div className="flex gap-3">
                     <button onClick={capturePhoto} className="flex-1 py-3 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 shadow-md">📸 Capture Fast</button>
-                    <button onClick={() => { stream?.getTracks().forEach(t => t.stop()); setUseCamera(false); }} className="px-6 py-3 bg-slate-200 text-slate-700 rounded-xl font-semibold hover:bg-slate-300">Cancel</button>
+                    <button onClick={() => { stream?.getTracks().forEach(t => t.stop()); setUseCamera(false); }} className="px-6 py-3 bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-xl font-semibold hover:bg-slate-300 dark:hover:bg-slate-700">Cancel</button>
                   </div>
                 </div>
               ) : (
                 <div className="space-y-6 max-w-lg mx-auto w-full">
-                  <label className="flex flex-col items-center justify-center w-full h-72 border-2 border-dashed border-indigo-300 rounded-2xl bg-indigo-50/50 cursor-pointer hover:bg-indigo-50 transition-colors">
+                  <label className="flex flex-col items-center justify-center w-full h-72 border-2 border-dashed border-indigo-300 dark:border-indigo-800 rounded-2xl bg-indigo-50/50 dark:bg-indigo-950/30 cursor-pointer hover:bg-indigo-50 dark:hover:bg-indigo-950/50 transition-colors">
                     <ScanLine className="w-16 h-16 text-indigo-400 mb-4" />
-                    <span className="text-indigo-900 font-bold text-xl">Upload multi-page documents</span>
+                    <span className="text-indigo-900 dark:text-indigo-200 font-bold text-xl">Upload multi-page documents</span>
                     <span className="text-sm text-indigo-400 mt-2">Select multiple JPG, PNG files</span>
                     <input type="file" multiple accept="image/*" className="hidden" onChange={handleFiles} />
                   </label>
                   <div className="relative flex items-center justify-center my-4">
-                     <div className="absolute border-b border-slate-200 w-full top-1/2"></div>
-                     <span className="relative bg-white px-4 text-xs font-bold text-slate-400 uppercase tracking-widest">OR</span>
+                     <div className="absolute border-b border-slate-200 dark:border-slate-700 w-full top-1/2"></div>
+                     <span className="relative bg-white dark:bg-slate-900 px-4 text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest">OR</span>
                   </div>
-                  <button onClick={startCamera} className="w-full py-4 bg-slate-800 text-white rounded-xl font-bold hover:bg-slate-900 flex items-center justify-center gap-2 shadow-md text-lg">
+                  <button onClick={startCamera} className="w-full py-4 bg-slate-800 dark:bg-indigo-600 text-white rounded-xl font-bold hover:bg-slate-900 dark:hover:bg-indigo-700 flex items-center justify-center gap-2 shadow-md text-lg">
                     📷 Open Camera
                   </button>
                 </div>
@@ -565,19 +565,19 @@ export default function DocumentScanner() {
             </div>
           ) : activePage ? (
             <div className="flex flex-col h-full">
-              <div className="flex bg-slate-100 border-b border-slate-200 p-3 sm:p-4 gap-2">
-                 <button onClick={() => switchPage(activePage.id, 'crop')} className={`flex-1 text-center py-2 rounded-lg text-sm font-bold transition-colors ${step==='crop' ? 'bg-indigo-500 text-white shadow' : 'text-slate-500 hover:bg-slate-200 cursor-pointer'}`}>1. Accurate Crop</button>
-                 <button onClick={() => { if(activePage.croppedUrl) switchPage(activePage.id, 'filter') }} className={`flex-1 text-center py-2 rounded-lg text-sm font-bold transition-colors ${step==='filter' ? 'bg-indigo-500 text-white shadow' : 'text-slate-500 hover:bg-slate-200 font-medium'}`} disabled={!activePage.croppedUrl}>2. Enhance & Filter</button>
+              <div className="flex bg-slate-100 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 p-3 sm:p-4 gap-2">
+                 <button onClick={() => switchPage(activePage.id, 'crop')} className={`flex-1 text-center py-2 rounded-lg text-sm font-bold transition-colors ${step==='crop' ? 'bg-indigo-500 text-white shadow' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 cursor-pointer'}`}>1. Accurate Crop</button>
+                 <button onClick={() => { if(activePage.croppedUrl) switchPage(activePage.id, 'filter') }} className={`flex-1 text-center py-2 rounded-lg text-sm font-bold transition-colors ${step==='filter' ? 'bg-indigo-500 text-white shadow' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 font-medium'}`} disabled={!activePage.croppedUrl}>2. Enhance & Filter</button>
               </div>
               
               <div className="p-4 flex-1 flex flex-col justify-center">
                 {step === 'crop' && (
                   <div className="flex flex-col items-center space-y-6">
-                    <p className="text-slate-600 font-medium">Drag the 4 corners to fit the document bounds exactly.</p>
+                    <p className="text-slate-600 dark:text-slate-300 font-medium">Drag the 4 corners to fit the document bounds exactly.</p>
                     
                     <div 
                       ref={imgContainerRef}
-                      className="relative inline-block border border-slate-300 shadow-md touch-none select-none max-w-full"
+                      className="relative inline-block border border-slate-300 dark:border-slate-700 shadow-md touch-none select-none max-w-full"
                       onPointerMove={handleMove}
                       onPointerUp={() => setActivePt(null)}
                       onPointerLeave={() => setActivePt(null)}
@@ -606,12 +606,12 @@ export default function DocumentScanner() {
                     </div>
 
                     <div className="flex flex-wrap items-center justify-center gap-3">
-                      <button onClick={handleAutoDetect} className="px-4 py-2.5 bg-amber-500/10 border border-amber-300 text-amber-800 font-bold rounded-xl hover:bg-amber-500/20 flex items-center gap-2 text-sm shadow-sm">
-                        <Sparkles className="w-4 h-4 text-amber-600" />
+                      <button onClick={handleAutoDetect} className="px-4 py-2.5 bg-amber-500/10 border border-amber-300 dark:border-amber-700 text-amber-800 dark:text-amber-300 font-bold rounded-xl hover:bg-amber-500/20 flex items-center gap-2 text-sm shadow-sm">
+                        <Sparkles className="w-4 h-4 text-amber-600 dark:text-amber-400" />
                         <span>✨ Auto Detect Edges</span>
                       </button>
-                      <button onClick={handleResetCorners} className="px-4 py-2.5 bg-slate-100 border border-slate-300 text-slate-700 font-bold rounded-xl hover:bg-slate-200 flex items-center gap-2 text-sm shadow-sm">
-                        <Maximize2 className="w-4 h-4 text-slate-600" />
+                      <button onClick={handleResetCorners} className="px-4 py-2.5 bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 font-bold rounded-xl hover:bg-slate-200 dark:hover:bg-slate-700 flex items-center gap-2 text-sm shadow-sm">
+                        <Maximize2 className="w-4 h-4 text-slate-600 dark:text-slate-400" />
                         <span>Full Image</span>
                       </button>
                       <button onClick={applyCrop} disabled={busy} className="px-6 py-2.5 bg-indigo-600 text-white font-bold rounded-xl shadow-md hover:bg-indigo-700 flex gap-2 items-center notranslate text-sm" translate="no">
@@ -624,18 +624,18 @@ export default function DocumentScanner() {
                 
                 {step === 'filter' && activePage.resultUrl && (
                   <div className="flex flex-col lg:flex-row gap-8 items-start w-full">
-                    <div className="flex-1 bg-slate-100 p-4 rounded-xl flex justify-center items-center w-full shadow-inner relative min-h-[50vh]">
+                    <div className="flex-1 bg-slate-100 dark:bg-slate-800 p-4 rounded-xl flex justify-center items-center w-full shadow-inner relative min-h-[50vh]">
                       {busy && (
-                        <div className="absolute inset-0 z-10 bg-white/50 flex items-center justify-center backdrop-blur-sm rounded-xl">
+                        <div className="absolute inset-0 z-10 bg-white/50 dark:bg-slate-900/60 flex items-center justify-center backdrop-blur-sm rounded-xl">
                           <Loader2 className="w-10 h-10 text-indigo-600 animate-spin" />
                         </div>
                       )}
-                      <img src={activePage.resultUrl} alt="Filtered" className="max-h-[65vh] object-contain shadow-md rounded border border-slate-200" />
+                      <img src={activePage.resultUrl} alt="Filtered" className="max-h-[65vh] object-contain shadow-md rounded border border-slate-200 dark:border-slate-700" />
                     </div>
                     
                     <div className="w-full lg:w-80 space-y-6">
-                      <div className="bg-slate-50 p-5 rounded-xl border border-slate-200 shadow-sm space-y-5">
-                         <h3 className="font-bold text-slate-800 uppercase text-sm tracking-wider">Enhancement</h3>
+                      <div className="bg-slate-50 dark:bg-slate-800 p-5 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm space-y-5">
+                         <h3 className="font-bold text-slate-800 dark:text-white uppercase text-sm tracking-wider">Enhancement</h3>
                          <div className="grid grid-cols-2 gap-2.5">
                            {[
                              { id: 'magic_color', label: 'Magic Color', icon: '✨', desc: 'CamScanner Pro' },
@@ -645,15 +645,15 @@ export default function DocumentScanner() {
                              { id: 'photo', label: 'Original Photo', icon: '🖼️', desc: 'Untouched' },
                            ].map(f => (
                              <button key={f.id} onClick={() => changeFilter(f.id as EnhanceMode)}
-                               className={`p-2.5 rounded-lg flex flex-col items-center gap-0.5 text-xs font-semibold transition-all ${activePage.enhanceMode === f.id ? 'bg-indigo-600 text-white shadow border-transparent' : 'bg-white text-slate-600 border border-slate-200 hover:border-indigo-300'}`}>
+                               className={`p-2.5 rounded-lg flex flex-col items-center gap-0.5 text-xs font-semibold transition-all ${activePage.enhanceMode === f.id ? 'bg-indigo-600 text-white shadow border-transparent' : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:border-indigo-300'}`}>
                                <span className="text-lg">{f.icon}</span>
                                <span className="font-bold">{f.label}</span>
-                               <span className={`text-[10px] ${activePage.enhanceMode === f.id ? 'text-indigo-200' : 'text-slate-400'}`}>{f.desc}</span>
+                               <span className={`text-[10px] ${activePage.enhanceMode === f.id ? 'text-indigo-200' : 'text-slate-400 dark:text-slate-500'}`}>{f.desc}</span>
                              </button>
                            ))}
                          </div>
                          {activePage.enhanceMode === 'screen' && (
-                           <p className="text-xs text-indigo-600 bg-indigo-50 p-2 rounded block">
+                           <p className="text-xs text-indigo-600 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/50 p-2 rounded block">
                               <Activity className="w-3 h-3 inline mr-1 -mt-0.5" />
                               Removes Moiré patterns and push pixels to pure white.
                            </p>
@@ -661,7 +661,7 @@ export default function DocumentScanner() {
                       </div>
 
                       <div className="flex gap-2">
-                        <button onClick={changeRotation} className="flex-1 py-3 bg-white border border-slate-200 text-slate-700 font-bold rounded-xl hover:bg-slate-50 flex items-center justify-center gap-2">
+                        <button onClick={changeRotation} className="flex-1 py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-bold rounded-xl hover:bg-slate-50 dark:hover:bg-slate-700 flex items-center justify-center gap-2">
                            <RotateCw className="w-4 h-4"/> Rotate 90°
                         </button>
                       </div>

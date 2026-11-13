@@ -7,6 +7,7 @@ import { PDFDocument } from 'pdf-lib';
 import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
+import { triggerBlobDownload } from '../lib/blobUrl';
 
 interface ValidationResult {
   hasSignature: boolean;
@@ -182,10 +183,7 @@ export default function ValidateSignatures() {
     };
 
     const blob = new Blob([JSON.stringify(reportData, null, 2)], { type: 'application/json' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `${file.name.replace(/\.pdf$/i, '')}_Signature_Audit_Report.json`;
-    a.click();
+    triggerBlobDownload(blob, `${file.name.replace(/\.pdf$/i, '')}_Signature_Audit_Report.json`);
   };
 
   const reset = () => {
