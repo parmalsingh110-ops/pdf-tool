@@ -182,14 +182,14 @@ export default function SignaturePad() {
             <div className="flex gap-2">
               {([['draw', Pen, 'Draw'], ['type', Type, 'Type'], ['upload', ImageIcon, 'Upload']] as const).map(([m, Icon, label]) => (
                 <button key={m} onClick={() => { setMode(m as Mode); if (m !== 'type') clearCanvas(); }}
-                  className={`flex-1 py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 ${mode === m ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
+                  className={`flex-1 py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-colors ${mode === m ? 'bg-indigo-600 text-white' : 'bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-slate-200 hover:bg-gray-200 dark:hover:bg-slate-700'}`}>
                   <Icon className="w-4 h-4" /> {label}
                 </button>
               ))}
             </div>
 
             {/* Canvas */}
-            <div className="bg-white border-2 border-dashed border-gray-300 rounded-2xl overflow-hidden relative">
+            <div className="bg-white border-2 border-dashed border-gray-300 dark:border-slate-600 rounded-2xl overflow-hidden relative">
               <canvas ref={canvasRef} className="w-full cursor-crosshair" style={{ height: 200, touchAction: 'none' }}
                 onMouseDown={startDraw} onMouseMove={draw} onMouseUp={endDraw} onMouseLeave={endDraw}
                 onTouchStart={startDraw} onTouchMove={draw} onTouchEnd={endDraw} />
@@ -202,14 +202,14 @@ export default function SignaturePad() {
             {mode === 'draw' && (
               <div className="flex items-center gap-4 flex-wrap">
                 <div className="flex items-center gap-2">
-                  <label className="text-sm font-medium text-gray-700">Color</label>
-                  <input type="color" value={penColor} onChange={e => setPenColor(e.target.value)} className="w-8 h-8 rounded cursor-pointer" />
+                  <label className="text-sm font-medium text-gray-700 dark:text-slate-300">Color</label>
+                  <input type="color" value={penColor} onChange={e => setPenColor(e.target.value)} className="w-8 h-8 rounded cursor-pointer bg-transparent" />
                 </div>
                 <div className="flex items-center gap-2 flex-1">
-                  <label className="text-sm font-medium text-gray-700">Width</label>
+                  <label className="text-sm font-medium text-gray-700 dark:text-slate-300">Width</label>
                   <input type="range" min={1} max={8} value={penWidth} onChange={e => setPenWidth(Number(e.target.value))} className="flex-1" />
                 </div>
-                <button onClick={clearCanvas} className="px-3 py-2 text-sm bg-gray-100 rounded-lg hover:bg-gray-200 flex items-center gap-1">
+                <button onClick={clearCanvas} className="px-3 py-2 text-sm bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-slate-200 rounded-lg hover:bg-gray-200 dark:hover:bg-slate-700 flex items-center gap-1 transition-colors">
                   <Trash2 className="w-3 h-3" /> Clear
                 </button>
               </div>
@@ -218,11 +218,11 @@ export default function SignaturePad() {
             {mode === 'type' && (
               <div className="space-y-3">
                 <input type="text" value={typedText} onChange={e => setTypedText(e.target.value)} placeholder="Your Name"
-                  className="w-full px-4 py-3 border border-gray-300 rounded-xl text-lg" />
+                  className="w-full px-4 py-3 border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-gray-900 dark:text-white rounded-xl text-lg" />
                 <div className="grid grid-cols-2 gap-2">
                   {CURSIVE_FONTS.map(f => (
                     <button key={f.name} onClick={() => setSelectedFont(f)}
-                      className={`px-3 py-2 rounded-lg text-sm border ${selectedFont.name === f.name ? 'bg-indigo-50 border-indigo-500 text-indigo-700' : 'border-gray-200 hover:bg-gray-50'}`}
+                      className={`px-3 py-2 rounded-lg text-sm border transition-colors ${selectedFont.name === f.name ? 'bg-indigo-50 dark:bg-indigo-950/50 border-indigo-500 text-indigo-700 dark:text-indigo-300' : 'border-gray-200 dark:border-slate-700 text-gray-700 dark:text-slate-200 hover:bg-gray-50 dark:hover:bg-slate-800'}`}
                       style={{ fontFamily: f.css }}>
                       {f.name}
                     </button>
@@ -232,7 +232,7 @@ export default function SignaturePad() {
             )}
 
             {mode === 'upload' && (
-              <label className="flex items-center justify-center gap-2 w-full py-3 bg-gray-100 rounded-xl font-semibold text-sm cursor-pointer hover:bg-gray-200">
+              <label className="flex items-center justify-center gap-2 w-full py-3 bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-slate-200 rounded-xl font-semibold text-sm cursor-pointer hover:bg-gray-200 dark:hover:bg-slate-700 transition-colors">
                 <ImageIcon className="w-4 h-4" /> Upload signature image
                 <input type="file" accept="image/*" className="hidden" onChange={handleUpload} />
               </label>

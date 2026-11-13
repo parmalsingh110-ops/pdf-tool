@@ -16,7 +16,7 @@ import { PDFDocument } from 'pdf-lib';
 import { useSEO } from '../hooks/useSEO';
 import { usePageSEO } from '../lib/usePageSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
-import { downloadBlob } from '../lib/utils';
+import { dataUrlToBytes, downloadBlob } from '../lib/utils';
 
 type CleanMode = 'whiteboard_clean' | 'blackboard_invert' | 'color_boost' | 'high_contrast';
 
@@ -163,7 +163,9 @@ export default function BoardNotesCleaner() {
       const pageH = 841.89;
 
       const page = pdfDoc.addPage([pageW, pageH]);
-      const imgBytes = await fetch(previewDataUrl).then((r) => r.arrayBuffer());
+      const imgBytes = previewDataUrl.startsWith('data:')
+        ? dataUrlToBytes(previewDataUrl)
+        : await fetch(previewDataUrl).then((r) => r.arrayBuffer());
       const embeddedImg = await pdfDoc.embedJpg(imgBytes);
 
       const margin = 25;

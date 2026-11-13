@@ -721,7 +721,9 @@ export default function AdvancedEditor() {
           continue;
         }
         const last = consolidated[consolidated.length - 1];
-        const sameBaseline = Math.abs(last.baselineY - cur.baselineY) <= 3 || Math.abs(last.y - cur.y) <= 3;
+        const lastBaseY = last.baselineY ?? last.y;
+        const curBaseY = cur.baselineY ?? cur.y;
+        const sameBaseline = Math.abs(lastBaseY - curBaseY) <= 3 || Math.abs(last.y - cur.y) <= 3;
         const gap = cur.x - (last.x + last.w);
         const noSpace = !last.text.endsWith(' ') && !cur.text.startsWith(' ');
         // If items touch or are within 2.5px without whitespace, they belong to the same word/number token

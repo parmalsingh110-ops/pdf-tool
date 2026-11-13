@@ -19,7 +19,7 @@ import '../lib/pdfWorker';
 import { useSEO } from '../hooks/useSEO';
 import { usePageSEO } from '../lib/usePageSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
-import { downloadBlob } from '../lib/utils';
+import { dataUrlToBytes, downloadBlob } from '../lib/utils';
 
 interface EnhanceConfig {
   resolutionScale: number;
@@ -361,7 +361,7 @@ export default function TrueVector4k() {
         // Construct 4K Ultra-HD PDF via pdf-lib
         const newPdf = await PDFDocument.create();
         const pdfPage = newPdf.addPage([origW, origH]);
-        const imgBytes = await fetch(enhancedDataUrl).then((r) => r.arrayBuffer());
+        const imgBytes = dataUrlToBytes(enhancedDataUrl);
         const embeddedImg = await newPdf.embedJpg(imgBytes);
 
         pdfPage.drawImage(embeddedImg, {
@@ -410,7 +410,7 @@ export default function TrueVector4k() {
         const page = await pdfDocRef.current.getPage(p);
         const { enhancedDataUrl, origW, origH } = await enhanceCanvasPage(page, config);
 
-        const imgBytes = await fetch(enhancedDataUrl).then((r) => r.arrayBuffer());
+        const imgBytes = dataUrlToBytes(enhancedDataUrl);
         const embeddedImg = await newPdf.embedJpg(imgBytes);
         const pdfPage = newPdf.addPage([origW, origH]);
         pdfPage.drawImage(embeddedImg, {
@@ -453,7 +453,7 @@ export default function TrueVector4k() {
             <div className="flex flex-wrap items-center gap-3">
               {enhancedImageUrl && (
                 <button
-                  onClick={() => downloadBlob(fetch(enhancedImageUrl).then((r) => r.blob()) as any, `4K_Enhanced_${file?.name.replace(/\.pdf$/i, '') || 'page'}_p${currentPage}.jpg`)}
+                  onClick={() => downloadBlob(new Blob([dataUrlToBytes(enhancedImageUrl) as BlobPart], { type: 'image/jpeg' }), `4K_Enhanced_${file?.name.replace(/\.pdf$/i, '') || 'page'}_p${currentPage}.jpg`)}
                   className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs transition-colors"
                 >
                   <ImageIcon className="w-3.5 h-3.5 text-cyan-400" /> High-Res JPG

@@ -23,7 +23,8 @@ import { useSEO } from '../hooks/useSEO';
 import { usePageSEO } from '../lib/usePageSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
 import ShareQrModal from '../components/ShareQrModal';
-import { downloadBlob } from '../lib/utils';
+import { dataUrlToBytes, downloadBlob } from '../lib/utils';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 
 interface BillItem {
   id: string;
@@ -290,7 +291,7 @@ export default function BillConsolidator() {
         if (!canvas) continue;
 
         const jpgData = canvas.toDataURL('image/jpeg', 0.92);
-        const jpgBytes = await fetch(jpgData).then((r) => r.arrayBuffer());
+        const jpgBytes = dataUrlToBytes(jpgData);
         const jpgImg = await pdfDoc.embedJpg(jpgBytes);
 
         // A4 page 595.28 x 841.89 points
@@ -309,21 +310,15 @@ export default function BillConsolidator() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 py-10 px-4 sm:px-6">
-      <div className="max-w-6xl mx-auto space-y-8">
-        {/* Header */}
-        <div className="text-center space-y-3">
-          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs font-bold uppercase tracking-wider">
-            <Receipt className="w-4 h-4" /> Office & Reimbursement Special
-          </div>
-          <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight">
-            Expense Bills & Fuel Slips 4-in-1 Consolidator
-          </h1>
-          <p className="text-sm sm:text-base text-slate-500 dark:text-slate-400 max-w-2xl mx-auto">
-            Consolidate 4 or 6 fuel bills, toll receipts, and taxi slips onto single A4 sheets.
-            Automatically calculates total claim amount and prints an audited expense voucher.
-          </p>
-        </div>
+    <ToolWorkspaceShell
+      title="Expense Bills & Fuel Slips 4-in-1 Consolidator"
+      subtitle="Consolidate 4 or 6 fuel bills, toll receipts, and taxi slips onto single A4 sheets. Automatically calculates total claim amount and prints an audited expense voucher."
+      categoryLabel="Office & Reimbursement Special"
+      icon={Receipt}
+      microVariant="merge"
+      tone="emerald"
+    >
+      <div className="max-w-6xl mx-auto space-y-8 text-slate-900 dark:text-slate-100">
 
         {/* Upload State */}
         {bills.length === 0 ? (
@@ -588,6 +583,6 @@ export default function BillConsolidator() {
           fileName="expense-claim.pdf"
         />
       </div>
-    </div>
+    </ToolWorkspaceShell>
   );
 }

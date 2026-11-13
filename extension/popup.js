@@ -244,8 +244,8 @@ function renderRecentPanel() {
   recentList.innerHTML = recentFiles
     .map(
       (f) => `
-      <div class="recent-item" data-path="${f.path}">
-        <span class="recent-icon">${f.icon}</span>
+      <div class="recent-item" data-path="${escapeHtml(f.path)}">
+        <span class="recent-icon">${escapeHtml(f.icon)}</span>
         <span class="recent-name">${escapeHtml(f.name)}</span>
         <span class="recent-arrow">→</span>
       </div>`
@@ -304,15 +304,15 @@ function renderTools() {
   toolsContainer.innerHTML = unique
     .map(
       (tool) => `
-    <div class="tool-item" data-path="${tool.path}" data-id="${tool.id}" role="button" tabindex="0" title="${escapeHtml(tool.desc)}">
+    <div class="tool-item" data-path="${escapeHtml(tool.path)}" data-id="${escapeHtml(tool.id)}" role="button" tabindex="0" title="${escapeHtml(tool.desc)}">
       <div class="tool-left">
-        <span class="tool-emoji">${tool.icon}</span>
+        <span class="tool-emoji">${escapeHtml(tool.icon)}</span>
         <div class="tool-details">
-          <span class="tool-name">${tool.name}</span>
-          <span class="tool-desc">${tool.desc}</span>
+          <span class="tool-name">${escapeHtml(tool.name)}</span>
+          <span class="tool-desc">${escapeHtml(tool.desc)}</span>
         </div>
       </div>
-      ${tool.badge ? `<span class="tool-badge">${tool.badge}</span>` : '<span class="tool-arrow">→</span>'}
+      ${tool.badge ? `<span class="tool-badge">${escapeHtml(tool.badge)}</span>` : '<span class="tool-arrow">→</span>'}
     </div>
   `
     )
@@ -342,10 +342,12 @@ function renderTools() {
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────
 function escapeHtml(str) {
-  return String(str)
+  return String(str ?? '')
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 // ─── EVENT LISTENERS ──────────────────────────────────────────────────────

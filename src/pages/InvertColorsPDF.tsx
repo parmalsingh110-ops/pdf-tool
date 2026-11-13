@@ -7,6 +7,7 @@ import '../lib/pdfWorker';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { dataUrlToBytes } from '../lib/utils';
+import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 
 export default function InvertColorsPDF() {
   useSEO(
@@ -271,19 +272,15 @@ export default function InvertColorsPDF() {
   };
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center p-6 md:p-8 max-w-6xl mx-auto w-full">
-      {/* Header */}
-      <div className="text-center mb-8">
-        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-900 text-slate-100 text-xs font-bold tracking-widest uppercase mb-3 border border-slate-700">
-          <Moon className="w-3.5 h-3.5 text-amber-400" /> Eye Care & Night Reader
-        </div>
-        <h1 className="text-3xl md:text-5xl font-extrabold text-gray-900 dark:text-white tracking-tight mb-3">
-          Invert PDF & Dark Mode Creator
-        </h1>
-        <p className="text-base md:text-lg text-gray-600 dark:text-slate-400 max-w-2xl mx-auto">
-          Convert harsh bright PDFs into soothing dark mode documents. Choose from OLED Pitch Dark, Warm Sepia, and Solarized Navy with real-time preview.
-        </p>
-      </div>
+    <ToolWorkspaceShell
+      title="Invert PDF & Dark Mode Creator"
+      subtitle="Convert harsh bright PDFs into soothing dark mode documents. Choose from OLED Pitch Dark, Warm Sepia, and Solarized Navy with real-time preview."
+      categoryLabel="Eye Care & Night Reader"
+      icon={Moon}
+      microVariant="generic"
+      tone="violet"
+    >
+      <div className="flex flex-col items-center justify-center max-w-6xl mx-auto w-full">
 
       {!file ? (
         <div className="w-full max-w-2xl">
@@ -601,6 +598,7 @@ export default function InvertColorsPDF() {
           )}
         </div>
       )}
-    </div>
+      </div>
+    </ToolWorkspaceShell>
   );
 }

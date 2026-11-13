@@ -21,7 +21,7 @@ import { useSEO } from '../hooks/useSEO';
 import { usePageSEO } from '../lib/usePageSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
 import ShareQrModal from '../components/ShareQrModal';
-import { downloadBlob } from '../lib/utils';
+import { dataUrlToBytes, downloadBlob } from '../lib/utils';
 
 type AttestPhrase = 'Self Attested' | 'Self Attested with Date' | 'True Copy' | 'Verified from Original' | 'custom';
 type StampPosition = 'bottom_right' | 'bottom_left' | 'bottom_center' | 'custom';
@@ -366,7 +366,7 @@ export default function SelfAttest() {
       sCtx.font = 'bold 22px sans-serif';
       sCtx.fillText(`Date: ${signDate}`, 200, 165);
 
-      const stampPngBytes = await fetch(stampCanvas.toDataURL('image/png')).then((r) => r.arrayBuffer());
+      const stampPngBytes = dataUrlToBytes(stampCanvas.toDataURL('image/png'));
       const stampPdfImg = await pdfDoc.embedPng(stampPngBytes);
 
       // Embed stamp on designated pages

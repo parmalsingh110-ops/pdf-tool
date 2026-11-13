@@ -5260,7 +5260,16 @@ async def report_telemetry_error(request: Request):
         tool_name = str(body.get("tool_name", "Unknown Tool")).strip()
         error_message = str(body.get("error_message", "Unknown error")).strip()
         error_stack = str(body.get("error_stack", "")).strip()
-        file_info = body.get("file_info", {})
+        raw_file_info = body.get("file_info", {})
+        file_info = (
+            {
+                k: v
+                for k, v in raw_file_info.items()
+                if k in ("size", "sizeFormatted", "type")
+            }
+            if isinstance(raw_file_info, dict)
+            else {}
+        )
         user_agent = request.headers.get("user-agent", "")
         client_ip = request.client.host if request.client else ""
 

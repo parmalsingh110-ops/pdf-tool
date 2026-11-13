@@ -23,7 +23,7 @@ import { useSEO } from '../hooks/useSEO';
 import { usePageSEO } from '../lib/usePageSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
 import ShareQrModal from '../components/ShareQrModal';
-import { downloadBlob } from '../lib/utils';
+import { dataUrlToBytes, downloadBlob } from '../lib/utils';
 
 type CleanMode = 'crisp_xerox' | 'grayscale' | 'toner_saver' | 'magic_color';
 
@@ -256,7 +256,7 @@ export default function XeroxCleaner() {
       for (const p of pages) {
         const canvas = p.cleanedCanvas || p.originalCanvas;
         const jpgDataUrl = canvas.toDataURL('image/jpeg', 0.92);
-        const jpgBytes = await fetch(jpgDataUrl).then((r) => r.arrayBuffer());
+        const jpgBytes = dataUrlToBytes(jpgDataUrl);
         const jpgImage = await pdfDoc.embedJpg(jpgBytes);
 
         // Standard A4 point dimensions (595.28 x 841.89)

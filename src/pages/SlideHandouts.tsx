@@ -21,7 +21,7 @@ import { useSEO } from '../hooks/useSEO';
 import { usePageSEO } from '../lib/usePageSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
 import ShareQrModal from '../components/ShareQrModal';
-import { downloadBlob } from '../lib/utils';
+import { dataUrlToBytes, downloadBlob } from '../lib/utils';
 
 type HandoutLayout = '3_slides_notes' | '2_slides' | '4_slides' | '6_slides' | '9_slides';
 
@@ -257,7 +257,7 @@ export default function SlideHandouts() {
         if (!sheetCanvas) continue;
 
         const jpgData = sheetCanvas.toDataURL('image/jpeg', 0.92);
-        const jpgBytes = await fetch(jpgData).then((r) => r.arrayBuffer());
+        const jpgBytes = dataUrlToBytes(jpgData);
         const jpgImg = await pdfDoc.embedJpg(jpgBytes);
 
         // A4 595.28 x 841.89 points

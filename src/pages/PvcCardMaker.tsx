@@ -22,7 +22,7 @@ import { useSEO } from '../hooks/useSEO';
 import { usePageSEO } from '../lib/usePageSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
 import ShareQrModal from '../components/ShareQrModal';
-import { downloadBlob } from '../lib/utils';
+import { dataUrlToBytes, downloadBlob } from '../lib/utils';
 
 // Standard CR80 Card Dimensions: 85.6mm × 53.98mm (Aspect ratio ≈ 1.5858)
 const CARD_ASPECT = 85.6 / 53.98;
@@ -309,7 +309,7 @@ export default function PvcCardMaker() {
       const pdfDoc = await PDFDocument.create();
       const canvas = previewCanvasRef.current;
       const jpgDataUrl = canvas.toDataURL('image/jpeg', 0.95);
-      const jpgBytes = await fetch(jpgDataUrl).then((r) => r.arrayBuffer());
+      const jpgBytes = dataUrlToBytes(jpgDataUrl);
       const jpgImage = await pdfDoc.embedJpg(jpgBytes);
 
       // Point dimensions (72 pt per inch)
