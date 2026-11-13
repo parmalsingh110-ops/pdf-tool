@@ -2339,7 +2339,7 @@ export default function ScanToPrint() {
                   setIsSenderMode(true);
                   setPeerReconnectKey((k) => k + 1);
                 }}
-                className="flex items-center gap-2 px-4 sm:px-5 py-2 rounded-xl text-xs sm:text-sm font-extrabold bg-white dark:bg-slate-900 shadow-sm transition cursor-pointer"
+                className="flex items-center gap-2 px-4 sm:px-5 py-2 rounded-xl text-xs sm:text-sm font-extrabold pms-glass-panel shadow-sm transition cursor-pointer"
                 style={{ color: 'var(--pms-ink)' }}
               >
                 <Zap className="w-4 h-4 text-rose-600" />
@@ -2948,10 +2948,10 @@ export default function ScanToPrint() {
       key={job.id}
       className={`p-3 sm:p-3.5 rounded-2xl border transition-all ${
         job.status === 'printed'
-          ? 'bg-emerald-50/40 dark:bg-emerald-950/20 border-emerald-200/70 dark:border-emerald-800/60'
+          ? 'bg-emerald-500/10 border-emerald-500/25'
           : isInsideBundle
-          ? 'bg-white dark:bg-slate-800 border-slate-200/80 dark:border-slate-700 hover:border-rose-300 dark:hover:border-rose-700 shadow-xs'
-          : 'bg-slate-50 dark:bg-slate-800/60 border-slate-200/70 dark:border-slate-700 hover:border-rose-400'
+          ? 'pms-glass-panel border-[var(--pms-border)] hover:border-rose-400/60 shadow-xs'
+          : 'bg-white/40 dark:bg-slate-900/40 border-[var(--pms-border)] hover:border-rose-400/60'
       }`}
     >
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -2959,7 +2959,7 @@ export default function ScanToPrint() {
           {/* Token Badge if not inside bundle card */}
           {!isInsideBundle && (
             <div className={`flex flex-col items-center justify-center min-w-[50px] h-12 rounded-xl text-white font-black shadow-sm shrink-0 ${
-              job.status === 'printed' ? 'bg-emerald-600' : 'bg-rose-600'
+              job.status === 'printed' ? 'bg-emerald-600' : 'bg-gradient-to-br from-rose-600 to-violet-600'
             }`}>
               <span className="text-[8px] uppercase font-bold tracking-tight opacity-80 leading-none">Token</span>
               <span className="text-base font-extrabold leading-none mt-0.5">#{job.tokenNum}</span>
@@ -2967,7 +2967,7 @@ export default function ScanToPrint() {
           )}
 
           {/* Thumbnail */}
-          <div className="w-10 h-10 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 flex items-center justify-center text-rose-600 shrink-0 overflow-hidden">
+          <div className="w-10 h-10 rounded-xl pms-glass-panel border border-[var(--pms-border)] flex items-center justify-center text-rose-600 shrink-0 overflow-hidden">
             {job.type.startsWith('image/') ? (
               <img src={job.dataUrl} alt={job.name} className="w-full h-full object-cover" />
             ) : (
@@ -2977,25 +2977,25 @@ export default function ScanToPrint() {
 
           <div className="min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
-              <p className="font-bold text-sm text-slate-900 dark:text-white truncate max-w-[180px] sm:max-w-[240px]">
+              <p className="font-bold text-sm truncate max-w-[180px] sm:max-w-[240px]" style={{ color: 'var(--pms-ink)' }}>
                 {job.name}
               </p>
               {job.status === 'printed' && (
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 shrink-0">
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 shrink-0">
                   ✅ Printed {job.printedAt || ''}
                 </span>
               )}
             </div>
-            <p className="text-[11px] text-slate-400 mt-0.5 flex flex-wrap items-center gap-1.5">
+            <p className="text-[11px] mt-0.5 flex flex-wrap items-center gap-1.5" style={{ color: 'var(--pms-muted)' }}>
               <span className="font-mono">{formatFileSize(job.size)}</span>
               {job.pages && (
                 <>
                   <span>•</span>
-                  <span className="font-bold text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-700 px-1.5 py-0.5 rounded text-[10px]">
+                  <span className="font-bold bg-slate-500/10 px-1.5 py-0.5 rounded text-[10px]" style={{ color: 'var(--pms-ink)' }}>
                     {job.pages} page{job.pages > 1 ? 's' : ''}
                   </span>
                   <span>•</span>
-                  <span className="font-extrabold text-rose-600">
+                  <span className="font-extrabold text-rose-600 dark:text-rose-400">
                     Total: {job.pages * job.copies} prints
                   </span>
                 </>
@@ -3003,7 +3003,7 @@ export default function ScanToPrint() {
               {job.detectedOrientation === 'landscape' && (
                 <>
                   <span>•</span>
-                  <span className="font-bold text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-950/60 px-1.5 py-0.5 rounded text-[10px]">
+                  <span className="font-bold text-amber-700 dark:text-amber-300 bg-amber-500/15 px-1.5 py-0.5 rounded text-[10px]">
                     🔄 Landscape
                   </span>
                 </>
@@ -3022,19 +3022,19 @@ export default function ScanToPrint() {
           {job.status === 'pending' ? (
             <>
               {/* Copies control */}
-              <div className="flex items-center gap-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-1.5 py-1">
+              <div className="flex items-center gap-1 pms-glass-panel border border-[var(--pms-border)] rounded-xl px-1.5 py-1">
                 <button
                   type="button"
                   onClick={() => updateJobField(job.id, 'copies', Math.max(1, job.copies - 1))}
-                  className="w-5 h-5 rounded flex items-center justify-center hover:bg-slate-100 dark:hover:bg-slate-800"
+                  className="w-5 h-5 rounded flex items-center justify-center hover:bg-slate-500/10 cursor-pointer"
                 >
                   <Minus className="w-3 h-3" />
                 </button>
-                <span className="text-xs font-black text-slate-900 dark:text-white w-5 text-center">{job.copies}</span>
+                <span className="text-xs font-black w-5 text-center" style={{ color: 'var(--pms-ink)' }}>{job.copies}</span>
                 <button
                   type="button"
                   onClick={() => updateJobField(job.id, 'copies', Math.min(20, job.copies + 1))}
-                  className="w-5 h-5 rounded flex items-center justify-center hover:bg-slate-100 dark:hover:bg-slate-800"
+                  className="w-5 h-5 rounded flex items-center justify-center hover:bg-slate-500/10 cursor-pointer"
                 >
                   <Plus className="w-3 h-3" />
                 </button>
@@ -3044,7 +3044,8 @@ export default function ScanToPrint() {
               <select
                 value={job.colorMode}
                 onChange={(e) => updateJobField(job.id, 'colorMode', e.target.value as 'bw' | 'color')}
-                className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-2 py-1.5 text-xs font-bold text-slate-700 dark:text-slate-300 outline-none"
+                className="pms-glass-panel border border-[var(--pms-border)] rounded-xl px-2 py-1.5 text-xs font-bold outline-none cursor-pointer"
+                style={{ color: 'var(--pms-ink)' }}
               >
                 <option value="bw">B&W</option>
                 <option value="color">Color</option>
@@ -3055,7 +3056,8 @@ export default function ScanToPrint() {
                 value={job.orientation || 'auto'}
                 onChange={(e) => updateJobField(job.id, 'orientation', e.target.value as 'auto' | 'portrait' | 'landscape')}
                 title="Page Orientation (Auto detects Landscape)"
-                className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-2 py-1.5 text-xs font-bold text-slate-700 dark:text-slate-300 outline-none"
+                className="pms-glass-panel border border-[var(--pms-border)] rounded-xl px-2 py-1.5 text-xs font-bold outline-none cursor-pointer"
+                style={{ color: 'var(--pms-ink)' }}
               >
                 <option value="auto">
                   Auto {job.detectedOrientation ? `(${job.detectedOrientation === 'landscape' ? 'Land' : 'Port'})` : ''}
@@ -3069,7 +3071,7 @@ export default function ScanToPrint() {
                 type="button"
                 onClick={() => handlePrint(job)}
                 disabled={printingJobId === job.id}
-                className="px-3.5 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-sm flex items-center gap-1.5 transition-all disabled:opacity-50"
+                className="pms-btn-primary px-3.5 py-1.5 rounded-xl font-bold text-xs shadow-sm flex items-center gap-1.5 transition-all disabled:opacity-50 cursor-pointer"
               >
                 {printingJobId === job.id ? (
                   <><RefreshCw className="w-3 h-3 animate-spin" /> Rendering...</>
@@ -3083,7 +3085,7 @@ export default function ScanToPrint() {
                 type="button"
                 onClick={() => markAsPrinted(job.id)}
                 title="Mark as Printed"
-                className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1 transition-all"
+                className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1 transition-all cursor-pointer shadow-sm"
               >
                 <Check className="w-3.5 h-3.5" /> Done
               </button>
@@ -3094,14 +3096,15 @@ export default function ScanToPrint() {
                 type="button"
                 onClick={() => markAsPending(job.id)}
                 title="Move back to Pending"
-                className="px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-bold text-xs flex items-center gap-1 hover:bg-slate-50 transition"
+                className="px-3 py-1.5 rounded-xl pms-glass-panel border border-[var(--pms-border)] font-bold text-xs flex items-center gap-1 hover:opacity-80 transition cursor-pointer"
+                style={{ color: 'var(--pms-ink)' }}
               >
-                <RotateCcw className="w-3.5 h-3.5 text-slate-500" /> Undo
+                <RotateCcw className="w-3.5 h-3.5" style={{ color: 'var(--pms-muted)' }} /> Undo
               </button>
               <button
                 type="button"
                 onClick={() => handlePrint(job)}
-                className="px-3 py-1.5 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 font-bold text-xs flex items-center gap-1 shadow-sm hover:opacity-90 transition"
+                className="pms-btn-primary px-3 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1 shadow-sm hover:opacity-90 transition cursor-pointer"
               >
                 <Printer className="w-3.5 h-3.5" /> Re-Print
               </button>
@@ -3123,7 +3126,8 @@ export default function ScanToPrint() {
               }
             }}
             title="Preview"
-            className="p-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-slate-900 transition"
+            className="p-1.5 rounded-xl pms-glass-panel border border-[var(--pms-border)] hover:border-rose-400/60 transition cursor-pointer"
+            style={{ color: 'var(--pms-muted)' }}
           >
             <ExternalLink className="w-3.5 h-3.5" />
           </button>
@@ -3138,7 +3142,8 @@ export default function ScanToPrint() {
               a.click();
             }}
             title="Download"
-            className="p-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-slate-900 transition"
+            className="p-1.5 rounded-xl pms-glass-panel border border-[var(--pms-border)] hover:border-rose-400/60 transition cursor-pointer"
+            style={{ color: 'var(--pms-muted)' }}
           >
             <Download className="w-3.5 h-3.5" />
           </button>
@@ -3148,7 +3153,8 @@ export default function ScanToPrint() {
             type="button"
             onClick={() => deleteJob(job.id)}
             title="Delete"
-            className="p-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-400 hover:text-rose-600 transition"
+            className="p-1.5 rounded-xl pms-glass-panel border border-[var(--pms-border)] hover:text-rose-600 transition cursor-pointer"
+            style={{ color: 'var(--pms-muted)' }}
           >
             <Trash2 className="w-3.5 h-3.5" />
           </button>
@@ -3161,18 +3167,23 @@ export default function ScanToPrint() {
   // COUNTER PC SHOPKEEPER VIEW
   // ════════════════════════════════════════════════════════════════════════
   return (
-    <div className="w-full min-h-screen bg-slate-50 dark:bg-slate-950 py-8 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-7xl mx-auto space-y-8">
+    <div
+      className="relative w-full min-h-screen overflow-x-clip py-8 px-4 sm:px-6 lg:px-8"
+      style={{ backgroundColor: 'var(--pms-pearl)', color: 'var(--pms-ink)' }}
+    >
+      <PearlAuroraBackground mode="workspace" />
+      <div className="relative z-10 max-w-7xl mx-auto space-y-8">
 
         {/* Top Mode Switcher Bar */}
         <div className="flex items-center justify-center">
-          <div className="inline-flex p-1.5 rounded-2xl bg-slate-200/80 dark:bg-slate-800 border border-slate-300/60 dark:border-slate-700 shadow-sm max-w-full overflow-x-auto">
+          <div className="inline-flex p-1.5 rounded-2xl pms-glass-header shadow-sm max-w-full overflow-x-auto">
             <button
               onClick={() => {
                 setIsSenderMode(false);
                 setPeerReconnectKey((k) => k + 1);
               }}
-              className="flex items-center gap-2 px-4 sm:px-5 py-2 rounded-xl text-xs sm:text-sm font-extrabold bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-sm transition"
+              className="flex items-center gap-2 px-4 sm:px-5 py-2 rounded-xl text-xs sm:text-sm font-extrabold pms-glass-panel shadow-sm transition cursor-pointer"
+              style={{ color: 'var(--pms-ink)' }}
             >
               <Printer className="w-4 h-4 text-rose-600" />
               <span>📥 Counter Station (Print Queue)</span>
@@ -3182,7 +3193,8 @@ export default function ScanToPrint() {
                 setIsSenderMode(true);
                 setPeerReconnectKey((k) => k + 1);
               }}
-              className="flex items-center gap-2 px-4 sm:px-5 py-2 rounded-xl text-xs sm:text-sm font-bold text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white transition"
+              className="flex items-center gap-2 px-4 sm:px-5 py-2 rounded-xl text-xs sm:text-sm font-bold hover:opacity-80 transition cursor-pointer"
+              style={{ color: 'var(--pms-muted)' }}
             >
               <Zap className="w-4 h-4 text-rose-600" />
               <span>📤 Beam Files (Send to another PC)</span>
@@ -3191,15 +3203,20 @@ export default function ScanToPrint() {
         </div>
 
         {/* ── Header ──────────────────────────────────────────────────────── */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <motion.div
+          initial={prefersReduced ? false : { opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.25 }}
+          className="flex flex-col md:flex-row md:items-center justify-between gap-4 pms-glass-panel rounded-3xl p-5 sm:p-6 shadow-sm"
+        >
           <div>
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-rose-50 dark:bg-rose-950/60 border border-rose-200 dark:border-rose-900 text-rose-600 text-xs font-bold mb-2">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-400 text-xs font-bold mb-2">
               <Sparkles className="w-3.5 h-3.5" /> E-Mitra &amp; Cyber Cafe Super Tool
             </div>
-            <h1 className="text-3xl sm:text-4xl font-extrabold text-slate-900 dark:text-white">
+            <h1 className="text-3xl sm:text-4xl font-extrabold" style={{ color: 'var(--pms-ink)' }}>
               Scan to Print QR Web-Drop
             </h1>
-            <p className="text-sm text-slate-600 dark:text-slate-400 mt-1 max-w-2xl">
+            <p className="text-sm mt-1 max-w-2xl" style={{ color: 'var(--pms-muted)' }}>
               Keep this screen open on your counter PC. Customers scan the QR with their phone and beam documents
               directly to your queue for 1-click printing — no WhatsApp, no app needed.
             </p>
@@ -3209,10 +3226,10 @@ export default function ScanToPrint() {
             {/* Connection status pill */}
             <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold border transition-all ${
               peerStatus === 'online' || peerStatus === 'cloud'
-                ? 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-300 text-emerald-700 dark:text-emerald-300'
+                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-700 dark:text-emerald-300'
                 : peerStatus === 'error'
-                ? 'bg-red-50 dark:bg-red-950/60 border-red-300 text-red-700 dark:text-red-300'
-                : 'bg-amber-50 dark:bg-amber-950/60 border-amber-300 text-amber-700'
+                ? 'bg-rose-500/10 border-rose-500/30 text-rose-700 dark:text-rose-300'
+                : 'bg-amber-500/10 border-amber-500/30 text-amber-700 dark:text-amber-300'
             }`}>
               {peerStatus === 'online' ? (
                 <><span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />Station Online (P2P + Cloud)</>
@@ -3228,7 +3245,7 @@ export default function ScanToPrint() {
                       peerRetryCountRef.current = 0;
                       setPeerReconnectKey((k) => k + 1);
                     }}
-                    className="ml-1 underline font-bold cursor-pointer hover:text-red-900 dark:hover:text-red-200"
+                    className="ml-1 underline font-bold cursor-pointer hover:opacity-80"
                   >
                     Reconnect
                   </button>
@@ -3240,10 +3257,10 @@ export default function ScanToPrint() {
 
             <button
               onClick={() => setSoundEnabled(!soundEnabled)}
-              className={`p-2.5 rounded-xl border text-xs font-bold flex items-center gap-2 transition-all ${
+              className={`p-2.5 rounded-xl border text-xs font-bold flex items-center gap-2 transition-all cursor-pointer ${
                 soundEnabled
-                  ? 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-300 text-emerald-700 dark:text-emerald-300'
-                  : 'bg-slate-100 dark:bg-slate-800 border-slate-300 text-slate-400'
+                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-700 dark:text-emerald-300'
+                  : 'pms-glass-panel border-[var(--pms-border)] opacity-70'
               }`}
             >
               {soundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
@@ -3253,28 +3270,33 @@ export default function ScanToPrint() {
             <button
               onClick={handlePrintAll}
               disabled={!pendingJobs.length}
-              className="px-4 py-2.5 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 font-bold text-xs shadow-md disabled:opacity-40 flex items-center gap-2 hover:opacity-90 transition"
+              className="pms-btn-primary px-4 py-2.5 rounded-xl font-bold text-xs shadow-md disabled:opacity-40 flex items-center gap-2 transition cursor-pointer"
             >
               <Printer className="w-4 h-4" /> Print All ({pendingJobs.length})
             </button>
           </div>
-        </div>
+        </motion.div>
 
         {/* ── Main Grid ───────────────────────────────────────────────────── */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
 
           {/* ── LEFT: QR Station ─────────────────────────────────────────── */}
-          <div className="lg:col-span-4 bg-white dark:bg-slate-900 rounded-3xl border border-slate-200/90 dark:border-slate-800 p-6 shadow-sm space-y-5 sticky top-20">
+          <motion.div
+            initial={prefersReduced ? false : { opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.25, delay: 0.05 }}
+            className="lg:col-span-4 pms-glass-panel rounded-3xl p-6 shadow-sm space-y-5 sticky top-20"
+          >
             <div className="text-center space-y-1">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-rose-600 bg-rose-50 dark:bg-rose-950/60 px-3 py-1 rounded-full">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-rose-600 dark:text-rose-400 bg-rose-500/10 px-3 py-1 rounded-full">
                 Customer Mobile Scan
               </span>
-              <h2 className="text-lg font-bold text-slate-900 dark:text-white">Scan with Phone Camera</h2>
-              <p className="text-xs text-slate-500">No app or mobile number required. Instant direct transfer.</p>
+              <h2 className="text-lg font-bold" style={{ color: 'var(--pms-ink)' }}>Scan with Phone Camera</h2>
+              <p className="text-xs" style={{ color: 'var(--pms-muted)' }}>No app or mobile number required. Instant direct transfer.</p>
             </div>
 
             {/* QR Card */}
-            <div className="p-5 rounded-3xl bg-slate-50 dark:bg-slate-800/60 border-2 border-dashed border-rose-200 dark:border-rose-900 flex flex-col items-center">
+            <div className="p-5 rounded-3xl bg-white/35 dark:bg-slate-900/35 border-2 border-dashed border-rose-300/70 dark:border-rose-800/70 flex flex-col items-center">
               <div className="p-3 bg-white rounded-2xl shadow-md border border-slate-100">
                 {qrDataUrl ? (
                   <img
@@ -3292,18 +3314,18 @@ export default function ScanToPrint() {
 
               <div className="mt-3 flex flex-col items-center gap-1.5 w-full">
                 <div className="flex items-center gap-2">
-                  <span className="text-xs font-semibold text-slate-500">Counter PIN:</span>
-                  <span className="text-xl font-black tracking-widest text-slate-900 dark:text-white bg-white dark:bg-slate-900 px-3 py-1 rounded-lg border border-slate-200 dark:border-slate-700 font-mono">
+                  <span className="text-xs font-semibold" style={{ color: 'var(--pms-muted)' }}>Counter PIN:</span>
+                  <span className="text-xl font-black tracking-widest pms-glass-panel px-3 py-1 rounded-lg border border-[var(--pms-border)] font-mono" style={{ color: 'var(--pms-ink)' }}>
                     {sessionCode}
                   </span>
                 </div>
 
-                <div className="flex items-center gap-1.5 text-[10.5px] font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/60 px-2.5 py-0.5 rounded-full border border-emerald-200 dark:border-emerald-800">
+                <div className="flex items-center gap-1.5 text-[10.5px] font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-500/10 px-2.5 py-0.5 rounded-full border border-emerald-500/25">
                   <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
                   <span>Permanent QR (Standee Safe)</span>
                 </div>
 
-                <div className="w-full mt-1 p-2 rounded-xl bg-rose-50/80 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/60 text-[11px] text-rose-700 dark:text-rose-300 text-center font-medium">
+                <div className="w-full mt-1 p-2 rounded-xl bg-rose-500/10 border border-rose-500/20 text-[11px] text-rose-700 dark:text-rose-300 text-center font-medium">
                   💡 <strong>WhatsApp Share Ready:</strong> Customers can share PDFs directly from WhatsApp share menu to print!
                 </div>
 
@@ -3315,7 +3337,8 @@ export default function ScanToPrint() {
                       setCustomShopNameInput(shopName);
                       setShowPinModal(true);
                     }}
-                    className="px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 hover:border-rose-400 bg-white dark:bg-slate-800 text-[11px] font-bold text-slate-700 dark:text-slate-200 flex items-center gap-1 transition"
+                    className="px-2.5 py-1 rounded-lg border border-[var(--pms-border)] hover:border-rose-400 pms-glass-panel text-[11px] font-bold flex items-center gap-1 transition cursor-pointer"
+                    style={{ color: 'var(--pms-ink)' }}
                     title="Customize Shop Name & PIN"
                   >
                     <Edit3 className="w-3 h-3 text-rose-600" /> Custom PIN / Shop
@@ -3323,7 +3346,8 @@ export default function ScanToPrint() {
                   <button
                     type="button"
                     onClick={handleResetPin}
-                    className="px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 hover:border-rose-400 bg-white dark:bg-slate-800 text-[11px] font-bold text-slate-500 hover:text-rose-600 flex items-center gap-1 transition"
+                    className="px-2.5 py-1 rounded-lg border border-[var(--pms-border)] hover:border-rose-400 pms-glass-panel text-[11px] font-bold hover:text-rose-600 flex items-center gap-1 transition cursor-pointer"
+                    style={{ color: 'var(--pms-muted)' }}
                     title="Generate fresh random PIN"
                   >
                     <RefreshCw className="w-3 h-3" /> Reset
@@ -3332,7 +3356,7 @@ export default function ScanToPrint() {
               </div>
 
               {pinNotice && (
-                <div className="mt-2.5 w-full p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-800 text-[11px] text-amber-900 dark:text-amber-100 flex flex-col gap-1.5">
+                <div className="mt-2.5 w-full p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-[11px] text-amber-800 dark:text-amber-200 flex flex-col gap-1.5">
                   <div className="flex items-start gap-1.5">
                     <AlertCircle className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
                     <span>{pinNotice}</span>
@@ -3345,7 +3369,7 @@ export default function ScanToPrint() {
                         setPeerStatus('connecting');
                         setPeerReconnectKey((k) => k + 1);
                       }}
-                      className="px-2 py-0.5 rounded bg-amber-600 hover:bg-amber-700 text-white font-bold text-[10px]"
+                      className="px-2 py-0.5 rounded bg-amber-600 hover:bg-amber-700 text-white font-bold text-[10px] cursor-pointer"
                     >
                       Reconnect
                     </button>
@@ -3356,7 +3380,7 @@ export default function ScanToPrint() {
                         setCustomShopNameInput(shopName);
                         setShowPinModal(true);
                       }}
-                      className="px-2 py-0.5 rounded border border-amber-400 text-amber-900 dark:text-amber-100 font-bold text-[10px]"
+                      className="px-2 py-0.5 rounded border border-amber-400 font-bold text-[10px] cursor-pointer"
                     >
                       Change PIN
                     </button>
@@ -3364,7 +3388,7 @@ export default function ScanToPrint() {
                 </div>
               )}
 
-              <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-2 text-center px-2">
+              <p className="text-[11px] mt-2 text-center px-2" style={{ color: 'var(--pms-muted)' }}>
                 Scan QR or enter PIN <strong className="text-rose-600 font-mono">#{sessionCode}</strong> to beam files wirelessly from any phone, laptop, or PC!
               </p>
 
@@ -3384,11 +3408,12 @@ export default function ScanToPrint() {
                   type="text"
                   readOnly
                   value={mobileLink}
-                  className="flex-1 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs font-mono text-slate-600 dark:text-slate-300 outline-none truncate"
+                  className="flex-1 pms-glass-panel border border-[var(--pms-border)] rounded-xl px-3 py-2 text-xs font-mono outline-none truncate"
+                  style={{ color: 'var(--pms-muted)' }}
                 />
                 <button
                   onClick={copyLink}
-                  className="px-3 py-2 rounded-xl bg-rose-50 dark:bg-rose-950 text-rose-600 text-xs font-bold border border-rose-200 dark:border-rose-900 hover:bg-rose-100 flex items-center gap-1 shrink-0 transition"
+                  className="px-3 py-2 rounded-xl bg-rose-500/10 text-rose-600 dark:text-rose-400 text-xs font-bold border border-rose-500/25 hover:bg-rose-500/20 flex items-center gap-1 shrink-0 transition cursor-pointer"
                 >
                   <Copy className="w-3.5 h-3.5" /> {copiedLink ? 'Copied!' : 'Copy'}
                 </button>
@@ -3397,7 +3422,8 @@ export default function ScanToPrint() {
               {/* Print QR for counter display */}
               <button
                 onClick={handlePrintQr}
-                className="w-full py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 hover:border-rose-400 text-slate-700 dark:text-slate-300 text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition-colors hover:bg-rose-50 dark:hover:bg-rose-950/30"
+                className="w-full py-2.5 rounded-xl border border-[var(--pms-border)] hover:border-rose-400 pms-glass-panel text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition-colors"
+                style={{ color: 'var(--pms-ink)' }}
               >
                 <Printer className="w-3.5 h-3.5" /> Print QR for Counter Display
               </button>
@@ -3426,7 +3452,8 @@ export default function ScanToPrint() {
                     addIncomingJob(job);
                   });
                 }}
-                className="w-full py-2.5 rounded-xl border border-dashed border-slate-300 dark:border-slate-700 hover:border-rose-400 text-slate-600 dark:text-slate-300 text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition-colors hover:bg-slate-50"
+                className="w-full py-2.5 rounded-xl border border-dashed border-[var(--pms-border)] hover:border-rose-400 pms-glass-panel text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition-colors"
+                style={{ color: 'var(--pms-muted)' }}
               >
                 <Upload className="w-3.5 h-3.5" /> Drop Local File from this PC to Queue
                 <input
@@ -3438,22 +3465,28 @@ export default function ScanToPrint() {
                 />
               </label>
             </div>
-          </div>
+          </motion.div>
 
           {/* ── RIGHT: Print Queue ───────────────────────────────────────── */}
-          <div className="lg:col-span-8 bg-white dark:bg-slate-900 rounded-3xl border border-slate-200/90 dark:border-slate-800 p-6 shadow-sm space-y-5">
+          <motion.div
+            initial={prefersReduced ? false : { opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.25, delay: 0.08 }}
+            className="lg:col-span-8 pms-glass-panel rounded-3xl p-6 shadow-sm space-y-5"
+          >
 
             {/* Tabs & View Switcher */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-[var(--pms-border)]">
               <div className="flex items-center gap-2 flex-wrap">
                 <button
                   type="button"
                   onClick={() => setQueueTab('pending')}
-                  className={`px-4 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all ${
+                  className={`px-4 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer ${
                     queueTab === 'pending'
-                      ? 'bg-rose-600 text-white shadow-sm'
-                      : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200'
+                      ? 'pms-btn-primary shadow-sm'
+                      : 'pms-glass-panel border border-[var(--pms-border)] hover:opacity-80'
                   }`}
+                  style={queueTab === 'pending' ? undefined : { color: 'var(--pms-muted)' }}
                 >
                   <span className="w-2 h-2 rounded-full bg-current opacity-80 animate-pulse" />
                   Waiting to Print ({pendingJobs.length})
@@ -3462,11 +3495,12 @@ export default function ScanToPrint() {
                 <button
                   type="button"
                   onClick={() => setQueueTab('printed')}
-                  className={`px-4 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all ${
+                  className={`px-4 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer ${
                     queueTab === 'printed'
                       ? 'bg-emerald-600 text-white shadow-sm'
-                      : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200'
+                      : 'pms-glass-panel border border-[var(--pms-border)] hover:opacity-80'
                   }`}
+                  style={queueTab === 'printed' ? undefined : { color: 'var(--pms-muted)' }}
                 >
                   <CheckCircle2 className="w-3.5 h-3.5" />
                   Printed Today ({printedJobs.length})
@@ -3475,15 +3509,16 @@ export default function ScanToPrint() {
 
               <div className="flex items-center gap-2.5 self-end sm:self-center flex-wrap">
                 {/* View Switcher: Customer Bundles vs Flat Files */}
-                <div className="inline-flex p-1 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700/80 text-xs">
+                <div className="inline-flex p-1 rounded-xl pms-glass-header border border-[var(--pms-border)] text-xs">
                   <button
                     type="button"
                     onClick={() => setViewMode('grouped')}
-                    className={`px-2.5 py-1 rounded-lg font-bold flex items-center gap-1.5 transition ${
+                    className={`px-2.5 py-1 rounded-lg font-bold flex items-center gap-1.5 transition cursor-pointer ${
                       viewMode === 'grouped'
-                        ? 'bg-white dark:bg-slate-900 text-rose-600 shadow-sm'
-                        : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
+                        ? 'pms-glass-panel text-rose-600 shadow-sm'
+                        : 'hover:opacity-80'
                     }`}
+                    style={viewMode === 'grouped' ? undefined : { color: 'var(--pms-muted)' }}
                     title="Customer-wise Bundles"
                   >
                     <Users className="w-3.5 h-3.5" />
@@ -3492,11 +3527,12 @@ export default function ScanToPrint() {
                   <button
                     type="button"
                     onClick={() => setViewMode('flat')}
-                    className={`px-2.5 py-1 rounded-lg font-bold flex items-center gap-1.5 transition ${
+                    className={`px-2.5 py-1 rounded-lg font-bold flex items-center gap-1.5 transition cursor-pointer ${
                       viewMode === 'flat'
-                        ? 'bg-white dark:bg-slate-900 text-rose-600 shadow-sm'
-                        : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
+                        ? 'pms-glass-panel text-rose-600 shadow-sm'
+                        : 'hover:opacity-80'
                     }`}
+                    style={viewMode === 'flat' ? undefined : { color: 'var(--pms-muted)' }}
                     title="All Files Flat List"
                   >
                     <List className="w-3.5 h-3.5" />
@@ -3513,7 +3549,7 @@ export default function ScanToPrint() {
                       });
                       setPrintJobs([]);
                     }}
-                    className="text-xs text-rose-600 hover:underline font-semibold flex items-center gap-1 ml-1"
+                    className="text-xs text-rose-600 hover:underline font-semibold flex items-center gap-1 ml-1 cursor-pointer"
                   >
                     <Trash2 className="w-3.5 h-3.5" /> Clear All
                   </button>
@@ -3523,15 +3559,15 @@ export default function ScanToPrint() {
 
             {/* Incoming progress bar */}
             {incomingProgress && (
-              <div className="p-3.5 rounded-2xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 flex items-center justify-between gap-3">
+              <div className="p-3.5 rounded-2xl bg-rose-500/10 border border-rose-500/25 flex items-center justify-between gap-3">
                 <div className="flex items-center gap-2 min-w-0">
                   <RefreshCw className="w-4 h-4 text-rose-600 animate-spin shrink-0" />
-                  <span className="text-xs font-bold text-slate-800 dark:text-slate-100 truncate">
+                  <span className="text-xs font-bold truncate" style={{ color: 'var(--pms-ink)' }}>
                     Receiving &ldquo;{incomingProgress.name}&rdquo;...
                   </span>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
-                  <div className="w-24 bg-slate-200 dark:bg-slate-700 rounded-full h-1.5 overflow-hidden">
+                  <div className="w-24 bg-slate-500/20 rounded-full h-1.5 overflow-hidden">
                     <div
                       className="bg-rose-600 h-1.5 rounded-full transition-all duration-100"
                       style={{ width: `${incomingProgress.progress}%` }}
@@ -3547,11 +3583,11 @@ export default function ScanToPrint() {
               <>
                 {pendingJobs.length === 0 ? (
                   <div className="py-14 text-center space-y-3">
-                    <div className="w-16 h-16 rounded-2xl bg-slate-50 dark:bg-slate-800 text-slate-300 dark:text-slate-600 mx-auto flex items-center justify-center">
-                      <Printer className="w-8 h-8" />
+                    <div className="w-16 h-16 rounded-2xl pms-glass-panel border border-[var(--pms-border)] mx-auto flex items-center justify-center" style={{ color: 'var(--pms-muted)' }}>
+                      <Printer className="w-8 h-8 opacity-60" />
                     </div>
-                    <h3 className="font-bold text-slate-700 dark:text-slate-200 text-sm">Queue is Empty</h3>
-                    <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                    <h3 className="font-bold text-sm" style={{ color: 'var(--pms-ink)' }}>Queue is Empty</h3>
+                    <p className="text-xs max-w-sm mx-auto" style={{ color: 'var(--pms-muted)' }}>
                       When a customer scans your QR code and beams files, their documents arrive neatly bundled under a Customer Token!
                     </p>
                   </div>
@@ -3561,30 +3597,30 @@ export default function ScanToPrint() {
                     {pendingCustomerGroups.map((group) => (
                       <div
                         key={group.customerToken}
-                        className="rounded-3xl border-2 border-slate-200/80 dark:border-slate-700/80 bg-white dark:bg-slate-900 shadow-sm overflow-hidden hover:border-rose-400 dark:hover:border-rose-600 transition-all"
+                        className="rounded-3xl border border-[var(--pms-border)] pms-glass-panel shadow-sm overflow-hidden hover:border-rose-400/70 transition-all"
                       >
                         {/* Bundle Header */}
-                        <div className="bg-gradient-to-r from-slate-50 via-rose-50/25 to-slate-50 dark:from-slate-800/80 dark:via-rose-950/20 dark:to-slate-800/80 p-3.5 sm:p-4 border-b border-slate-200 dark:border-slate-700/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div className="bg-gradient-to-r from-rose-500/5 via-violet-500/5 to-transparent p-3.5 sm:p-4 border-b border-[var(--pms-border)] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                           <div className="flex items-center gap-3">
                             {/* Big Customer Token Badge */}
-                            <div className="flex flex-col items-center justify-center min-w-[56px] h-14 rounded-2xl bg-rose-600 text-white font-black shadow-sm shrink-0">
+                            <div className="flex flex-col items-center justify-center min-w-[56px] h-14 rounded-2xl bg-gradient-to-br from-rose-600 to-violet-600 text-white font-black shadow-sm shrink-0">
                               <span className="text-[9px] uppercase font-bold tracking-tight opacity-90 leading-none">Customer</span>
                               <span className="text-xl font-extrabold leading-none mt-0.5">#{group.customerToken}</span>
                             </div>
 
                             <div>
                               <div className="flex items-center gap-2 flex-wrap">
-                                <h3 className="font-black text-slate-900 dark:text-white text-base">
+                                <h3 className="font-black text-base" style={{ color: 'var(--pms-ink)' }}>
                                   Customer Bundle #{group.customerToken}
                                 </h3>
-                                <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-rose-100 dark:bg-rose-950/80 text-rose-700 dark:text-rose-300">
+                                <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-rose-500/15 text-rose-700 dark:text-rose-300">
                                   {group.pendingJobs.length} doc{group.pendingJobs.length > 1 ? 's' : ''} · {group.totalPrints} print{group.totalPrints > 1 ? 's' : ''}
                                 </span>
-                                <span className="text-[10px] font-semibold text-slate-500 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-full flex items-center gap-1">
+                                <span className="text-[10px] font-semibold bg-slate-500/10 px-2 py-0.5 rounded-full flex items-center gap-1" style={{ color: 'var(--pms-muted)' }}>
                                   {group.deviceLabel.includes('Mobile') ? '📱' : '💻'} {group.deviceLabel}
                                 </span>
                               </div>
-                              <p className="text-[11px] text-slate-400 mt-0.5">
+                              <p className="text-[11px] mt-0.5" style={{ color: 'var(--pms-muted)' }}>
                                 Arrived: {group.firstTimestamp} • {group.totalFiles} file{group.totalFiles > 1 ? 's' : ''} in total
                               </p>
                             </div>
@@ -3596,7 +3632,7 @@ export default function ScanToPrint() {
                               type="button"
                               onClick={() => handlePrintCustomerBundle(group)}
                               disabled={isPrintingCustomerToken === group.customerToken}
-                              className="px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 active:scale-95 text-white font-extrabold text-xs shadow-sm flex items-center gap-1.5 transition disabled:opacity-50"
+                              className="pms-btn-primary px-3.5 py-2 rounded-xl active:scale-95 font-extrabold text-xs shadow-sm flex items-center gap-1.5 transition disabled:opacity-50 cursor-pointer"
                             >
                               {isPrintingCustomerToken === group.customerToken ? (
                                 <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Printing Bundle...</>
@@ -3608,7 +3644,7 @@ export default function ScanToPrint() {
                             <button
                               type="button"
                               onClick={() => markCustomerBundlePrinted(group.customerToken)}
-                              className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1 transition shadow-sm"
+                              className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1 transition shadow-sm cursor-pointer"
                               title="Mark All Documents in this Bundle as Printed"
                             >
                               <Check className="w-3.5 h-3.5" /> All Done
@@ -3617,7 +3653,8 @@ export default function ScanToPrint() {
                             <button
                               type="button"
                               onClick={() => deleteCustomerBundle(group.customerToken)}
-                              className="p-2 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition"
+                              className="p-2 rounded-xl border border-[var(--pms-border)] hover:text-rose-600 hover:bg-rose-500/10 transition cursor-pointer"
+                              style={{ color: 'var(--pms-muted)' }}
                               title="Delete Customer Bundle"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
@@ -3626,7 +3663,7 @@ export default function ScanToPrint() {
                         </div>
 
                         {/* Documents inside this Customer Bundle */}
-                        <div className="p-3 sm:p-4 space-y-2 bg-slate-50/40 dark:bg-slate-900/40">
+                        <div className="p-3 sm:p-4 space-y-2 bg-white/25 dark:bg-slate-900/25">
                           {group.jobs.map((job) => renderJobRow(job, true))}
                         </div>
                       </div>
@@ -3646,11 +3683,11 @@ export default function ScanToPrint() {
               <>
                 {printedJobs.length === 0 ? (
                   <div className="py-14 text-center space-y-3">
-                    <div className="w-16 h-16 rounded-2xl bg-slate-50 dark:bg-slate-800 text-slate-300 dark:text-slate-600 mx-auto flex items-center justify-center">
-                      <CheckCircle2 className="w-8 h-8" />
+                    <div className="w-16 h-16 rounded-2xl pms-glass-panel border border-[var(--pms-border)] mx-auto flex items-center justify-center" style={{ color: 'var(--pms-muted)' }}>
+                      <CheckCircle2 className="w-8 h-8 opacity-60" />
                     </div>
-                    <h3 className="font-bold text-slate-700 dark:text-slate-200 text-sm">No Documents Printed Yet</h3>
-                    <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                    <h3 className="font-bold text-sm" style={{ color: 'var(--pms-ink)' }}>No Documents Printed Yet</h3>
+                    <p className="text-xs max-w-sm mx-auto" style={{ color: 'var(--pms-muted)' }}>
                       When you print or click &ldquo;Done&rdquo;, items move here so you never confuse pending jobs.
                     </p>
                   </div>
@@ -3660,9 +3697,9 @@ export default function ScanToPrint() {
                     {printedCustomerGroups.map((group) => (
                       <div
                         key={group.customerToken}
-                        className="rounded-3xl border border-emerald-200/80 dark:border-emerald-800/60 bg-emerald-50/20 dark:bg-emerald-950/10 shadow-xs overflow-hidden"
+                        className="rounded-3xl border border-emerald-500/30 bg-emerald-500/5 shadow-xs overflow-hidden"
                       >
-                        <div className="p-3.5 sm:p-4 bg-emerald-50/50 dark:bg-emerald-950/30 border-b border-emerald-200/60 dark:border-emerald-800/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div className="p-3.5 sm:p-4 bg-emerald-500/10 border-b border-emerald-500/20 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                           <div className="flex items-center gap-3">
                             <div className="flex flex-col items-center justify-center min-w-[52px] h-13 rounded-2xl bg-emerald-600 text-white font-black shadow-xs shrink-0">
                               <span className="text-[8px] uppercase font-bold tracking-tight opacity-90 leading-none">Customer</span>
@@ -3670,14 +3707,14 @@ export default function ScanToPrint() {
                             </div>
                             <div>
                               <div className="flex items-center gap-2 flex-wrap">
-                                <h4 className="font-bold text-sm text-slate-900 dark:text-white">
+                                <h4 className="font-bold text-sm" style={{ color: 'var(--pms-ink)' }}>
                                   Customer #{group.customerToken} Completed
                                 </h4>
-                                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300">
+                                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-300">
                                   ✅ {group.totalFiles} doc{group.totalFiles > 1 ? 's' : ''} ({group.totalPrints} prints)
                                 </span>
                               </div>
-                              <p className="text-[11px] text-slate-400 mt-0.5">
+                              <p className="text-[11px] mt-0.5" style={{ color: 'var(--pms-muted)' }}>
                                 Arrived: {group.firstTimestamp}
                               </p>
                             </div>
@@ -3687,21 +3724,23 @@ export default function ScanToPrint() {
                             <button
                               type="button"
                               onClick={() => markCustomerBundlePending(group.customerToken)}
-                              className="px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-bold text-xs flex items-center gap-1.5 hover:bg-slate-50 transition"
+                              className="px-3 py-1.5 rounded-xl pms-glass-panel border border-[var(--pms-border)] font-bold text-xs flex items-center gap-1.5 hover:opacity-80 transition cursor-pointer"
+                              style={{ color: 'var(--pms-ink)' }}
                             >
-                              <RotateCcw className="w-3.5 h-3.5 text-slate-500" /> Undo All
+                              <RotateCcw className="w-3.5 h-3.5" style={{ color: 'var(--pms-muted)' }} /> Undo All
                             </button>
                             <button
                               type="button"
                               onClick={() => handlePrintCustomerBundle(group)}
-                              className="px-3 py-1.5 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 font-bold text-xs flex items-center gap-1.5 shadow-sm hover:opacity-90 transition"
+                              className="pms-btn-primary px-3 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1.5 shadow-sm hover:opacity-90 transition cursor-pointer"
                             >
                               <Printer className="w-3.5 h-3.5" /> Re-Print
                             </button>
                             <button
                               type="button"
                               onClick={() => deleteCustomerBundle(group.customerToken)}
-                              className="p-1.5 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-400 hover:text-rose-600 transition"
+                              className="p-1.5 rounded-xl border border-[var(--pms-border)] hover:text-rose-600 transition cursor-pointer"
+                              style={{ color: 'var(--pms-muted)' }}
                             >
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>
@@ -3718,7 +3757,8 @@ export default function ScanToPrint() {
                       <button
                         type="button"
                         onClick={clearPrintedHistory}
-                        className="text-xs text-slate-400 hover:text-rose-600 font-semibold inline-flex items-center gap-1.5 transition-colors py-1 px-3 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/40"
+                        className="text-xs hover:text-rose-600 font-semibold inline-flex items-center gap-1.5 transition-colors py-1 px-3 rounded-lg hover:bg-rose-500/10 cursor-pointer"
+                        style={{ color: 'var(--pms-muted)' }}
                       >
                         <Trash2 className="w-3.5 h-3.5" /> Clear Printed History ({printedJobs.length})
                       </button>
@@ -3733,7 +3773,8 @@ export default function ScanToPrint() {
                       <button
                         type="button"
                         onClick={clearPrintedHistory}
-                        className="text-xs text-slate-400 hover:text-rose-600 font-semibold inline-flex items-center gap-1.5 transition-colors py-1 px-3 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/40"
+                        className="text-xs hover:text-rose-600 font-semibold inline-flex items-center gap-1.5 transition-colors py-1 px-3 rounded-lg hover:bg-rose-500/10 cursor-pointer"
+                        style={{ color: 'var(--pms-muted)' }}
                       >
                         <Trash2 className="w-3.5 h-3.5" /> Clear Printed History ({printedJobs.length})
                       </button>
@@ -3742,27 +3783,33 @@ export default function ScanToPrint() {
                 )}
               </>
             )}
-          </div>
+          </motion.div>
         </div>
 
         {/* ── Shop Identity & Custom PIN Modal ────────────────────────────── */}
         {showPinModal && (
           <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-            <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-6 sm:p-7 max-w-md w-full shadow-2xl space-y-5 animate-in fade-in zoom-in-95 duration-150">
+            <motion.div
+              initial={prefersReduced ? false : { opacity: 0, scale: 0.96 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ duration: 0.16 }}
+              className="pms-glass-panel rounded-3xl border border-[var(--pms-border)] p-6 sm:p-7 max-w-md w-full shadow-2xl space-y-5"
+            >
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2.5">
-                  <div className="w-10 h-10 rounded-2xl bg-rose-50 dark:bg-rose-950/60 text-rose-600 flex items-center justify-center">
+                  <div className="w-10 h-10 rounded-2xl bg-rose-500/10 text-rose-600 flex items-center justify-center">
                     <Store className="w-5 h-5" />
                   </div>
                   <div>
-                    <h3 className="text-base font-extrabold text-slate-900 dark:text-white">Shop &amp; Permanent PIN Settings</h3>
-                    <p className="text-xs text-slate-500">Fixed forever on your counter QR Standee</p>
+                    <h3 className="text-base font-extrabold" style={{ color: 'var(--pms-ink)' }}>Shop &amp; Permanent PIN Settings</h3>
+                    <p className="text-xs" style={{ color: 'var(--pms-muted)' }}>Fixed forever on your counter QR Standee</p>
                   </div>
                 </div>
                 <button
                   type="button"
                   onClick={() => setShowPinModal(false)}
-                  className="p-2 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+                  className="p-2 rounded-xl hover:bg-slate-500/10 transition cursor-pointer"
+                  style={{ color: 'var(--pms-muted)' }}
                 >
                   <X className="w-4 h-4" />
                 </button>
@@ -3770,7 +3817,7 @@ export default function ScanToPrint() {
 
               <div className="space-y-4">
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
+                  <label className="block text-xs font-bold mb-1.5" style={{ color: 'var(--pms-ink)' }}>
                     Shop / Counter Name (Printed on QR Standee)
                   </label>
                   <input
@@ -3778,12 +3825,13 @@ export default function ScanToPrint() {
                     value={customShopNameInput}
                     onChange={(e) => setCustomShopNameInput(e.target.value)}
                     placeholder="e.g. Sharma Cyber Cafe & E-Mitra"
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs sm:text-sm text-slate-900 dark:text-white focus:outline-none focus:border-rose-500 font-medium"
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-[var(--pms-border)] pms-glass-panel text-xs sm:text-sm focus:outline-none focus:border-rose-500 font-medium"
+                    style={{ color: 'var(--pms-ink)' }}
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
+                  <label className="block text-xs font-bold mb-1.5" style={{ color: 'var(--pms-ink)' }}>
                     Custom Counter PIN / Shop Code
                   </label>
                   <input
@@ -3792,14 +3840,15 @@ export default function ScanToPrint() {
                     value={customPinInput}
                     onChange={(e) => setCustomPinInput(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))}
                     placeholder="e.g. SHARMA or 6-CHAR PIN"
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-sm font-black font-mono tracking-widest text-slate-900 dark:text-white focus:outline-none focus:border-rose-500 uppercase"
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-[var(--pms-border)] pms-glass-panel text-sm font-black font-mono tracking-widest focus:outline-none focus:border-rose-500 uppercase"
+                    style={{ color: 'var(--pms-ink)' }}
                   />
-                  <p className="text-[11px] text-slate-400 mt-1">
+                  <p className="text-[11px] mt-1" style={{ color: 'var(--pms-muted)' }}>
                     3 to 10 letters/numbers (e.g. <span className="font-mono font-bold text-rose-600">SHARMA</span>, <span className="font-mono font-bold text-rose-600">CYBER1</span>, or <span className="font-mono font-bold text-rose-600">{sessionCode}</span>).
                   </p>
                 </div>
 
-                <div className="p-3 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 text-amber-800 dark:text-amber-200 text-xs">
+                <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/25 text-amber-800 dark:text-amber-200 text-xs">
                   ⚠️ <strong>Note:</strong> Agar aap PIN change karenge to aapka puraana printed QR standee update ho jayega aur aapko naya QR print karna hoga.
                 </div>
               </div>
@@ -3808,19 +3857,20 @@ export default function ScanToPrint() {
                 <button
                   type="button"
                   onClick={() => setShowPinModal(false)}
-                  className="flex-1 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition"
+                  className="flex-1 py-2.5 rounded-xl border border-[var(--pms-border)] pms-glass-panel text-xs font-bold hover:opacity-80 transition cursor-pointer"
+                  style={{ color: 'var(--pms-muted)' }}
                 >
                   Cancel
                 </button>
                 <button
                   type="button"
                   onClick={() => handleSaveCustomPin(customPinInput || sessionCode, customShopNameInput)}
-                  className="flex-1 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shadow-md transition"
+                  className="pms-btn-primary flex-1 py-2.5 rounded-xl text-xs font-bold shadow-md transition cursor-pointer"
                 >
                   Save &amp; Update QR
                 </button>
               </div>
-            </div>
+            </motion.div>
           </div>
         )}
 

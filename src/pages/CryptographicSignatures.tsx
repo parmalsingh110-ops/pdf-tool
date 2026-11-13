@@ -292,8 +292,9 @@ export default function CryptographicSignatures() {
   };
 
   const downloadPublicKeyPem = () => {
-    if (!auditReceipt || !(auditReceipt as any).publicKeyPem) return;
-    const blob = new Blob([(auditReceipt as any).publicKeyPem], { type: 'application/x-pem-file' });
+    const pem = String(auditReceipt?.publicKeyPem || '');
+    if (!pem) return;
+    const blob = new Blob([pem], { type: 'application/x-pem-file' });
     triggerBlobDownload(blob, `${file?.name.replace(/\.pdf$/i, '')}_Signer_PublicKey.pem`);
   };
 
