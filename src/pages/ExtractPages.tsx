@@ -10,6 +10,7 @@ import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { useToast } from '../components/Toast';
 import { toArrayBufferBytes } from '../lib/blobUrl';
+import { loadPdfDocumentSafely } from '../lib/pdfLoad';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 import { AnimatedNumber, PearlScanOverlay, PearlStageSwitch } from '../components/pearl/PearlMotion';
 
@@ -153,7 +154,10 @@ export default function ExtractPages() {
 
     try {
       const buf = await file.arrayBuffer();
-      const srcDoc = await PDFDocument.load(buf, { ignoreEncryption: true });
+      const { pdfDoc: srcDoc } = await loadPdfDocumentSafely(buf, {
+        fileName: file.name,
+        onStatus: (msg) => setProgressMsg(msg),
+      });
 
       if (exportMode === 'single') {
         // Mode A: Single combined PDF

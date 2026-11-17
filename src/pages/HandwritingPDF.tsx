@@ -79,6 +79,18 @@ const SAMPLE_TEXTS = {
 export default function HandwritingPDF() {
   const prefersReduced = useReducedMotion();
 
+  // Lazy-load the 8 decorative handwriting fonts only when this route mounts
+  useEffect(() => {
+    const id = 'pms-handwriting-fonts';
+    if (document.getElementById(id)) return;
+    const link = document.createElement('link');
+    link.id = id;
+    link.rel = 'stylesheet';
+    link.href =
+      'https://fonts.googleapis.com/css2?family=Architects+Daughter&family=Caveat:wght@400..700&family=Homemade+Apple&family=Indie+Flower&family=Kalam:wght@300;400;700&family=Marck+Script&family=Patrick+Hand&family=Reenie+Beanie&display=swap';
+    document.head.appendChild(link);
+  }, []);
+
   useSEO(
     'Custom Handwriting PDF Generator Online Free — Dual-Pen & Realistic Note Maker | PDF Media Suite',
     'Free online tool to convert typed notes and PDFs into authentic handwritten pages. Features Dual-Pen Mode for headings, realistic mistake scratch-outs, smartphone camera shadows, and notebook date headers.'

@@ -360,7 +360,7 @@ export default function AdminDashboard() {
                       className="w-full px-3 py-2 text-xs rounded-xl border border-[var(--pms-border)] bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:outline-none"
                     />
                     <p className="text-[10px] text-slate-400">
-                      Enter your Render FastAPI URL (e.g. <code>https://your-backend.onrender.com</code>).
+                      Enter your backend API URL (e.g. <code>https://your-backend.onrender.com</code>).
                     </p>
                     <button
                       type="button"

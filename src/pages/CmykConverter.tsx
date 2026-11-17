@@ -64,10 +64,10 @@ export default function CmykConverter() {
       icon={Palette}
       microVariant="convert"
       tone="violet"
-      trustNote="Ghostscript ISO Coated v2 engine · Ephemeral zero-retention conversion"
+      trustNote="ISO Coated v2 Print Profile · Ephemeral zero-retention conversion"
     >
       <div className="flex flex-wrap justify-center gap-2 mb-7">
-        {['ISO Coated v2 Compatible', 'Ghostscript Powered', 'Print-Ready Output', 'No Color Loss'].map((tag, idx) => (
+        {['ISO Coated v2 Compatible', 'Press-Ready Engine', 'Print-Ready Output', 'No Color Loss'].map((tag, idx) => (
           <motion.span
             key={tag}
             initial={prefersReduced ? false : { opacity: 0, y: 8 }}
@@ -118,7 +118,7 @@ export default function CmykConverter() {
             <div className="p-4 bg-[var(--pms-soft-blue)] border border-[var(--pms-border)] rounded-2xl text-slate-700 dark:text-slate-200 text-xs sm:text-sm leading-relaxed">
               <p className="font-bold mb-1">ℹ️ What this tool does</p>
               <p>
-                Converts all RGB colors to CMYK using Ghostscript. Some colors may appear slightly different as RGB has a wider gamut than CMYK. This is expected behavior for print preparation.
+                Converts all RGB colors to CMYK using an industry-standard press color profile. Some colors may appear slightly different as RGB has a wider gamut than CMYK. This is expected behavior for print preparation.
               </p>
             </div>
 

@@ -1,20 +1,20 @@
 import { Link } from 'react-router-dom';
 import { useEffect, useState } from 'react';
-import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
+import { motion, useReducedMotion } from 'motion/react';
 import {
   Combine, Scissors, Minimize2, Edit3, ArrowRight, Sparkles, FileText,
   Shield, Wand2, Ruler, ScanText, Target, Image as ImageIcon,
   ContactRound, Zap, BarChart3, ShieldOff, RotateCw, Crop, Palette,
   Presentation, BookOpen, Stamp, Layers2, Lock, Unlock, Droplet, Hash,
   Layers, RefreshCw, Code, ShieldCheck, FileX, MonitorSmartphone,
-  Images, Copy, Info, Download, ScanSearch, Clock3, Maximize, Pen,
+  Images, Copy, Info, Download, ScanSearch, Maximize, Pen,
   ChevronDown, ChevronUp, CheckCircle2,
   Shuffle, FlipHorizontal, Compass, Trash2, Tag, Bookmark,
   ScanLine, FileCheck, Receipt, BookMarked, Printer, Grid,
   Calculator, Monitor, Scale, GraduationCap, Megaphone,
   ShieldAlert, Maximize2, FileWarning, WifiOff, Cpu, GlobeLock,
 } from 'lucide-react';
-import { readRecentTools, type RecentEntry } from '../lib/recentFiles';
+import { clearRecentTools, readRecentTools, removeRecentTool, type RecentEntry } from '../lib/recentFiles';
 import { useSEO } from '../hooks/useSEO';
 import { VERIFIED_TOOL_COUNT } from '../components/GlobalSearch';
 import PearlAuroraBackground from '../components/pearl/PearlAuroraBackground';
@@ -22,6 +22,7 @@ import HeroDocumentStage from '../components/pearl/HeroDocumentStage';
 import HeroQuickSearch from '../components/pearl/HeroQuickSearch';
 import PearlToolCard, { type PearlAccentTone } from '../components/pearl/PearlToolCard';
 import WorkflowShowcase from '../components/pearl/WorkflowShowcase';
+import WelcomeBackSection from '../components/pearl/WelcomeBackSection';
 
 /* =============================================
    TOOL CATEGORIES — ordered by user usefulness
@@ -416,43 +417,20 @@ export default function Home() {
         </section>
 
         {/* =============== WELCOME BACK / RECENT TOOLS =============== */}
-        {recent.length > 0 && (
-          <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-10">
-            <div
-              className="rounded-2xl border p-4 sm:p-5"
-              style={{
-                backgroundColor: 'var(--pms-white)',
-                borderColor: 'var(--pms-border)',
-                boxShadow: 'var(--pms-shadow-sm)',
-              }}
-            >
-              <div className="flex items-center gap-2 mb-3">
-                <Clock3 className="w-4 h-4 text-[var(--pms-rose)]" />
-                <h2 className="text-sm font-bold" style={{ color: 'var(--pms-ink)' }}>Welcome back</h2>
-              </div>
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
-                {recent.map((tool) => (
-                  <Link
-                    key={`${tool.path}-${tool.at}`}
-                    to={tool.path}
-                    className="rounded-xl border px-3 py-2 text-sm font-medium hover:border-rose-300 dark:hover:border-rose-700 hover:text-[var(--pms-rose)] transition-colors truncate"
-                    style={{
-                      backgroundColor: 'var(--pms-pearl)',
-                      borderColor: 'var(--pms-border)',
-                      color: 'var(--pms-ink)',
-                    }}
-                    title={tool.title}
-                  >
-                    {tool.title}
-                  </Link>
-                ))}
-              </div>
-            </div>
-          </section>
-        )}
+        <WelcomeBackSection
+          recent={recent}
+          onRemove={(path) => {
+            const next = removeRecentTool(path).filter((r) => r.path !== '/').slice(0, 4);
+            setRecent(next);
+          }}
+          onClearAll={() => {
+            clearRecentTools();
+            setRecent([]);
+          }}
+        />
 
         {/* =============== TOOL CATEGORIES (5 visible + More toggle per category) =============== */}
-        {TOOL_GROUPS.map((group) => {
+        {TOOL_GROUPS.map((group, groupIdx) => {
           const isExpanded = Boolean(expandedGroups[group.title]);
           const hasMore = group.tools.length > 5;
           const visibleTools = isExpanded || !hasMore ? group.tools : group.tools.slice(0, 5);
@@ -462,7 +440,7 @@ export default function Home() {
             <section
               key={group.id}
               id={group.id}
-              className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-12 scroll-mt-20"
+              className={`${groupIdx > 0 ? 'pms-cv-auto ' : ''}max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-12 scroll-mt-20`}
             >
               <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-2 mb-5">
                 <div>
@@ -497,38 +475,29 @@ export default function Home() {
                 )}
               </div>
 
-              <motion.div layout className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
-                <AnimatePresence initial={false}>
-                  {visibleTools.map((tool, i) => (
-                    <motion.div
-                      key={tool.path + tool.title}
-                      initial={prefersReduced ? false : { opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={prefersReduced ? undefined : { opacity: 0, scale: 0.96 }}
-                      transition={{ duration: 0.22, delay: Math.min(i * 0.025, 0.2) }}
-                    >
-                      <PearlToolCard
-                        title={tool.title}
-                        desc={tool.desc}
-                        path={tool.path}
-                        icon={tool.icon}
-                        badge={tool.badge}
-                        tone={group.color}
-                      />
-                    </motion.div>
-                  ))}
-                </AnimatePresence>
-              </motion.div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+                {visibleTools.map((tool) => (
+                  <PearlToolCard
+                    key={tool.path + tool.title}
+                    title={tool.title}
+                    desc={tool.desc}
+                    path={tool.path}
+                    icon={tool.icon}
+                    badge={tool.badge}
+                    tone={group.color}
+                  />
+                ))}
+              </div>
             </section>
           );
         })}
 
-        {/* =============== SCROLL-LINKED WORKFLOW SHOWCASE =============== */}
+        {/* =============== WORKFLOW SHOWCASE =============== */}
         <WorkflowShowcase />
 
         {/* =============== ARCHITECTURE & HOW IT WORKS =============== */}
         <section
-          className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 border-t"
+          className="pms-cv-auto max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 border-t"
           style={{ borderColor: 'var(--pms-border)' }}
         >
           <div className="text-center max-w-2xl mx-auto mb-10">

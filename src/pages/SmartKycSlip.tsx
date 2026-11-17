@@ -10,7 +10,7 @@ import { useSEO } from '../hooks/useSEO';
 import { usePageSEO } from '../lib/usePageSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
-import { AnimatedNumber, PearlScanOverlay } from '../components/pearl/PearlMotion';
+import { AnimatedNumber, PearlScanOverlay, PearlSpinner } from '../components/pearl/PearlMotion';
 import { escapeHtml } from '../lib/utils';
 
 interface KycData {
@@ -281,7 +281,7 @@ export default function SmartKycSlip() {
       icon={ScanLine}
       microVariant="ocr"
       tone="sky"
-      trustNote="Local Tesseract OCR engine · Citizen ID cards stay on your device"
+      trustNote="Smart on-device OCR engine · Citizen ID cards stay on your device"
     >
       <div className="space-y-8">
         {/* Upload State */}
@@ -358,7 +358,7 @@ export default function SmartKycSlip() {
 
                 {isExtracting ? (
                   <div className="py-12 text-center space-y-3">
-                    <div className="w-8 h-8 rounded-full border-4 border-sky-500 border-t-transparent animate-spin mx-auto" />
+                    <PearlSpinner size="md" accent="blue" className="mx-auto" />
                     <p className="text-xs font-bold text-[var(--pms-muted)]">Reading text from ID card photo...</p>
                   </div>
                 ) : (

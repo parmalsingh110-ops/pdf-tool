@@ -8,6 +8,7 @@ import { PDFDocument } from 'pdf-lib';
 import { dataUrlToBytes } from '../lib/utils';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 import { toArrayBufferBytes, triggerBlobDownload, useAutoRevokeUrl } from '../lib/blobUrl';
+import { encodeCanvasExactByteTarget } from '../lib/imageByteBudget';
 import { AnimatedNumber, PearlScanOverlay } from '../components/pearl/PearlMotion';
 
 type LayoutMode = 'ssc_combo' | 'side_by_side' | 'photo_only' | 'sign_only';
@@ -309,29 +310,27 @@ export default function SarkariPhotoSignature() {
         }
       }
 
-      // Binary search for exact JPEG quality to hit target size (e.g. 45 KB)
-      let quality = 0.92;
-      let dataUrl = canvas.toDataURL('image/jpeg', quality);
+      let dataUrl = '';
+      let finalBytes = 0;
 
       if (targetSizeKb > 0) {
-        const targetBytes = targetSizeKb * 1024;
-        let low = 0.05;
-        let high = 0.98;
-
-        for (let i = 0; i < 7; i++) {
-          quality = (low + high) / 2;
-          dataUrl = canvas.toDataURL('image/jpeg', quality);
-          const approxBytes = Math.round((dataUrl.length - 22) * 0.75);
-          if (approxBytes > targetBytes) {
-            high = quality;
-          } else {
-            low = quality;
-          }
-        }
+        const targetBytes = Math.round(targetSizeKb * 1024);
+        const encoded = await encodeCanvasExactByteTarget(canvas, 'image/jpeg', targetBytes, {
+          allowGrow: true,
+        });
+        finalBytes = encoded.blob.size;
+        dataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result || ''));
+          reader.onerror = () => reject(new Error('Failed reading encoded signature blob.'));
+          reader.readAsDataURL(encoded.blob);
+        });
+      } else {
+        dataUrl = canvas.toDataURL('image/jpeg', 0.94);
+        finalBytes = Math.round((dataUrl.length - 22) * 0.75);
       }
 
-      const finalBytes = Math.round((dataUrl.length - 22) * 0.75);
-      setResultSizeKb(Math.round(finalBytes / 1024));
+      setResultSizeKb(Math.max(1, Math.round(finalBytes / 1024)));
       lastRenderedCanvasRef.current = canvas;
       setPreviewDataUrl(dataUrl);
     } finally {
@@ -612,9 +611,24 @@ export default function SarkariPhotoSignature() {
               <h2 className="text-sm font-extrabold flex items-center gap-2" style={{ color: 'var(--pms-ink)' }}>
                 <Sliders className="w-4 h-4 text-emerald-600 dark:text-emerald-400" /> Target File Size Controller
               </h2>
-              <span className="text-xs font-bold px-2.5 py-1 bg-[var(--pms-soft-mint)] text-emerald-700 dark:text-emerald-300 rounded-full border border-emerald-200 dark:border-emerald-800 font-mono">
-                {targetSizeKb > 0 ? `Target: ~${targetSizeKb} KB` : 'Original Quality'}
-              </span>
+              <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1 rounded-xl border border-[var(--pms-border-strong)] bg-[var(--pms-white)] px-2 py-1">
+                  <input
+                    type="number"
+                    min={0}
+                    max={5000}
+                    value={targetSizeKb}
+                    onChange={(e) => setTargetSizeKb(Math.max(0, Math.min(5000, Number(e.target.value) || 0)))}
+                    className="w-16 bg-transparent text-xs font-black text-center outline-none tabular-nums"
+                    style={{ color: 'var(--pms-ink)' }}
+                    aria-label="Exact target size in KB"
+                  />
+                  <span className="text-[11px] font-bold" style={{ color: 'var(--pms-muted)' }}>KB</span>
+                </div>
+                <span className="text-xs font-bold px-2.5 py-1 bg-[var(--pms-soft-mint)] text-emerald-700 dark:text-emerald-300 rounded-full border border-emerald-200 dark:border-emerald-800 font-mono">
+                  {targetSizeKb > 0 ? `Exact: ${targetSizeKb} KB` : 'Original Quality'}
+                </span>
+              </div>
             </div>
 
             {/* Quick Presets */}
@@ -623,7 +637,8 @@ export default function SarkariPhotoSignature() {
                 { label: '20 KB – 50 KB (SSC Format)', kb: 40 },
                 { label: '50 KB – 100 KB (UPSC Format)', kb: 80 },
                 { label: '10 KB – 20 KB (Sign Only)', kb: 18 },
-                { label: 'Under 100 KB', kb: 95 },
+                { label: 'Exact 50 KB', kb: 50 },
+                { label: 'Exact 200 KB', kb: 200 },
                 { label: 'Max Quality (No limit)', kb: 0 },
               ].map((preset) => (
                 <button
@@ -646,18 +661,18 @@ export default function SarkariPhotoSignature() {
             <div>
               <input
                 type="range"
-                min="10"
-                max="200"
+                min="5"
+                max="500"
                 step="5"
-                value={targetSizeKb || 150}
+                value={Math.min(500, targetSizeKb || 150)}
                 onChange={(e) => setTargetSizeKb(Number(e.target.value))}
                 className="w-full accent-emerald-600 cursor-pointer"
               />
               <div className="flex justify-between text-[11px] mt-1" style={{ color: 'var(--pms-subtle-text)' }}>
-                <span>10 KB (Super Compressed)</span>
+                <span>5 KB (Compact)</span>
                 <span>50 KB (SSC)</span>
                 <span>100 KB (UPSC)</span>
-                <span>200 KB</span>
+                <span>500 KB (High / Exact)</span>
               </div>
             </div>
           </div>

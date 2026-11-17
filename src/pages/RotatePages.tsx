@@ -9,8 +9,9 @@ import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { useToast } from '../components/Toast';
 import { toArrayBufferBytes } from '../lib/blobUrl';
+import { loadPdfDocumentSafely } from '../lib/pdfLoad';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
-import { AnimatedNumber, PearlScanOverlay, PearlStageSwitch } from '../components/pearl/PearlMotion';
+import { AnimatedNumber, PearlProcessCard, PearlScanOverlay, PearlStageSwitch } from '../components/pearl/PearlMotion';
 
 interface PageInfo {
   index: number;
@@ -135,7 +136,7 @@ export default function RotatePages() {
     setBusy(true);
     try {
       const buf = await file.arrayBuffer();
-      const doc = await PDFDocument.load(buf);
+      const { pdfDoc: doc } = await loadPdfDocumentSafely(buf, { fileName: file.name });
       const pdfPages = doc.getPages();
 
       pages.forEach((pg, i) => {
@@ -181,20 +182,13 @@ export default function RotatePages() {
           <FileDropzone onDrop={handleDrop} multiple={false} title="Drop PDF here or click to select" />
         </div>
       ) : loading ? (
-        <div className="relative overflow-hidden w-full max-w-md mx-auto pms-glass-panel p-8 rounded-3xl text-center space-y-4">
-          <PearlScanOverlay active label={`Rendering page ${loadingProgress.current} of ${loadingProgress.total || '...'}...`} />
-          <div className="w-12 h-12 border-3 border-sky-200 dark:border-sky-900 border-t-[var(--pms-blue)] rounded-full animate-spin mx-auto" />
-          <h3 className="text-lg font-bold text-gray-900 dark:text-slate-100">Rendering Page Previews...</h3>
-          <p className="text-sm text-gray-500 dark:text-slate-400 tabular-nums">
-            Page {loadingProgress.current} of {loadingProgress.total}
-          </p>
-          <div className="w-full bg-white/75 dark:bg-slate-800 rounded-full h-2 overflow-hidden border border-[var(--pms-border)]">
-            <div
-              className="bg-gradient-to-r from-sky-500 to-cyan-500 h-full transition-all duration-200"
-              style={{ width: `${loadingProgress.total ? (loadingProgress.current / loadingProgress.total) * 100 : 0}%` }}
-            />
-          </div>
-        </div>
+        <PearlProcessCard
+          title="Rendering Page Previews..."
+          stageLabel={`Page ${loadingProgress.current} of ${loadingProgress.total || '...'}`}
+          progress={loadingProgress.total ? (loadingProgress.current / loadingProgress.total) * 100 : 0}
+          accent="blue"
+          className="w-full max-w-md mx-auto"
+        />
       ) : resultUrl ? (
         /* Success Screen */
         <div className="w-full max-w-lg mx-auto pms-glass-panel rounded-3xl p-8 text-center">

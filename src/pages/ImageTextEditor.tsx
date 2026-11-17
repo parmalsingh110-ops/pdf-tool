@@ -15,7 +15,7 @@ import {
   Columns2,
 } from 'lucide-react';
 import FileDropzone from '../components/FileDropzone';
-import { extractTextRegions, isVisionAiEnabled } from '../lib/advancedVisionEngine';
+import { extractTextRegions, isVisionAiEnabled, sourceUrlToBase64 } from '../lib/advancedVisionEngine';
 import { useSEO } from '../hooks/useSEO';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 import { AnimatedNumber, PearlScanOverlay } from '../components/pearl/PearlMotion';
@@ -436,10 +436,11 @@ export default function ImageTextEditor() {
       await workerRef.current?.terminate();
       workerRef.current = null;
 
-      // Optional opt-in BYOK AI enhancement (disabled by default — zero external upload)
+      // Optional server-assisted text enhancement (falls back seamlessly to browser OCR)
       try {
         if (isVisionAiEnabled()) {
-          const aiBlocks = await extractTextRegions(ocrSource);
+          const ocrBase64 = await sourceUrlToBase64(ocrSource);
+          const aiBlocks = ocrBase64 ? await extractTextRegions(ocrBase64) : [];
           const aiWords: EditableWord[] = [];
           let idx = 0;
           for (const block of aiBlocks) {
@@ -685,7 +686,7 @@ export default function ImageTextEditor() {
       icon={ScanText}
       microVariant="ocr"
       tone="sky"
-      trustNote="Local Tesseract OCR & pixel background sampling · 100% browser-only"
+      trustNote="Smart on-device OCR & seamless background sampling · 100% private"
     >
       <motion.div
         initial={prefersReduced ? false : { opacity: 0, y: 10 }}

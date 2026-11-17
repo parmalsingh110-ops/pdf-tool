@@ -167,7 +167,10 @@ export default function ZeroTracePrint() {
     }
 
     if (pdfDoc) {
-      pdfDoc.destroy();
+      try {
+        await pdfDoc.cleanup();
+        await pdfDoc.loadingTask?.destroy();
+      } catch {}
       setPdfDoc(null);
     }
 

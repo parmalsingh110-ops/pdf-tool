@@ -19,6 +19,7 @@ import { AnimatedNumber, PearlScanOverlay } from '../components/pearl/PearlMotio
 import ToolSEOSection from '../components/ToolSEOSection';
 import { downloadBlob } from '../lib/utils';
 import { toArrayBufferBytes, useAutoRevokeUrl } from '../lib/blobUrl';
+import { loadPdfDocumentSafely } from '../lib/pdfLoad';
 
 export default function AdmitCardOptimizer() {
   useSEO(
@@ -83,7 +84,7 @@ export default function AdmitCardOptimizer() {
     setIsProcessing(true);
 
     try {
-      const srcDoc = await PDFDocument.load(pdfBytes);
+      const { pdfDoc: srcDoc } = await loadPdfDocumentSafely(pdfBytes, { fileName });
       const outDoc = await PDFDocument.create();
 
       // Copy only Page 1 (The core hall ticket / admit card)

@@ -33,6 +33,8 @@ import {
   Store,
   Camera,
   Share2,
+  Lock,
+  ChevronDown,
 } from 'lucide-react';
 import { motion, useReducedMotion } from 'motion/react';
 import { Peer } from 'peerjs';
@@ -50,6 +52,10 @@ import {
   generateSecretToken,
   encryptBytesWithKey,
   decryptBytesWithKey,
+  isEncryptedEnvelope,
+  computeKeyFingerprint,
+  encryptJsonWithKey,
+  decryptJsonWithKey,
 } from '../lib/privacy';
 import {
   getSharedFilesFromCache,
@@ -76,6 +82,7 @@ interface PrintJob {
   colorMode: 'bw' | 'color';
   orientation?: 'auto' | 'portrait' | 'landscape';
   detectedOrientation?: 'portrait' | 'landscape';
+  e2eeVerified?: boolean;
   status: 'pending' | 'printed';
   printedAt?: string;
 }
@@ -85,6 +92,7 @@ interface IncomingTransfer {
   senderDeviceId?: string;
   deviceLabel?: string;
   name: string;
+  encMeta?: string;
   size: number;
   type: string;
   timestamp: string;
@@ -237,6 +245,144 @@ const getAudioContext = (): AudioContext | null => {
   }
 };
 
+interface ZeroKnowledgeTrustCardProps {
+  role: 'counter' | 'sender';
+  sessionPin: string;
+  hasE2eeKey: boolean;
+  keyFingerprint: string;
+  transportMode: 'p2p' | 'relay' | 'connecting';
+  onBurnServerCache?: () => void;
+  burningCache?: boolean;
+  burnDone?: boolean;
+}
+
+/** Shared live Zero-Knowledge E2EE & relay isolation proof panel for Counter PC and Mobile Upload screens. */
+function ZeroKnowledgeTrustCard({
+  role,
+  sessionPin,
+  hasE2eeKey,
+  keyFingerprint,
+  transportMode,
+  onBurnServerCache,
+  burningCache = false,
+  burnDone = false,
+}: ZeroKnowledgeTrustCardProps) {
+  const [expanded, setExpanded] = useState(false);
+
+  const routeLabel =
+    transportMode === 'p2p'
+      ? 'Direct P2P WebRTC (DTLS) — 0 Bytes Touch Server'
+      : transportMode === 'relay'
+      ? hasE2eeKey
+        ? 'Sealed E2EE Relay (Read-Locked + Auto-Deletes on Fetch)'
+        : 'TLS Relay (Write-Only Upload, Counter Token Read)'
+      : 'Negotiating Direct P2P (Sealed Relay Ready)';
+
+  return (
+    <div
+      className={`rounded-2xl border p-3 text-left transition-colors ${
+        hasE2eeKey
+          ? 'bg-emerald-500/8 border-emerald-500/30 dark:bg-emerald-950/25 dark:border-emerald-500/30'
+          : 'bg-amber-500/10 border-amber-500/35 dark:bg-amber-950/25 dark:border-amber-500/30'
+      }`}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex items-start gap-2 min-w-0">
+          <div
+            className={`w-7 h-7 rounded-xl flex items-center justify-center shrink-0 mt-0.5 ${
+              hasE2eeKey
+                ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
+                : 'bg-amber-500/20 text-amber-700 dark:text-amber-300'
+            }`}
+          >
+            <Lock className="w-3.5 h-3.5" />
+          </div>
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span
+                className={`text-xs font-extrabold tracking-tight ${
+                  hasE2eeKey
+                    ? 'text-emerald-800 dark:text-emerald-200'
+                    : 'text-amber-800 dark:text-amber-200'
+                }`}
+              >
+                {hasE2eeKey
+                  ? 'Zero-Knowledge AES-256-GCM Active'
+                  : 'HTTPS TLS Only — Scan QR for AES-256 E2EE'}
+              </span>
+              {hasE2eeKey && keyFingerprint && (
+                <span
+                  className="text-[10px] font-mono font-extrabold px-1.5 py-0.5 rounded-md bg-emerald-500/20 text-emerald-900 dark:text-emerald-100 border border-emerald-500/30"
+                  title="Match this code on both Counter PC and Customer Phone to verify Zero-Knowledge E2EE key parity"
+                >
+                  Key {keyFingerprint}
+                </span>
+              )}
+            </div>
+            <p className="text-[11px] mt-0.5 leading-snug" style={{ color: 'var(--pms-muted)' }}>
+              {routeLabel}
+            </p>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="text-[10px] font-bold px-2 py-1 rounded-lg border border-[var(--pms-border)] hover:bg-black/5 dark:hover:bg-white/5 flex items-center gap-1 shrink-0 cursor-pointer transition"
+          style={{ color: 'var(--pms-muted)' }}
+          aria-expanded={expanded}
+        >
+          <span>Proof</span>
+          <ChevronDown
+            className={`w-3 h-3 transition-transform duration-200 ${expanded ? 'rotate-180' : ''}`}
+          />
+        </button>
+      </div>
+
+      {role === 'counter' && onBurnServerCache && (
+        <div className="mt-2 pt-2 border-t border-emerald-500/15 flex items-center justify-between gap-2">
+          <span className="text-[10px]" style={{ color: 'var(--pms-muted)' }}>
+            Room <strong className="font-mono">#{sessionPin}</strong> protected by SHA-256 read lock
+          </span>
+          <button
+            type="button"
+            onClick={onBurnServerCache}
+            disabled={burningCache}
+            className="text-[10px] font-extrabold px-2 py-1 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-700 dark:text-rose-300 border border-rose-500/25 flex items-center gap-1 cursor-pointer transition disabled:opacity-50"
+          >
+            <Trash2 className="w-3 h-3" />
+            {burningCache ? 'Wiping...' : burnDone ? 'Server Cache Wiped ✓' : 'Burn Server Cache'}
+          </button>
+        </div>
+      )}
+
+      {expanded && (
+        <div
+          className="mt-2.5 pt-2.5 border-t border-black/10 dark:border-white/10 space-y-1.5 text-[11px] leading-relaxed"
+          style={{ color: 'var(--pms-muted)' }}
+        >
+          <p>
+            <strong style={{ color: 'var(--pms-ink)' }}>1. #k= Key Never Leaves Your Devices:</strong>{' '}
+            Your browser never sends URL <code className="font-mono text-[10px]">#fragment</code> keys over HTTP, so Render/relay servers cannot decrypt files or filenames.
+          </p>
+          <p>
+            <strong style={{ color: 'var(--pms-ink)' }}>2. File Bytes + Metadata Sealed:</strong>{' '}
+            Before upload, file bytes (<code className="font-mono text-[10px]">PMSE2EE1</code>) and original filenames (<code className="font-mono text-[10px]">enc_meta</code>) are encrypted via browser AES-256-GCM.
+          </p>
+          <p>
+            <strong style={{ color: 'var(--pms-ink)' }}>3. Write-Only Customer Upload:</strong>{' '}
+            Phones can only <code className="font-mono text-[10px]">POST</code> uploads to <code className="font-mono text-[10px]">#{sessionPin}</code>. Only Counter PC holds the <code className="font-mono text-[10px]">X-Room-Token</code> to list or fetch jobs.
+          </p>
+          <p>
+            <strong style={{ color: 'var(--pms-ink)' }}>4. Instant Self-Destruct:</strong>{' '}
+            Direct P2P skips the server completely. Any cloud relay buffer deletes via <code className="font-mono text-[10px]">BackgroundTask</code> immediately after Counter fetch (or 15m TTL).
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Component ──────────────────────────────────────────────────────────────
 export default function ScanToPrint() {
   useSEO(
@@ -271,6 +417,9 @@ export default function ScanToPrint() {
   const [customPinInput, setCustomPinInput] = useState<string>('');
   const [customShopNameInput, setCustomShopNameInput] = useState<string>('');
   const [pinNotice, setPinNotice] = useState<string | null>(null);
+  const [e2eeFingerprint, setE2eeFingerprint] = useState<string>('');
+  const [burningServerCache, setBurningServerCache] = useState<boolean>(false);
+  const [serverBurnDone, setServerBurnDone] = useState<boolean>(false);
 
   // ── Shopkeeper Queue state ───────────────────────────────────────────────
   const [printJobs, setPrintJobs] = useState<PrintJob[]>([]);
@@ -318,6 +467,47 @@ export default function ScanToPrint() {
   const pollBackoffRef = useRef<number>(3500);
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const senderAbortRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    let active = true;
+    const activeKey = isSenderMode ? senderE2eeKey : counterE2eeKey;
+    if (!activeKey) {
+      setE2eeFingerprint('');
+      return;
+    }
+    void computeKeyFingerprint(activeKey).then((fp) => {
+      if (active) setE2eeFingerprint(fp);
+    });
+    return () => {
+      active = false;
+    };
+  }, [isSenderMode, senderE2eeKey, counterE2eeKey]);
+
+  const purgeServerRoom = useCallback(async (pinToPurge: string, secretToken: string) => {
+    const cleanPin = (pinToPurge || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (!cleanPin || !secretToken) return;
+    const bases = API_BASE.includes('localhost:8000') ? [API_BASE, ''] : [API_BASE];
+    await Promise.allSettled(
+      bases.map((baseUrl) =>
+        fetch(`${baseUrl}/api/print-drop/session/${cleanPin}`, {
+          method: 'DELETE',
+          headers: { 'X-Room-Token': secretToken },
+        })
+      )
+    );
+  }, []);
+
+  const handleBurnServerCache = async () => {
+    if (!sessionCode || !roomReadToken || burningServerCache) return;
+    setBurningServerCache(true);
+    try {
+      await purgeServerRoom(sessionCode, roomReadToken);
+      setServerBurnDone(true);
+      setTimeout(() => setServerBurnDone(false), 2600);
+    } finally {
+      setBurningServerCache(false);
+    }
+  };
 
   // ── PIN Entry & File Selection Helpers ────────────────────────────────────
   const handleConnectWithPin = useCallback((pinToConnect: string) => {
@@ -1003,6 +1193,7 @@ export default function ScanToPrint() {
                 senderDeviceId: data.senderDeviceId,
                 deviceLabel: data.deviceLabel || 'Mobile Phone',
                 name: data.name,
+                encMeta: typeof data.encMeta === 'string' ? data.encMeta : undefined,
                 size: data.size,
                 type: data.type || 'application/pdf',
                 timestamp: data.timestamp || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
@@ -1014,7 +1205,10 @@ export default function ScanToPrint() {
                 colorMode: data.colorMode || 'bw',
                 lastUpdated: Date.now(),
               };
-              setIncomingProgress({ name: data.name, progress: 0 });
+              setIncomingProgress({
+                name: data.encMeta ? 'Encrypted Document...' : data.name,
+                progress: 0,
+              });
             }
 
             else if (data.action === 'JOB_CHUNK') {
@@ -1046,6 +1240,10 @@ export default function ScanToPrint() {
               if (transfer) {
                 let blobUrl = '';
                 let assembledBlob: Blob | null = null;
+                let resolvedName = transfer.name;
+                let resolvedType = transfer.type || 'application/pdf';
+                let resolvedSize = transfer.size;
+                let wasEncrypted = false;
                 try {
                   const validChunks = (transfer.chunks as any[]).filter((c) => c !== undefined && c !== null);
                   if (
@@ -1055,8 +1253,18 @@ export default function ScanToPrint() {
                   ) {
                     const rawBlob = new Blob(validChunks, { type: transfer.type });
                     const rawBuf = await rawBlob.arrayBuffer();
-                    const { buffer: plainBuf } = await decryptBytesWithKey(rawBuf, counterE2eeKey);
-                    assembledBlob = new Blob([plainBuf], { type: transfer.type });
+                    const decResult = await decryptBytesWithKey(rawBuf, counterE2eeKey);
+                    wasEncrypted = decResult.wasEncrypted;
+                    if (transfer.encMeta && counterE2eeKey) {
+                      const meta = await decryptJsonWithKey<{ name?: string; type?: string; size?: number }>(
+                        transfer.encMeta,
+                        counterE2eeKey
+                      );
+                      if (meta?.name) resolvedName = meta.name;
+                      if (meta?.type) resolvedType = meta.type;
+                      if (typeof meta?.size === 'number' && meta.size > 0) resolvedSize = meta.size;
+                    }
+                    assembledBlob = new Blob([decResult.buffer], { type: resolvedType });
                     blobUrl = URL.createObjectURL(assembledBlob);
                   } else {
                     console.warn(
@@ -1082,13 +1290,14 @@ export default function ScanToPrint() {
                   tokenNum,
                   senderDeviceId: transfer.senderDeviceId,
                   deviceLabel: transfer.deviceLabel,
-                  name: transfer.name,
-                  size: transfer.size,
-                  type: transfer.type,
+                  name: resolvedName,
+                  size: resolvedSize,
+                  type: resolvedType,
                   dataUrl: blobUrl,
                   timestamp: transfer.timestamp,
                   copies: transfer.copies,
                   colorMode: transfer.colorMode,
+                  e2eeVerified: wasEncrypted,
                   status: 'pending',
                 };
 
@@ -1296,6 +1505,10 @@ export default function ScanToPrint() {
 
             let fileBlobUrl = j.dataUrl || '';
             let downloadedBlob: Blob | null = null;
+            let resolvedName: string = j.name;
+            let resolvedType: string = j.type || 'application/pdf';
+            let resolvedSize: number = j.size;
+            let wasEncrypted = false;
             if (j.fileUrl && !fileBlobUrl) {
               try {
                 const fileUrlFull = j.fileUrl.startsWith('http') ? j.fileUrl : `${baseUrl}${j.fileUrl}`;
@@ -1304,15 +1517,33 @@ export default function ScanToPrint() {
                 });
                 if (fileRes.ok) {
                   const rawArrayBuf = await fileRes.arrayBuffer();
-                  const { buffer: plainBuf } = await decryptBytesWithKey(rawArrayBuf, counterE2eeKey);
-                  downloadedBlob = new Blob([plainBuf], { type: j.type || 'application/pdf' });
+                  const decResult = await decryptBytesWithKey(rawArrayBuf, counterE2eeKey);
+                  wasEncrypted = decResult.wasEncrypted;
+                  if (j.encMeta && counterE2eeKey) {
+                    const meta = await decryptJsonWithKey<{ name?: string; type?: string; size?: number }>(
+                      j.encMeta,
+                      counterE2eeKey
+                    );
+                    if (meta?.name) resolvedName = meta.name;
+                    if (meta?.type) resolvedType = meta.type;
+                    if (typeof meta?.size === 'number' && meta.size > 0) resolvedSize = meta.size;
+                  }
+                  downloadedBlob = new Blob([decResult.buffer], { type: resolvedType });
                   fileBlobUrl = URL.createObjectURL(downloadedBlob);
                 }
               } catch {}
             }
 
             if (fileBlobUrl) {
-              const incoming = { ...j, dataUrl: fileBlobUrl, status: 'pending' as const };
+              const incoming: PrintJob = {
+                ...j,
+                name: resolvedName,
+                type: resolvedType,
+                size: resolvedSize,
+                dataUrl: fileBlobUrl,
+                e2eeVerified: wasEncrypted,
+                status: 'pending' as const,
+              };
               addIncomingJob(incoming);
               if (downloadedBlob) {
                 try {
@@ -1380,11 +1611,14 @@ export default function ScanToPrint() {
     if (!qrDataUrl) return;
     const win = window.open('', '_blank');
     if (!win) return;
+    const safePin = escapeHtml(sessionCode);
+    const safeShop = escapeHtml(shopName || 'DIRECT PRINT STATION');
+    const safeStandeeUrl = escapeHtml(mobileLink.split('#')[0]);
     win.document.write(`
       <!DOCTYPE html>
       <html>
         <head>
-          <title>Counter QR Standee - ${sessionCode}</title>
+          <title>Counter QR Standee - ${safePin}</title>
           <style>
             @page { size: A5 portrait; margin: 8mm; }
             * { box-sizing: border-box; }
@@ -1471,7 +1705,7 @@ export default function ScanToPrint() {
         </head>
         <body>
           <div class="standee-card">
-            <div class="shop-badge">${shopName || 'DIRECT PRINT STATION'}</div>
+            <div class="shop-badge">${safeShop}</div>
             <h1>📄 Mobile se Direct Print Bhejein</h1>
             <p class="tagline">WhatsApp par number save karne ki koi zaroorat nahi!</p>
             <div class="qr-box">
@@ -1479,7 +1713,7 @@ export default function ScanToPrint() {
             </div>
             <div class="pin-container">
               <div class="pin-label">Permanent Counter PIN</div>
-              <div class="pin-code">${sessionCode}</div>
+              <div class="pin-code">${safePin}</div>
             </div>
             <div class="steps">
               <ol>
@@ -1491,8 +1725,8 @@ export default function ScanToPrint() {
                 💡 WhatsApp Direct Share: WhatsApp me PDF par 'Share' daba kar 'PDF Media Suite' chunein — bina file dhoonde direct print!
               </div>
             </div>
-            <div class="footer-badge">🔒 100% Private • Direct Beam • Zero Data Stored</div>
-            <div class="link-text">${mobileLink}</div>
+            <div class="footer-badge">🔒 100% Private • Zero-Knowledge AES-256 QR • Zero Data Stored</div>
+            <div class="link-text">${safeStandeeUrl}</div>
           </div>
           <script>
             window.onload = function() {
@@ -1510,12 +1744,29 @@ export default function ScanToPrint() {
   // ─── Relay Upload (Fallback / secondary guarantee with E2EE & localhost auto-fallback) ───
   const uploadViaRelay = async (file: File, copies: number, colorMode: 'bw' | 'color', jobId: string): Promise<boolean> => {
     let payloadFile: File | Blob = file;
+    let uploadFileName = file.name;
+    let encMeta = '';
     if (senderE2eeKey) {
       try {
         const plainBuf = await file.arrayBuffer();
         const encBuf = await encryptBytesWithKey(plainBuf, senderE2eeKey);
+        if (!isEncryptedEnvelope(encBuf)) {
+          throw new Error('AES-256-GCM encryption unavailable in this browser context.');
+        }
         payloadFile = new Blob([encBuf], { type: 'application/octet-stream' });
-      } catch {}
+        encMeta = await encryptJsonWithKey(
+          { name: file.name, type: file.type || 'application/pdf', size: file.size },
+          senderE2eeKey
+        );
+        if (!encMeta) {
+          throw new Error('Metadata encryption failed in browser.');
+        }
+        uploadFileName = 'sealed_doc.bin';
+      } catch (cryptoErr) {
+        console.error('[ScanToPrint] E2EE encryption failed, upload blocked to protect privacy:', cryptoErr);
+        setSenderStatusText('Browser encryption failed — blocked plaintext upload.');
+        return false;
+      }
     }
 
     const attemptUploadToBase = (baseUrl: string): Promise<boolean> =>
@@ -1524,7 +1775,10 @@ export default function ScanToPrint() {
         const formData = new FormData();
         const activeSession = isSenderMode ? (targetCounterPin || sessionCode) : sessionCode;
         formData.append('session_id', activeSession);
-        formData.append('file', payloadFile, file.name);
+        formData.append('file', payloadFile, uploadFileName);
+        if (encMeta) {
+          formData.append('enc_meta', encMeta);
+        }
         formData.append('copies', String(copies));
         formData.append('color_mode', colorMode);
         formData.append('sender_device_id', getSenderDeviceId());
@@ -1536,7 +1790,7 @@ export default function ScanToPrint() {
             const pct = Math.round((e.loaded / e.total) * 95);
             setSenderProgress(pct);
             setSenderStatusText(
-              `Uploading ${file.name} (${(e.loaded / 1048576).toFixed(1)} / ${(e.total / 1048576).toFixed(1)} MB)...`
+              `${senderE2eeKey ? 'Encrypted upload' : 'Uploading'} ${file.name} (${(e.loaded / 1048576).toFixed(1)} / ${(e.total / 1048576).toFixed(1)} MB)...`
             );
           }
         };
@@ -1632,6 +1886,15 @@ export default function ScanToPrint() {
             const dc: RTCDataChannel | null = mobileConnRef.current.dataChannel ?? null;
             const plainBuf = await file.arrayBuffer();
             const wireBuf = senderE2eeKey ? await encryptBytesWithKey(plainBuf, senderE2eeKey) : plainBuf;
+            if (senderE2eeKey && !isEncryptedEnvelope(wireBuf)) {
+              throw new Error('AES-256-GCM encryption unavailable for WebRTC transfer.');
+            }
+            const encMeta = senderE2eeKey
+              ? await encryptJsonWithKey(
+                  { name: file.name, type: file.type || 'application/pdf', size: file.size },
+                  senderE2eeKey
+                )
+              : '';
             const wireSize = wireBuf.byteLength;
 
             // Determine adaptive chunk size based on connection quality
@@ -1643,9 +1906,10 @@ export default function ScanToPrint() {
               jobId,
               senderDeviceId: getSenderDeviceId(),
               deviceLabel: getDeviceLabel(),
-              name: file.name,
+              name: encMeta ? 'sealed_doc.bin' : file.name,
+              encMeta: encMeta || undefined,
               size: wireSize,
-              type: file.type || 'application/pdf',
+              type: encMeta ? 'application/octet-stream' : (file.type || 'application/pdf'),
               timestamp,
               totalChunks: totalChunksSmall,
               copies: senderCopies,
@@ -2198,6 +2462,9 @@ export default function ScanToPrint() {
     }
 
     const pinChanged = cleanPin !== sessionCode;
+    if (pinChanged && sessionCode && roomReadToken) {
+      void purgeServerRoom(sessionCode, roomReadToken);
+    }
     const nextSecret = pinChanged || !roomReadToken ? generateSecretToken(24) : roomReadToken;
     const nextE2ee = pinChanged || !counterE2eeKey ? generateSecretToken(32) : counterE2eeKey;
 
@@ -2702,10 +2969,20 @@ export default function ScanToPrint() {
                       </div>
                     )}
 
-                    {/* Privacy Notice */}
-                    <div className="p-3 rounded-2xl bg-rose-50/75 dark:bg-rose-950/30 border border-rose-200/70 dark:border-rose-900 text-xs text-rose-700 dark:text-rose-300">
-                      🔒 <strong>100% Private &amp; Direct:</strong> Files beam straight to counter #{targetCounterPin}. No WhatsApp, no contact sharing.
-                    </div>
+                    {/* Live Zero-Knowledge Privacy Proof */}
+                    <ZeroKnowledgeTrustCard
+                      role="sender"
+                      sessionPin={targetCounterPin}
+                      hasE2eeKey={Boolean(senderE2eeKey)}
+                      keyFingerprint={e2eeFingerprint}
+                      transportMode={
+                        mobileConnectionStatus === 'connected'
+                          ? 'p2p'
+                          : mobileConnectionStatus === 'fallback'
+                          ? 'relay'
+                          : 'connecting'
+                      }
+                    />
 
                     {/* If files are already loaded (e.g. from Mobile/PC Share), show Selected Files & Beam Button FIRST at the top! */}
                     {senderFiles.length > 0 && (
@@ -2980,6 +3257,14 @@ export default function ScanToPrint() {
               <p className="font-bold text-sm truncate max-w-[180px] sm:max-w-[240px]" style={{ color: 'var(--pms-ink)' }}>
                 {job.name}
               </p>
+              {job.e2eeVerified && (
+                <span
+                  className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-500/12 text-emerald-700 dark:text-emerald-300 border border-emerald-500/25 flex items-center gap-0.5 shrink-0"
+                  title="Verified end-to-end AES-256-GCM encrypted transfer"
+                >
+                  <Lock className="w-2.5 h-2.5" /> E2EE
+                </span>
+              )}
               {job.status === 'printed' && (
                 <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 shrink-0">
                   ✅ Printed {job.printedAt || ''}
@@ -3400,6 +3685,24 @@ export default function ScanToPrint() {
               </div>
             </div>
 
+            {/* Live Zero-Knowledge Encryption & Relay Isolation Proof */}
+            <ZeroKnowledgeTrustCard
+              role="counter"
+              sessionPin={sessionCode}
+              hasE2eeKey={Boolean(counterE2eeKey)}
+              keyFingerprint={e2eeFingerprint}
+              transportMode={
+                peerStatus === 'online'
+                  ? 'p2p'
+                  : peerStatus === 'cloud'
+                  ? 'relay'
+                  : 'connecting'
+              }
+              onBurnServerCache={handleBurnServerCache}
+              burningCache={burningServerCache}
+              burnDone={serverBurnDone}
+            />
+
             {/* Actions */}
             <div className="space-y-2.5">
               {/* Copy link */}
@@ -3548,6 +3851,7 @@ export default function ScanToPrint() {
                         if (j.dataUrl.startsWith('blob:')) { try { URL.revokeObjectURL(j.dataUrl); } catch {} }
                       });
                       setPrintJobs([]);
+                      void purgeServerRoom(sessionCode, roomReadToken);
                     }}
                     className="text-xs text-rose-600 hover:underline font-semibold flex items-center gap-1 ml-1 cursor-pointer"
                   >

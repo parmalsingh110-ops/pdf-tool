@@ -28,6 +28,7 @@ import {
   generateSecretToken,
   encryptBytesWithKey,
   decryptBytesWithKey,
+  isEncryptedEnvelope,
 } from '../lib/privacy';
 
 const makeNoteRoomId = (): string => {
@@ -330,6 +331,9 @@ export default function TalkingNotes() {
 
               const plainBuf = await anno.audioBlob.arrayBuffer();
               const encBuf = await encryptBytesWithKey(plainBuf, noteKey);
+              if (!isEncryptedEnvelope(encBuf)) {
+                throw new Error('Browser encryption unavailable — skipping cloud audio upload.');
+              }
               const encBlob = new Blob([encBuf], { type: 'application/octet-stream' });
 
               const fd = new FormData();

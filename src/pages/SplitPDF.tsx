@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, type ElementType } from 'react';
+import { useState, useCallback, useEffect, useRef, type ElementType } from 'react';
 import { Link } from 'react-router-dom';
 import { motion, useReducedMotion } from 'motion/react';
 import { PDFDocument } from 'pdf-lib';
@@ -11,6 +11,7 @@ import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { useToast } from '../components/Toast';
 import { toArrayBufferBytes } from '../lib/blobUrl';
+import { loadPdfDocumentSafely } from '../lib/pdfLoad';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 import { AnimatedNumber, PearlScanOverlay, PearlStageSwitch } from '../components/pearl/PearlMotion';
 
@@ -43,6 +44,7 @@ export default function SplitPDF() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [processStep, setProcessStep] = useState('');
   const [splitUrls, setSplitUrls] = useState<{ url: string; name: string; pages: string; sizeLabel: string }[]>([]);
+  const resolvedBytesRef = useRef<Uint8Array | null>(null);
 
   const toast = useToast();
 
@@ -94,13 +96,21 @@ export default function SplitPDF() {
     setFile(f);
     setSplitUrls([]);
     setSelectedPages(new Set());
+    resolvedBytesRef.current = null;
     try {
       const ab = await f.arrayBuffer();
-      const pdf = await PDFDocument.load(ab);
-      const count = pdf.getPageCount();
+      const loaded = await loadPdfDocumentSafely(ab, { fileName: f.name });
+      resolvedBytesRef.current = loaded.bytes;
+      const count = loaded.pdfDoc.getPageCount();
       setPageCount(count);
       setRanges(`1-${count}`);
-      generateThumbs(f);
+      if (loaded.wasOwnerUnlocked) {
+        toast.info('Owner permission lock detected & unlocked automatically — ready to split.');
+      }
+      const cleanFile = loaded.wasOwnerUnlocked
+        ? new File([toArrayBufferBytes(loaded.bytes)], f.name, { type: 'application/pdf' })
+        : f;
+      generateThumbs(cleanFile);
     } catch (e: any) {
       console.error('Error loading PDF:', e);
       const errMsg = e?.message?.toLowerCase() || '';
@@ -109,6 +119,7 @@ export default function SplitPDF() {
       } else {
         toast.error('Could not read this PDF. The file may be damaged.');
       }
+      resolvedBytesRef.current = null;
       setFile(null);
       setPageCount(0);
       setThumbs([]);
@@ -137,10 +148,17 @@ export default function SplitPDF() {
     setSplitUrls([]);
 
     try {
-      const arrayBuffer = await file.arrayBuffer();
+      const arrayBuffer = resolvedBytesRef.current
+        ? toArrayBufferBytes(resolvedBytesRef.current)
+        : await file.arrayBuffer();
       let sourcePdf: PDFDocument;
       try {
-        sourcePdf = await PDFDocument.load(arrayBuffer);
+        const loaded = await loadPdfDocumentSafely(arrayBuffer, {
+          fileName: file.name,
+          onStatus: (msg) => setProcessStep(msg),
+        });
+        sourcePdf = loaded.pdfDoc;
+        resolvedBytesRef.current = loaded.bytes;
       } catch (loadErr: any) {
         const errMsg = loadErr?.message?.toLowerCase() || '';
         if (errMsg.includes('encrypt') || errMsg.includes('password')) {
@@ -283,7 +301,10 @@ export default function SplitPDF() {
           }
           page.cleanup();
         }
-        pdfJsDoc.destroy();
+        try {
+          await pdfJsDoc.cleanup();
+          await pdfJsDoc.loadingTask?.destroy();
+        } catch {}
 
         if (matchingPages.length === 0) {
           toast.error(`Keyword "${splitKeyword}" was not found on any page. Try a different phrase or check spelling.`);

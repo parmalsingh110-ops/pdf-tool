@@ -171,6 +171,52 @@ export async function decryptBytesWithKey(
 }
 
 /**
+ * Computes a compact 6-character visual verification fingerprint (e.g. `A9F4·3B`)
+ * from an E2EE base64url room key using SHA-256 so sender & receiver can verify
+ * they share the exact same encryption key without revealing the key itself.
+ */
+export async function computeKeyFingerprint(keyB64Url: string): Promise<string> {
+  if (!keyB64Url) return '';
+  const hex = await hashStorageId(keyB64Url);
+  const up = hex.slice(0, 6).toUpperCase();
+  return up.length === 6 ? `${up.slice(0, 4)}·${up.slice(4, 6)}` : up;
+}
+
+/**
+ * Encrypts small JSON metadata (filename, MIME type, size) with the room AES-256-GCM key
+ * so even filenames with Aadhaar/PAN/bank PII never reach relay servers in plaintext.
+ */
+export async function encryptJsonWithKey(data: unknown, keyB64Url: string): Promise<string> {
+  if (!keyB64Url || typeof window === 'undefined' || !window.crypto?.subtle) return '';
+  const encoded = new TextEncoder().encode(JSON.stringify(data));
+  const plainBuf = new ArrayBuffer(encoded.byteLength);
+  new Uint8Array(plainBuf).set(encoded);
+  const cipherBuf = await encryptBytesWithKey(plainBuf, keyB64Url);
+  return toBase64Url(new Uint8Array(cipherBuf));
+}
+
+/**
+ * Decrypts AES-256-GCM metadata previously encrypted with `encryptJsonWithKey`.
+ */
+export async function decryptJsonWithKey<T = Record<string, unknown>>(
+  cipherB64Url: string,
+  keyB64Url: string
+): Promise<T | null> {
+  if (!cipherB64Url || !keyB64Url) return null;
+  try {
+    const cipherBytes = fromBase64Url(cipherB64Url);
+    const cipherBuf = new ArrayBuffer(cipherBytes.byteLength);
+    new Uint8Array(cipherBuf).set(cipherBytes);
+    const { buffer, wasEncrypted } = await decryptBytesWithKey(cipherBuf, keyB64Url);
+    if (!wasEncrypted) return null;
+    const text = new TextDecoder().decode(new Uint8Array(buffer));
+    return JSON.parse(text) as T;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Scrubs API keys, URL secret fragments (#k=, #t=), query tokens, and local OS user paths
  * from error messages or stack traces before persisting or dispatching telemetry.
  */
@@ -178,6 +224,8 @@ export function sanitizeSensitiveText(input: string, maxLen = 2000): string {
   if (!input) return '';
   return String(input)
     .replace(/AIza[0-9A-Za-z\-_]{20,}/g, '[REDACTED_KEY]')
+    .replace(/AQ\.[0-9A-Za-z\-_.]{20,}/g, '[REDACTED_KEY]')
+    .replace(/sk-(?:ant-|proj-)?[0-9A-Za-z\-_]{20,}/g, '[REDACTED_KEY]')
     .replace(/Bearer\s+[A-Za-z0-9\-._~+/]+=*/gi, 'Bearer [REDACTED]')
     .replace(/#(?:k|t|key|token)=[^&\s"']+/gi, '#[REDACTED]')
     .replace(/([?&](?:token|key|secret|passcode|auth|read_token)=)[^&\s"']+/gi, '$1[REDACTED]')

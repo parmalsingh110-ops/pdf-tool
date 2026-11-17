@@ -4,7 +4,7 @@ import { preload, removeBackground } from '@imgly/background-removal';
 import JSZip from 'jszip';
 import { motion, useReducedMotion } from 'motion/react';
 import FileDropzone from '../components/FileDropzone';
-import { encodeCanvasUnderByteBudget, type RasterMime } from '../lib/imageByteBudget';
+import { encodeCanvasExactByteTarget, type RasterMime } from '../lib/imageByteBudget';
 import { useSEO } from '../hooks/useSEO';
 import { dataUrlToBytes } from '../lib/utils';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
@@ -439,29 +439,17 @@ export default function ImageResizer() {
     let mime = resolveMimeForFile(sourceFile);
 
     let userNote: string | null = null;
-    if (mime === 'image/png' && maxBytes) {
-      userNote =
-        'Target file size applies to JPEG/WebP. PNG is lossless — export may exceed the limit.';
-    }
-
     let blob: Blob | null = null;
 
-    if (mime !== 'image/png' && maxBytes) {
-      if (mime !== 'image/jpeg' && mime !== 'image/webp') {
+    if (maxBytes) {
+      if (mime !== 'image/jpeg' && mime !== 'image/webp' && mime !== 'image/png') {
         mime = 'image/jpeg';
       }
-      const enc = await encodeCanvasUnderByteBudget(canvas, mime as RasterMime, maxBytes);
+      const enc = await encodeCanvasExactByteTarget(canvas, mime as RasterMime, maxBytes, {
+        allowGrow: true,
+      });
       blob = enc.blob;
-      let msg = enc.note ?? null;
-      if (blob.size > maxBytes) {
-        msg = [
-          msg,
-          `Still above ${targetUnit === 'MB' ? targetKb + ' MB' : targetKb + ' KB'} — try a smaller pixel size or JPEG.`,
-        ]
-          .filter(Boolean)
-          .join(' ');
-      }
-      userNote = [userNote, msg].filter(Boolean).join(' ');
+      userNote = enc.note ?? null;
     } else {
       blob = await new Promise<Blob | null>((resolve) => {
         if (mime === 'image/png') {

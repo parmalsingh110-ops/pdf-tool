@@ -5,6 +5,7 @@ import Layout from './components/Layout';
 import ScrollToTop from './components/ScrollToTop';
 import Home from './pages/Home';
 import { getSharedFilesFromCache, subscribeSharedFilesReady } from './lib/shareTarget';
+import { PearlRouteSkeleton } from './components/pearl/PearlMotion';
 
 // ── Lazy Loaded Tool & Informational Pages (Code Splitting for Core Web Vitals) ──
 const MergePDF = lazy(() => import('./pages/MergePDF'));
@@ -205,11 +206,7 @@ export default function App() {
   return (
     <ToastProvider>
     <ScrollToTop />
-    <Suspense fallback={
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', background: '#0f172a' }}>
-        <div style={{ width: 48, height: 48, border: '4px solid #334155', borderTopColor: '#6366f1', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
-      </div>
-    }>
+    <Suspense fallback={<PearlRouteSkeleton />}>
     <Routes>
       <Route path="/" element={<Layout />}>
         <Route index element={<Home />} />

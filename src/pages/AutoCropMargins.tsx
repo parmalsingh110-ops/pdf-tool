@@ -262,7 +262,7 @@ export default function AutoCropMargins() {
                   <br />
                   <span className="text-emerald-600 dark:text-emerald-400 font-semibold text-xs mt-1 inline-block">
                     {engineUsed === 'backend'
-                      ? 'Processed with PyMuPDF High-Precision Vector Engine.'
+                      ? 'Processed with Precision Vector Auto-Crop Engine.'
                       : 'Processed with Non-Destructive Vector CropBox Engine.'}
                   </span>
                 </p>

@@ -10,7 +10,7 @@ import {
   Document, Packer, Paragraph, TextRun, Table as DocxTable, TableRow, TableCell,
   WidthType, HeadingLevel, AlignmentType, BorderStyle,
 } from 'docx';
-import * as XLSX from 'xlsx';
+import { buildXlsxBlob, parseXlsxWorkbook, type XlsxWriteSheet } from '../lib/excelCodec';
 import PptxGenJS from 'pptxgenjs';
 import FileDropzone from '../components/FileDropzone';
 import { extractTextRegions, extractTableData, isVisionAiEnabled } from '../lib/advancedVisionEngine';
@@ -41,8 +41,8 @@ const KIND_LABELS: Record<Kind, string> = {
 
 const TARGETS_FOR_KIND: Record<Kind, Target[]> = {
   pdf:     ['txt', 'docx', 'xlsx', 'pptx', 'png', 'jpg', 'jpeg', 'zip'],
-  image:   ['pdf', 'png', 'jpg', 'jpeg', 'webp'],
-  tiff:    ['pdf', 'png', 'jpg', 'jpeg', 'webp'],
+  image:   ['pdf', 'docx', 'xlsx', 'pptx', 'png', 'jpg', 'jpeg', 'webp'],
+  tiff:    ['pdf', 'docx', 'xlsx', 'pptx', 'png', 'jpg', 'jpeg', 'webp'],
   text:    ['pdf'],
   docx:    ['pdf', 'xlsx', 'pptx', 'txt'],
   xlsx:    ['pdf', 'docx', 'pptx', 'txt', 'csv'],
@@ -120,13 +120,8 @@ async function extractDocxParagraphsFlat(file: File): Promise<string[]> {
 type XlsxSheet = { name: string; rows: any[][] };
 
 async function extractXlsxSheets(file: File): Promise<XlsxSheet[]> {
-  const wb = XLSX.read(await file.arrayBuffer(), { type: 'array', cellText: true, cellNF: false });
-  return wb.SheetNames.map(name => {
-    const ws = wb.Sheets[name];
-    // Use sheet_to_json with raw:false to get formatted strings including \n for multiline cells
-    const rows = XLSX.utils.sheet_to_json<any[]>(ws, { header: 1, defval: '', raw: false });
-    return { name, rows: rows as any[][] };
-  });
+  const parsed = await parseXlsxWorkbook(await file.arrayBuffer());
+  return parsed.map((s) => ({ name: s.name, rows: s.rowsAsStrings }));
 }
 
 // ─── XLSX→PDF helpers ────────────────────────────────────────────────
@@ -605,11 +600,7 @@ async function pdfFromDocxContent(
 // ─── Advanced XLSX → PDF (merge-aware, style-aware) ─────────────────
 
 async function xlsxFileToPdf(file: File): Promise<Blob> {
-  const wb = XLSX.read(await file.arrayBuffer(), {
-    type: 'array',
-    cellStyles: true,    // read alignment, bold, font size
-    cellDates: false,
-  });
+  const sheets = await parseXlsxWorkbook(await file.arrayBuffer());
 
   const pdfDoc   = await PDFDocument.create();
   const fontReg  = await pdfDoc.embedFont(StandardFonts.Helvetica);
@@ -620,48 +611,35 @@ async function xlsxFileToPdf(file: File): Promise<Blob> {
   const PAD_H    = 4;   // horizontal cell padding
   const PAD_V    = 3;   // vertical cell padding
 
-  for (const sheetName of wb.SheetNames) {
-    const ws = wb.Sheets[sheetName];
-    if (!ws['!ref']) continue;
-
-    const range  = XLSX.utils.decode_range(ws['!ref']);
-    const R0     = range.s.r, C0 = range.s.c;
-    const nRows  = range.e.r - range.s.r + 1;
-    const nCols  = range.e.c - range.s.c + 1;
+  for (const sheet of sheets) {
+    const nRows = sheet.nRows;
+    const nCols = sheet.nCols;
     if (!nRows || !nCols) continue;
 
     // ── Build merge maps ─────────────────────────────────────────────
-    // mergeOf[ri][ci] = {cs, rs} for the top-left cell of each merge
     const mergeOf  = new Map<string, { cs: number; rs: number }>();
     const coveredSet = new Set<string>();
 
-    for (const m of (ws['!merges'] ?? [])) {
-      const ri = m.s.r - R0, ci = m.s.c - C0;
+    for (const m of sheet.merges) {
+      const ri = m.s.r, ci = m.s.c;
       const cs = m.e.c - m.s.c + 1, rs = m.e.r - m.s.r + 1;
       mergeOf.set(`${ri},${ci}`, { cs, rs });
       for (let r = m.s.r; r <= m.e.r; r++) {
         for (let c = m.s.c; c <= m.e.c; c++) {
-          if (r !== m.s.r || c !== m.s.c) coveredSet.add(`${r - R0},${c - C0}`);
+          if (r !== m.s.r || c !== m.s.c) coveredSet.add(`${r},${c}`);
         }
       }
     }
 
     // ── Column widths from Excel ─────────────────────────────────────
-    const colInfoArr = ws['!cols'] ?? [];
-    const CHAR_PT    = 6.0;
-    const rawColW    = Array.from({ length: nCols }, (_, i) => {
-      const info = colInfoArr[i + C0];
-      if (info?.wpx) return info.wpx * 0.75;
-      if (info?.wch) return Math.max(20, info.wch * CHAR_PT);
-      return 8.43 * CHAR_PT;
+    const CHAR_PT = 6.0;
+    const rawColW = Array.from({ length: nCols }, (_, i) => {
+      const wch = sheet.colWidths[i];
+      return wch ? Math.max(20, wch * CHAR_PT) : 8.43 * CHAR_PT;
     });
 
     // ── Row heights from Excel ───────────────────────────────────────
-    const rowInfoArr  = ws['!rows'] ?? [];
-    const xlRowHint   = (ri: number) => {
-      const h = rowInfoArr[ri + R0];
-      return h?.hpt ?? 0; // 0 = use auto
-    };
+    const xlRowHint = (ri: number) => sheet.rowHeights[ri] ?? 0;
 
     // ── Page orientation ─────────────────────────────────────────────
     const MARGIN   = 28;
@@ -671,14 +649,10 @@ async function xlsxFileToPdf(file: File): Promise<Blob> {
     const AW = W - MARGIN * 2;
 
     // Scale columns to fit page width
-    const scl   = AW / rawTotal;
+    const scl   = AW / Math.max(1, rawTotal);
     const colW  = rawColW.map(w => Math.max(18, Math.round(w * scl)));
     const diff  = AW - colW.reduce((a, b) => a + b, 0);
     colW[colW.length - 1] = Math.max(18, colW[colW.length - 1] + diff);
-
-    // ── Helper: get cell object ──────────────────────────────────────
-    const getCell = (ri: number, ci: number) =>
-      ws[XLSX.utils.encode_cell({ r: ri + R0, c: ci + C0 })];
 
     // ── Build full grid ──────────────────────────────────────────────
     type CP = {
@@ -692,7 +666,7 @@ async function xlsxFileToPdf(file: File): Promise<Blob> {
     };
 
     const grid: CP[][] = [];
-    let colHeaderRowIdx = -1; // first non-covered, non-full-merge row = header
+    let colHeaderRowIdx = -1;
 
     for (let ri = 0; ri < nRows; ri++) {
       const row: CP[] = [];
@@ -701,35 +675,23 @@ async function xlsxFileToPdf(file: File): Promise<Blob> {
         const key     = `${ri},${ci}`;
         const isCov   = coveredSet.has(key);
         const minfo   = mergeOf.get(key) ?? { cs: 1, rs: 1 };
-        const cell    = getCell(ri, ci);
+        const cell    = sheet.cells.get(key);
 
         let text = '';
         if (!isCov && cell) {
-          text = String(cell.w ?? cell.v ?? '').replace(/[^\x09\x0A\x20-\x7E]/g, '?');
+          text = String(cell.text ?? '').replace(/[^\x09\x0A\x20-\x7E]/g, '?');
         }
 
-        // Style
-        let align: CP['align'] = 'left';
-        let bold   = false;
-        let italic = false;
+        let align: CP['align'] = cell?.align || 'left';
+        let bold   = Boolean(cell?.bold);
+        const italic = Boolean(cell?.italic);
         let fsize  = FONT_SZ;
+        if (cell?.fontSize) fsize = Math.max(6, Math.min(16, cell.fontSize * 0.72));
 
-        if (cell?.s) {
-          const h = cell.s.alignment?.horizontal;
-          if (h === 'center' || h === 'centerContinuous') align = 'center';
-          else if (h === 'right') align = 'right';
-          bold   = cell.s.font?.bold   === true;
-          italic = cell.s.font?.italic === true;
-          if (cell.s.font?.sz) fsize = Math.max(6, Math.min(16, cell.s.font.sz * 0.72));
-        }
-
-        // Heuristic: if this cell's merge spans ALL columns → treat as centered title
-        if (minfo.cs >= nCols && nCols > 2 && !cell?.s?.alignment) {
+        if (minfo.cs >= nCols && nCols > 2 && (!cell || cell.align === 'left')) {
           align = 'center';
-          if (text && ri < 6) bold = true; // first few rows of a doc are usually bold
+          if (text && ri < 6) bold = true;
         }
-
-        // Full-merge row detection
         if (ci === 0 && minfo.cs >= nCols) rowIsFullMerge = true;
 
         const fnt   = bold ? fontBold : fontReg;
@@ -740,8 +702,6 @@ async function xlsxFileToPdf(file: File): Promise<Blob> {
                    colSpan: minfo.cs, rowSpan: minfo.rs, covered: isCov, cellW });
       }
 
-      // First row that has multiple non-covered cells with content and is NOT a full-merge
-      // and all main cells appear to be column headers (short text, possibly bold)
       if (colHeaderRowIdx === -1 && !rowIsFullMerge) {
         const hasContent = row.some(c => !c.covered && c.text.trim());
         if (hasContent) colHeaderRowIdx = ri;
@@ -755,7 +715,7 @@ async function xlsxFileToPdf(file: File): Promise<Blob> {
     let y    = H - MARGIN;
 
     // Sheet name strip
-    const safeSheet = sheetName.replace(/[^\x20-\x7E]/g, '?');
+    const safeSheet = sheet.name.replace(/[^\x20-\x7E]/g, '?');
     page.drawRectangle({ x: 0, y: H - MARGIN - 16, width: W, height: 16, color: rgb(0.15, 0.20, 0.50) });
     try { page.drawText(safeSheet, { x: MARGIN, y: H - MARGIN - 12, size: 9, font: fontBold, color: rgb(1, 1, 1) }); } catch { /* */ }
     y -= 20;
@@ -1282,13 +1242,11 @@ async function docxFromSlides(slides: PptxSlide[], title?: string): Promise<Blob
 
 // ─── XLSX builders ──────────────────────────────────────────────────
 
-function xlsxFromParagraphs(paragraphs: string[], sheetName = 'Content'): Blob {
-  // Group paragraphs under headings into structured rows
+async function xlsxFromParagraphs(paragraphs: string[], sheetName = 'Content'): Promise<Blob> {
   const aoa: string[][] = [];
   for (const p of paragraphs) {
     const safe = safeStr(p);
     if (!safe) continue;
-    // Detect if line looks like a table row (tab-separated or multiple |)
     if (safe.includes('\t') || safe.split('|').length > 2) {
       const cols = safe.includes('\t')
         ? safe.split('\t').map(s => s.trim())
@@ -1299,40 +1257,27 @@ function xlsxFromParagraphs(paragraphs: string[], sheetName = 'Content'): Blob {
     }
   }
   if (!aoa.length) aoa.push(['No content']);
-  const ws = XLSX.utils.aoa_to_sheet(aoa);
   const colWidths = aoa.reduce<number[]>((acc, row) => {
-    row.forEach((c, ci) => { acc[ci] = Math.max(acc[ci] ?? 8, c.length + 2); });
+    row.forEach((c, ci) => { acc[ci] = Math.max(acc[ci] ?? 8, Math.min(60, c.length + 2)); });
     return acc;
   }, []);
-  ws['!cols'] = colWidths.map(w => ({ wch: Math.min(w, 60) }));
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, safeStr(sheetName).slice(0, 31) || 'Content');
-  const arr = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
-  return new Blob([arr], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  return buildXlsxBlob([{ name: safeStr(sheetName).slice(0, 31) || 'Content', rows: aoa, colWidths }]);
 }
 
-function xlsxFromSlides(slides: PptxSlide[]): Blob {
-  const wb = XLSX.utils.book_new();
-
+async function xlsxFromSlides(slides: PptxSlide[]): Promise<Blob> {
+  const sheets: XlsxWriteSheet[] = [];
   slides.forEach((slide, i) => {
-    // If slide has a table, output the table as a sheet
     if (slide.tableRows.length > 0) {
-      const ws = XLSX.utils.aoa_to_sheet(slide.tableRows.map(r => r.map(safeStr)));
       const sheetName = safeStr(slide.title || `Slide ${i + 1}`).slice(0, 31) || `Slide${i + 1}`;
-      try { XLSX.utils.book_append_sheet(wb, ws, sheetName); } catch { /* duplicate name */ }
+      sheets.push({ name: sheetName, rows: slide.tableRows.map(r => r.map(safeStr)) });
     }
   });
-
-  // Fallback: summary sheet
-  if (!wb.SheetNames.length) {
-    const aoa: string[][] = [['Slide', 'Title', 'Content']];
-    slides.forEach((s, i) => aoa.push([String(i + 1), safeStr(s.title), safeStr(s.body)]));
-    const ws = XLSX.utils.aoa_to_sheet(aoa);
-    XLSX.utils.book_append_sheet(wb, ws, 'Slides');
+  if (!sheets.length) {
+    const aoa: (string | number)[][] = [['Slide', 'Title', 'Content']];
+    slides.forEach((s, i) => aoa.push([i + 1, safeStr(s.title), safeStr(s.body)]));
+    sheets.push({ name: 'Slides', rows: aoa, colWidths: [8, 28, 55] });
   }
-
-  const arr = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
-  return new Blob([arr], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  return buildXlsxBlob(sheets);
 }
 
 // ─── PPTX builders ──────────────────────────────────────────────────
@@ -1711,18 +1656,10 @@ async function convertPdfFile(f: File, outType: Target, quality: number): Promis
       } catch { /* fallback */ }
 
       if (tableRows) {
-        const ws = XLSX.utils.aoa_to_sheet(tableRows);
-        const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, 'PDF Data');
-        const arr = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
-        return new Blob([arr], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+        return buildXlsxBlob([{ name: 'PDF Data', rows: tableRows }]);
       }
-      const rows = pageTexts.map((text, idx) => ({ Page: idx + 1, Text: text }));
-      const ws = XLSX.utils.json_to_sheet(rows);
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, 'PDF Text');
-      const arr = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
-      return new Blob([arr], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const rows: (string | number)[][] = [['Page', 'Text'], ...pageTexts.map((text, idx) => [idx + 1, text])];
+      return buildXlsxBlob([{ name: 'PDF Text', rows, colWidths: [10, 65] }]);
     }
     const pptx = new PptxGenJS();
     pptx.layout = 'LAYOUT_STANDARD';
@@ -1919,8 +1856,18 @@ export default function UniversalConverter() {
         }
 
       } else if (kind === 'image') {
-        setProgress('Converting image…');
-        blob = await convertImageFile(file, target, quality);
+        if (target === 'docx' || target === 'xlsx' || target === 'pptx') {
+          const ep = target === 'docx' ? '/convert/pdf-to-word' : target === 'xlsx' ? '/convert/pdf-to-excel' : '/convert/pdf-to-ppt';
+          setProgress(`Reconstructing ${target.toUpperCase()} from image scan…`);
+          const backendBlob = await tryBackend(ep, { force_ocr: 'true' });
+          if (!backendBlob) {
+            throw new Error('Server-side AI reconstruction is required for Image to Office conversion.');
+          }
+          blob = backendBlob;
+        } else {
+          setProgress('Converting image…');
+          blob = await convertImageFile(file, target, quality);
+        }
 
       } else if (kind === 'pdf') {
 
@@ -1985,32 +1932,26 @@ export default function UniversalConverter() {
           setProgress('Building output…');
 
           if (target === 'xlsx') {
-            const wb = XLSX.utils.book_new();
+            const sheets: XlsxWriteSheet[] = [];
             let tableIdx = 0;
             for (const el of docxContent.elements) {
               if (el.type === 'table') {
                 const t = el as DTable;
                 const aoa = t.rows.map((r: DRow) => r.cells.map(c => safeStr(c.text)));
-                const ws = XLSX.utils.aoa_to_sheet(aoa);
-                const colW = aoa.reduce<number[]>((acc, row) => {
-                  row.forEach((c: string, ci: number) => { acc[ci] = Math.max(acc[ci] ?? 8, c.length + 2); });
+                const colWidths = aoa.reduce<number[]>((acc, row) => {
+                  row.forEach((c: string, ci: number) => { acc[ci] = Math.max(acc[ci] ?? 8, Math.min(50, c.length + 2)); });
                   return acc;
                 }, []);
-                ws['!cols'] = colW.map(w => ({ wch: Math.min(w, 50) }));
-                const sheetName = `Table ${++tableIdx}`.slice(0, 31);
-                XLSX.utils.book_append_sheet(wb, ws, sheetName);
+                sheets.push({ name: `Table ${++tableIdx}`.slice(0, 31), rows: aoa, colWidths });
               }
             }
             if (docxContent.flatText.length > 0) {
-              const textAoa = docxContent.flatText.map(t => [safeStr(t)]);
-              const ws = XLSX.utils.aoa_to_sheet(textAoa);
-              try { XLSX.utils.book_append_sheet(wb, ws, 'Content'); } catch { /* */ }
+              sheets.push({ name: 'Content', rows: docxContent.flatText.map(t => [safeStr(t)]), colWidths: [65] });
             }
-            if (!wb.SheetNames.length) {
-              XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['No content']]), 'Sheet1');
+            if (!sheets.length) {
+              sheets.push({ name: 'Sheet1', rows: [['No content']] });
             }
-            const arr = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
-            blob = new Blob([arr], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+            blob = await buildXlsxBlob(sheets);
           } else if (target === 'pptx') {
             // ── DOCX → PPT: Backend ──
             setProgress('Converting Word to PowerPoint (server-side)…');
@@ -2102,7 +2043,7 @@ export default function UniversalConverter() {
           } else {
             setProgress('Server offline — converting PowerPoint to Excel in browser…');
             const slides = await extractPptxSlides(file);
-            blob = xlsxFromSlides(slides);
+            blob = await xlsxFromSlides(slides);
           }
         } else {
           setProgress('Extracting slides (titles, body, tables)…');

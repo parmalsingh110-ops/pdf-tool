@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import { motion, useReducedMotion } from 'motion/react';
 import * as pdfjsLib from 'pdfjs-dist';
-import * as XLSX from 'xlsx';
+import { buildXlsxBlob } from '../lib/excelCodec';
 import FileDropzone from '../components/FileDropzone';
 import BackendLoader from '../components/BackendLoader';
 import { usePageSEO } from '../lib/usePageSEO';
@@ -13,7 +13,16 @@ import { useSEO } from '../hooks/useSEO';
 import { apiFetch } from '../lib/api';
 import '../lib/pdfWorker';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
-import { AnimatedNumber, PearlScanOverlay, PearlStageSwitch } from '../components/pearl/PearlMotion';
+import { AnimatedNumber, PearlProcessCard, PearlStageSwitch } from '../components/pearl/PearlMotion';
+import VisionLayerControls from '../components/VisionLayerControls';
+import { appendVisionLayerParams } from '../lib/advancedVisionEngine';
+import { getStoredOcrLang } from '../lib/ocrLanguages';
+import {
+  SCAN_CONVERTER_ACCEPT,
+  detectIfPdfScannedOrOcr,
+  isRasterImageFile,
+  stripDocumentExt,
+} from '../utils/scanDetector';
 
 type Stage = 'idle' | 'analyzing' | 'converting' | 'backend' | 'done' | 'error';
 type Method = 'auto' | 'frontend' | 'backend';
@@ -33,16 +42,9 @@ interface ConversionStats {
   timeMs: number;
 }
 
-// ─── Detect if PDF is scanned ────────────────────────────────────────────────
+// ─── Detect if PDF is scanned (raw image OR OCR-layered scan) ─────────────────
 async function detectIfScanned(pdf: pdfjsLib.PDFDocumentProxy): Promise<boolean> {
-  let totalText = 0;
-  const check = Math.min(3, pdf.numPages);
-  for (let i = 1; i <= check; i++) {
-    const page = await pdf.getPage(i);
-    const tc = await page.getTextContent();
-    totalText += tc.items.reduce((s: number, it: any) => s + (it.str || '').trim().length, 0);
-  }
-  return totalText < 50;
+  return detectIfPdfScannedOrOcr(pdf);
 }
 
 // ─── Extract text content with positioning info ──────────────────────────────
@@ -178,33 +180,41 @@ async function extractFrontend(
 }
 
 // ─── Build XLSX from extracted tables ────────────────────────────────────────
-function buildXlsx(tables: ExtractedTable[], fallbackText: string): Blob {
-  const wb = XLSX.utils.book_new();
-
+async function buildXlsx(tables: ExtractedTable[], fallbackText: string): Promise<Blob> {
   if (tables.length === 0) {
-    // No tables: dump raw text into Sheet1
-    const ws = XLSX.utils.aoa_to_sheet(fallbackText.split('\n').map(l => [l]));
-    XLSX.utils.book_append_sheet(wb, ws, 'Text Content');
-  } else {
-    tables.forEach(tbl => {
-      // Make first row bold (header) via cell styles not directly, but via aoa_to_sheet
-      const ws = XLSX.utils.aoa_to_sheet(tbl.rows);
-      // Apply column widths
-      const maxCols = Math.max(...tbl.rows.map(r => r.length));
-      ws['!cols'] = Array(maxCols).fill({ wch: 20 });
-      XLSX.utils.book_append_sheet(wb, ws, tbl.sheetName);
-    });
+    return buildXlsxBlob([
+      {
+        name: 'Text Content',
+        rows: fallbackText.split('\n').map((l) => [l]),
+        colWidths: [60],
+      },
+    ]);
   }
-
-  const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-  return new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  return buildXlsxBlob(
+    tables.map((tbl) => {
+      const maxCols = Math.max(1, ...tbl.rows.map((r) => r.length));
+      return {
+        name: tbl.sheetName,
+        rows: tbl.rows,
+        colWidths: Array(maxCols).fill(20),
+      };
+    })
+  );
 }
 
 // ─── Backend conversion ───────────────────────────────────────────────────────
-async function convertBackend(file: File, method: string): Promise<Blob> {
+async function convertBackend(
+  file: File,
+  method: string,
+  forceOcr: boolean,
+  strictLocal: boolean,
+  lang: string
+): Promise<Blob> {
   const formData = new FormData();
   formData.append('file', file);
   formData.append('method', method);
+  formData.append('force_ocr', forceOcr ? 'true' : 'false');
+  appendVisionLayerParams(formData, { strictLocal, lang });
   const res = await apiFetch('/convert/pdf-to-excel', { method: 'POST', body: formData });
   if (!res.ok) throw new Error(await res.text() || 'Backend conversion failed.');
   return res.blob();
@@ -216,11 +226,11 @@ export default function PdfToExcel() {
 
   useSEO(
     'PDF to Excel Converter — Instant Online Free | PDF Media Suite',
-    'Extract tables from PDF to Excel XLSX instantly in browser. No upload needed. Smart table detection with lattice and stream modes. OCR backend for scanned PDFs.'
+    'Extract tables from PDF to Excel XLSX instantly in browser. Smart table detection with lattice and stream modes and high-precision OCR table reconstruction.'
   );
   usePageSEO(
     'PDF to Excel — Smart Hybrid Table Extractor',
-    'Instantly extracts tables in browser with spatial clustering. Falls back to Camelot/pdfplumber backend only for scanned PDFs.',
+    'Instantly extracts structured tables into editable spreadsheets, preserving complex merged cells and multilingual scans.',
   );
 
   const [file, setFile] = useState<File | null>(null);
@@ -231,6 +241,8 @@ export default function PdfToExcel() {
   const [errorMsg, setErrorMsg] = useState('');
   const [method, setMethod] = useState<Method>('auto');
   const [frontendMode, setFrontendMode] = useState<FrontendMode>('lattice');
+  const [strictLocal, setStrictLocal] = useState<boolean>(false);
+  const [ocrLang, setOcrLang] = useState<string>(() => getStoredOcrLang());
 
   const resultUrlRef = useRef<string | null>(null);
   useEffect(() => {
@@ -256,19 +268,28 @@ export default function PdfToExcel() {
 
     try {
       setStage('analyzing');
-      setProgress('Analyzing PDF structure...');
+      setProgress('Analyzing document & table structure...');
 
-      const buf = await f.arrayBuffer();
-      const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buf) }).promise;
-      const isScanned = await detectIfScanned(pdf);
+      const isImage = isRasterImageFile(f);
+      let numPages = 1;
+      let isScanned = isImage;
+      let buf: ArrayBuffer | null = null;
 
-      const useBackend = method === 'backend' || (method === 'auto' && isScanned);
+      if (!isImage) {
+        buf = await f.arrayBuffer();
+        const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buf) }).promise;
+        numPages = pdf.numPages;
+        isScanned = await detectIfScanned(pdf);
+      }
+
+      const useBackend = isImage || method === 'backend' || (method === 'auto' && isScanned);
 
       if (useBackend) {
         setStage('backend');
-        const blob = await convertBackend(f, frontendMode);
+        setProgress('Reconstructing merged tables & multilingual cells...');
+        const blob = await convertBackend(f, frontendMode, isImage || isScanned, strictLocal, ocrLang);
         setResultUrl(URL.createObjectURL(blob));
-        setStats({ pages: pdf.numPages, tables: 0, rows: 0, method: 'backend', timeMs: 0 });
+        setStats({ pages: numPages, tables: 0, rows: 0, method: 'backend', timeMs: 0 });
       } else {
         setStage('converting');
 
@@ -276,7 +297,7 @@ export default function PdfToExcel() {
         let rawText = '';
         const { tables, stats: s } = await extractFrontend(f, frontendMode, (msg) => setProgress(msg));
 
-        if (tables.length === 0) {
+        if (tables.length === 0 && buf) {
           setProgress('No tables detected, extracting all text...');
           const pdfDoc = await pdfjsLib.getDocument({ data: new Uint8Array(buf) }).promise;
           for (let p = 1; p <= pdfDoc.numPages; p++) {
@@ -287,7 +308,7 @@ export default function PdfToExcel() {
         }
 
         setProgress('Building Excel file...');
-        const blob = buildXlsx(tables, rawText);
+        const blob = await buildXlsx(tables, rawText);
         setResultUrl(URL.createObjectURL(blob));
         setStats(s);
       }
@@ -298,7 +319,7 @@ export default function PdfToExcel() {
       setErrorMsg(err.message || 'Extraction failed.');
       setStage('error');
     }
-  }, [method, frontendMode]);
+  }, [method, frontendMode, strictLocal, ocrLang]);
 
   const reset = () => {
     if (resultUrlRef.current) URL.revokeObjectURL(resultUrlRef.current);
@@ -313,12 +334,12 @@ export default function PdfToExcel() {
   return (
     <ToolWorkspaceShell
       title="PDF to Excel"
-      subtitle="Smart table extractor. Detects rows and columns instantly in browser — uses powerful Camelot backend for complex scanned tables."
+      subtitle="Smart table extractor. Detects rows, merged headers, and columns instantly — handles both digital & scanned documents."
       categoryLabel="Spreadsheet Extraction · XLSX"
       icon={Table2}
       microVariant="convert"
       tone="emerald"
-      trustNote="Browser table detection + ephemeral OCR backend fallback"
+      trustNote="Instant spreadsheet extraction with precision table reconstruction"
     >
       <div className="max-w-3xl mx-auto space-y-6">
         <div className="flex flex-wrap justify-center gap-2">
@@ -429,11 +450,20 @@ export default function PdfToExcel() {
                 </div>
               </div>
 
+              <VisionLayerControls
+                showLayerMode={false}
+                strictLocal={strictLocal}
+                onStrictLocalChange={setStrictLocal}
+                lang={ocrLang}
+                onLangChange={setOcrLang}
+              />
+
               <FileDropzone
                 onDrop={handleDrop}
                 multiple={false}
-                title="Drop PDF to extract tables to Excel"
-                subtitle="Tables extracted instantly in browser • Each table becomes a separate sheet"
+                accept={SCAN_CONVERTER_ACCEPT}
+                title="Drop PDF or Scan Image to extract tables to Excel"
+                subtitle="Merged cells, multilingual scripts & complex marksheet/invoice grids supported"
               />
 
               <div className="pms-glass-panel rounded-2xl p-4">
@@ -454,46 +484,39 @@ export default function PdfToExcel() {
           )}
 
           {stage === 'analyzing' && (
-            <div className="pms-glass-panel rounded-3xl p-10 text-center relative overflow-hidden">
-              <PearlScanOverlay active={true} label={progress || 'Analyzing PDF structure...'} />
-              <div
-                className="w-14 h-14 rounded-full border-4 border-t-transparent animate-spin mx-auto mb-4"
-                style={{ borderColor: 'var(--pms-blue)', borderTopColor: 'transparent' }}
-              />
-              <p className="font-bold text-[var(--pms-ink)]">Analyzing PDF...</p>
-              <p className="text-sm text-[var(--pms-muted)] mt-1">{progress}</p>
-            </div>
+            <PearlProcessCard
+              title="Analyzing Document & Grid Topology"
+              stageLabel="Detecting table structure"
+              subtitle={progress || 'Locating rows, columns, and merged cells…'}
+              accent="blue"
+            />
           )}
 
           {stage === 'converting' && (
-            <div className="pms-glass-panel rounded-3xl p-10 text-center relative overflow-hidden">
-              <PearlScanOverlay active={true} label={progress || 'Extracting spreadsheet tables...'} />
-              <div className="w-16 h-16 rounded-full border-4 border-emerald-200 border-t-emerald-600 animate-spin mx-auto mb-4" />
-              <div
-                className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold mb-3 border border-[var(--pms-border)]"
-                style={{ backgroundColor: 'var(--pms-soft-mint)', color: 'var(--pms-ink)' }}
-              >
-                <Zap className="w-3 h-3 text-emerald-600" /> Extracting in browser — no upload needed
-              </div>
-              <p className="font-bold text-[var(--pms-ink)]">{progress || 'Processing...'}</p>
-            </div>
+            <PearlProcessCard
+              title="Extracting Structured Spreadsheets"
+              stageLabel="On-Device Engine · Zero Upload"
+              subtitle={progress || 'Formatting workbook sheets directly in your browser…'}
+              accent="emerald"
+              badge="100% Private Local Processing"
+            />
           )}
 
           {stage === 'backend' && (
             <BackendLoader
-              title="Camelot Table Extraction…"
+              title="Reconstructing Structured Spreadsheets…"
               accentColor="emerald"
               steps={[
-                { icon: '📤', label: 'Uploading', detail: 'Sending PDF to extraction server...' },
-                { icon: '🔍', label: 'Scanning', detail: 'Detecting table borders & grids...' },
-                { icon: '📊', label: 'Extracting', detail: 'Camelot parsing all table cells...' },
-                { icon: '💾', label: 'Building', detail: 'Writing rows to Excel sheets...' },
+                { icon: '📤', label: 'Securing', detail: 'Preparing document geometry for extraction…' },
+                { icon: '🔍', label: 'Grid Detection', detail: 'Detecting ruled & borderless table structures…' },
+                { icon: '📊', label: 'Cell Extraction', detail: 'Parsing merged spans, numbers & multilingual text…' },
+                { icon: '💾', label: 'Generating XLSX', detail: 'Building clean formatted Excel sheets…' },
               ]}
               tips={[
-                '📊 Camelot backend runs only for complex/scanned PDFs.',
-                '⚡ Text PDFs extract instantly in your browser.',
-                '🔒 Files auto-deleted from server after download.',
-                '📝 Each table gets its own Excel sheet.',
+                'Complex scanned tables and borderless invoices are reconstructed seamlessly.',
+                'Digital vector spreadsheets extract directly on your device.',
+                'Files are processed privately and removed immediately after export.',
+                'Each detected table is exported to its own clean worksheet.',
               ]}
             />
           )}
@@ -545,7 +568,7 @@ export default function PdfToExcel() {
                   whileHover={prefersReduced ? undefined : { scale: 1.01 }}
                   whileTap={prefersReduced ? undefined : { scale: 0.98 }}
                   href={resultUrl}
-                  download={file.name.replace(/\.pdf$/i, '') + '_tables.xlsx'}
+                  download={stripDocumentExt(file.name) + '_tables.xlsx'}
                   className="pms-btn-primary flex items-center justify-center gap-2 w-full px-6 py-4 font-bold rounded-2xl"
                 >
                   <Download className="w-5 h-5" /> Download Excel File (.xlsx)

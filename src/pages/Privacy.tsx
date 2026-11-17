@@ -54,8 +54,8 @@ export default function Privacy() {
           use browser-side AES-256-GCM encryption with per-room access tokens.
         </p>
         <p>
-          <strong>OCR &amp; image tools</strong> may download language or model data from third-party CDNs
-          (e.g. Tesseract, background removal). That traffic is subject to those providers&apos; policies.
+          <strong>OCR &amp; image tools</strong> may download browser-side recognition language packs when running
+          offline on your device. Files are processed ephemerally in memory and never stored permanently.
         </p>
         <p>
           <strong>Target file size</strong> features aim to keep output <em>at or below</em> your limit; exact
@@ -66,13 +66,12 @@ export default function Privacy() {
           or shop billing settings stay strictly inside your local browser storage (<code className="bg-slate-100 dark:bg-slate-800 px-1 rounded">localStorage</code> /{' '}
           <code className="bg-slate-100 dark:bg-slate-800 px-1 rounded">sessionStorage</code>). Shared OS/WhatsApp
           files cached via PWA Share Target auto-expire within 10 minutes or as soon as opened. You can wipe all
-          browser traces, queued logs, and local keys in 1 click using the <strong>Erase All Browser Traces</strong> button in the footer.
+          browser traces, queued logs, and local state in 1 click using the <strong>Erase All Browser Traces</strong> button in the footer.
         </p>
         <p>
-          <strong>Privacy-Safe Crash Diagnostics &amp; AI Features:</strong> Automated crash telemetry strips document
-          filenames, URL hash secrets (<code className="bg-slate-100 dark:bg-slate-800 px-1 rounded">#k=</code>), tokens,
-          and API keys before queuing or sending reports. Optional BYOK AI features send data only when explicitly
-          triggered using your session-scoped key.
+          <strong>Privacy-Safe Crash Diagnostics &amp; Smart Processing:</strong> Automated crash telemetry strips document
+          filenames, URL hash secrets (<code className="bg-slate-100 dark:bg-slate-800 px-1 rounded">#k=</code>), and session tokens
+          before queuing reports. All server-assisted document analysis runs statelessly with immediate post-response cleanup.
         </p>
         <p className="text-xs text-slate-500 dark:text-slate-400">
           This page is informational and not legal advice. For questions about our privacy practices or data handling, contact us at{' '}

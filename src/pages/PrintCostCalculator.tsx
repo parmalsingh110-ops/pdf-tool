@@ -19,7 +19,7 @@ import { useSEO } from '../hooks/useSEO';
 import { usePageSEO } from '../lib/usePageSEO';
 import FileDropzone from '../components/FileDropzone';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
-import { AnimatedNumber, PearlScanOverlay } from '../components/pearl/PearlMotion';
+import { AnimatedNumber, PearlProcessCard } from '../components/pearl/PearlMotion';
 import ToolSEOSection from '../components/ToolSEOSection';
 import { escapeHtml } from '../lib/utils';
 
@@ -517,20 +517,14 @@ export default function PrintCostCalculator() {
 
         {/* Analyzing Progress */}
         {isAnalyzing && (
-          <div className="p-10 rounded-3xl pms-glass-panel text-center space-y-4 relative overflow-hidden max-w-xl mx-auto">
-            <PearlScanOverlay active={isAnalyzing} label="Inspecting chromatic pixels across pages..." />
-            <div className="w-12 h-12 rounded-full border-4 border-emerald-500 border-t-transparent animate-spin mx-auto" />
-            <h4 className="text-base font-bold text-[var(--pms-ink)]">
-              Analyzing Pages &amp; Color Inks... <AnimatedNumber value={analysisProgress} suffix="%" />
-            </h4>
-            <div className="w-full max-w-md mx-auto bg-white/70 dark:bg-slate-800 rounded-full h-2.5 overflow-hidden border border-[var(--pms-border)]">
-              <div
-                className="bg-emerald-500 h-2.5 rounded-full transition-all duration-200"
-                style={{ width: `${analysisProgress}%` }}
-              />
-            </div>
-            <p className="text-xs text-[var(--pms-muted)]">Inspecting chromatic pixels to distinguish B&amp;W from Color sheets...</p>
-          </div>
+          <PearlProcessCard
+            title="Analyzing Pages & Color Inks..."
+            stageLabel="Color & monochrome channel inspection"
+            subtitle="Inspecting chromatic pixels to distinguish B&W from Color sheets..."
+            progress={analysisProgress}
+            accent="emerald"
+            className="max-w-xl mx-auto"
+          />
         )}
 
         {/* Main Cost & QR Dashboard */}

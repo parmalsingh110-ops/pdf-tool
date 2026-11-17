@@ -13,7 +13,16 @@ import { useSEO } from '../hooks/useSEO';
 import { apiFetch } from '../lib/api';
 import '../lib/pdfWorker';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
-import { AnimatedNumber, PearlScanOverlay, PearlStageSwitch } from '../components/pearl/PearlMotion';
+import { AnimatedNumber, PearlProcessCard, PearlStageSwitch } from '../components/pearl/PearlMotion';
+import VisionLayerControls from '../components/VisionLayerControls';
+import { appendVisionLayerParams, type DocumentLayerMode } from '../lib/advancedVisionEngine';
+import { getStoredOcrLang } from '../lib/ocrLanguages';
+import {
+  SCAN_CONVERTER_ACCEPT,
+  detectIfPdfScannedOrOcr,
+  isRasterImageFile,
+  stripDocumentExt,
+} from '../utils/scanDetector';
 
 type Stage = 'idle' | 'analyzing' | 'converting' | 'backend' | 'done' | 'error';
 type Method = 'auto' | 'frontend' | 'backend';
@@ -27,16 +36,9 @@ interface ConversionStats {
   dpi: number;
 }
 
-// ─── Detect if scanned ────────────────────────────────────────────────────────
+// ─── Detect if scanned (raw image OR OCR-layered scan) ────────────────────────
 async function detectIfScanned(pdf: pdfjsLib.PDFDocumentProxy): Promise<boolean> {
-  let total = 0;
-  const check = Math.min(3, pdf.numPages);
-  for (let i = 1; i <= check; i++) {
-    const page = await pdf.getPage(i);
-    const tc = await page.getTextContent();
-    total += tc.items.reduce((s: number, it: any) => s + (it.str || '').trim().length, 0);
-  }
-  return total < 50;
+  return detectIfPdfScannedOrOcr(pdf);
 }
 
 // ─── Render a PDF page to a base64 PNG at given DPI ─────────────────────────
@@ -167,10 +169,20 @@ async function convertFrontend(
 }
 
 // ─── Backend conversion ───────────────────────────────────────────────────────
-async function convertBackend(file: File, dpi: number): Promise<Blob> {
+async function convertBackend(
+  file: File,
+  forceOcr: boolean,
+  slideMode: SlideMode,
+  layerMode: DocumentLayerMode,
+  strictLocal: boolean,
+  lang: string
+): Promise<Blob> {
   const formData = new FormData();
   formData.append('file', file);
-  formData.append('dpi', String(dpi));
+  formData.append('force_ocr', forceOcr ? 'true' : 'false');
+  const effSlideMode = layerMode === 'layered_replica' ? 'hybrid' : (slideMode === 'text' ? 'structural' : 'structural');
+  formData.append('slide_mode', effSlideMode);
+  appendVisionLayerParams(formData, { layerMode, strictLocal, lang });
   const res = await apiFetch('/convert/pdf-to-ppt', { method: 'POST', body: formData });
   if (!res.ok) throw new Error(await res.text() || 'Backend conversion failed.');
   return res.blob();
@@ -182,11 +194,11 @@ export default function PdfToPpt() {
 
   useSEO(
     'PDF to PowerPoint Converter — Instant Online Free | PDF Media Suite',
-    'Convert PDF to PowerPoint PPTX instantly in browser. Each page becomes a slide with perfect image quality. No upload needed for standard PDFs. Choose quality DPI.'
+    'Convert PDF to PowerPoint PPTX with editable textboxes, native tables, and crisp visual assets.'
   );
   usePageSEO(
-    'PDF to PowerPoint — Instant Browser Converter with DPI Control',
-    'Renders PDF pages to high-quality PPTX slides using pdfjs-dist and pptxgenjs. Backend only for scanned/complex PDFs.',
+    'PDF to PowerPoint — Precision Slide Reconstructor',
+    'Converts digital and scanned PDFs into editable PowerPoint presentations while keeping layouts and visuals sharp.',
   );
 
   const [file, setFile] = useState<File | null>(null);
@@ -198,6 +210,9 @@ export default function PdfToPpt() {
   const [method, setMethod] = useState<Method>('auto');
   const [dpi, setDpi] = useState(150);
   const [slideMode, setSlideMode] = useState<SlideMode>('hybrid');
+  const [layerMode, setLayerMode] = useState<DocumentLayerMode>('clean_real');
+  const [strictLocal, setStrictLocal] = useState<boolean>(false);
+  const [ocrLang, setOcrLang] = useState<string>(() => getStoredOcrLang());
 
   const resultUrlRef = useRef<string | null>(null);
   useEffect(() => {
@@ -223,18 +238,26 @@ export default function PdfToPpt() {
 
     try {
       setStage('analyzing');
-      setProgress('Analyzing PDF...');
-      const buf = await f.arrayBuffer();
-      const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buf) }).promise;
-      const isScanned = await detectIfScanned(pdf);
+      setProgress('Analyzing document & layout...');
+      const isImage = isRasterImageFile(f);
+      let numPages = 1;
+      let isScanned = isImage;
 
-      const useBackend = method === 'backend' || (method === 'auto' && isScanned && slideMode !== 'image');
+      if (!isImage) {
+        const buf = await f.arrayBuffer();
+        const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buf) }).promise;
+        numPages = pdf.numPages;
+        isScanned = await detectIfScanned(pdf);
+      }
+
+      const useBackend = isImage || method === 'backend' || (method === 'auto' && isScanned && slideMode !== 'image');
 
       if (useBackend) {
         setStage('backend');
-        const blob = await convertBackend(f, dpi);
+        setProgress('Reconstructing native editable slides, tables & graphics...');
+        const blob = await convertBackend(f, isImage || isScanned, slideMode, layerMode, strictLocal, ocrLang);
         setResultUrl(URL.createObjectURL(blob));
-        setStats({ pages: pdf.numPages, slides: pdf.numPages, method: 'backend', timeMs: 0, dpi });
+        setStats({ pages: numPages, slides: numPages, method: 'backend', timeMs: 0, dpi });
       } else {
         setStage('converting');
         const { blob, stats: s } = await convertFrontend(f, dpi, slideMode, (msg) => setProgress(msg));
@@ -247,7 +270,7 @@ export default function PdfToPpt() {
       setErrorMsg(err.message || 'Conversion failed.');
       setStage('error');
     }
-  }, [method, dpi, slideMode]);
+  }, [method, dpi, slideMode, layerMode, strictLocal]);
 
   const reset = () => {
     if (resultUrlRef.current) URL.revokeObjectURL(resultUrlRef.current);
@@ -402,11 +425,22 @@ export default function PdfToPpt() {
                 </div>
               </div>
 
+              <VisionLayerControls
+                showLayerMode={true}
+                layerMode={layerMode}
+                onLayerModeChange={setLayerMode}
+                strictLocal={strictLocal}
+                onStrictLocalChange={setStrictLocal}
+                lang={ocrLang}
+                onLangChange={setOcrLang}
+              />
+
               <FileDropzone
                 onDrop={handleDrop}
                 multiple={false}
-                title="Drop PDF to convert to PowerPoint"
-                subtitle="Converts instantly in browser • Each page = one crisp slide"
+                accept={SCAN_CONVERTER_ACCEPT}
+                title="Drop PDF or Scan Image to convert to PowerPoint"
+                subtitle="Reconstructs editable tables, cropped logos/photos & global multilingual text per slide"
               />
 
               <div className="pms-glass-panel rounded-2xl p-4">
@@ -428,49 +462,38 @@ export default function PdfToPpt() {
           )}
 
           {stage === 'analyzing' && (
-            <div className="pms-glass-panel rounded-3xl p-10 text-center relative overflow-hidden">
-              <PearlScanOverlay active={true} label={progress || 'Analyzing PDF deck...'} />
-              <div
-                className="w-14 h-14 rounded-full border-4 border-t-transparent animate-spin mx-auto mb-4"
-                style={{ borderColor: 'var(--pms-rose)', borderTopColor: 'transparent' }}
-              />
-              <p className="font-bold text-[var(--pms-ink)]">Analyzing PDF...</p>
-              <p className="text-sm text-[var(--pms-muted)] mt-1">{progress}</p>
-            </div>
+            <PearlProcessCard
+              title="Analyzing Slide Geometry"
+              stageLabel="Mapping textboxes, tables & graphics"
+              subtitle={progress || 'Inspecting page composition and visual layers…'}
+              accent="rose"
+            />
           )}
 
           {stage === 'converting' && (
-            <div className="pms-glass-panel rounded-3xl p-10 text-center relative overflow-hidden">
-              <PearlScanOverlay active={true} label={progress || `Rendering PowerPoint slides at ${dpi} DPI...`} />
-              <div
-                className="w-16 h-16 rounded-full border-4 border-t-transparent animate-spin mx-auto mb-4"
-                style={{ borderColor: 'var(--pms-rose)', borderTopColor: 'transparent' }}
-              />
-              <div
-                className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold mb-3 border border-[var(--pms-border)]"
-                style={{ backgroundColor: 'var(--pms-soft-rose)', color: 'var(--pms-ink)' }}
-              >
-                <Zap className="w-3 h-3" style={{ color: 'var(--pms-rose)' }} /> Rendering slides in browser — no upload
-              </div>
-              <p className="font-bold text-[var(--pms-ink)]">{progress || 'Processing...'}</p>
-              <p className="text-sm text-[var(--pms-muted)] mt-1">Quality: {dpi} DPI</p>
-            </div>
+            <PearlProcessCard
+              title="Generating Editable PowerPoint Deck"
+              stageLabel={`On-Device Engine · ${dpi} DPI`}
+              subtitle={progress || `Rendering PowerPoint slides at ${dpi} DPI locally…`}
+              accent="rose"
+              badge="Zero Server Upload"
+            />
           )}
 
           {stage === 'backend' && (
             <BackendLoader
-              title="Backend PPT Conversion…"
+              title="Reconstructing Editable PowerPoint Slides…"
               accentColor="orange"
               steps={[
-                { icon: '📤', label: 'Uploading', detail: 'Sending PDF to conversion server...' },
-                { icon: '🎨', label: 'Rendering', detail: 'Rendering pages at high DPI via PyMuPDF...' },
-                { icon: '🖼️', label: 'Building Slides', detail: 'Creating PPTX slides...' },
-                { icon: '📝', label: 'Text Layer', detail: 'Adding searchable text overlays...' },
+                { icon: '📤', label: 'Preparing', detail: 'Analyzing document geometry and visuals…' },
+                { icon: '🎨', label: 'Layering', detail: 'Isolating logos, photos, stamps & backgrounds…' },
+                { icon: '🖼️', label: 'Tables & Text', detail: 'Mapping native PowerPoint grids and styled frames…' },
+                { icon: '📝', label: 'Finalizing', detail: 'Packaging editable .pptx deck…' },
               ]}
               tips={[
-                '🎨 Backend only runs for complex scanned PDFs.',
-                '⚡ Standard PDFs convert instantly in your browser.',
-                '🔒 File auto-deleted from server after download.',
+                'Complex scanned pages are transformed into editable slides & tables.',
+                'Digital vector documents build instantaneously inside your browser.',
+                'Documents are processed securely and cleared right after export.',
               ]}
             />
           )}
@@ -518,7 +541,7 @@ export default function PdfToPpt() {
                   whileHover={prefersReduced ? undefined : { scale: 1.01 }}
                   whileTap={prefersReduced ? undefined : { scale: 0.98 }}
                   href={resultUrl}
-                  download={file.name.replace(/\.pdf$/i, '') + '_slides.pptx'}
+                  download={stripDocumentExt(file.name) + '_slides.pptx'}
                   className="pms-btn-primary flex items-center justify-center gap-2 w-full px-6 py-4 font-bold rounded-2xl"
                 >
                   <Download className="w-5 h-5" /> Download PowerPoint (.pptx)

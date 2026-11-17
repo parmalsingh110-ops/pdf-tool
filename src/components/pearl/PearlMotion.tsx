@@ -122,6 +122,163 @@ export function PearlScanOverlay({
   );
 }
 
+type PearlAccent = 'rose' | 'blue' | 'emerald' | 'violet' | 'amber';
+
+const SPINNER_PALETTE: Record<PearlAccent, { a: string; b: string; glow: string }> = {
+  rose: { a: '#E11D48', b: '#7C3AED', glow: 'rgba(225, 29, 72, 0.22)' },
+  blue: { a: '#0284C7', b: '#7C3AED', glow: 'rgba(2, 132, 199, 0.22)' },
+  emerald: { a: '#059669', b: '#0284C7', glow: 'rgba(5, 150, 105, 0.22)' },
+  violet: { a: '#7C3AED', b: '#E11D48', glow: 'rgba(124, 58, 237, 0.22)' },
+  amber: { a: '#D97706', b: '#E11D48', glow: 'rgba(217, 119, 6, 0.22)' },
+};
+
+/**
+ * Crisp luminous orbital spinner aligned with Pearl Aurora tokens.
+ */
+export function PearlSpinner({
+  size = 'md',
+  accent = 'rose',
+  className = '',
+}: {
+  size?: 'xs' | 'sm' | 'md' | 'lg';
+  accent?: PearlAccent;
+  className?: string;
+}) {
+  const prefersReduced = useReducedMotion();
+  const dims =
+    size === 'xs'
+      ? 'w-4 h-4'
+      : size === 'sm'
+        ? 'w-6 h-6'
+        : size === 'lg'
+          ? 'w-16 h-16'
+          : 'w-12 h-12';
+  const insetPx = size === 'xs' ? 2 : size === 'sm' ? 2.5 : 3.5;
+  const pal = SPINNER_PALETTE[accent] || SPINNER_PALETTE.rose;
+
+  return (
+    <div
+      className={`relative inline-flex items-center justify-center shrink-0 ${dims} ${className}`}
+      aria-hidden="true"
+    >
+      <div
+        className="w-full h-full rounded-full"
+        style={{
+          background: `conic-gradient(from 0deg, transparent 28%, ${pal.a} 78%, ${pal.b} 100%)`,
+          animation: prefersReduced ? 'none' : 'pms-pearl-spin 0.9s linear infinite',
+          boxShadow: size === 'xs' || size === 'sm' ? 'none' : `0 0 18px -4px ${pal.glow}`,
+        }}
+      >
+        <div
+          className="rounded-full"
+          style={{
+            position: 'absolute',
+            inset: insetPx,
+            backgroundColor: 'var(--pms-white)',
+          }}
+        />
+      </div>
+      <style>{`
+        @keyframes pms-pearl-spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+/**
+ * Glassmorphic Pearl Aurora processing card replacing raw Tailwind border spinners.
+ */
+export function PearlProcessCard({
+  title,
+  subtitle,
+  stageLabel,
+  progress,
+  accent = 'rose',
+  badge,
+  className = '',
+}: {
+  title: string;
+  subtitle?: string;
+  stageLabel?: string;
+  progress?: number;
+  accent?: PearlAccent;
+  badge?: string;
+  className?: string;
+}) {
+  const prefersReduced = useReducedMotion();
+  const pal = SPINNER_PALETTE[accent] || SPINNER_PALETTE.rose;
+  const grad = `linear-gradient(135deg, ${pal.a}, ${pal.b})`;
+  const clampedPct =
+    typeof progress === 'number' && Number.isFinite(progress)
+      ? Math.max(0, Math.min(100, Math.round(progress)))
+      : null;
+
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className={`relative overflow-hidden rounded-3xl pms-glass-panel p-7 sm:p-9 text-center space-y-5 ${className}`}
+      style={{
+        borderColor: 'var(--pms-border)',
+        boxShadow: `0 18px 46px -16px ${pal.glow}, var(--pms-shadow-card)`,
+      }}
+    >
+      <PearlScanOverlay active={!prefersReduced} label={badge} />
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute -top-20 left-1/2 -translate-x-1/2 w-64 h-40 rounded-full blur-3xl opacity-35"
+        style={{ background: grad }}
+      />
+
+      <div className="relative z-10 flex justify-center">
+        <PearlSpinner size="lg" accent={accent} />
+      </div>
+
+      <div className="relative z-10 space-y-1.5">
+        <h3 className="text-lg font-extrabold tracking-tight text-[var(--pms-ink)]">
+          {title}
+        </h3>
+        {stageLabel && (
+          <p
+            className="text-xs font-bold uppercase tracking-wider"
+            style={{ color: pal.a }}
+          >
+            {stageLabel}
+          </p>
+        )}
+        {subtitle && (
+          <p className="text-sm text-[var(--pms-muted)] max-w-md mx-auto">
+            {subtitle}
+          </p>
+        )}
+      </div>
+
+      {clampedPct !== null && (
+        <div className="relative z-10 max-w-sm mx-auto space-y-1.5">
+          <div className="flex justify-between text-xs font-bold text-[var(--pms-muted)]">
+            <span>Progress</span>
+            <span className="tabular-nums text-[var(--pms-ink)]">{clampedPct}%</span>
+          </div>
+          <div
+            className="h-2 rounded-full overflow-hidden"
+            style={{ backgroundColor: 'var(--pms-lavender-surface)' }}
+          >
+            <div
+              className="h-full rounded-full relative overflow-hidden transition-[width] duration-300 ease-out"
+              style={{ width: `${clampedPct}%`, backgroundImage: grad }}
+            >
+              {!prefersReduced && <div className="absolute inset-0 pms-shimmer opacity-50" />}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /**
  * Pearl Aurora workspace skeleton shown while lazy-loaded tool chunks resolve.
  */

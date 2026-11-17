@@ -9,7 +9,7 @@ import { useSEO } from '../hooks/useSEO';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 import PearlAuroraBackground from '../components/pearl/PearlAuroraBackground';
 import ToolMicroPreview from '../components/pearl/ToolMicroPreview';
-import { AnimatedNumber, PearlScanOverlay } from '../components/pearl/PearlMotion';
+import { AnimatedNumber, PearlProcessCard } from '../components/pearl/PearlMotion';
 
 export default function PdfPresenter() {
   useSEO('Pdf Presenter Online Free | PDF Media Suite', 'Free online Pdf Presenter tool. No signup or installation required.');
@@ -99,19 +99,13 @@ export default function PdfPresenter() {
             <FileDropzone onDrop={handleDrop} multiple={false} title="Select PDF file" />
           </motion.div>
         ) : loading ? (
-          <motion.div
-            initial={prefersReduced ? false : { opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.25 }}
-            className="relative max-w-md mx-auto pms-glass-panel rounded-3xl p-10 text-center space-y-4 overflow-hidden"
-          >
-            <PearlScanOverlay active={true} label="Rendering high-resolution presentation slides…" />
-            <div className="w-12 h-12 rounded-2xl bg-[var(--pms-soft-lavender)] text-[var(--pms-violet)] flex items-center justify-center mx-auto">
-              <div className="w-6 h-6 border-3 border-[var(--pms-violet)] border-t-transparent rounded-full animate-spin" />
-            </div>
-            <p className="font-bold text-slate-900 dark:text-white">Rendering slides…</p>
-            <p className="text-xs text-slate-500 dark:text-slate-400 truncate">{file.name}</p>
-          </motion.div>
+          <PearlProcessCard
+            title="Rendering slides…"
+            stageLabel="Preparing presentation deck"
+            subtitle={file.name}
+            accent="violet"
+            className="max-w-md mx-auto"
+          />
         ) : (
           <div className="max-w-md mx-auto pms-glass-panel rounded-3xl p-8 text-center space-y-4">
             <p className="text-sm text-slate-600 dark:text-slate-300">No slides could be rendered from this file.</p>

@@ -1,5 +1,4 @@
 import { Link } from 'react-router-dom';
-import { motion, useMotionTemplate, useMotionValue, useReducedMotion, useSpring } from 'motion/react';
 import type { LucideIcon } from 'lucide-react';
 import ToolMicroPreview, { inferToolMicroVariant, type MicroPreviewVariant } from './ToolMicroPreview';
 
@@ -13,7 +12,7 @@ interface ToneStyle {
   hoverRing: string;
 }
 
-const TONE_MAP: Record<PearlAccentTone, ToneStyle> = {
+export const TONE_MAP: Record<PearlAccentTone, ToneStyle> = {
   rose: {
     iconBg: 'var(--pms-soft-rose)',
     iconColor: 'var(--pms-rose)',
@@ -91,77 +90,56 @@ export default function PearlToolCard({
 }: PearlToolCardProps) {
   const t = TONE_MAP[tone] || TONE_MAP.rose;
   const resolvedVariant = microVariant || inferToolMicroVariant(path);
-  const prefersReduced = useReducedMotion();
-
-  const spotX = useSpring(useMotionValue(50), { stiffness: 260, damping: 28 });
-  const spotY = useSpring(useMotionValue(50), { stiffness: 260, damping: 28 });
-  const spotlightBg = useMotionTemplate`radial-gradient(220px circle at ${spotX}% ${spotY}%, ${t.iconBg}, transparent 75%)`;
-
-  const handleMouseMove = (e: React.MouseEvent<HTMLAnchorElement>) => {
-    if (prefersReduced) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    spotX.set(((e.clientX - rect.left) / rect.width) * 100);
-    spotY.set(((e.clientY - rect.top) / rect.height) * 100);
-  };
 
   return (
-    <motion.div
-      whileHover={prefersReduced ? undefined : { y: -4 }}
-      whileTap={prefersReduced ? undefined : { scale: 0.99 }}
-      transition={{ type: 'spring', stiffness: 420, damping: 28 }}
-      className="h-full"
+    <Link
+      to={path}
+      className={`group pms-card relative h-full flex flex-col justify-between rounded-2xl border p-4 sm:p-5 overflow-hidden focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--pms-rose)] ${t.hoverRing}`}
+      style={{
+        backgroundColor: 'var(--pms-white)',
+        borderColor: 'var(--pms-border)',
+        boxShadow: 'var(--pms-shadow-sm)',
+      }}
     >
-      <Link
-        to={path}
-        onMouseMove={handleMouseMove}
-        className={`group relative h-full flex flex-col justify-between rounded-2xl border p-4 sm:p-5 overflow-hidden transition-colors duration-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--pms-rose)] ${t.hoverRing}`}
-        style={{
-          backgroundColor: 'var(--pms-white)',
-          borderColor: 'var(--pms-border)',
-          boxShadow: 'var(--pms-shadow-sm)',
-        }}
-      >
-        {!prefersReduced && (
-          <motion.span
-            aria-hidden="true"
-            className="pointer-events-none absolute -inset-px rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-300"
-            style={{ background: spotlightBg }}
-          />
-        )}
-        <div className="relative z-10">
-          <div className="flex items-start justify-between gap-2 mb-3.5">
-            <span
-              className="w-10 h-10 rounded-xl flex items-center justify-center transition-transform duration-200 group-hover:scale-110 shrink-0"
-              style={{ backgroundColor: t.iconBg, color: t.iconColor }}
-            >
-              <Icon className="w-5 h-5" />
-            </span>
+      {/* Pure-CSS zero-JS corner spotlight tint (hover on desktop, tap on mobile) */}
+      <span
+        aria-hidden="true"
+        className="pointer-events-none absolute -top-8 -right-8 w-40 h-40 rounded-full opacity-0 group-hover:opacity-90 group-active:opacity-95 transition-opacity duration-200"
+        style={{ background: `radial-gradient(circle, ${t.iconBg} 0%, transparent 72%)` }}
+      />
+      <div className="relative z-10">
+        <div className="flex items-start justify-between gap-2 mb-3.5">
+          <span
+            className="w-10 h-10 rounded-xl flex items-center justify-center transition-transform duration-200 group-hover:scale-110 group-active:scale-95 shrink-0"
+            style={{ backgroundColor: t.iconBg, color: t.iconColor }}
+          >
+            <Icon className="w-5 h-5" />
+          </span>
 
-            <div className="flex flex-col items-end gap-1">
-              <ToolMicroPreview variant={resolvedVariant} />
-            </div>
+          <div className="flex flex-col items-end gap-1">
+            <ToolMicroPreview variant={resolvedVariant} />
           </div>
-
-          <div className="flex items-center gap-1.5 flex-wrap">
-            <h3 className="font-bold text-sm leading-snug tracking-tight" style={{ color: 'var(--pms-ink)' }}>
-              {title}
-            </h3>
-            {badge && (
-              <span
-                className="px-2 py-0.5 rounded-full text-[10px] font-bold tracking-tight"
-                style={{ backgroundColor: t.badgeBg, color: t.badgeText }}
-              >
-                {badge}
-              </span>
-            )}
-          </div>
-
-          <p className="mt-1.5 text-xs leading-relaxed line-clamp-2" style={{ color: 'var(--pms-muted)' }}>
-            {desc}
-          </p>
         </div>
-      </Link>
-    </motion.div>
+
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <h3 className="font-bold text-sm leading-snug tracking-tight" style={{ color: 'var(--pms-ink)' }}>
+            {title}
+          </h3>
+          {badge && (
+            <span
+              className="px-2 py-0.5 rounded-full text-[10px] font-bold tracking-tight"
+              style={{ backgroundColor: t.badgeBg, color: t.badgeText }}
+            >
+              {badge}
+            </span>
+          )}
+        </div>
+
+        <p className="mt-1.5 text-xs leading-relaxed line-clamp-2" style={{ color: 'var(--pms-muted)' }}>
+          {desc}
+        </p>
+      </div>
+    </Link>
   );
 }
 

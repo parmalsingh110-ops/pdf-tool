@@ -41,17 +41,41 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     try {
-      document.documentElement.classList.toggle('dark', theme === 'dark');
+      const root = document.documentElement;
+      root.classList.add('pms-theme-switching');
+      root.classList.toggle('dark', theme === 'dark');
+      const id = window.requestAnimationFrame(() => {
+        root.classList.remove('pms-theme-switching');
+      });
+      safeWrite(theme);
+      return () => window.cancelAnimationFrame(id);
     } catch {
       /* defensive — should never fail in browsers, but don't crash if it does */
     }
     safeWrite(theme);
   }, [theme]);
 
-  const setTheme = useCallback((t: Theme) => setThemeState(t), []);
-  const toggleTheme = useCallback(() => {
-    setThemeState((prev) => (prev === 'dark' ? 'light' : 'dark'));
+  const setTheme = useCallback((t: Theme) => {
+    const docAny = typeof document !== 'undefined' ? (document as any) : null;
+    const prefersReduced =
+      typeof window !== 'undefined' &&
+      window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    if (docAny && typeof docAny.startViewTransition === 'function' && !prefersReduced) {
+      try {
+        docAny.startViewTransition(() => {
+          setThemeState(t);
+        });
+        return;
+      } catch {
+        /* fallback below */
+      }
+    }
+    setThemeState(t);
   }, []);
+
+  const toggleTheme = useCallback(() => {
+    setTheme(theme === 'dark' ? 'light' : 'dark');
+  }, [theme, setTheme]);
 
   const value = useMemo(() => ({ theme, setTheme, toggleTheme }), [theme, setTheme, toggleTheme]);
 

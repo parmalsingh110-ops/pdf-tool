@@ -101,6 +101,11 @@ function pmsShareTargetServerPlugin(): Plugin {
             res.end(JSON.stringify({ detail: 'Room already active' }));
             return;
           }
+          if (localRoomSecrets.size >= 1000) {
+            res.statusCode = 429;
+            res.end(JSON.stringify({ detail: 'Relay room capacity reached' }));
+            return;
+          }
           localRoomSecrets.set(cleanSession, h);
           localRoomTimestamps.set(cleanSession, Date.now());
           res.statusCode = 200;
@@ -115,6 +120,36 @@ function pmsShareTargetServerPlugin(): Plugin {
     }
 
     // ── Built-in Print-Drop Relay Endpoints (/api/print-drop/*) ──────────
+    if (reqUrl.startsWith('/api/print-drop/session/') && req.method === 'DELETE') {
+      pruneLocalRelay();
+      const sessionRaw = reqUrl.split('/api/print-drop/session/')[1]?.split('?')[0] || '';
+      const cleanSession = sessionRaw.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+      const expected = localRoomSecrets.get(cleanSession);
+      if (expected) {
+        const provided = extractRoomToken(req);
+        if (!provided || !safeEqualHex(hashToken(provided), expected)) {
+          res.statusCode = 403;
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify({ detail: 'Unauthorized' }));
+          return;
+        }
+      }
+      localPrintRooms.delete(cleanSession);
+      localRoomSecrets.delete(cleanSession);
+      localRoomTokens.delete(cleanSession);
+      localDeviceTokens.delete(cleanSession);
+      localRoomTimestamps.delete(cleanSession);
+      for (const fileKey of Array.from(localPrintFiles.keys())) {
+        if (fileKey.startsWith(`${cleanSession}_`)) {
+          localPrintFiles.delete(fileKey);
+        }
+      }
+      res.statusCode = 200;
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify({ success: true, purged: true }));
+      return;
+    }
+
     if (reqUrl.startsWith('/api/print-drop/jobs/') && req.method === 'GET') {
       pruneLocalRelay();
       const sessionRaw = reqUrl.split('/api/print-drop/jobs/')[1]?.split('?')[0] || '';
@@ -240,6 +275,7 @@ function pmsShareTargetServerPlugin(): Plugin {
           const colorMode = String(formData.get('color_mode') || 'bw') === 'color' ? 'color' : 'bw';
           const senderDeviceId = String(formData.get('sender_device_id') || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 48);
           const deviceLabel = String(formData.get('device_label') || 'Sender Device').replace(/[\x00-\x1f\x7f<>]/g, '').trim().slice(0, 32) || 'Sender Device';
+          const encMeta = String(formData.get('enc_meta') || '').replace(/[^A-Za-z0-9\-_]/g, '').slice(0, 4096);
           const safeFileName = path.basename(String(fileEntry.name || 'Document.pdf')).replace(/[^\w.\-]/g, '_').slice(0, 180) || 'Document.pdf';
 
           if (!localDeviceTokens.has(cleanSession)) {
@@ -268,6 +304,7 @@ function pmsShareTargetServerPlugin(): Plugin {
             senderDeviceId,
             deviceLabel,
             name: safeFileName,
+            encMeta,
             size: buf.byteLength,
             type: fileEntry.type || 'application/pdf',
             fileUrl: `/api/print-drop/file/${cleanSession}/${jobId}`,
@@ -493,16 +530,46 @@ export default defineConfig(() => {
     ],
     build: {
       target: 'es2022',
+      rollupOptions: {
+        output: {
+          manualChunks(rawId) {
+            const id = rawId.replace(/\\/g, '/');
+            if (id.includes('vite/preload-helper') || id.includes('commonjsHelpers')) {
+              return 'vendor-react';
+            }
+            if (!id.includes('/node_modules/')) return;
+            if (
+              id.includes('/node_modules/react/') ||
+              id.includes('/node_modules/react-dom/') ||
+              id.includes('/node_modules/react-router') ||
+              id.includes('/node_modules/scheduler/')
+            ) {
+              return 'vendor-react';
+            }
+            if (
+              id.includes('/node_modules/motion/') ||
+              id.includes('/node_modules/motion-dom/') ||
+              id.includes('/node_modules/motion-utils/') ||
+              id.includes('/node_modules/framer-motion/')
+            ) {
+              return 'vendor-motion';
+            }
+            if (id.includes('/node_modules/pdfjs-dist/')) {
+              return 'vendor-pdfjs';
+            }
+            if (id.includes('/node_modules/pdf-lib/')) {
+              return 'vendor-pdflib';
+            }
+          },
+        },
+      },
     },
     optimizeDeps: {
       exclude: ['harfbuzzjs'],
-      esbuildOptions: {
-        target: 'es2022',
-      },
     },
     resolve: {
       alias: {
-        '@': path.resolve(__dirname, '.'),
+        '@': path.resolve(import.meta.dirname, '.'),
       },
     },
     server: {

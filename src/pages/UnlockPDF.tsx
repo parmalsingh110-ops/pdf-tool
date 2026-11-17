@@ -8,7 +8,7 @@ import { useSEO } from '../hooks/useSEO';
 import { dataUrlToBytes } from '../lib/utils';
 import { apiFetch } from '../lib/api';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
-import { PearlScanOverlay, PearlStageSwitch } from '../components/pearl/PearlMotion';
+import { PearlScanOverlay, PearlSpinner, PearlStageSwitch } from '../components/pearl/PearlMotion';
 import { useAutoRevokeUrl, toArrayBufferBytes } from '../lib/blobUrl';
 
 interface DocPreset {
@@ -386,6 +386,7 @@ export default function UnlockPDF() {
   const [progress, setProgress] = useState('');
   const [unlockedUrl, setUnlockedUrl] = useState<string | null>(null);
   const [showPreview, setShowPreview] = useState(true);
+  const [isOwnerLocked, setIsOwnerLocked] = useState(false);
 
   useAutoRevokeUrl(unlockedUrl);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -400,13 +401,38 @@ export default function UnlockPDF() {
     p.formulaDesc.toLowerCase().includes(docSearch.toLowerCase())
   );
 
-  const handleDrop = (acceptedFiles: File[]) => {
+  const handleDrop = async (acceptedFiles: File[]) => {
     if (acceptedFiles.length > 0) {
-      setFile(acceptedFiles[0]);
+      const f = acceptedFiles[0];
+      setFile(f);
       setUnlockedUrl(null);
       setErrorMsg(null);
       setProgress('');
       setTriedPasswords([]);
+      setIsOwnerLocked(false);
+
+      // Detect viewable owner-permission-locked PDFs (empty open password) cleanly
+      try {
+        const ab = await f.arrayBuffer();
+        await PDFDocument.load(ab);
+      } catch (err: any) {
+        const msg = String(err?.message || '').toLowerCase();
+        if (msg.includes('encrypt') || msg.includes('password')) {
+          try {
+            const pdfjsLib = await import('pdfjs-dist');
+            if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
+              const workerModule = await import('pdfjs-dist/build/pdf.worker.min.mjs?url');
+              pdfjsLib.GlobalWorkerOptions.workerSrc = workerModule.default;
+            }
+            const task = pdfjsLib.getDocument({ data: new Uint8Array(await f.arrayBuffer()), password: '' });
+            const pdoc = await task.promise;
+            setIsOwnerLocked(true);
+            try { await pdoc.cleanup(); await task.destroy(); } catch {}
+          } catch {
+            // Requires a real open password
+          }
+        }
+      }
     }
   };
 
@@ -426,6 +452,7 @@ export default function UnlockPDF() {
     setProgress('Loading PDF decryption engine...');
     setTriedPasswords([]);
 
+    let pdfjsDoc: any = null;
     try {
       const arrayBuffer = await file.arrayBuffer();
 
@@ -436,26 +463,27 @@ export default function UnlockPDF() {
         pdfjsLib.GlobalWorkerOptions.workerSrc = workerModule.default;
       }
 
-      let pdfjsDoc: any = null;
       let successfulPassword = '';
       const triedList: string[] = [];
 
       for (let i = 0; i < passwordsToTry.length; i++) {
         const pass = passwordsToTry[i];
-        if (!pass) continue;
-        triedList.push(pass);
+        if (pass === undefined || pass === null) continue;
+        triedList.push(pass === '' ? '(owner permission lock)' : pass);
         setProgress(`Trying candidate password (${i + 1}/${passwordsToTry.length})...`);
 
+        let attemptTask: any = null;
         try {
-          const loadingTask = pdfjsLib.getDocument({
+          attemptTask = pdfjsLib.getDocument({
             data: new Uint8Array(arrayBuffer.slice(0)),
             password: pass,
           });
-          pdfjsDoc = await loadingTask.promise;
+          pdfjsDoc = await attemptTask.promise;
           successfulPassword = pass;
           break; // Successfully unlocked!
         } catch (err: any) {
           // If wrong password, continue to try variations
+          try { await attemptTask?.destroy?.(); } catch {}
           continue;
         }
       }
@@ -477,7 +505,11 @@ export default function UnlockPDF() {
       const numPages = pdfjsDoc.numPages;
 
       if (!offlineOnly) {
-        setProgress(`Verified password "${successfulPassword}"! Trying lossless backend unlock...`);
+        setProgress(
+          successfulPassword === ''
+            ? 'Owner permission lock verified! Trying lossless backend unlock...'
+            : `Verified password "${successfulPassword}"! Trying lossless backend unlock...`
+        );
         // ── Step 1: Try backend lossless unlock (preserves text/links/vectors) ──
         try {
           const formData = new FormData();
@@ -548,6 +580,10 @@ export default function UnlockPDF() {
       console.error('Error unlocking PDF:', error);
       setErrorMsg('An unexpected error occurred while processing the PDF. Please try again.');
     } finally {
+      try {
+        await pdfjsDoc?.cleanup?.();
+        await pdfjsDoc?.loadingTask?.destroy?.();
+      } catch {}
       setIsProcessing(false);
     }
   };
@@ -637,6 +673,28 @@ export default function UnlockPDF() {
 
           {!unlockedUrl ? (
             <div className="space-y-6">
+              {isOwnerLocked && (
+                <div className="p-4 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-bold text-emerald-900 dark:text-emerald-200 flex items-center gap-2">
+                      <Unlock className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                      Owner Permission Lock Detected (No Open Password Required)
+                    </p>
+                    <p className="text-xs text-emerald-700 dark:text-emerald-300 mt-0.5">
+                      This PDF opens without a password but blocks splitting, editing, or copying. Remove restrictions in 1 click.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={isProcessing}
+                    onClick={() => executeUnlockWithPasswords([''])}
+                    className="shrink-0 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-sm transition-colors cursor-pointer"
+                  >
+                    Remove Restrictions Instantly
+                  </button>
+                </div>
+              )}
+
               {/* Mode Toggle Bar */}
               <div className="grid grid-cols-2 p-1 bg-white/75 dark:bg-slate-800/75 border border-[var(--pms-border)] rounded-2xl gap-1">
                 <button
@@ -804,7 +862,7 @@ export default function UnlockPDF() {
               {isProcessing && progress && (
                 <div className="p-4 bg-[var(--pms-soft-lavender)] border border-[var(--pms-border)] rounded-2xl">
                   <div className="flex items-center gap-3">
-                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-[var(--pms-violet)] shrink-0"></div>
+                    <PearlSpinner size="xs" accent="violet" />
                     <p className="text-sm text-purple-800 dark:text-purple-200 font-medium">{progress}</p>
                   </div>
                 </div>
@@ -839,7 +897,7 @@ export default function UnlockPDF() {
                   <span className="pms-shimmer pointer-events-none" />
                   {isProcessing ? (
                     <>
-                      <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                      <PearlSpinner size="xs" accent="violet" />
                       Decrypting & Rebuilding PDF...
                     </>
                   ) : (

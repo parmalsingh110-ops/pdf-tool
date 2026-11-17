@@ -25,6 +25,8 @@ _RETENTION_DAYS = int(os.environ.get("TELEMETRY_RETENTION_DAYS", "90"))
 
 _SENSITIVE_TEXT_PATTERNS = [
     (re.compile(r"AIza[0-9A-Za-z\-_]{20,}"), "[REDACTED_KEY]"),
+    (re.compile(r"AQ\.[0-9A-Za-z\-_.]{20,}"), "[REDACTED_KEY]"),
+    (re.compile(r"sk-(?:ant-|proj-)?[0-9A-Za-z\-_]{20,}"), "[REDACTED_KEY]"),
     (re.compile(r"Bearer\s+[A-Za-z0-9\-._~+/]+=*", re.IGNORECASE), "Bearer [REDACTED]"),
     (re.compile(r"#(?:k|t|key|token)=[^&\s\"']+", re.IGNORECASE), "#[REDACTED]"),
     (re.compile(r"([?&](?:token|key|secret|passcode|auth|read_token)=)[^&\s\"']+", re.IGNORECASE), r"\1[REDACTED]"),

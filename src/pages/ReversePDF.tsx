@@ -8,6 +8,7 @@ import '../lib/pdfWorker';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { toArrayBufferBytes } from '../lib/blobUrl';
+import { loadPdfDocumentSafely } from '../lib/pdfLoad';
 import { useToast } from '../components/Toast';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 import { AnimatedNumber, PearlScanOverlay, PearlStageSwitch } from '../components/pearl/PearlMotion';
@@ -129,7 +130,7 @@ export default function ReversePDF() {
     setIsProcessing(true);
     try {
       const arrayBuffer = await file.arrayBuffer();
-      const sourcePdf = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
+      const { pdfDoc: sourcePdf } = await loadPdfDocumentSafely(arrayBuffer, { fileName: file.name });
       const newPdf = await PDFDocument.create();
 
       const pageCount = sourcePdf.getPageCount();

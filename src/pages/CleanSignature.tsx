@@ -7,6 +7,7 @@ import ToolSEOSection from '../components/ToolSEOSection';
 import { PDFDocument } from 'pdf-lib';
 import { dataUrlToBytes } from '../lib/utils';
 import { toArrayBufferBytes } from '../lib/blobUrl';
+import { encodeCanvasExactByteTarget } from '../lib/imageByteBudget';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 import { AnimatedNumber, PearlScanOverlay } from '../components/pearl/PearlMotion';
 
@@ -70,7 +71,7 @@ export default function CleanSignature() {
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.onerror = () => setIsProcessing(false);
-    img.onload = () => {
+    img.onload = async () => {
       try {
         sourceImgRef.current = img;
 
@@ -191,69 +192,31 @@ export default function CleanSignature() {
           }
         }
 
-        // Generate Data URL (PNG if transparent, else JPEG)
-        const targetBytes = targetKb > 0 ? targetKb * 1024 : 0;
+        // Export cleanly with bidirectional exact target KB sizing (compress OR grow)
+        const targetBytes = targetKb > 0 ? Math.round(targetKb * 1024) : 0;
+        const exportMime = makeTransparent ? 'image/png' : 'image/jpeg';
         let dataUrl = '';
+        let outBytes = 0;
 
-        if (makeTransparent) {
-          // PNG export
-          dataUrl = finalCanvas.toDataURL('image/png');
-          let bytes = Math.round((dataUrl.length - 22) * 0.75);
-
-          // If target size is set and PNG exceeds it, downscale dimensions
-          if (targetBytes > 0 && bytes > targetBytes) {
-            let scale = 0.9;
-            while (bytes > targetBytes && scale >= 0.35) {
-              const scCanvas = document.createElement('canvas');
-              scCanvas.width = Math.max(80, Math.round(finalCanvas.width * scale));
-              scCanvas.height = Math.max(30, Math.round(finalCanvas.height * scale));
-              const scCtx = scCanvas.getContext('2d');
-              if (scCtx) {
-                scCtx.drawImage(finalCanvas, 0, 0, scCanvas.width, scCanvas.height);
-                dataUrl = scCanvas.toDataURL('image/png');
-                bytes = Math.round((dataUrl.length - 22) * 0.75);
-              }
-              scale -= 0.08;
-            }
-          }
+        if (targetBytes > 0) {
+          const encoded = await encodeCanvasExactByteTarget(finalCanvas, exportMime, targetBytes, {
+            allowGrow: true,
+          });
+          outBytes = encoded.blob.size;
+          dataUrl = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(String(reader.result || ''));
+            reader.onerror = () => reject(new Error('Failed reading signature output.'));
+            reader.readAsDataURL(encoded.blob);
+          });
         } else {
-          // Target file size compression if JPEG
-          if (targetBytes > 0) {
-            let low = 0.08;
-            let high = 0.98;
-            for (let k = 0; k < 8; k++) {
-              const q = (low + high) / 2;
-              dataUrl = finalCanvas.toDataURL('image/jpeg', q);
-              const bytes = Math.round((dataUrl.length - 22) * 0.75);
-              if (bytes > targetBytes) high = q;
-              else low = q;
-            }
-            // If still larger at lowest quality, scale down slightly
-            let bytes = Math.round((dataUrl.length - 22) * 0.75);
-            if (bytes > targetBytes) {
-              let scale = 0.85;
-              while (bytes > targetBytes && scale >= 0.35) {
-                const scCanvas = document.createElement('canvas');
-                scCanvas.width = Math.max(80, Math.round(finalCanvas.width * scale));
-                scCanvas.height = Math.max(30, Math.round(finalCanvas.height * scale));
-                const scCtx = scCanvas.getContext('2d');
-                if (scCtx) {
-                  scCtx.fillStyle = '#ffffff';
-                  scCtx.fillRect(0, 0, scCanvas.width, scCanvas.height);
-                  scCtx.drawImage(finalCanvas, 0, 0, scCanvas.width, scCanvas.height);
-                  dataUrl = scCanvas.toDataURL('image/jpeg', 0.75);
-                  bytes = Math.round((dataUrl.length - 22) * 0.75);
-                }
-                scale -= 0.12;
-              }
-            }
-          } else {
-            dataUrl = finalCanvas.toDataURL('image/jpeg', 0.94);
-          }
+          dataUrl = makeTransparent
+            ? finalCanvas.toDataURL('image/png')
+            : finalCanvas.toDataURL('image/jpeg', 0.94);
+          outBytes = Math.round((dataUrl.length - 22) * 0.75);
         }
 
-        const approxBytes = Math.round((dataUrl.length - 22) * 0.75);
-        setFileSizeKb(Math.round(approxBytes / 1024));
+        setFileSizeKb(Math.max(1, Math.round(outBytes / 1024)));
         setPreviewUrl(dataUrl);
       } finally {
         setIsProcessing(false);
@@ -615,15 +578,15 @@ export default function CleanSignature() {
                       <div className="flex items-center gap-1.5">
                         <input
                           type="number"
-                          min="5"
-                          max="200"
+                          min="3"
+                          max="5000"
                           value={customKbValue}
                           onChange={(e) => {
                             setCustomKbValue(e.target.value);
                             const n = Number(e.target.value);
                             if (n > 0) setTargetKb(n);
                           }}
-                          className="w-20 px-2 py-1 text-xs font-black text-center bg-[var(--pms-white)] border border-[var(--pms-border-strong)] rounded-lg focus:border-rose-500 outline-none"
+                          className="w-24 px-2 py-1 text-xs font-black text-center bg-[var(--pms-white)] border border-[var(--pms-border-strong)] rounded-lg focus:border-rose-500 outline-none"
                           style={{ color: 'var(--pms-ink)' }}
                         />
                         <span className="text-xs font-bold" style={{ color: 'var(--pms-muted)' }}>KB</span>
@@ -632,8 +595,9 @@ export default function CleanSignature() {
                     <input
                       type="range"
                       min="5"
-                      max="150"
-                      value={targetKb || 20}
+                      max="500"
+                      step="5"
+                      value={Math.min(500, targetKb || 20)}
                       onChange={(e) => {
                         const val = Number(e.target.value);
                         setTargetKb(val);
@@ -642,9 +606,9 @@ export default function CleanSignature() {
                       className="w-full accent-rose-600 cursor-pointer"
                     />
                     <div className="flex justify-between text-[10px]" style={{ color: 'var(--pms-subtle-text)' }}>
-                      <span>5 KB (Tiny)</span>
-                      <span>50 KB</span>
-                      <span>150 KB (High Res)</span>
+                      <span>5 KB (Shrink)</span>
+                      <span>50 KB (Exact)</span>
+                      <span>500 KB+ (Type any KB above)</span>
                     </div>
                   </div>
                 )}

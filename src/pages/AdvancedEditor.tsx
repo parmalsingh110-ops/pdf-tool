@@ -26,7 +26,6 @@ import {
   Redo,
   Pencil,
   Loader2,
-  Move,
   ScanText,
   ImagePlus,
   Eraser,
@@ -37,11 +36,22 @@ import {
   AlignCenter,
   AlignRight,
   Sparkles,
+  Wand2,
+  Languages,
+  Image as ImageIcon,
 } from 'lucide-react';
 import SignatureCanvas from 'react-signature-canvas';
 import FileDropzone from '../components/FileDropzone';
+import OcrLanguageSelect from '../components/OcrLanguageSelect';
+import { getStoredOcrLang, toBrowserTesseractLang } from '../lib/ocrLanguages';
 import { useSEO } from '../hooks/useSEO';
 import { apiFetch } from '../lib/api';
+import {
+  fetchServerVisionStatus,
+  fixTextWithAI,
+  translateTextWithAI,
+  shortenTextWithAI,
+} from '../lib/advancedVisionEngine';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 import PearlAuroraBackground from '../components/pearl/PearlAuroraBackground';
 import { PearlScanOverlay } from '../components/pearl/PearlMotion';
@@ -61,7 +71,7 @@ import {
 // Initialize pdf.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
-type Tool = 'select' | 'text' | 'whiteout' | 'highlight' | 'signature' | 'link' | 'table' | 'freehand' | 'image' | 'eraser' | 'underline' | 'strikethrough' | null;
+type Tool = 'select' | 'text' | 'whiteout' | 'magic_erase' | 'highlight' | 'signature' | 'link' | 'table' | 'freehand' | 'image' | 'eraser' | 'underline' | 'strikethrough' | null;
 
 interface Annotation {
   id: string;
@@ -87,15 +97,20 @@ interface Annotation {
   /** Freehand drawing SVG path data */
   pathData?: string;
   strokeWidth?: number;
-  /** Inserted image data URL */
+  /** Inserted or extracted image data URL */
   imageDataUrl?: string;
+  /** Layer object tracking for detected PDF images/logos/stamps */
+  objectId?: string;
+  objectSource?: 'native' | 'scan';
+  objectAction?: 'move' | 'replace' | 'delete';
+  xref?: number;
   /** Text background to blend with scanned page when replacing OCR text */
   backgroundColor?: string;
   /** Prevent accidental drag for OCR-aligned text replacement */
   lockPosition?: boolean;
   /** Link text <-> whiteout pair for seamless replace */
   linkedId?: string;
-  /** Original position of the text block before moving */
+  /** Original position of the text/object block before moving */
   sourceX?: number;
   sourceY?: number;
   /** Keep original OCR line metrics for smart resizing */
@@ -109,9 +124,15 @@ interface Annotation {
   align?: 'left' | 'center' | 'right';
   /** Exact text baseline in unscaled PDF points (from top of page) */
   baseline?: number;
+  /** Original untouched PDF baseline in unscaled points before drag */
+  sourceBaseline?: number;
+  /** Multi-line spacing ratio measured from source PDF rows (lineHeight / fontSize) */
+  lineHeightRatio?: number;
+  /** Number of visual lines detected/active in this block */
+  lineCount?: number;
 }
 
-/** Span info returned by /analyze/text-layout (PyMuPDF backend) */
+/** Span info returned by backend layout analyzer */
 interface BackendSpan {
   text: string;
   x: number;
@@ -129,7 +150,7 @@ interface BackendSpan {
   isInvisibleOcr?: boolean;
 }
 
-/** Word info returned by /analyze/text-layout (PyMuPDF backend) */
+/** Word info returned by backend layout analyzer */
 interface BackendWord {
   text: string;
   x: number;
@@ -145,6 +166,11 @@ interface BackendWord {
   color: string;
   baseline: number;
   isInvisibleOcr?: boolean;
+  lineHeightRatio?: number;
+  lineCount?: number;
+  bgColor?: string;
+  /** Backend solved this size by fitting the word's real advance width (scan-exact typography) */
+  scanFit?: boolean;
 }
 
 /** Context menu state */
@@ -177,6 +203,372 @@ interface DetectedTextBlock {
   exactColor?: string; // exact color from pdfjs
   fgColor?: string;   // sampled text color from canvas
   bgColor?: string;   // sampled background color from canvas
+  lineHeightRatio?: number; // vertical pitch / fontSize for multi-line paragraphs
+  lineCount?: number;       // constituent visual line count
+}
+
+interface DetectedObjectLayer {
+  id: string;
+  source: 'native' | 'scan';
+  xref: number;
+  kind: string;
+  x: number; // PDF pt
+  y: number;
+  w: number;
+  h: number;
+  dataUrl: string;
+}
+
+interface DetectedFormField {
+  x: number; // PDF pt
+  y: number;
+  w: number;
+  h: number;
+  kind: 'line' | 'checkbox';
+  labelHint: string;
+}
+
+interface DetectedTableLayer {
+  id: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  nRows: number;
+  nCols: number;
+  cells: Array<{
+    r0: number;
+    c0: number;
+    r1: number;
+    c1: number;
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+    text: string;
+    bgColor: string;
+    textColor: string;
+    bold: boolean;
+    align: string;
+    fontSize: number;
+  }>;
+}
+
+interface PageLayerSnapshot {
+  isScanned: boolean;
+  spans: BackendSpan[];
+  words: BackendWord[];
+  lines?: BackendWord[];
+  paragraphs?: BackendWord[];
+  assets: DetectedObjectLayer[];
+  tables: DetectedTableLayer[];
+  formFields: DetectedFormField[];
+}
+
+let _sharedMetricsCanvas: HTMLCanvasElement | null = null;
+let _sharedMetricsCtx: CanvasRenderingContext2D | null = null;
+
+function getSharedMetricsCtx(): CanvasRenderingContext2D | null {
+  if (typeof document === 'undefined') return null;
+  if (!_sharedMetricsCtx) {
+    _sharedMetricsCanvas = document.createElement('canvas');
+    _sharedMetricsCtx = _sharedMetricsCanvas.getContext('2d');
+  }
+  return _sharedMetricsCtx;
+}
+
+function measureCanvasTextMetrics(
+  text: string,
+  fontCss: string,
+  fontSizePx: number,
+  bold: boolean,
+  italic: boolean,
+): { maxLineW: number; lineWidths: number[]; cssAscent: number; cssDescent: number } {
+  const lines = (text || '').split(/\r?\n/);
+  const px = Math.max(4, fontSizePx);
+  let cssAscent = px * 0.88;
+  let cssDescent = px * 0.22;
+  const ctx = getSharedMetricsCtx();
+  if (!ctx) {
+    const widths = lines.map(ln => ln.length * px * 0.56);
+    return { maxLineW: Math.max(0, ...widths), lineWidths: widths, cssAscent, cssDescent };
+  }
+  ctx.font = `${italic ? 'italic ' : ''}${bold ? '700 ' : '400 '}${px}px ${fontCss || 'Helvetica, Arial, sans-serif'}`;
+  const lineWidths = lines.map(ln => (ln ? ctx.measureText(ln).width : 0));
+  const tm = ctx.measureText('HÁpgy');
+  if (typeof (tm as any).fontBoundingBoxAscent === 'number' && (tm as any).fontBoundingBoxAscent > 0) {
+    cssAscent = (tm as any).fontBoundingBoxAscent;
+    cssDescent = typeof (tm as any).fontBoundingBoxDescent === 'number' ? (tm as any).fontBoundingBoxDescent : px * 0.2;
+  } else if (tm.actualBoundingBoxAscent > 0) {
+    cssAscent = tm.actualBoundingBoxAscent * 1.15;
+    cssDescent = Math.max(tm.actualBoundingBoxDescent || 0, px * 0.18);
+  }
+  return { maxLineW: Math.max(0, ...lineWidths), lineWidths, cssAscent, cssDescent };
+}
+
+function weightedMedian(pairs: Array<{ val: number; weight: number }>): number {
+  const valid = pairs.filter(p => Number.isFinite(p.val) && p.val > 0 && p.weight > 0);
+  if (!valid.length) return 0;
+  valid.sort((a, b) => a.val - b.val);
+  const totalW = valid.reduce((s, p) => s + p.weight, 0);
+  let acc = 0;
+  for (const p of valid) {
+    acc += p.weight;
+    if (acc >= totalW * 0.5) return p.val;
+  }
+  return valid[valid.length - 1].val;
+}
+
+function sanitizeMatchedFontSizePt(
+  candPt: number,
+  boxHeightPt: number,
+  text: string,
+  explicitLineCount = 1,
+  trustedFit = false,
+): number {
+  const clean = (text || '').trim();
+  const lineCount = Math.max(1, explicitLineCount, clean ? clean.split(/\r?\n/).length : 1);
+  const rawCand = Number.isFinite(candPt) && candPt > 0 ? candPt : 12;
+  if (!boxHeightPt || boxHeightPt <= 1 || !clean) {
+    return Math.round(Math.max(5, Math.min(160, rawCand)) * 10) / 10;
+  }
+  const effLineH = lineCount > 1 ? boxHeightPt / (1 + (lineCount - 1) * 1.22) : boxHeightPt;
+  if (trustedFit) {
+    // Width-fitted size is already exact; only guard against absurd outliers (never re-inflate it).
+    const tLo = Math.max(5, effLineH * 0.5);
+    const tHi = Math.min(200, Math.max(tLo + 1, effLineH * 2.6));
+    return Math.round(Math.max(tLo, Math.min(tHi, rawCand)) * 10) / 10;
+  }
+  const hasDevanagari = /[\u0900-\u097F]/.test(clean);
+  const hasUpperOrAsc = /[A-Z0-9bdfhklt()[\]{}/|!?]/.test(clean);
+  const hasDesc = /[gjpqy,;_()]/.test(clean);
+  let minRatio = 0.72;
+  let maxRatio = 1.65;
+  if (hasDevanagari) {
+    minRatio = 0.65;
+    maxRatio = 1.35;
+  } else if (hasUpperOrAsc && hasDesc) {
+    minRatio = 0.80;
+    maxRatio = 1.38;
+  } else if (hasUpperOrAsc) {
+    minRatio = 0.88;
+    maxRatio = 1.52;
+  } else if (hasDesc) {
+    minRatio = 0.88;
+    maxRatio = 1.65;
+  } else {
+    minRatio = 1.05;
+    maxRatio = 2.05;
+  }
+  const lo = Math.max(5, effLineH * minRatio);
+  const hi = Math.min(160, Math.max(lo + 1, effLineH * maxRatio));
+  return Math.round(Math.max(lo, Math.min(hi, rawCand)) * 10) / 10;
+}
+
+function getSafeTextareaLayout(
+  boxHPx: number,
+  fontSizePt: number,
+  scale: number,
+  text: string,
+  lineCountHint?: number,
+  lineHeightRatioHint?: number,
+): {
+  fontPx: number;
+  lineCount: number;
+  effLineHeight: number;
+  safeHeightPx: number;
+  whiteSpaceMode: 'pre' | 'pre-wrap';
+} {
+  const clean = text || '';
+  const hasNewline = clean.includes('\n');
+  const explicitLines = clean.split(/\r?\n/).length;
+  const lineCount = Math.max(1, explicitLines, lineCountHint || 1);
+  const isMultiLine = hasNewline || lineCount > 1;
+  const effLineHeight = isMultiLine ? Math.max(1.05, Math.min(1.85, lineHeightRatioHint || 1.22)) : 1.18;
+  const fontPx = Math.max(4, fontSizePt * scale);
+  const renderedTextH = Math.ceil(fontPx * effLineHeight * lineCount + Math.max(6, Math.ceil(fontPx * 0.35)));
+  const safeHeightPx = Math.max(Math.ceil(boxHPx) + 4, renderedTextH);
+  return {
+    fontPx,
+    lineCount,
+    effLineHeight,
+    safeHeightPx,
+    whiteSpaceMode: isMultiLine ? 'pre-wrap' : 'pre',
+  };
+}
+
+type ResizeHandleDir = 'tl' | 'tr' | 'bl' | 'br' | 't' | 'b' | 'l' | 'r';
+
+function getAnnotationDisplayBox(ann: Annotation, scale: number, pageWidth?: number, resolvedFontCss?: string) {
+  const baseW = ann.width !== undefined
+    ? ann.width
+    : (ann.type === 'text'
+      ? Math.max(16, Math.round((ann.text?.length || 4) * (ann.fontSize || 12) * scale * 0.62))
+      : undefined);
+  const baseH = ann.height !== undefined
+    ? ann.height
+    : Math.max(12, ann.type === 'text' ? Math.round((ann.fontSize || 12) * scale * 1.18) : 0);
+
+  if (ann.type !== 'text') {
+    return {
+      width: baseW,
+      height: baseH,
+      frameW: baseW ?? (ann.type === 'image' ? 120 : 150),
+      taLayout: null as ReturnType<typeof getSafeTextareaLayout> | null,
+    };
+  }
+
+  const taLayout = getSafeTextareaLayout(
+    baseH,
+    ann.fontSize || 12,
+    scale,
+    ann.text || '',
+    ann.lineCount,
+    ann.lineHeightRatio,
+  );
+  let textW = baseW ?? 16;
+  if (taLayout.whiteSpaceMode === 'pre') {
+    const fontCss = ann.fontCssFamily || resolvedFontCss || 'Helvetica, Arial, sans-serif';
+    const measuredW = measureCanvasTextMetrics(
+      ann.text || '',
+      fontCss,
+      taLayout.fontPx,
+      !!ann.bold,
+      !!ann.italic,
+    ).maxLineW;
+    const availW = Math.max(textW, Math.round((pageWidth || 1200) - Math.max(0, ann.x)));
+    textW = Math.min(availW, Math.max(textW, Math.ceil(measuredW + 2)));
+  }
+  return {
+    width: textW,
+    height: baseH,
+    frameW: textW,
+    taLayout,
+  };
+}
+
+function SelectionFrameOverlay({
+  ann,
+  boxW,
+  boxH,
+  showHandles,
+  prefersReduced,
+  onStartResize,
+  onStartDrag,
+  onDelete,
+}: {
+  ann: Annotation;
+  boxW: number;
+  boxH: number;
+  showHandles: boolean;
+  prefersReduced: boolean | null;
+  onStartResize: (handle: ResizeHandleDir, clientX: number, clientY: number) => void;
+  onStartDrag?: (clientX: number, clientY: number) => void;
+  onDelete: () => void;
+}) {
+  const isSpacious = boxW >= 72 && boxH >= 26;
+  const cornerSizeClass = isSpacious ? 'w-[7px] h-[7px]' : 'w-[5px] h-[5px]';
+  const cornerHandles: Array<{ dir: ResizeHandleDir; posClass: string; cursorClass: string; title: string }> = [
+    { dir: 'tl', posClass: isSpacious ? '-top-[3.5px] -left-[3.5px]' : '-top-[2.5px] -left-[2.5px]', cursorClass: 'cursor-nwse-resize', title: 'Resize diagonally' },
+    { dir: 'tr', posClass: isSpacious ? '-top-[3.5px] -right-[3.5px]' : '-top-[2.5px] -right-[2.5px]', cursorClass: 'cursor-nesw-resize', title: 'Resize diagonally' },
+    { dir: 'bl', posClass: isSpacious ? '-bottom-[3.5px] -left-[3.5px]' : '-bottom-[2.5px] -left-[2.5px]', cursorClass: 'cursor-nesw-resize', title: 'Resize diagonally' },
+    { dir: 'br', posClass: isSpacious ? '-bottom-[3.5px] -right-[3.5px]' : '-bottom-[2.5px] -right-[2.5px]', cursorClass: 'cursor-nwse-resize', title: 'Resize diagonally' },
+  ];
+  const edgeHandles: Array<{ dir: ResizeHandleDir; posClass: string; title: string }> = isSpacious
+    ? [
+        { dir: 't', posClass: '-top-[1.5px] left-1/2 -translate-x-1/2 w-4 h-[3px] cursor-ns-resize', title: 'Resize height vertically' },
+        { dir: 'b', posClass: '-bottom-[1.5px] left-1/2 -translate-x-1/2 w-4 h-[3px] cursor-ns-resize', title: 'Resize height vertically' },
+        { dir: 'l', posClass: 'top-1/2 -left-[1.5px] -translate-y-1/2 w-[3px] h-3 cursor-ew-resize', title: 'Resize width horizontally' },
+        { dir: 'r', posClass: 'top-1/2 -right-[1.5px] -translate-y-1/2 w-[3px] h-3 cursor-ew-resize', title: 'Resize width horizontally' },
+      ]
+    : [];
+
+  return (
+    <motion.div
+      aria-hidden={false}
+      initial={prefersReduced ? false : { opacity: 0, scale: 0.985 }}
+      animate={{ opacity: 1, scale: 1 }}
+      transition={prefersReduced ? { duration: 0.08 } : { type: 'spring', stiffness: 520, damping: 34, mass: 0.6 }}
+      className="pointer-events-none absolute -top-[1px] -bottom-[1px] -left-[2px] -right-[2px] rounded-[4px] border-[1.25px] border-blue-500 z-30"
+      style={{
+        boxShadow: '0 0 0 1px rgba(59, 130, 246, 0.14)',
+      }}
+    >
+      {/* Slim perimeter grab strips strictly on the border lines — move any text box without obscuring neighboring lines */}
+      {onStartDrag && !ann.lockPosition && (
+        <>
+          <div
+            title="Drag border to move"
+            className="pointer-events-auto absolute -top-[2px] left-[4px] right-[4px] h-[4px] cursor-grab active:cursor-grabbing z-10"
+            onMouseDown={e => { e.stopPropagation(); onStartDrag(e.clientX, e.clientY); }}
+          />
+          <div
+            title="Drag border to move"
+            className="pointer-events-auto absolute -bottom-[2px] left-[4px] right-[4px] h-[4px] cursor-grab active:cursor-grabbing z-10"
+            onMouseDown={e => { e.stopPropagation(); onStartDrag(e.clientX, e.clientY); }}
+          />
+          <div
+            title="Drag border to move"
+            className="pointer-events-auto absolute top-[4px] bottom-[4px] -left-[2px] w-[4px] cursor-grab active:cursor-grabbing z-10"
+            onMouseDown={e => { e.stopPropagation(); onStartDrag(e.clientX, e.clientY); }}
+          />
+          <div
+            title="Drag border to move"
+            className="pointer-events-auto absolute top-[4px] bottom-[4px] -right-[2px] w-[4px] cursor-grab active:cursor-grabbing z-10"
+            onMouseDown={e => { e.stopPropagation(); onStartDrag(e.clientX, e.clientY); }}
+          />
+        </>
+      )}
+
+      {/* Compact delete button for non-text elements (images, signatures, shapes); text uses Delete key or sidebar */}
+      {ann.type !== 'text' && (
+        <button
+          type="button"
+          title={ann.type === 'image' && ann.objectId ? 'Erase object from PDF' : 'Delete'}
+          onClick={e => {
+            e.stopPropagation();
+            onDelete();
+          }}
+          onMouseDown={e => e.stopPropagation()}
+          className="pointer-events-auto absolute -top-2.5 -right-2.5 bg-red-500 hover:bg-red-600 text-white rounded-full p-0.5 shadow-sm transition-colors z-30"
+        >
+          <X className="w-3 h-3" />
+        </button>
+      )}
+
+      {showHandles && (
+        <>
+          {/* Precision circular corner nodes (zero intrusion onto selected glyphs or neighboring words) */}
+          {cornerHandles.map(c => (
+            <motion.div
+              key={c.dir}
+              title={c.title}
+              whileHover={prefersReduced ? undefined : { scale: 1.5 }}
+              whileTap={prefersReduced ? undefined : { scale: 0.95 }}
+              className={`pointer-events-auto absolute ${c.posClass} ${cornerSizeClass} rounded-full bg-white border-[1.25px] border-blue-600 shadow-[0_1px_2px_rgba(37,99,235,0.3)] ${c.cursorClass} z-20 hover:bg-blue-600 transition-colors`}
+              onMouseDown={e => {
+                e.stopPropagation();
+                onStartResize(c.dir, e.clientX, e.clientY);
+              }}
+            />
+          ))}
+
+          {/* Slim edge pills shown on spacious boxes (paragraphs, images, signatures) */}
+          {edgeHandles.map(edge => (
+            <div
+              key={edge.dir}
+              title={edge.title}
+              className={`pointer-events-auto absolute ${edge.posClass} rounded-full bg-white border-[1.25px] border-blue-600 shadow-[0_1px_2px_rgba(37,99,235,0.25)] z-20 hover:bg-blue-600 transition-colors`}
+              onMouseDown={e => {
+                e.stopPropagation();
+                onStartResize(edge.dir, e.clientX, e.clientY);
+              }}
+            />
+          ))}
+        </>
+      )}
+    </motion.div>
+  );
 }
 
 export default function AdvancedEditor() {
@@ -188,6 +580,7 @@ export default function AdvancedEditor() {
   const [numPages, setNumPages] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageViewport, setPageViewport] = useState<pdfjsLib.PageViewport | null>(null);
+  const pageViewportRef = useRef<pdfjsLib.PageViewport | null>(null);
 
   const [activeTool, setActiveTool] = useState<Tool>('select');
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
@@ -283,7 +676,7 @@ export default function AdvancedEditor() {
   const [ocrBusy, setOcrBusy] = useState(false);
   const [ocrDone, setOcrDone] = useState(false);
   const [isScannedPdf, setIsScannedPdf] = useState(false);
-  const [ocrLanguage, setOcrLanguage] = useState<'eng' | 'hin' | 'eng+hin'>('eng+hin');
+  const [ocrLanguage, setOcrLanguage] = useState<string>(() => getStoredOcrLang());
   const [ocrStatusLabel, setOcrStatusLabel] = useState<string>('');
   const [ocrNotice, setOcrNotice] = useState<string | null>(null);
   // Store unscaled PDF-point OCR blocks per page (1-based) so zooming or changing pages never wipes them
@@ -304,13 +697,23 @@ export default function AdvancedEditor() {
   // === Signature pen width ===
   const [signaturePenWidth, setSignaturePenWidth] = useState(2);
 
-  // === NEW: Backend text layout (accurate font/color data from PyMuPDF) ===
+  // === Backend page layers (typography, objects, tables, blank form fields) ===
   const [backendSpans, setBackendSpans] = useState<BackendSpan[]>([]);
   const [backendWords, setBackendWords] = useState<BackendWord[]>([]);
+  const [backendLines, setBackendLines] = useState<BackendWord[]>([]);
+  const [backendParagraphs, setBackendParagraphs] = useState<BackendWord[]>([]);
+  const [backendLayerPage, setBackendLayerPage] = useState<number | null>(null);
+  const [detectedObjects, setDetectedObjects] = useState<DetectedObjectLayer[]>([]);
+  const [detectedTables, setDetectedTables] = useState<DetectedTableLayer[]>([]);
+  const [detectedFormFields, setDetectedFormFields] = useState<DetectedFormField[]>([]);
   const [layoutFetching, setLayoutFetching] = useState(false);
+  const pageLayersCacheRef = useRef<Map<string, PageLayerSnapshot>>(new Map());
+  const autoScannedPagesRef = useRef<Set<number>>(new Set());
+  const replaceObjectInputRef = useRef<HTMLInputElement>(null);
 
-  // === NEW: Right-click context menu ===
+  // === Right-click context menu & inline text helpers ===
   const [contextMenu, setContextMenu] = useState<ContextMenuState>({ visible: false, x: 0, y: 0, block: null });
+  const [contextBusyAction, setContextBusyAction] = useState<string | null>(null);
 
   // === NEW: Double-click inline edit ===
   const [inlineEdit, setInlineEdit] = useState<InlineEditState>({ active: false, block: null, text: '' });
@@ -384,6 +787,16 @@ export default function AdvancedEditor() {
       setUndoStack([]);
       setRedoStack([]);
       ocrBlocksByPageRef.current.clear();
+      pageLayersCacheRef.current.clear();
+      autoScannedPagesRef.current.clear();
+      setBackendSpans([]);
+      setBackendWords([]);
+      setBackendLines([]);
+      setBackendParagraphs([]);
+      setBackendLayerPage(null);
+      setDetectedObjects([]);
+      setDetectedTables([]);
+      setDetectedFormFields([]);
       setOcrDone(false);
       setIsScannedPdf(false);
       setOcrNotice(null);
@@ -440,9 +853,10 @@ export default function AdvancedEditor() {
     return () => window.removeEventListener('keydown', handler);
   }, [doUndo, doRedo, selectedId, pushUndo]);
 
-  // === Render Cold-Start Pre-Warm: Wake backend immediately when user opens /edit ===
+  // === Pre-warm document processing backend & capability cache ===
   useEffect(() => {
     let cancelled = false;
+    fetchServerVisionStatus().catch(() => {});
     (async () => {
       try {
         const res = await apiFetch('/', {
@@ -467,30 +881,116 @@ export default function AdvancedEditor() {
   useEffect(() => {
     if (pdfDoc && !editedUrl) {
       renderPage(currentPage);
-      // Fetch accurate backend text layout after rendering
       if (file) {
-        fetchTextLayout(file, currentPage - 1);
+        fetchPageLayers(file, currentPage - 1);
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pdfDoc, currentPage, zoomLevel, editedUrl]);
 
-  // If backend finishes waking up after PDF was already rendered on page, fetch layout once
+  // If backend finishes waking up after PDF was already rendered on page, fetch page layers once
   useEffect(() => {
-    if (backendStatus === 'ready' && file && pdfDoc && backendSpans.length === 0 && !layoutFetching) {
-      fetchTextLayout(file, currentPage - 1);
+    if (backendStatus === 'ready' && file && pdfDoc && !pageLayersCacheRef.current.has(`${currentPage - 1}:${ocrLanguage}`) && !layoutFetching) {
+      fetchPageLayers(file, currentPage - 1);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [backendStatus]);
 
-  // === Fetch accurate text layout from backend (PyMuPDF) ===
-  const fetchTextLayout = async (pdfFile: File, pageIndex: number) => {
+  const mapBackendWordToBlock = (w: any): DetectedTextBlock => {
+    const x = Number(w.x) || 0;
+    const y = Number(w.y) || 0;
+    const bw = Math.max(2, Number(w.w) || 2);
+    const bh = Math.max(4, Number(w.h) || 4);
+    const rawText = String(w.text || '').trim();
+    const lc = typeof w.lineCount === 'number' && w.lineCount >= 1
+      ? Math.round(w.lineCount)
+      : Math.max(1, rawText ? rawText.split(/\r?\n/).length : 1);
+    const rawFsz = Number(w.fontSize) || Math.max(6, Math.min(160, Math.round(bh * 0.76 * 10) / 10));
+    const fsz = sanitizeMatchedFontSizePt(rawFsz, bh, rawText, lc);
+    const basePt = Number(w.baseline) || Math.round((y + bh * 0.80) * 100) / 100;
+    return {
+      text: rawText,
+      x,
+      y,
+      w: bw,
+      h: bh,
+      fontSize: fsz,
+      pdfBaselineY: basePt,
+      fontName: w.fontName ? String(w.fontName) : undefined,
+      fgColor: String(w.fgColor || w.color || '#000000'),
+      bgColor: w.bgColor ? (isPaperWhiteHex(w.bgColor) ? '#ffffff' : String(w.bgColor)) : undefined,
+      bold: Boolean(w.bold),
+      italic: Boolean(w.italic),
+      lineHeightRatio: typeof w.lineHeightRatio === 'number' ? w.lineHeightRatio : undefined,
+      lineCount: lc > 1 ? lc : undefined,
+    };
+  };
+
+  const mapBackendWordToScreenBlock = (w: any, scale: number): DetectedTextBlock => {
+    const base = mapBackendWordToBlock(w);
+    const s = scale || 1;
+    const basePt = base.pdfBaselineY;
+    return {
+      ...base,
+      x: base.x * s,
+      y: base.y * s,
+      w: Math.max(4, base.w * s),
+      h: Math.max(6, base.h * s),
+      baselineY: basePt !== undefined ? basePt * s : undefined,
+      exactColor: base.fgColor,
+    };
+  };
+
+  const applyLayerSnapshot = (snapshot: PageLayerSnapshot, pageOneBased: number) => {
+    setBackendSpans(snapshot.spans || []);
+    setBackendWords(snapshot.words || []);
+    setBackendLines(snapshot.lines || []);
+    setBackendParagraphs(snapshot.paragraphs || []);
+    setBackendLayerPage(pageOneBased);
+    setDetectedObjects(snapshot.assets || []);
+    setDetectedTables(snapshot.tables || []);
+    setDetectedFormFields(snapshot.formFields || []);
+
+    if (snapshot.isScanned && Array.isArray(snapshot.words) && snapshot.words.length > 0) {
+      const blocksPt: DetectedTextBlock[] = snapshot.words
+        .map(mapBackendWordToBlock)
+        .filter((b) => b.text.length > 0);
+
+      if (blocksPt.length > 0) {
+        ocrBlocksByPageRef.current.set(pageOneBased, blocksPt);
+        if (currentPageRef.current === pageOneBased) {
+          const activeScale = pageViewportRef.current?.scale || zoomLevel || 1;
+          setDetectedText(scaleOcrBlocks(blocksPt, activeScale));
+          setOcrDone(true);
+          setIsScannedPdf(true);
+          setOcrNotice(null);
+          setActiveTool('select');
+          const sizes = blocksPt.map((b) => b.fontSize).filter((s) => s >= 5 && s <= 160).sort((a, b) => a - b);
+          if (sizes.length > 0) {
+            setFontSize(Math.round(Math.max(10, Math.min(72, sizes[Math.floor(sizes.length / 2)]))));
+          }
+        }
+      }
+    }
+  };
+
+  // === Fetch unified page layers (typography, objects, tables, form fields) from backend ===
+  const fetchPageLayers = async (pdfFile: File, pageIndex: number, force = false) => {
+    const apiLang = ocrLanguage || 'auto';
+    const cacheKey = `${pageIndex}:${apiLang}`;
+    const cached = pageLayersCacheRef.current.get(cacheKey);
+    if (!force && cached) {
+      applyLayerSnapshot(cached, pageIndex + 1);
+      return;
+    }
+
     setLayoutFetching(true);
     try {
       const formData = new FormData();
       formData.append('file', pdfFile);
       formData.append('page', String(pageIndex));
-      const res = await apiFetch('/analyze/text-layout', {
+      formData.append('lang', apiLang);
+      const res = await apiFetch('/analyze/page-layers', {
         method: 'POST',
         body: formData,
         timeoutMs: 65000,
@@ -498,20 +998,54 @@ export default function AdvancedEditor() {
       });
       if (res.ok) {
         const data = await res.json();
+        const snapshot: PageLayerSnapshot = {
+          isScanned: Boolean(data.isScanned),
+          spans: Array.isArray(data.spans) ? data.spans : [],
+          words: Array.isArray(data.words) ? data.words : [],
+          lines: Array.isArray(data.lines) ? data.lines : [],
+          paragraphs: Array.isArray(data.paragraphs) ? data.paragraphs : [],
+          assets: Array.isArray(data.assets) ? data.assets : [],
+          tables: Array.isArray(data.tables) ? data.tables : [],
+          formFields: Array.isArray(data.formFields) ? data.formFields : [],
+        };
+        pageLayersCacheRef.current.set(cacheKey, snapshot);
+        autoScannedPagesRef.current.add(pageIndex + 1);
+        setBackendStatus('ready');
+        applyLayerSnapshot(snapshot, pageIndex + 1);
+        return;
+      }
+
+      // Graceful fallback to lightweight text-layout endpoint
+      const fallbackFd = new FormData();
+      fallbackFd.append('file', pdfFile);
+      fallbackFd.append('page', String(pageIndex));
+      const fallbackRes = await apiFetch('/analyze/text-layout', {
+        method: 'POST',
+        body: fallbackFd,
+        timeoutMs: 45000,
+        suppressTelemetry: true,
+      });
+      if (fallbackRes.ok) {
+        const data = await fallbackRes.json();
         setBackendSpans(data.spans || []);
         setBackendWords(data.words || []);
+        setBackendLines(Array.isArray(data.lines) ? data.lines : []);
+        setBackendParagraphs(Array.isArray(data.paragraphs) ? data.paragraphs : []);
+        setBackendLayerPage(pageIndex + 1);
         setBackendStatus('ready');
       }
-    } catch (e) {
-      // Silently ignore — pdfjs text detection + frontend vector HarfBuzz is the fallback
-      console.warn('[AdvancedEditor] Backend text layout fetch failed:', e);
+    } catch {
+      // Silently ignore — browser PDF detection + on-device engine handles fallback smoothly
     } finally {
       setLayoutFetching(false);
     }
   };
 
-  // === Helper: find backend word or span matching a detected text block ===
-  const findBackendMatch = (block: DetectedTextBlock): {
+  // === Helper: find best-scoring backend word or span matching a detected text block ===
+  const findBackendMatch = (
+    block: DetectedTextBlock,
+    targetGranularity: 'word' | 'line' | 'paragraph' = selectionGranularity,
+  ): {
     fontSize: number;
     fontName: string;
     bold: boolean;
@@ -519,54 +1053,146 @@ export default function AdvancedEditor() {
     color: string;
     baseline: number;
     isInvisibleOcr?: boolean;
+    x?: number;
+    y?: number;
+    w?: number;
+    h?: number;
+    exactWordBounds?: boolean;
+    lineHeightRatio?: number;
+    lineCount?: number;
+    fitTrusted?: boolean;
   } | null => {
     if (!pageViewport) return null;
+    if (backendLayerPage !== null && backendLayerPage !== currentPage) return null;
     const scale = pageViewport.scale;
     const bx = block.x / scale;
     const by = block.y / scale;
     const bw = block.w / scale;
     const bh = block.h / scale;
+    const bRight = bx + bw;
+    const bBot = by + bh;
+    const bCy = by + bh * 0.5;
+    const blockLc = Math.max(1, block.lineCount || 1, block.text.trim() ? block.text.trim().split(/\r?\n/).length : 1);
+    const estLineH = blockLc > 1 ? (bh / blockLc) : bh;
+    const bBase = block.pdfBaselineY ?? (block.baselineY !== undefined ? block.baselineY / scale : by + estLineH * 0.8);
     const blockText = block.text.trim().toLowerCase();
+    const normBlockText = blockText.replace(/\s+/g, ' ');
+    const effMode: 'word' | 'line' | 'paragraph' =
+      (blockLc > 1 || block.text.includes('\n')) ? 'paragraph' : targetGranularity;
 
-    // 1. Search word-level PyMuPDF layout
-    if (backendWords.length > 0) {
-      const wordMatch = backendWords.find(w => {
-        const wText = w.text.trim().toLowerCase();
-        const textEqual = wText === blockText || wText.includes(blockText) || blockText.includes(wText);
-        const posNear = Math.abs(w.x - bx) < Math.max(16, bw * 0.8) && Math.abs(w.y - by) < Math.max(18, bh * 0.7);
-        return textEqual && posNear;
-      });
-      if (wordMatch) {
-        return {
-          fontSize: wordMatch.isInvisibleOcr && block.fontSize ? block.fontSize : wordMatch.fontSize,
-          fontName: wordMatch.fontName,
-          bold: wordMatch.bold,
-          italic: wordMatch.italic,
-          color: wordMatch.isInvisibleOcr ? (block.fgColor || wordMatch.color) : wordMatch.color,
-          baseline: wordMatch.baseline,
-          isInvisibleOcr: wordMatch.isInvisibleOcr,
-        };
+    const overlapScore = (
+      tx: number,
+      ty: number,
+      tw: number,
+      th: number,
+      tText: string,
+      tBase: number,
+      allowMultiLine = false,
+    ): number | null => {
+      const ovX = Math.max(0, Math.min(bRight, tx + tw) - Math.max(bx, tx));
+      const ovY = Math.max(0, Math.min(bBot, ty + th) - Math.max(by, ty));
+      const yDist = Math.abs((ty + th * 0.5) - bCy);
+      const baseDist = Math.abs(tBase - bBase);
+      const maxY = allowMultiLine ? Math.max(14, bh * 0.65) : Math.max(10, bh * 0.85);
+      const maxBase = allowMultiLine ? Math.max(12, estLineH * 1.1) : Math.max(8, bh * 0.65);
+      if (yDist > maxY && baseDist > maxBase) return null;
+      const xNear = Math.abs(tx - bx) <= Math.max(12, bw * 0.65) || ovX > 0;
+      if (!xNear) return null;
+      const tNorm = tText.replace(/\s+/g, ' ');
+      const eq = tText === blockText || (normBlockText.length > 0 && tNorm === normBlockText);
+      const rel = eq || tNorm.includes(normBlockText) || normBlockText.includes(tNorm);
+      if (!rel && ovX * ovY <= 0) return null;
+      const unionArea = Math.max(1, bw * bh + tw * th - ovX * ovY);
+      const iou = (ovX * ovY) / unionArea;
+      return iou * 40 + (eq ? 25 : rel ? 10 : 0) - baseDist * 2.5 - Math.abs(tx - bx) * 0.35;
+    };
+
+    const pickFromBackendWords = (items: BackendWord[], allowMultiLine = false) => {
+      if (!items.length) return null;
+      let bestW: BackendWord | null = null;
+      let bestScore = -Infinity;
+      for (const w of items) {
+        const sc = overlapScore(w.x, w.y, w.w, w.h, (w.text || '').trim().toLowerCase(), w.baseline, allowMultiLine);
+        if (sc !== null && sc > bestScore) {
+          bestScore = sc;
+          bestW = w;
+        }
+      }
+      if (!bestW) return null;
+      const wNorm = (bestW.text || '').trim().toLowerCase().replace(/\s+/g, ' ');
+      const wEq = wNorm === normBlockText;
+      const matchedLc = Math.max(
+        1,
+        bestW.lineCount || 1,
+        bestW.text ? bestW.text.trim().split(/\r?\n/).length : blockLc,
+      );
+      const rawFs = bestW.isInvisibleOcr && block.fontSize ? block.fontSize : bestW.fontSize;
+      const fitTrusted = Boolean(bestW.scanFit) && !bestW.isInvisibleOcr;
+      const cleanFs = sanitizeMatchedFontSizePt(rawFs, bh, bestW.text || block.text, matchedLc, fitTrusted);
+      return {
+        fontSize: cleanFs,
+        fontName: bestW.fontName,
+        bold: bestW.bold,
+        italic: bestW.italic,
+        color: bestW.isInvisibleOcr ? (block.fgColor || bestW.color) : bestW.color,
+        baseline: bestW.baseline,
+        isInvisibleOcr: bestW.isInvisibleOcr,
+        x: bestW.x,
+        y: bestW.y,
+        w: bestW.w,
+        h: bestW.h,
+        exactWordBounds: wEq && !bestW.isInvisibleOcr,
+        lineHeightRatio: bestW.lineHeightRatio,
+        lineCount: matchedLc,
+        fitTrusted,
+      };
+    };
+
+    if (effMode === 'paragraph') {
+      const pMatch = pickFromBackendWords(backendParagraphs, true);
+      if (pMatch) return pMatch;
+    }
+    if (effMode === 'line' || effMode === 'paragraph') {
+      const lMatch = pickFromBackendWords(backendLines, false);
+      if (lMatch) {
+        if (effMode === 'paragraph') {
+          return { ...lMatch, exactWordBounds: false, lineCount: blockLc };
+        }
+        return lMatch;
       }
     }
 
-    // 2. Search span-level PyMuPDF layout
+    // Search word-level layout (highest-scored nearest word)
+    const wMatch = pickFromBackendWords(backendWords, false);
+    if (wMatch) {
+      if (effMode !== 'word') {
+        return { ...wMatch, exactWordBounds: false, lineCount: blockLc };
+      }
+      return wMatch;
+    }
+
+    // Fallback: span-level layout
     if (backendSpans.length > 0) {
-      const spanMatch = backendSpans.find(s => {
-        const sText = s.text.trim().toLowerCase();
-        const textInSpan = sText.includes(blockText) || blockText.includes(sText);
-        const xInside = (bx >= s.x - 8) && (bx <= s.x + s.w + 8);
-        const yNear = Math.abs(s.y - by) < Math.max(18, s.h * 1.5);
-        return textInSpan && xInside && yNear;
-      });
-      if (spanMatch) {
+      let bestS: BackendSpan | null = null;
+      let bestScore = -Infinity;
+      for (const s of backendSpans) {
+        const sBase = s.baseline || (s.y + s.h * 0.82);
+        const sc = overlapScore(s.x, s.y, s.w, s.h, s.text.trim().toLowerCase(), sBase, effMode === 'paragraph');
+        if (sc !== null && sc > bestScore) {
+          bestScore = sc;
+          bestS = s;
+        }
+      }
+      if (bestS) {
+        const rawFs = bestS.isInvisibleOcr && block.fontSize ? block.fontSize : bestS.fontSize;
         return {
-          fontSize: spanMatch.isInvisibleOcr && block.fontSize ? block.fontSize : spanMatch.fontSize,
-          fontName: spanMatch.fontName,
-          bold: spanMatch.bold,
-          italic: spanMatch.italic,
-          color: spanMatch.isInvisibleOcr ? (block.fgColor || spanMatch.color) : spanMatch.color,
-          baseline: spanMatch.baseline || (spanMatch.y + spanMatch.h * 0.82),
-          isInvisibleOcr: spanMatch.isInvisibleOcr,
+          fontSize: sanitizeMatchedFontSizePt(rawFs, effMode === 'paragraph' ? estLineH : bh, block.text, 1),
+          fontName: bestS.fontName,
+          bold: bestS.bold,
+          italic: bestS.italic,
+          color: bestS.isInvisibleOcr ? (block.fgColor || bestS.color) : bestS.color,
+          baseline: bestS.baseline || (bestS.y + bestS.h * 0.82),
+          isInvisibleOcr: bestS.isInvisibleOcr,
         };
       }
     }
@@ -595,7 +1221,41 @@ export default function AdvancedEditor() {
     };
   };
 
-  // Clear a specific text block footprint on the rendered canvas so no ghost text stays behind
+  // Sample surrounding paper background color for canvas previews
+  const sampleCanvasBgHex = useCallback((sx: number, sy: number, sw: number, sh: number): string => {
+    const canvas = canvasRef.current;
+    if (!canvas) return '#ffffff';
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return '#ffffff';
+    try {
+      const rx = Math.max(0, Math.round(sx));
+      const ry = Math.max(0, Math.round(sy));
+      const pts: Array<[number, number]> = [
+        [Math.max(0, rx - 3), ry + Math.round(sh * 0.5)],
+        [Math.min(canvas.width - 1, rx + Math.round(sw) + 3), ry + Math.round(sh * 0.5)],
+        [rx + Math.round(sw * 0.5), Math.max(0, ry - 3)],
+        [rx + Math.round(sw * 0.5), Math.min(canvas.height - 1, ry + Math.round(sh) + 3)],
+      ];
+      let bestLum = -1;
+      let br = 255, bgc = 255, bb = 255;
+      for (const [px, py] of pts) {
+        const d = ctx.getImageData(px, py, 1, 1).data;
+        if (d[3] > 128) {
+          const lum = 0.299 * d[0] + 0.587 * d[1] + 0.114 * d[2];
+          if (lum > bestLum) {
+            bestLum = lum;
+            br = d[0]; bgc = d[1]; bb = d[2];
+          }
+        }
+      }
+      if (bestLum < 0 || isNeutralPaperRgb(br, bgc, bb)) return '#ffffff';
+      return `#${br.toString(16).padStart(2, '0')}${bgc.toString(16).padStart(2, '0')}${bb.toString(16).padStart(2, '0')}`;
+    } catch {
+      return '#ffffff';
+    }
+  }, []);
+
+  // Clear a specific text/object block footprint on the rendered canvas so no ghost pixels stay behind
   const clearTextFootprintOnCanvas = useCallback((sx: number, sy: number, sw: number, sh: number, bg?: string) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -616,9 +1276,13 @@ export default function AdvancedEditor() {
     // 1. Restore pristine background from PDF.js
     ctx.putImageData(pristineCanvasRef.current, 0, 0);
 
-    // 2. Erase the original text at source positions for all active text annotations on current page
+    // 2. Erase original footprints at source positions for edited text or moved PDF image objects
     const pageAnnotations = annotations.filter(
-      a => a.pageIndex === currentPage - 1 && a.type === 'text' && a.sourceWidth && a.sourceWidth > 0
+      a =>
+        a.pageIndex === currentPage - 1 &&
+        (a.type === 'text' || a.type === 'image') &&
+        a.sourceWidth &&
+        a.sourceWidth > 0
     );
     for (const ann of pageAnnotations) {
       const sx = ann.sourceX !== undefined ? ann.sourceX : ann.x;
@@ -642,6 +1306,7 @@ export default function AdvancedEditor() {
     try {
       const page = await pdfDoc.getPage(pageNum);
       const viewport = page.getViewport({ scale: zoomLevel });
+      pageViewportRef.current = viewport;
       setPageViewport(viewport);
 
       const canvas = canvasRef.current;
@@ -820,6 +1485,11 @@ export default function AdvancedEditor() {
         } else {
           setDetectedText([]);
           setOcrDone(false);
+          // Zero-click auto-scan when offline or when layer analysis won't cover it
+          if (backendStatus === 'offline' && !autoScannedPagesRef.current.has(pageNum)) {
+            autoScannedPagesRef.current.add(pageNum);
+            setTimeout(() => { runOcrOnPage(); }, 50);
+          }
         }
       } else {
         setDetectedText(items);
@@ -848,7 +1518,7 @@ export default function AdvancedEditor() {
     }
   };
 
-  // === Upgraded Multi-Engine OCR for Scanned PDFs (Backend Pro Hybrid + High-Res Browser Fallback) ===
+  // === Multi-Engine OCR for Scanned PDFs (Precision Hybrid + High-Res Browser Fallback) ===
   const runOcrOnPage = async () => {
     if (!pdfDoc) return;
     const targetPage = currentPage;
@@ -858,13 +1528,13 @@ export default function AdvancedEditor() {
     setOcrStatusLabel('Scanning page...');
 
     try {
-      const apiLang = ocrLanguage === 'eng+hin' ? 'hin+eng' : ocrLanguage;
+      const apiLang = ocrLanguage || 'auto';
       let unscaledBlocks: DetectedTextBlock[] = [];
 
-      // 1. Prefer Pro Hybrid Backend OCR (/ocr/page-words: RapidOCR + OpenCV cleaner + Tesseract TSV)
+      // 1. Prefer server hybrid OCR endpoint
       if (file && backendStatus !== 'offline') {
         try {
-          setOcrStatusLabel('Running Pro AI OCR...');
+          setOcrStatusLabel('Detecting page layers...');
           const fd = new FormData();
           fd.append('file', file);
           fd.append('page', String(targetPage - 1));
@@ -878,31 +1548,28 @@ export default function AdvancedEditor() {
             setBackendStatus('ready');
             const payload = await res.json();
             if (Array.isArray(payload?.words) && payload.words.length > 0) {
+              const ocrLines = Array.isArray(payload.lines) ? payload.lines : [];
+              const ocrParagraphs = Array.isArray(payload.paragraphs) ? payload.paragraphs : [];
+              setBackendWords(payload.words);
+              setBackendLines(ocrLines);
+              setBackendParagraphs(ocrParagraphs);
+              setBackendLayerPage(targetPage);
+              const existingSnap = pageLayersCacheRef.current.get(`${targetPage - 1}:${ocrLanguage}`);
+              if (existingSnap) {
+                pageLayersCacheRef.current.set(`${targetPage - 1}:${ocrLanguage}`, {
+                  ...existingSnap,
+                  words: payload.words,
+                  lines: ocrLines,
+                  paragraphs: ocrParagraphs,
+                });
+              }
               unscaledBlocks = payload.words
-                .map((w: any): DetectedTextBlock => {
-                  const x = Number(w.x) || 0;
-                  const y = Number(w.y) || 0;
-                  const bw = Math.max(2, Number(w.w) || 2);
-                  const bh = Math.max(4, Number(w.h) || 4);
-                  const fsz = Number(w.fontSize) || Math.max(6, Math.min(160, Math.round(bh * 0.76 * 10) / 10));
-                  const basePt = Number(w.baseline) || Math.round((y + bh * 0.80) * 100) / 100;
-                  return {
-                    text: String(w.text || '').trim(),
-                    x,
-                    y,
-                    w: bw,
-                    h: bh,
-                    fontSize: fsz,
-                    pdfBaselineY: basePt,
-                    fgColor: String(w.fgColor || '#000000'),
-                    bgColor: isPaperWhiteHex(w.bgColor) ? '#ffffff' : String(w.bgColor || '#ffffff'),
-                  };
-                })
+                .map(mapBackendWordToBlock)
                 .filter((b: DetectedTextBlock) => b.text.length > 0);
             }
           }
-        } catch (backendErr) {
-          console.warn('Backend /ocr/page-words unavailable, falling back to high-res browser OCR:', backendErr);
+        } catch {
+          // Silently fall back to high-res on-device OCR
         }
       }
 
@@ -934,7 +1601,7 @@ export default function AdvancedEditor() {
         const rawImgData = rawCtx.getImageData(0, 0, rawCanvas.width, rawCanvas.height).data;
 
         setOcrStatusLabel('Recognizing words...');
-        const tessLang = ocrLanguage === 'eng+hin' ? 'hin+eng' : ocrLanguage;
+        const tessLang = toBrowserTesseractLang(ocrLanguage);
         const worker = await createWorker(tessLang, 1, {
           logger: (m: any) => {
             if (m?.status === 'recognizing text') {
@@ -1175,7 +1842,7 @@ export default function AdvancedEditor() {
       lastErasedRef.current = new Set();
       pushUndo();
       eraseAtPoint(x, y);
-    } else if (['highlight', 'link', 'table', 'underline', 'strikethrough'].includes(activeTool!)) {
+    } else if (['highlight', 'link', 'table', 'underline', 'strikethrough', 'magic_erase'].includes(activeTool!)) {
       setIsDrawing(true);
       setStartPos({ x, y });
       setCurrentRect({ x, y, w: 0, h: 0 });
@@ -1404,6 +2071,20 @@ export default function AdvancedEditor() {
         };
         setAnnotations(prev => [...prev, newAnnotation]);
         setSelectedId(newAnnotation.id);
+      } else if (activeTool === 'magic_erase') {
+        const bgHex = sampleCanvasBgHex(currentRect.x, currentRect.y, currentRect.w, currentRect.h);
+        const newAnnotation: Annotation = {
+          id: Date.now().toString(),
+          type: 'magic_erase',
+          pageIndex: currentPage - 1,
+          x: currentRect.x,
+          y: currentRect.y,
+          width: currentRect.w,
+          height: currentRect.h,
+          color: bgHex,
+        };
+        setAnnotations(prev => [...prev, newAnnotation]);
+        setSelectedId(newAnnotation.id);
       } else {
         const newAnnotation: Annotation = {
           id: Date.now().toString(),
@@ -1493,31 +2174,47 @@ export default function AdvancedEditor() {
       const target = prev.find(a => a.id === id);
       if (!target || target.type !== 'text') return prev;
 
-      // ── Keep original font size: NEVER auto-resize while user is typing.
-      // User can manually change size via the toolbar. This prevents the
-      // "text gets big/small as I type" problem.
+      // Strictly lock matched font size while editing — prevent arbitrary resize while typing
       const preservedFont = target.fontSize || 14;
-
-      // Width: for single-line text, auto-expand if new text exceeds previous box width
       const scale = pageViewport?.scale || 1;
-      const isSingleLine = !text.includes('\n') && !(target.text || '').includes('\n');
-      const estimatedW = Math.round(text.length * (preservedFont * scale * 0.62));
-      const contentW = isSingleLine
-        ? Math.max(target.width || 0, target.sourceWidth || 0, estimatedW)
-        : (target.width || target.sourceWidth || 120);
-      
-      // Calculate how many lines we roughly have by splitting by newline
-      const lines = text.split('\n').length;
-      
-      const lineHeight = Math.round(preservedFont * scale * 1.28);
-      const minH = lineHeight * lines;
-      const contentH = Math.max(target.height || target.sourceHeight || lineHeight, minH);
-      
+      const fontPx = Math.max(4, preservedFont * scale);
+      const fontCss = target.fontCssFamily || pdfFontToCss(target.originalFontName);
+      const metrics = measureCanvasTextMetrics(text, fontCss, fontPx, !!target.bold, !!target.italic);
+      const isParagraphBlock = (target.lineCount || 1) > 1 || text.includes('\n') || (target.text || '').includes('\n');
+
+      let contentW: number;
+      let contentH: number;
+      let nextLineCount = 1;
+
+      if (!isParagraphBlock) {
+        const measuredPadW = Math.ceil(metrics.maxLineW + 2);
+        const maxPageW = Math.max(240, Math.round((pageViewport?.width || 1200) - Math.max(0, target.x)));
+        contentW = Math.min(maxPageW, Math.max(target.sourceWidth || target.width || 16, measuredPadW));
+        contentH = Math.max(target.sourceHeight || 0, target.height || Math.round(fontPx * 1.18));
+      } else {
+        contentW = Math.max(target.width || 0, target.sourceWidth || 0, 120);
+        const wrapW = Math.max(24, contentW - 2);
+        nextLineCount = Math.max(
+          1,
+          metrics.lineWidths.reduce((acc, lw) => acc + Math.max(1, Math.ceil(lw / wrapW)), 0),
+        );
+        const effRatio = Math.max(1.05, Math.min(1.85, target.lineHeightRatio || 1.22));
+        const minH = Math.ceil(fontPx * effRatio * nextLineCount);
+        contentH = Math.max(target.sourceHeight || 0, minH);
+      }
+
       const pad = getWhiteoutPad(contentH);
 
       return prev.map(a => {
         if (a.id === id) {
-          return { ...a, text, fontSize: preservedFont, width: contentW, height: contentH };
+          return {
+            ...a,
+            text,
+            fontSize: preservedFont,
+            width: contentW,
+            height: contentH,
+            lineCount: nextLineCount,
+          };
         }
         if (target.linkedId && a.id === target.linkedId && a.type === 'whiteout') {
           return {
@@ -1562,9 +2259,8 @@ export default function AdvancedEditor() {
   };
 
   /**
-   * Map a PDF/PyMuPDF font name to a CSS font-family stack.
-   * This gives a visually accurate live preview of the original font
-   * while editing (exact embedding happens in the saved PDF via pdf-lib).
+   * Map a PDF font name to a CSS font-family stack for live WYSIWYG preview
+   * while editing.
    */
   const pdfFontToCss = (fontName: string | undefined): string => {
     if (!fontName) return 'Helvetica, Arial, sans-serif';
@@ -1576,9 +2272,25 @@ export default function AdvancedEditor() {
       f.includes('garamond') || f.includes('georgia') || f.includes('bookman') ||
       f.includes('minion') || f.includes('caslon') || f.includes('didot') ||
       f.includes('bodoni') || f.includes('cambria') || f.includes('constantia') ||
-      (f.includes('serif') && !f.includes('sans-serif'));
+      f.includes('nimbusrom') || f.includes('liberationserif') || f.includes('liberation serif') ||
+      f.includes('tinos') || f.includes('freeserif') || f.includes('dejavuserif') ||
+      f.includes('dejavu serif') || f.includes('century') || f.includes('baskerville') ||
+      f.includes('charter') || f.includes('ptserif') || f.includes('merriweather') ||
+      f.includes('lora') ||
+      (f.includes('serif') && !f.includes('sans-serif') && !f.includes('sans'));
     if (hasExplicitSerif) {
+      if (f.includes('georgia') || f.includes('cambria')) {
+        return 'Georgia, "Times New Roman", Times, serif';
+      }
       return '"Times New Roman", Times, Georgia, serif';
+    }
+
+    // Wide modern UI sans families (Verdana, DejaVu, Tahoma, Segoe, Calibri)
+    if (f.includes('verdana') || f.includes('dejavu') || f.includes('tahoma')) {
+      return 'Verdana, "DejaVu Sans", Arial, sans-serif';
+    }
+    if (f.includes('calibri') || f.includes('carlito') || f.includes('segoe')) {
+      return 'Calibri, Arial, Helvetica, sans-serif';
     }
 
     // Monospace / Courier family
@@ -1609,8 +2321,42 @@ export default function AdvancedEditor() {
     }
 
     // Helvetica / Arial / sans-serif (default catch-all)
-    // Includes: Arial, Helvetica, Calibri, Trebuchet, Verdana, Tahoma, Gill Sans, Franklin, Futura
     return 'Helvetica, Arial, Calibri, sans-serif';
+  };
+
+  /**
+   * Compute exact CSS marginTop offset (in canvas px) so a `<textarea>`'s first
+   * line baseline lands directly on the PDF baseline (`baselinePt * scale`),
+   * preventing the 2-16px downward jump inside browser text boxes.
+   */
+  const getTextareaBaselineMarginTop = (
+    boxTopPx: number,
+    targetBaselinePt: number | undefined,
+    fontCss: string,
+    fontSizePt: number,
+    bold: boolean,
+    italic: boolean,
+    lineHeightRatio = 1.18
+  ): number => {
+    const scale = pageViewport?.scale || 1;
+    if (!targetBaselinePt || targetBaselinePt <= 0) return 0;
+    const fontSizePx = Math.max(4, fontSizePt * scale);
+    let cssAscent = fontSizePx * 0.88;
+    let cssDescent = fontSizePx * 0.22;
+    try {
+      const m = measureCanvasTextMetrics('HÁpgy', fontCss, fontSizePx, bold, italic);
+      cssAscent = m.cssAscent;
+      cssDescent = m.cssDescent;
+    } catch {
+      // Keep default font metrics
+    }
+    const lineBoxH = fontSizePx * lineHeightRatio;
+    const halfLeading = (lineBoxH - (cssAscent + cssDescent)) / 2;
+    const baselineFromTextareaTop = halfLeading + cssAscent;
+    const desiredTopPx = targetBaselinePt * scale - baselineFromTextareaTop;
+    const delta = Math.round(desiredTopPx - boxTopPx);
+    const maxShift = Math.round(fontSizePx * 0.75);
+    return Math.max(-maxShift, Math.min(maxShift, delta));
   };
 
   const toggleBoldForText = () => {
@@ -1646,37 +2392,107 @@ export default function AdvancedEditor() {
         return;
       }
 
-      // 1. Separate native text replacements (from selection) vs other annotations
-      const nativeEditsAll = annotations.filter(a => a.type === 'text' && a.sourceWidth && a.sourceWidth > 0);
-      const otherAnnotations = annotations.filter(a => !(a.type === 'text' && a.sourceWidth && a.sourceWidth > 0));
+      // 1. Separate server-processed edits (matched text, magic erase, moved/replaced objects) vs overlay annotations
+      const isServerLayerEdit = (a: Annotation) =>
+        (a.type === 'text' && Boolean(a.sourceWidth && a.sourceWidth > 0)) ||
+        a.type === 'magic_erase' ||
+        (a.type === 'image' && Boolean(a.objectId));
+      const nativeEditsAll = annotations.filter(isServerLayerEdit);
+      const otherAnnotations = annotations.filter(a => !isServerLayerEdit(a));
 
       let currentFileBuffer = await file.arrayBuffer();
 
-      // 2. If there are native text edits, send to Python backend first (with Render cold-start wakeup retry)
+      // 2. Apply layer-level edits on server (with automatic cold-start wakeup retry)
       if (nativeEditsAll.length > 0) {
-        const editPayload = nativeEditsAll.map(ann => ({
-          page: ann.pageIndex,
-          origX: (ann.sourceX !== undefined ? ann.sourceX : ann.x) / pageViewport.scale,
-          origY: (ann.sourceY !== undefined ? ann.sourceY : ann.y) / pageViewport.scale,
-          origW: (ann.sourceWidth || ann.width || 100) / pageViewport.scale,
-          origH: (ann.sourceHeight || ann.height || 20) / pageViewport.scale,
-          x: ann.x / pageViewport.scale,
-          y: ann.y / pageViewport.scale,
-          w: (ann.width || ann.sourceWidth || 100) / pageViewport.scale,
-          h: (ann.height || ann.sourceHeight || 20) / pageViewport.scale,
-          newText: ann.text || '',
-          fontSize: ann.fontSize || 12,
-          color: ann.color || '#000000',
-          bgColor: isPaperWhiteHex(ann.backgroundColor) ? '#ffffff' : ann.backgroundColor,
-          bold: ann.bold || false,
-          italic: ann.italic || false,
-          underline: ann.underline || false,
-          strikethrough: ann.strikethrough || false,
-          fontFamily: ann.fontCssFamily || ann.originalFontName || '',
-          fontName: ann.originalFontName || '',
-          align: ann.align || 'left',
-          baseline: ann.baseline,
-        }));
+        const editPayload = nativeEditsAll.map(ann => {
+          const sx = (ann.sourceX !== undefined ? ann.sourceX : ann.x) / pageViewport.scale;
+          const sy = (ann.sourceY !== undefined ? ann.sourceY : ann.y) / pageViewport.scale;
+          const sw = (ann.sourceWidth || ann.width || 100) / pageViewport.scale;
+          const sh = (ann.sourceHeight || ann.height || 20) / pageViewport.scale;
+          const tx = ann.x / pageViewport.scale;
+          const rawTy = ann.y / pageViewport.scale;
+          const tw = (ann.width || ann.sourceWidth || 100) / pageViewport.scale;
+          const th = (ann.height || ann.sourceHeight || 20) / pageViewport.scale;
+
+          if (ann.type === 'magic_erase') {
+            if (ann.objectId && ann.objectAction === 'delete') {
+              return {
+                type: 'delete_image',
+                page: ann.pageIndex,
+                xref: ann.xref || 0,
+                source: ann.objectSource || 'scan',
+                origX: sx,
+                origY: sy,
+                origW: sw,
+                origH: sh,
+                x: sx,
+                y: sy,
+                w: sw,
+                h: sh,
+              };
+            }
+            return {
+              type: 'magic_erase',
+              page: ann.pageIndex,
+              origX: tx,
+              origY: rawTy,
+              origW: tw,
+              origH: th,
+              x: tx,
+              y: rawTy,
+              w: tw,
+              h: th,
+            };
+          }
+
+          if (ann.type === 'image' && ann.objectId) {
+            return {
+              type: ann.objectAction === 'replace' ? 'replace_image' : 'move_image',
+              page: ann.pageIndex,
+              xref: ann.xref || 0,
+              source: ann.objectSource || 'scan',
+              origX: sx,
+              origY: sy,
+              origW: sw,
+              origH: sh,
+              x: tx,
+              y: rawTy,
+              w: tw,
+              h: th,
+              imageDataUrl: ann.imageDataUrl || '',
+            };
+          }
+
+          // Lock vertical baseline against tiny zoom/pixel rounding drift on unmoved in-place edits
+          const inPlaceVert = ann.sourceY !== undefined && Math.abs(rawTy - sy) < 1.1;
+          const ty = inPlaceVert ? sy : rawTy;
+
+          return {
+            type: 'text',
+            page: ann.pageIndex,
+            origX: sx,
+            origY: sy,
+            origW: sw,
+            origH: sh,
+            x: tx,
+            y: ty,
+            w: tw,
+            h: th,
+            newText: ann.text || '',
+            fontSize: ann.fontSize || 12,
+            color: ann.color || '#000000',
+            bgColor: isPaperWhiteHex(ann.backgroundColor) ? '#ffffff' : ann.backgroundColor,
+            bold: ann.bold || false,
+            italic: ann.italic || false,
+            underline: ann.underline || false,
+            strikethrough: ann.strikethrough || false,
+            fontFamily: ann.originalFontName || ann.fontCssFamily || '',
+            fontName: ann.originalFontName || '',
+            align: ann.align || 'left',
+            baseline: inPlaceVert ? (ann.sourceBaseline ?? ann.baseline) : ann.baseline,
+            lineHeightRatio: ann.lineHeightRatio,
+          };
+        });
 
         const editsJson = JSON.stringify(editPayload);
         const postEditToBackend = async () => {
@@ -1714,8 +2530,6 @@ export default function AdvancedEditor() {
             currentFileBuffer = await res.arrayBuffer();
             setBackendStatus('ready');
             backendSucceeded = true;
-          } else {
-            console.warn('Native Python backend edit failed, using local vector HarfBuzz engine:', await res.text().catch(() => res.status));
           }
         } catch (fetchErr: any) {
           const msg = String(fetchErr?.message || '').toLowerCase();
@@ -1734,11 +2548,8 @@ export default function AdvancedEditor() {
                 }
               }
             } catch {
-              // Proceed to local vector fallback below
+              // Proceed silently to local fallback below
             }
-          }
-          if (!backendSucceeded) {
-            console.warn('Native Python backend offline/asleep, using in-browser vector HarfBuzz fallback:', fetchErr);
           }
         }
 
@@ -1898,6 +2709,7 @@ export default function AdvancedEditor() {
 
           const colorRgb = hexToRgb(ann.color || '#000000');
           const boxWidthPt = pdfW > 0 ? pdfW : clearPdfW;
+          const effLineFactor = ann.lineHeightRatio && ann.lineHeightRatio >= 1.05 ? ann.lineHeightRatio : 1.25;
 
           if (checkNonLatinChars(ann.text)) {
             // Pure Native PDF Vector HarfBuzz Path (Hindi / Devanagari / mixed Unicode)
@@ -1913,7 +2725,7 @@ export default function AdvancedEditor() {
               bold: ann.bold,
               italic: ann.italic,
               align: ann.align || 'left',
-              lineHeightFactor: 1.25,
+              lineHeightFactor: effLineFactor,
               underline: ann.underline,
               strikethrough: ann.strikethrough,
             });
@@ -1921,7 +2733,7 @@ export default function AdvancedEditor() {
             if (!vecRes.drawn) {
               // Last-resort raster fallback only if WASM/font is unavailable or emoji .notdef
               const lines = ann.text.split(/\r?\n/);
-              const lineHeightPt = textFontSizePt * 1.25;
+              const lineHeightPt = textFontSizePt * effLineFactor;
               for (let li = 0; li < lines.length; li++) {
                 const lineTxt = lines[li];
                 if (!lineTxt) continue;
@@ -1959,7 +2771,7 @@ export default function AdvancedEditor() {
               bold: ann.bold,
               italic: ann.italic,
               align: ann.align || 'left',
-              lineHeightFactor: 1.25,
+              lineHeightFactor: effLineFactor,
               underline: ann.underline,
               strikethrough: ann.strikethrough,
             });
@@ -2023,7 +2835,7 @@ export default function AdvancedEditor() {
               }
             }
           }
-        } else if (ann.type === 'whiteout') {
+        } else if (ann.type === 'whiteout' || ann.type === 'magic_erase') {
           const { r, g, b } = hexToRgb(ann.color || '#ffffff');
           const padding = 2 / scale;
           page.drawRectangle({
@@ -2127,7 +2939,7 @@ export default function AdvancedEditor() {
       }
 
       if (usedLocalVectorFallback) {
-        setSavedEngineNote('Processed cleanly in browser with Vector HarfBuzz Hindi & Font Matching (backend was asleep/offline).');
+        setSavedEngineNote('Processed locally in your browser with automatic font & Hindi shaping.');
       }
 
       const pdfBytes = await pdf.save();
@@ -2162,7 +2974,7 @@ export default function AdvancedEditor() {
     if (!mctx) return [block]; // fallback: return whole block
 
     const screenPx = Math.max(8, Math.round(block.fontSize * (pageViewport?.scale || 1)));
-    const fontStr = `${block.italic ? 'italic ' : ''}${block.bold ? '700 ' : ''}${screenPx}px Helvetica, Arial, sans-serif`;
+    const fontStr = `${block.italic ? 'italic ' : ''}${block.bold ? '700 ' : ''}${screenPx}px ${pdfFontToCss(block.fontName)}`;
     mctx.font = fontStr;
 
     const wordMeasures = words.map(w => mctx.measureText(w).width);
@@ -2196,82 +3008,201 @@ export default function AdvancedEditor() {
    */
   const mergeBlocksToLines = (blocks: DetectedTextBlock[]): DetectedTextBlock[] => {
     if (!blocks.length) return [];
+    const scale = pageViewport?.scale || 1;
+    const basePxOf = (b: DetectedTextBlock) =>
+      b.baselineY ?? (b.pdfBaselineY !== undefined ? b.pdfBaselineY * scale : b.y + b.h * 0.8);
+
     const sorted = [...blocks].sort((a, b) => {
-      const yDiff = a.y - b.y;
-      if (Math.abs(yDiff) > Math.max(a.h, b.h) * 0.45) return yDiff;
+      const baseDiff = basePxOf(a) - basePxOf(b);
+      if (Math.abs(baseDiff) > Math.max(a.h, b.h) * 0.45) return baseDiff;
       return a.x - b.x;
     });
+
+    const finalizeLine = (members: DetectedTextBlock[]): DetectedTextBlock => {
+      members.sort((a, b) => a.x - b.x);
+      let joined = members[0].text;
+      let minX = members[0].x;
+      let minY = members[0].y;
+      let maxX = members[0].x + members[0].w;
+      let maxY = members[0].y + members[0].h;
+      let boldWeight = 0;
+      let italicWeight = 0;
+      let totalWeight = 0;
+      let domFontName = members[0].fontName;
+      let domLen = -1;
+
+      const fsPairs: Array<{ val: number; weight: number }> = [];
+      const basePtPairs: Array<{ val: number; weight: number }> = [];
+
+      for (let i = 0; i < members.length; i++) {
+        const m = members[i];
+        const len = Math.max(1, m.text.trim().length);
+        totalWeight += len;
+        if (m.bold) boldWeight += len;
+        if (m.italic) italicWeight += len;
+        if (m.fontName && len > domLen) {
+          domLen = len;
+          domFontName = m.fontName;
+        }
+        fsPairs.push({ val: m.fontSize, weight: len });
+        const mBasePt = m.pdfBaselineY ?? (m.baselineY !== undefined ? m.baselineY / scale : (m.y + m.h * 0.8) / scale);
+        basePtPairs.push({ val: mBasePt, weight: len });
+        minX = Math.min(minX, m.x);
+        minY = Math.min(minY, m.y);
+        maxX = Math.max(maxX, m.x + m.w);
+        maxY = Math.max(maxY, m.y + m.h);
+        if (i > 0) {
+          const prev = members[i - 1];
+          const gap = m.x - (prev.x + prev.w);
+          joined += (gap > 1 ? ' ' : '') + m.text;
+        }
+      }
+
+      const lineH = Math.max(4, maxY - minY);
+      const medFs = weightedMedian(fsPairs) || members[0].fontSize;
+      const lineFs = sanitizeMatchedFontSizePt(medFs, lineH / scale, joined, 1);
+      const medBasePt = weightedMedian(basePtPairs) || ((minY + lineH * 0.8) / scale);
+
+      return {
+        ...members[0],
+        text: joined,
+        x: minX,
+        y: minY,
+        w: Math.max(4, maxX - minX),
+        h: lineH,
+        fontSize: lineFs,
+        pdfBaselineY: Math.round(medBasePt * 100) / 100,
+        baselineY: medBasePt * scale,
+        fontName: domFontName,
+        bold: boldWeight * 2 >= totalWeight,
+        italic: italicWeight * 2 >= totalWeight,
+        fgColor: members.find(m => m.fgColor)?.fgColor || members[0].fgColor,
+        bgColor: members.find(m => m.bgColor)?.bgColor || members[0].bgColor,
+        lineCount: 1,
+      };
+    };
+
     const result: DetectedTextBlock[] = [];
-    let group: DetectedTextBlock = { ...sorted[0] };
+    let currentMembers: DetectedTextBlock[] = [sorted[0]];
+    let rowBasePx = basePxOf(sorted[0]);
+    let rowMaxX = sorted[0].x + sorted[0].w;
+    let rowH = sorted[0].h;
+
     for (let i = 1; i < sorted.length; i++) {
       const next = sorted[i];
-      const sameRow = Math.abs(next.y - group.y) < Math.max(group.h, next.h) * 0.45;
-      const hGap = next.x - (group.x + group.w);
-      // Use canvas-pixel word spacing relative to box height so 75%/150%/OCR scales work consistently
-      const closeEnough = hGap >= -Math.max(2, group.h * 0.12) && hGap < Math.max(8, group.h * 0.85);
+      const nextBasePx = basePxOf(next);
+      const sameRow =
+        Math.abs(nextBasePx - rowBasePx) <= Math.max(4, Math.max(rowH, next.h) * 0.5) ||
+        Math.abs(next.y - currentMembers[0].y) < Math.max(rowH, next.h) * 0.45;
+      const hGap = next.x - rowMaxX;
+      const refH = Math.max(rowH, next.h);
+      const closeEnough = hGap >= -Math.max(3, refH * 0.15) && hGap < Math.max(10, refH * 1.15);
       if (sameRow && closeEnough) {
-        const rightEdge = Math.max(group.x + group.w, next.x + next.w);
-        const topEdge = Math.min(group.y, next.y);
-        const bottomEdge = Math.max(group.y + group.h, next.y + next.h);
-        group = {
-          ...group,
-          text: group.text + (hGap > 1 ? ' ' : '') + next.text,
-          y: topEdge,
-          w: rightEdge - group.x,
-          h: bottomEdge - topEdge,
-          fontSize: Math.max(group.fontSize, next.fontSize),
-          baselineY: group.baselineY ?? next.baselineY,
-          pdfBaselineY: group.pdfBaselineY ?? next.pdfBaselineY,
-          bold: group.bold || next.bold,
-          italic: group.italic || next.italic,
-          fgColor: group.fgColor || next.fgColor,
-          bgColor: group.bgColor || next.bgColor,
-        };
+        currentMembers.push(next);
+        rowBasePx = weightedMedian(
+          currentMembers.map(m => ({ val: basePxOf(m), weight: Math.max(1, m.text.trim().length) })),
+        ) || rowBasePx;
+        rowMaxX = Math.max(rowMaxX, next.x + next.w);
+        rowH = Math.max(rowH, next.h);
       } else {
-        result.push(group);
-        group = { ...next };
+        result.push(finalizeLine(currentMembers));
+        currentMembers = [next];
+        rowBasePx = nextBasePx;
+        rowMaxX = next.x + next.w;
+        rowH = next.h;
       }
     }
-    result.push(group);
+    result.push(finalizeLine(currentMembers));
     return result;
   };
 
   /**
    * PARAGRAPH MODE: Merge vertically adjacent line-groups into paragraph blocks.
-   * Lines must share similar left-margin (< 15px) and have small vertical gap
-   * (< 0.8× line height) to be considered part of the same paragraph.
+   * Uses zoom-scaled alignment tolerance and measures true baseline-to-baseline pitch.
    */
   const mergeLinesToParagraphs = (lines: DetectedTextBlock[]): DetectedTextBlock[] => {
     if (!lines.length) return [];
-    const sorted = [...lines].sort((a, b) => a.y - b.y);
+    const scale = pageViewport?.scale || 1;
+    const basePxOf = (b: DetectedTextBlock) =>
+      b.baselineY ?? (b.pdfBaselineY !== undefined ? b.pdfBaselineY * scale : b.y + b.h * 0.8);
+
+    const sorted = [...lines].sort((a, b) => a.y - b.y || a.x - b.x);
+
+    const finalizePara = (members: DetectedTextBlock[]): DetectedTextBlock => {
+      if (members.length === 1) return members[0];
+      const first = members[0];
+      const minX = Math.min(...members.map(m => m.x));
+      const minY = Math.min(...members.map(m => m.y));
+      const maxX = Math.max(...members.map(m => m.x + m.w));
+      const maxY = Math.max(...members.map(m => m.y + m.h));
+      const joined = members.map(m => m.text).join('\n');
+
+      let boldW = 0;
+      let italicW = 0;
+      let totalW = 0;
+      const fsPairs: Array<{ val: number; weight: number }> = [];
+      for (const m of members) {
+        const w = Math.max(1, m.text.trim().length);
+        totalW += w;
+        if (m.bold) boldW += w;
+        if (m.italic) italicW += w;
+        fsPairs.push({ val: m.fontSize, weight: w });
+      }
+      const avgLineHPt = members.reduce((s, m) => s + m.h, 0) / (members.length * scale);
+      const medFs = weightedMedian(fsPairs) || first.fontSize;
+      const cleanFs = sanitizeMatchedFontSizePt(medFs, avgLineHPt, first.text, 1);
+
+      const pitches: number[] = [];
+      for (let i = 1; i < members.length; i++) {
+        const dp = basePxOf(members[i]) - basePxOf(members[i - 1]);
+        if (dp > Math.max(4, cleanFs * scale * 0.85) && dp < cleanFs * scale * 2.1) {
+          pitches.push(dp);
+        }
+      }
+      pitches.sort((a, b) => a - b);
+      const medPitch = pitches.length ? pitches[Math.floor(pitches.length / 2)] : cleanFs * scale * 1.22;
+      const ratio = Math.round(Math.max(1.05, Math.min(1.85, medPitch / Math.max(4, cleanFs * scale))) * 1000) / 1000;
+      const firstBasePt = first.pdfBaselineY ?? (first.baselineY !== undefined ? first.baselineY / scale : (first.y + first.h * 0.8) / scale);
+
+      return {
+        ...first,
+        text: joined,
+        x: minX,
+        y: minY,
+        w: Math.max(4, maxX - minX),
+        h: Math.max(6, maxY - minY),
+        fontSize: cleanFs,
+        pdfBaselineY: Math.round(firstBasePt * 100) / 100,
+        baselineY: firstBasePt * scale,
+        bold: boldW * 2 >= totalW,
+        italic: italicW * 2 >= totalW,
+        lineHeightRatio: ratio,
+        lineCount: members.length,
+      };
+    };
+
     const result: DetectedTextBlock[] = [];
-    let para: DetectedTextBlock = { ...sorted[0] };
+    let members: DetectedTextBlock[] = [sorted[0]];
+
     for (let i = 1; i < sorted.length; i++) {
       const next = sorted[i];
-      const vertGap = next.y - (para.y + para.h);
-      const lineH = Math.max(para.h, next.h);
-      // Strict left-alignment: left edges within 15px
-      const alignedLeft = Math.abs(next.x - para.x) < 15;
-      // Gap must be small — less than 0.8 line heights (not a paragraph break)
-      const sameParagraph = vertGap >= 0 && vertGap < lineH * 0.8 && alignedLeft;
+      const prev = members[members.length - 1];
+      const anchor = members[0];
+      const vertGap = next.y - (prev.y + prev.h);
+      const lineH = Math.max(prev.h, next.h);
+      const leftDiff = Math.abs(next.x - anchor.x);
+      const centerDiff = Math.abs((next.x + next.w * 0.5) - (anchor.x + anchor.w * 0.5));
+      const aligned = leftDiff <= Math.max(12, lineH * 1.1) || centerDiff <= Math.max(14, lineH * 1.25);
+      const sameFontScale = Math.max(prev.fontSize, next.fontSize) <= Math.min(prev.fontSize, next.fontSize) * 1.38;
+      const sameParagraph = vertGap >= -lineH * 0.18 && vertGap < lineH * 0.92 && aligned && sameFontScale;
       if (sameParagraph) {
-        const newBottom = next.y + next.h;
-        const newRight = Math.max(para.x + para.w, next.x + next.w);
-        para = {
-          ...para,
-          text: para.text + ' ' + next.text,
-          w: newRight - para.x,
-          h: newBottom - para.y,
-          fontSize: Math.max(para.fontSize, next.fontSize),
-          bold: para.bold || next.bold,
-          italic: para.italic || next.italic,
-        };
+        members.push(next);
       } else {
-        result.push(para);
-        para = { ...next };
+        result.push(finalizePara(members));
+        members = [next];
       }
     }
-    result.push(para);
+    result.push(finalizePara(members));
     return result;
   };
 
@@ -2304,6 +3235,83 @@ export default function AdvancedEditor() {
     );
   };
 
+  // Shared helper: build a text annotation with exact PyMuPDF/vision metrics & baseline
+  const buildTextAnnotationFromBlock = useCallback((
+    block: DetectedTextBlock,
+    idSuffix: string,
+    overrideText?: string,
+  ): Annotation => {
+    const match = findBackendMatch(block);
+    const scale = pageViewport?.scale || 1;
+    const useExact = Boolean(
+      match?.exactWordBounds
+      && typeof match.x === 'number'
+      && typeof match.y === 'number'
+      && typeof match.w === 'number'
+      && typeof match.h === 'number'
+    );
+    const maxPageW = Math.max(800, Math.round(pageViewport?.width || 800));
+    const bx = useExact ? (match!.x! * scale) : block.x;
+    const by = useExact ? (match!.y! * scale) : block.y;
+    const rawBw = useExact ? (match!.w! * scale) : block.w;
+    const rawBh = useExact ? (match!.h! * scale) : block.h;
+    const bw = Math.min(Math.max(rawBw, 12), maxPageW);
+    const bh = Math.max(rawBh, 10);
+    const finalText = overrideText !== undefined ? overrideText : block.text;
+    const lineCount = Math.max(
+      1,
+      match?.lineCount || block.lineCount || 1,
+      finalText ? finalText.split(/\r?\n/).length : 1,
+    );
+    const rawFontSize = match ? match.fontSize : (block.fontSize || Math.max(6, Math.round((bh / scale) * 0.76)));
+    const fs = sanitizeMatchedFontSizePt(rawFontSize, bh / scale, finalText || block.text, lineCount, Boolean(match?.fitTrusted));
+    const baselinePt = match?.baseline || block.pdfBaselineY || ((by + (bh / lineCount) * 0.78) / scale);
+    const roundedBaseline = Math.round(baselinePt * 100) / 100;
+    const fontName = match?.fontName || block.fontName;
+    const fontCss = pdfFontToCss(fontName);
+    const isBold = match?.bold ?? block.bold ?? false;
+    const isItalic = match?.italic ?? block.italic ?? false;
+    const isSingleLine = lineCount === 1 && !(finalText || '').includes('\n');
+    const maxAvailW = Math.max(bw, Math.round((pageViewport?.width || 1200) - Math.max(0, bx)));
+    const measuredW = isSingleLine
+      ? measureCanvasTextMetrics(finalText || '', fontCss, fs * scale, isBold, isItalic).maxLineW
+      : 0;
+    const displayW = isSingleLine
+      ? Math.min(maxAvailW, Math.max(bw, Math.ceil(measuredW + 2)))
+      : bw;
+    const bg = block.bgColor
+      ? (isPaperWhiteHex(block.bgColor) ? '#ffffff' : block.bgColor)
+      : sampleCanvasBgHex(bx, by, bw, bh);
+    const lineHeightRatio = match?.lineHeightRatio ?? block.lineHeightRatio ?? (lineCount > 1 ? 1.22 : undefined);
+    clearTextFootprintOnCanvas(bx, by, bw, bh, bg);
+    return {
+      id: `${Date.now()}_${idSuffix}`,
+      type: 'text',
+      pageIndex: currentPage - 1,
+      x: bx,
+      y: by,
+      width: displayW,
+      height: bh,
+      sourceX: bx,
+      sourceY: by,
+      sourceWidth: bw,
+      sourceHeight: bh,
+      text: finalText,
+      fontSize: fs,
+      color: match?.color || block.fgColor || '#000000',
+      backgroundColor: bg,
+      bold: isBold,
+      italic: isItalic,
+      lockPosition: false,
+      baseline: roundedBaseline,
+      sourceBaseline: roundedBaseline,
+      originalFontName: fontName,
+      fontCssFamily: fontCss,
+      lineHeightRatio,
+      lineCount,
+    };
+  }, [currentPage, findBackendMatch, pageViewport, clearTextFootprintOnCanvas, sampleCanvasBgHex]);
+
   // Helper: commit inline edit as annotation
   const commitInlineEdit = useCallback(() => {
     if (!inlineEdit.active || !inlineEdit.block) return;
@@ -2311,44 +3319,124 @@ export default function AdvancedEditor() {
     const newText = inlineEdit.text.trim();
     if (newText && newText !== block.text.trim()) {
       pushUndo();
-      const match = findBackendMatch(block);
-      const scale = pageViewport?.scale || 1;
-      const realFontSize = match ? match.fontSize : (block.fontSize || Math.max(6, Math.round((block.h / scale) * 0.72)));
-      const fs = Math.max(4, Math.min(realFontSize, 200));
-      const bw = Math.min(Math.max(block.w, 12), Math.max(800, Math.round(pageViewport?.width || 800)));
-      const bh = Math.max(block.h, 10);
-      const baselinePt = match?.baseline || block.pdfBaselineY || ((block.y + block.h * 0.78) / scale);
-      const id = Date.now().toString() + '_ie';
-      const bg = isPaperWhiteHex(block.bgColor) ? '#ffffff' : block.bgColor;
-      clearTextFootprintOnCanvas(block.x, block.y, bw, bh, block.bgColor);
-      const textAnn: Annotation = {
-        id,
-        type: 'text',
-        pageIndex: currentPage - 1,
-        x: block.x,
-        y: block.y,
-        width: bw,
-        height: bh,
-        sourceX: block.x,
-        sourceY: block.y,
-        sourceWidth: bw,
-        sourceHeight: bh,
-        text: newText,
-        fontSize: fs,
-        color: match?.color || block.fgColor || '#000000',
-        backgroundColor: bg,
-        bold: match?.bold ?? block.bold ?? false,
-        italic: match?.italic ?? block.italic ?? false,
-        lockPosition: false,
-        baseline: Math.round(baselinePt * 100) / 100,
-        originalFontName: match?.fontName || block.fontName,
-        fontCssFamily: pdfFontToCss(match?.fontName || block.fontName),
-      };
+      const textAnn = buildTextAnnotationFromBlock(block, 'ie', newText);
       setAnnotations(prev => [...prev, textAnn]);
       setSelectedId(textAnn.id);
     }
     setInlineEdit({ active: false, block: null, text: '' });
-  }, [inlineEdit, currentPage, pushUndo, findBackendMatch, pageViewport]);
+  }, [inlineEdit, pushUndo, buildTextAnnotationFromBlock]);
+
+  const runContextTextHelper = async (mode: 'fix' | 'translate' | 'shorten') => {
+    const block = contextMenu.block;
+    if (!block || contextBusyAction) return;
+    setContextBusyAction(mode);
+    try {
+      let nextText = block.text;
+      if (mode === 'fix') {
+        const res = await fixTextWithAI(block.text);
+        nextText = res.text;
+      } else if (mode === 'translate') {
+        const res = await translateTextWithAI(block.text);
+        nextText = res.text;
+      } else {
+        const scale = pageViewport?.scale || 1;
+        const maxChars = Math.max(8, Math.round((block.w / scale) / Math.max(4, block.fontSize * 0.55)));
+        const res = await shortenTextWithAI(block.text, maxChars);
+        nextText = res.text;
+      }
+      setContextMenu({ visible: false, x: 0, y: 0, block: null });
+      setInlineEdit({ active: true, block, text: nextText });
+      setTimeout(() => inlineEditRef.current?.focus(), 30);
+    } finally {
+      setContextBusyAction(null);
+    }
+  };
+
+  const promoteDetectedObject = (obj: DetectedObjectLayer) => {
+    const scale = pageViewport?.scale || 1;
+    const ox = obj.x * scale;
+    const oy = obj.y * scale;
+    const ow = Math.max(12, obj.w * scale);
+    const oh = Math.max(12, obj.h * scale);
+    const bgHex = sampleCanvasBgHex(ox, oy, ow, oh);
+    pushUndo();
+    clearTextFootprintOnCanvas(ox, oy, ow, oh, bgHex);
+    const newAnn: Annotation = {
+      id: `${Date.now()}_obj`,
+      type: 'image',
+      pageIndex: currentPage - 1,
+      x: ox,
+      y: oy,
+      width: ow,
+      height: oh,
+      sourceX: ox,
+      sourceY: oy,
+      sourceWidth: ow,
+      sourceHeight: oh,
+      imageDataUrl: obj.dataUrl,
+      backgroundColor: bgHex,
+      objectId: obj.id,
+      objectSource: obj.source,
+      objectAction: 'move',
+      xref: obj.xref,
+    };
+    setAnnotations(prev => [...prev, newAnn]);
+    setSelectedId(newAnn.id);
+    setActiveTool(null);
+  };
+
+  const convertObjectToErase = (ann: Annotation) => {
+    const sx = ann.sourceX !== undefined ? ann.sourceX : ann.x;
+    const sy = ann.sourceY !== undefined ? ann.sourceY : ann.y;
+    const sw = ann.sourceWidth || ann.width || 40;
+    const sh = ann.sourceHeight || ann.height || 40;
+    const bgHex = sampleCanvasBgHex(sx, sy, sw, sh);
+    pushUndo();
+    setAnnotations(prev =>
+      prev.map(a =>
+        a.id === ann.id
+          ? {
+              ...a,
+              type: 'magic_erase',
+              objectAction: 'delete',
+              x: sx,
+              y: sy,
+              width: sw,
+              height: sh,
+              color: bgHex,
+            }
+          : a
+      )
+    );
+    setSelectedId(null);
+  };
+
+  const activateFormField = (field: DetectedFormField) => {
+    const scale = pageViewport?.scale || 1;
+    const fx = field.x * scale;
+    const fy = field.y * scale;
+    const fw = Math.max(field.kind === 'checkbox' ? 18 : 64, field.w * scale);
+    const fh = Math.max(14, field.h * scale);
+    pushUndo();
+    const newAnn: Annotation = {
+      id: `${Date.now()}_ff`,
+      type: 'text',
+      pageIndex: currentPage - 1,
+      x: fx,
+      y: fy,
+      width: fw,
+      height: fh,
+      text: field.kind === 'checkbox' ? '✓' : '',
+      fontSize: field.kind === 'checkbox' ? 12 : Math.max(9, Math.min(13, Math.round(field.h * 0.78))),
+      color: textColor,
+      bold: defaultBold,
+      italic: defaultItalic,
+      align: field.kind === 'checkbox' ? 'center' : 'left',
+    };
+    setAnnotations(prev => [...prev, newAnn]);
+    setSelectedId(newAnn.id);
+    setActiveTool(null);
+  };
 
   // Helper: pages that have annotations (for multi-page indicators)
   const pagesWithEdits = new Set(annotations.map(a => a.pageIndex + 1));
@@ -2568,6 +3656,7 @@ export default function AdvancedEditor() {
                 <Eraser className="w-5 h-5" />
                 <span className="text-xs font-medium hidden md:inline">Eraser</span>
               </motion.button>
+              {toolButton('magic_erase', <Wand2 className="w-5 h-5" />, 'Magic Erase', 'Drag over any stamp, signature, or smudge to blend it seamlessly into the paper background')}
               {toolButton('link', <LinkIcon className="w-5 h-5" />, 'Link')}
               {/* Insert Image */}
               <label
@@ -2690,17 +3779,12 @@ export default function AdvancedEditor() {
               {/* OCR button + language selector for scanned PDFs (always accessible before & after scanning) */}
               {(isScannedPdf || ocrDone) && (
                 <div className="flex items-center gap-1.5">
-                  <select
+                  <OcrLanguageSelect
                     value={ocrLanguage}
-                    onChange={e => setOcrLanguage(e.target.value as 'eng' | 'hin' | 'eng+hin')}
-                    disabled={ocrBusy}
-                    className="px-2.5 py-2 bg-amber-50/90 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-700/60 text-amber-900 dark:text-amber-200 rounded-xl text-xs font-semibold disabled:opacity-50"
-                    title="OCR Language"
-                  >
-                    <option value="eng+hin">Hindi + English</option>
-                    <option value="hin">Hindi OCR</option>
-                    <option value="eng">English OCR</option>
-                  </select>
+                    onChange={setOcrLanguage}
+                    compact
+                    title="Select document OCR language (or keep Auto Detect)"
+                  />
                   <motion.button
                     type="button"
                     whileTap={prefersReduced ? undefined : { scale: 0.96 }}
@@ -2755,12 +3839,18 @@ export default function AdvancedEditor() {
                     <span>{ocrNotice}</span>
                   ) : ocrDone ? (
                     <span>
-                      OCR active on Page {currentPage}: <strong>{detectedText.length} clickable word boxes</strong> ready. Hover &amp; click any word, or switch <strong>W / L / P</strong> mode in toolbar.
+                      Page {currentPage} ready: <strong>{detectedText.length} clickable text blocks</strong>
+                      {detectedObjects.length > 0 ? ` · ${detectedObjects.length} graphics/stamps` : ''}.
+                      {' '}Hover &amp; click to edit, or switch <strong>W / L / P</strong> mode.
+                    </span>
+                  ) : (layoutFetching || ocrBusy) ? (
+                    <span>
+                      Auto-detecting scanned text, objects, and form fields on Page {currentPage}…
                     </span>
                   ) : (
                     <span>
-                      Scanned/image-based PDF detected on Page {currentPage}.
-                      <strong> Choose language</strong> (Hindi + English default) and click <strong>"Scan Text"</strong> to make words clickable for editing.
+                      Scanned page detected on Page {currentPage}.
+                      <strong> Choose language</strong> and click <strong>"Scan Text"</strong> if needed.
                     </span>
                   )}
                 </div>
@@ -2840,7 +3930,22 @@ export default function AdvancedEditor() {
                   }}
                 >
                   {/* Render Annotations for current page */}
-                  {annotations.filter(a => a.pageIndex === currentPage - 1).map(ann => (
+                  {annotations.filter(a => a.pageIndex === currentPage - 1).map(ann => {
+                    const scale = pageViewport?.scale || 1;
+                    const resolvedFontCss = ann.fontCssFamily || pdfFontToCss(ann.originalFontName);
+                    const displayBox = getAnnotationDisplayBox(ann, scale, pageViewport?.width, resolvedFontCss);
+                    const isSelected = selectedId === ann.id && activeTool !== 'eraser';
+                    const startDragFromHandle = (clientX: number, clientY: number) => {
+                      if (ann.lockPosition || activeTool === 'eraser') return;
+                      setSelectedId(ann.id);
+                      setIsDragging(true);
+                      setDragTarget(ann.id);
+                      const rect = overlayRef.current?.getBoundingClientRect();
+                      if (rect) {
+                        setDragOffset({ x: clientX - rect.left - ann.x, y: clientY - rect.top - ann.y });
+                      }
+                    };
+                    return (
                     <div
                       key={ann.id}
                       onClick={(e) => { if (activeTool === 'eraser') return; e.stopPropagation(); setSelectedId(ann.id); }}
@@ -2854,60 +3959,81 @@ export default function AdvancedEditor() {
                         if (!activeTool || activeTool === 'select') {
                           if (!ann.lockPosition) {
                             e.stopPropagation();
-                            setSelectedId(ann.id);
-                            setIsDragging(true);
-                            setDragTarget(ann.id);
-                            const rect = overlayRef.current?.getBoundingClientRect();
-                            if (rect) {
-                              setDragOffset({ x: e.clientX - rect.left - ann.x, y: e.clientY - rect.top - ann.y });
-                            }
+                            startDragFromHandle(e.clientX, e.clientY);
                           }
                         }
                       }}
                       className={`absolute group ${activeTool === 'eraser' ? 'cursor-none' : ''
-                        } ${selectedId === ann.id && activeTool !== 'eraser' ? 'border border-blue-600 shadow-xs' : ''} ${!activeTool && ann.type !== 'freehand' ? 'cursor-move' : activeTool !== 'eraser' ? 'cursor-pointer' : ''}`}
+                        } ${!activeTool && ann.type !== 'freehand' ? 'cursor-move' : activeTool !== 'eraser' ? 'cursor-pointer' : ''}`}
                       style={{
                         left: ann.x,
                         top: ann.y,
-                        width: ann.width !== undefined ? ann.width : (ann.type === 'text' ? Math.max(16, Math.round((ann.text?.length || 4) * (ann.fontSize || 12) * (pageViewport?.scale || 1) * 0.62)) : undefined),
-                        height: ann.height !== undefined ? ann.height : Math.max(12, ann.type === 'text' ? Math.round((ann.fontSize || 12) * (pageViewport?.scale || 1) * 1.2) : 0),
-                        backgroundColor: ann.type === 'text' ? 'transparent' : ann.type === 'whiteout' ? (ann.color || '#ffffff') : ann.type === 'highlight' ? 'rgba(255, 255, 0, 0.4)' : ann.type === 'link' ? 'rgba(0, 0, 255, 0.2)' : 'transparent',
-                        border: selectedId === ann.id ? '1px solid #2563eb' : (ann.type === 'link' ? '1px dashed blue' : ann.type === 'table' ? '1px solid #ccc' : 'none'),
+                        width: displayBox.width,
+                        height: displayBox.height,
+                        backgroundColor: ann.type === 'text' ? 'transparent' : (ann.type === 'whiteout' || ann.type === 'magic_erase') ? (ann.color || '#ffffff') : ann.type === 'highlight' ? 'rgba(255, 255, 0, 0.4)' : ann.type === 'link' ? 'rgba(0, 0, 255, 0.2)' : 'transparent',
+                        border: ann.type === 'text' || isSelected
+                          ? 'none'
+                          : (ann.type === 'magic_erase' ? '1px dashed rgba(139, 92, 246, 0.55)' : ann.type === 'link' ? '1px dashed blue' : ann.type === 'table' ? '1px solid #ccc' : 'none'),
+                        overflow: ann.type === 'text' || isSelected ? 'visible' : undefined,
+                        zIndex: isSelected ? 60 : undefined,
                         boxSizing: 'border-box',
                       }}
                     >
-                      {ann.type === 'text' && (
-                        <textarea
-                          value={ann.text}
-                          onChange={(e) => updateAnnotationText(ann.id, e.target.value)}
-                          className="bg-transparent border-none outline-none w-full h-full m-0 p-0 box-border resize-none"
-                          style={{
-                            fontSize: `${(ann.fontSize || 12) * (pageViewport?.scale || 1)}px`,
-                            color: ann.color || '#000000',
-                            fontWeight: ann.bold ? 700 : 400,
-                            fontStyle: ann.italic ? 'italic' : 'normal',
-                            textDecoration: [ann.underline && 'underline', ann.strikethrough && 'line-through'].filter(Boolean).join(' ') || 'none',
-                            textAlign: ann.align || 'left',
-                            lineHeight: 1.25,
-                            whiteSpace: 'pre-wrap',
-                            // Use detected CSS font family for live WYSIWYG preview
-                            fontFamily: ann.fontCssFamily || pdfFontToCss(ann.originalFontName),
-                            padding: 0,
-                            margin: 0,
-                            overflow: 'visible'
-                          }}
-                          autoFocus
-                          onClick={(e) => e.stopPropagation()}
-                          onMouseDown={(e) => e.stopPropagation()}
-                          onKeyDown={(e) => {
-                            e.stopPropagation();
-                            // Only Escape cancels now. Enter inserts newline.
-                            if (e.key === 'Escape') {
-                              setSelectedId(null);
-                            }
-                          }}
-                        />
-                      )}
+                      {ann.type === 'text' && (() => {
+                        const fontCss = ann.fontCssFamily || pdfFontToCss(ann.originalFontName);
+                        const baseTarget = ann.baseline ?? ann.sourceBaseline;
+                        const dyPt = typeof ann.sourceY === 'number' ? ((ann.y - ann.sourceY) / scale) : 0;
+                        const liveBaselinePt = baseTarget ? (baseTarget + dyPt) : undefined;
+                        const taLayout = displayBox.taLayout!;
+                        const baselineMarginTop = getTextareaBaselineMarginTop(
+                          ann.y,
+                          liveBaselinePt,
+                          fontCss,
+                          ann.fontSize || 12,
+                          !!ann.bold,
+                          !!ann.italic,
+                          taLayout.effLineHeight
+                        );
+                        return (
+                          <textarea
+                            value={ann.text}
+                            onChange={(e) => updateAnnotationText(ann.id, e.target.value)}
+                            className="bg-transparent border-none outline-none w-full p-0 box-border resize-none"
+                            style={{
+                              position: 'relative',
+                              top: `${baselineMarginTop}px`,
+                              width: '100%',
+                              height: `${taLayout.safeHeightPx}px`,
+                              fontSize: `${taLayout.fontPx}px`,
+                              color: ann.color || '#000000',
+                              fontWeight: ann.bold ? 700 : 400,
+                              fontStyle: ann.italic ? 'italic' : 'normal',
+                              textDecoration: [ann.underline && 'underline', ann.strikethrough && 'line-through'].filter(Boolean).join(' ') || 'none',
+                              textAlign: ann.align || 'left',
+                              lineHeight: taLayout.effLineHeight,
+                              whiteSpace: taLayout.whiteSpaceMode,
+                              // Use detected CSS font family for live WYSIWYG preview
+                              fontFamily: fontCss,
+                              padding: 0,
+                              margin: 0,
+                              overflow: 'hidden',
+                              scrollbarWidth: 'none',
+                            }}
+                            autoFocus
+                            onFocus={(e) => { e.currentTarget.scrollTop = 0; }}
+                            onScroll={(e) => { if (e.currentTarget.scrollTop !== 0) e.currentTarget.scrollTop = 0; }}
+                            onClick={(e) => e.stopPropagation()}
+                            onMouseDown={(e) => e.stopPropagation()}
+                            onKeyDown={(e) => {
+                              e.stopPropagation();
+                              // Only Escape cancels now. Enter inserts newline.
+                              if (e.key === 'Escape') {
+                                setSelectedId(null);
+                              }
+                            }}
+                          />
+                        );
+                      })()}
                       {ann.type === 'table' && ann.tableData && (
                         <div
                           className="w-full h-full grid bg-white"
@@ -2933,61 +4059,39 @@ export default function AdvancedEditor() {
                         <img src={ann.signatureDataUrl} alt="Signature" className="w-full h-full object-contain pointer-events-none" />
                       )}
                       {ann.type === 'image' && ann.imageDataUrl && (
-                        <img src={ann.imageDataUrl} alt="Inserted" className="w-full h-full object-fill pointer-events-none" />
+                        <img src={ann.imageDataUrl} alt="PDF Graphic" className="w-full h-full object-fill pointer-events-none" />
                       )}
-                      {/* Sleek 8-Point Bounding Box Handles for Text (LightPDF exact style) */}
-                      {ann.type === 'text' && selectedId === ann.id && (
-                        <>
-                          {/* 4 Corners */}
-                          <div className="absolute -top-1 -left-1 w-2 h-2 bg-white border border-blue-600 rounded-none cursor-nwse-resize z-20 pointer-events-auto shadow-xs"
-                            title="Resize diagonally"
-                            onMouseDown={e => { e.stopPropagation(); resizeAnnRef.current = { id: ann.id, handle: 'tl', startX: e.clientX, startY: e.clientY, startAnnX: ann.x, startAnnY: ann.y, startW: ann.width || 80, startH: ann.height || 20 }; }} />
-                          <div className="absolute -top-1 -right-1 w-2 h-2 bg-white border border-blue-600 rounded-none cursor-nesw-resize z-20 pointer-events-auto shadow-xs"
-                            title="Resize diagonally"
-                            onMouseDown={e => { e.stopPropagation(); resizeAnnRef.current = { id: ann.id, handle: 'tr', startX: e.clientX, startY: e.clientY, startAnnX: ann.x, startAnnY: ann.y, startW: ann.width || 80, startH: ann.height || 20 }; }} />
-                          <div className="absolute -bottom-1 -left-1 w-2 h-2 bg-white border border-blue-600 rounded-none cursor-nesw-resize z-20 pointer-events-auto shadow-xs"
-                            title="Resize diagonally"
-                            onMouseDown={e => { e.stopPropagation(); resizeAnnRef.current = { id: ann.id, handle: 'bl', startX: e.clientX, startY: e.clientY, startAnnX: ann.x, startAnnY: ann.y, startW: ann.width || 80, startH: ann.height || 20 }; }} />
-                          <div className="absolute -bottom-1 -right-1 w-2 h-2 bg-white border border-blue-600 rounded-none cursor-nwse-resize z-20 pointer-events-auto shadow-xs"
-                            title="Resize diagonally"
-                            onMouseDown={e => { e.stopPropagation(); resizeAnnRef.current = { id: ann.id, handle: 'br', startX: e.clientX, startY: e.clientY, startAnnX: ann.x, startAnnY: ann.y, startW: ann.width || 80, startH: ann.height || 20 }; }} />
 
-                          {/* 4 Edge Centers: Top, Bottom, Left, Right */}
-                          <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-white border border-blue-600 rounded-none cursor-ns-resize z-20 pointer-events-auto shadow-xs"
-                            title="Resize height vertically"
-                            onMouseDown={e => { e.stopPropagation(); resizeAnnRef.current = { id: ann.id, handle: 't', startX: e.clientX, startY: e.clientY, startAnnX: ann.x, startAnnY: ann.y, startW: ann.width || 80, startH: ann.height || 20 }; }} />
-                          <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-white border border-blue-600 rounded-none cursor-ns-resize z-20 pointer-events-auto shadow-xs"
-                            title="Resize height vertically"
-                            onMouseDown={e => { e.stopPropagation(); resizeAnnRef.current = { id: ann.id, handle: 'b', startX: e.clientX, startY: e.clientY, startAnnX: ann.x, startAnnY: ann.y, startW: ann.width || 80, startH: ann.height || 20 }; }} />
-                          <div className="absolute top-1/2 -left-1 -translate-y-1/2 w-2 h-2 bg-white border border-blue-600 rounded-none cursor-ew-resize z-20 pointer-events-auto shadow-xs"
-                            title="Resize width horizontally"
-                            onMouseDown={e => { e.stopPropagation(); resizeAnnRef.current = { id: ann.id, handle: 'l', startX: e.clientX, startY: e.clientY, startAnnX: ann.x, startAnnY: ann.y, startW: ann.width || 80, startH: ann.height || 20 }; }} />
-                          <div className="absolute top-1/2 -right-1 -translate-y-1/2 w-2 h-2 bg-white border border-blue-600 rounded-none cursor-ew-resize z-20 pointer-events-auto shadow-xs"
-                            title="Resize width horizontally"
-                            onMouseDown={e => { e.stopPropagation(); resizeAnnRef.current = { id: ann.id, handle: 'r', startX: e.clientX, startY: e.clientY, startAnnX: ann.x, startAnnY: ann.y, startW: ann.width || 80, startH: ann.height || 20 }; }} />
-                        </>
-                      )}
-                      {/* Resize handles for image & signature */}
-                      {(ann.type === 'image' || ann.type === 'signature') && selectedId === ann.id && (
-                        <>
-                          <div className="absolute -top-1.5 -left-1.5 w-3 h-3 bg-blue-600 border border-white rounded-sm cursor-nwse-resize z-20"
-                            onMouseDown={e => { e.stopPropagation(); resizeAnnRef.current = { id: ann.id, handle: 'tl', startX: e.clientX, startY: e.clientY, startAnnX: ann.x, startAnnY: ann.y, startW: ann.width || 150, startH: ann.height || 50 }; }} />
-                          <div className="absolute -top-1.5 -right-1.5 w-3 h-3 bg-blue-600 border border-white rounded-sm cursor-nesw-resize z-20"
-                            onMouseDown={e => { e.stopPropagation(); resizeAnnRef.current = { id: ann.id, handle: 'tr', startX: e.clientX, startY: e.clientY, startAnnX: ann.x, startAnnY: ann.y, startW: ann.width || 150, startH: ann.height || 50 }; }} />
-                          <div className="absolute -bottom-1.5 -left-1.5 w-3 h-3 bg-blue-600 border border-white rounded-sm cursor-nesw-resize z-20"
-                            onMouseDown={e => { e.stopPropagation(); resizeAnnRef.current = { id: ann.id, handle: 'bl', startX: e.clientX, startY: e.clientY, startAnnX: ann.x, startAnnY: ann.y, startW: ann.width || 150, startH: ann.height || 50 }; }} />
-                          <div className="absolute -bottom-1.5 -right-1.5 w-3 h-3 bg-blue-600 border border-white rounded-sm cursor-nwse-resize z-20"
-                            onMouseDown={e => { e.stopPropagation(); resizeAnnRef.current = { id: ann.id, handle: 'br', startX: e.clientX, startY: e.clientY, startAnnX: ann.x, startAnnY: ann.y, startW: ann.width || 150, startH: ann.height || 50 }; }} />
-                          {/* Edge handles */}
-                          <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-6 h-2 bg-blue-500 border border-white rounded-sm cursor-ns-resize z-20"
-                            onMouseDown={e => { e.stopPropagation(); resizeAnnRef.current = { id: ann.id, handle: 't', startX: e.clientX, startY: e.clientY, startAnnX: ann.x, startAnnY: ann.y, startW: ann.width || 150, startH: ann.height || 50 }; }} />
-                          <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-6 h-2 bg-blue-500 border border-white rounded-sm cursor-ns-resize z-20"
-                            onMouseDown={e => { e.stopPropagation(); resizeAnnRef.current = { id: ann.id, handle: 'b', startX: e.clientX, startY: e.clientY, startAnnX: ann.x, startAnnY: ann.y, startW: ann.width || 150, startH: ann.height || 50 }; }} />
-                          <div className="absolute top-1/2 -left-1 -translate-y-1/2 w-2 h-6 bg-blue-500 border border-white rounded-sm cursor-ew-resize z-20"
-                            onMouseDown={e => { e.stopPropagation(); resizeAnnRef.current = { id: ann.id, handle: 'l', startX: e.clientX, startY: e.clientY, startAnnX: ann.x, startAnnY: ann.y, startW: ann.width || 150, startH: ann.height || 50 }; }} />
-                          <div className="absolute top-1/2 -right-1 -translate-y-1/2 w-2 h-6 bg-blue-500 border border-white rounded-sm cursor-ew-resize z-20"
-                            onMouseDown={e => { e.stopPropagation(); resizeAnnRef.current = { id: ann.id, handle: 'r', startX: e.clientX, startY: e.clientY, startAnnX: ann.x, startAnnY: ann.y, startW: ann.width || 150, startH: ann.height || 50 }; }} />
-                        </>
+                      {/* Modern Outset Motion Selection Frame & Non-Overlapping Handles */}
+                      {isSelected && ann.type !== 'freehand' && (
+                        <SelectionFrameOverlay
+                          ann={ann}
+                          boxW={displayBox.frameW}
+                          boxH={displayBox.height}
+                          showHandles={ann.type === 'text' || ann.type === 'image' || ann.type === 'signature'}
+                          prefersReduced={prefersReduced}
+                          onStartResize={(handle, clientX, clientY) => {
+                            resizeAnnRef.current = {
+                              id: ann.id,
+                              handle,
+                              startX: clientX,
+                              startY: clientY,
+                              startAnnX: ann.x,
+                              startAnnY: ann.y,
+                              startW: displayBox.frameW,
+                              startH: displayBox.height || (ann.type === 'text' ? 20 : 50),
+                            };
+                          }}
+                          onStartDrag={(!ann.lockPosition && (!activeTool || activeTool === 'select')) ? startDragFromHandle : undefined}
+                          onDelete={() => {
+                            if (ann.type === 'image' && ann.objectId) {
+                              convertObjectToErase(ann);
+                            } else {
+                              pushUndo();
+                              deleteAnnotation(ann.id);
+                            }
+                          }}
+                        />
                       )}
                       {ann.type === 'freehand' && ann.pathData && (
                         <svg className="absolute inset-0 w-full h-full pointer-events-none overflow-visible" style={{ left: -ann.x, top: -ann.y, width: pageViewport?.width, height: pageViewport?.height }}>
@@ -3000,35 +4104,143 @@ export default function AdvancedEditor() {
                         </div>
                       )}
 
-                      {/* Delete indicator for non-text items (images, stamps, etc.) */}
-                      {ann.type !== 'text' && (
+                      {/* Hover delete badge for unselected non-text items */}
+                      {ann.type !== 'text' && !isSelected && (
                         <button
-                          onClick={(e) => { e.stopPropagation(); pushUndo(); deleteAnnotation(ann.id); }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (ann.type === 'image' && ann.objectId) {
+                              convertObjectToErase(ann);
+                            } else {
+                              pushUndo();
+                              deleteAnnotation(ann.id);
+                            }
+                          }}
                           className="absolute -top-2.5 -right-2.5 bg-red-500 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity z-20 shadow-sm"
-                          title="Delete"
+                          title={ann.type === 'image' && ann.objectId ? 'Erase object from PDF' : 'Delete'}
                         >
                           <X className="w-3 h-3" />
                         </button>
                       )}
                     </div>
-                  ))}
+                    );
+                  })}
+
+                  {/* ── SELECT MODE: Detected Objects (Images / Logos / Stamps) & Form Blanks ── */}
+                  {activeTool === 'select' && (() => {
+                    const sc = pageViewport?.scale || 1;
+                    return (
+                      <>
+                        {detectedTables.map(tbl => (
+                          <div
+                            key={tbl.id}
+                            style={{
+                              position: 'absolute',
+                              left: tbl.x * sc,
+                              top: tbl.y * sc,
+                              width: Math.max(12, tbl.w * sc),
+                              height: Math.max(12, tbl.h * sc),
+                              zIndex: 9,
+                            }}
+                            className="border border-dashed border-sky-400/35 pointer-events-none rounded-xs"
+                          />
+                        ))}
+
+                        {detectedObjects.map(obj => {
+                          const alreadyPromoted = annotations.some(
+                            a => a.pageIndex === currentPage - 1 && a.objectId === obj.id
+                          );
+                          if (alreadyPromoted || obj.w < 10 || obj.h < 10) return null;
+                          const label = obj.kind.charAt(0).toUpperCase() + obj.kind.slice(1);
+                          return (
+                            <div
+                              key={obj.id}
+                              title={`${label} — Click to move, resize, replace, or erase`}
+                              style={{
+                                position: 'absolute',
+                                left: obj.x * sc,
+                                top: obj.y * sc,
+                                width: Math.max(12, obj.w * sc),
+                                height: Math.max(12, obj.h * sc),
+                                zIndex: 12,
+                              }}
+                              className="border border-dashed border-transparent hover:border-emerald-500 hover:bg-emerald-500/10 cursor-pointer rounded-xs transition-colors group"
+                              onMouseDown={e => {
+                                e.stopPropagation();
+                                promoteDetectedObject(obj);
+                              }}
+                            >
+                              <span className="hidden group-hover:inline-block absolute -top-5 left-0 px-1.5 py-0.5 rounded bg-emerald-600 text-white text-[10px] font-bold shadow-xs whitespace-nowrap pointer-events-none">
+                                {label} (Click to Edit)
+                              </span>
+                            </div>
+                          );
+                        })}
+
+                        {detectedFormFields.map((ff, fIdx) => {
+                          const fx = ff.x * sc;
+                          const fy = ff.y * sc;
+                          const fw = Math.max(ff.kind === 'checkbox' ? 14 : 36, ff.w * sc);
+                          const fh = Math.max(12, ff.h * sc);
+                          const filled = annotations.some(
+                            a =>
+                              a.pageIndex === currentPage - 1 &&
+                              Math.abs(a.x - fx) < 12 &&
+                              Math.abs(a.y - fy) < 12
+                          );
+                          if (filled) return null;
+                          return (
+                            <div
+                              key={`ff-${fIdx}`}
+                              title={`Form field${ff.labelHint ? ` (${ff.labelHint})` : ''} — Click to type`}
+                              style={{
+                                position: 'absolute',
+                                left: fx,
+                                top: fy,
+                                width: fw,
+                                height: fh,
+                                zIndex: 11,
+                              }}
+                              className="border border-dashed border-violet-400/35 hover:border-violet-600 hover:bg-violet-500/10 cursor-text rounded-xs transition-colors"
+                              onMouseDown={e => {
+                                e.stopPropagation();
+                                activateFormField(ff);
+                              }}
+                            />
+                          );
+                        })}
+                      </>
+                    );
+                  })()}
 
                   {/* ── SELECT MODE: Smart Word / Line / Paragraph Overlays ── */}
                   {activeTool === 'select' && (() => {
-                    // Compute grouped blocks based on granularity
+                    const useBackendLayer = backendLayerPage === currentPage && Boolean(pageViewport);
+                    const scale = pageViewport?.scale || 1;
+                    // Prefer backend-calibrated Word/Line/Paragraph layers when ready; fall back to local detection
                     const baseGroups: DetectedTextBlock[] =
                       selectionGranularity === 'word'
-                        ? detectedText.flatMap(b => splitBlockIntoWords(b))
+                        ? (useBackendLayer && backendWords.length > 0
+                            ? backendWords.map(w => mapBackendWordToScreenBlock(w, scale))
+                            : detectedText.flatMap(b => splitBlockIntoWords(b)))
                         : selectionGranularity === 'line'
-                        ? mergeBlocksToLines(detectedText)
-                        : mergeLinesToParagraphs(mergeBlocksToLines(detectedText));
+                        ? (useBackendLayer && backendLines.length > 0
+                            ? backendLines.map(l => mapBackendWordToScreenBlock(l, scale))
+                            : mergeBlocksToLines(detectedText))
+                        : (useBackendLayer && backendParagraphs.length > 0
+                            ? backendParagraphs.map(p => mapBackendWordToScreenBlock(p, scale))
+                            : mergeLinesToParagraphs(mergeBlocksToLines(detectedText)));
 
                     return baseGroups.map((block, idx) => {
+                      const yTol = Math.max(4, Math.min(block.h * 0.45, 8));
                       const replaced = annotations.some(a =>
                         a.pageIndex === currentPage - 1 &&
                         a.type === 'text' &&
-                        Math.abs(a.x - block.x) < 8 &&
-                        Math.abs(a.y - block.y) < 8
+                        (
+                          (Math.abs(a.x - block.x) < 8 && Math.abs(a.y - block.y) < yTol) ||
+                          (typeof a.sourceX === 'number' && typeof a.sourceY === 'number' &&
+                            Math.abs(a.sourceX - block.x) < 8 && Math.abs(a.sourceY - block.y) < yTol)
+                        )
                       );
                       if (replaced || !block.text.trim() || block.w < 2) return null;
 
@@ -3044,23 +4256,24 @@ export default function AdvancedEditor() {
                             top: block.y,
                             width: Math.max(block.w, 8),
                             height: Math.max(block.h, 8),
-                            border: '1px solid transparent',
+                            outline: '1px solid transparent',
+                            outlineOffset: '1px',
                             backgroundColor: 'transparent',
                             cursor: 'text',
                             zIndex: 15,
                             boxSizing: 'border-box',
-                            borderRadius: 1,
+                            borderRadius: 2.5,
                             pointerEvents: 'all',
-                            transition: 'border-color 0.1s ease, background-color 0.1s ease',
+                            transition: 'outline-color 0.1s ease, background-color 0.1s ease',
                           }}
                           onMouseEnter={e => {
                             const el = e.currentTarget as HTMLElement;
-                            el.style.border = '1px solid #2563eb';
-                            el.style.backgroundColor = 'rgba(37, 99, 235, 0.08)';
+                            el.style.outline = '1px solid rgba(59, 130, 246, 0.8)';
+                            el.style.backgroundColor = 'rgba(59, 130, 246, 0.06)';
                           }}
                           onMouseLeave={e => {
                             const el = e.currentTarget as HTMLElement;
-                            el.style.border = '1px solid transparent';
+                            el.style.outline = '1px solid transparent';
                             el.style.backgroundColor = 'transparent';
                           }}
                           onMouseDown={e => {
@@ -3068,39 +4281,7 @@ export default function AdvancedEditor() {
                             if (e.detail === 1) {
                               e.stopPropagation();
                               pushUndo();
-                              const match = findBackendMatch(block);
-                              const id = Date.now().toString() + '_tb';
-                              const scale = pageViewport?.scale || 1;
-                              const realFontSize = match ? match.fontSize : (block.fontSize || Math.max(6, Math.round((block.h / scale) * 0.72)));
-                              const fs = Math.max(4, Math.min(realFontSize, 200));
-                              const bw = Math.max(block.w, 12);
-                              const bh = Math.max(block.h, 10);
-                              const baselinePt = match?.baseline || block.pdfBaselineY || ((block.y + block.h * 0.78) / scale);
-                              const bg = isPaperWhiteHex(block.bgColor) ? '#ffffff' : block.bgColor;
-                              clearTextFootprintOnCanvas(block.x, block.y, bw, bh, block.bgColor);
-                              const textAnn: Annotation = {
-                                id,
-                                type: 'text',
-                                pageIndex: currentPage - 1,
-                                x: block.x,
-                                y: block.y,
-                                width: bw,
-                                height: bh,
-                                sourceX: block.x,
-                                sourceY: block.y,
-                                sourceWidth: bw,
-                                sourceHeight: bh,
-                                text: block.text,
-                                fontSize: fs,
-                                color: match?.color || block.fgColor || '#000000',
-                                backgroundColor: bg,
-                                bold: match?.bold ?? block.bold ?? false,
-                                italic: match?.italic ?? block.italic ?? false,
-                                lockPosition: false,
-                                baseline: Math.round(baselinePt * 100) / 100,
-                                originalFontName: match?.fontName || block.fontName,
-                                fontCssFamily: pdfFontToCss(match?.fontName || block.fontName),
-                              };
+                              const textAnn = buildTextAnnotationFromBlock(block, 'tb');
                               setAnnotations(prev => [...prev, textAnn]);
                               setSelectedId(textAnn.id);
                               if (!continuousSelect) {
@@ -3158,7 +4339,11 @@ export default function AdvancedEditor() {
                   {/* Current Drawing Rect */}
                   {isDrawing && currentRect && (
                     <div
-                      className="absolute border border-indigo-500 bg-indigo-500/20"
+                      className={`absolute border ${
+                        activeTool === 'magic_erase'
+                          ? 'border-dashed border-violet-600 bg-violet-500/15'
+                          : 'border-indigo-500 bg-indigo-500/20'
+                      }`}
                       style={{
                         left: currentRect.x,
                         top: currentRect.y,
@@ -3217,32 +4402,89 @@ export default function AdvancedEditor() {
                     const block = inlineEdit.block;
                     const match = findBackendMatch(block);
                     const scale = pageViewport?.scale || 1;
-                    const realFontSize = match ? match.fontSize : (block.fontSize || Math.max(6, Math.round((block.h / scale) * 0.72)));
-                    const fs = Math.max(4, Math.min(realFontSize, 200));
+                    const useExact = Boolean(
+                      match?.exactWordBounds
+                      && typeof match.x === 'number'
+                      && typeof match.y === 'number'
+                      && typeof match.w === 'number'
+                      && typeof match.h === 'number'
+                    );
+                    const bxX = useExact ? (match!.x! * scale) : block.x;
+                    const bxY = useExact ? (match!.y! * scale) : block.y;
+                    const bxW = useExact ? (match!.w! * scale) : block.w;
+                    const bxH = useExact ? (match!.h! * scale) : block.h;
+                    const lc = Math.max(
+                      1,
+                      match?.lineCount || block.lineCount || 1,
+                      (inlineEdit.text || block.text || '').split(/\r?\n/).length,
+                    );
+                    const rawFs = match ? match.fontSize : (block.fontSize || Math.max(6, Math.round((bxH / scale) * 0.76)));
+                    const fs = sanitizeMatchedFontSizePt(rawFs, bxH / scale, block.text, lc, Boolean(match?.fitTrusted));
                     const fgColor = match?.color || block.fgColor || '#000000';
                     const isBold = match?.bold ?? block.bold ?? false;
                     const isItalic = match?.italic ?? block.italic ?? false;
                     const fontFam = pdfFontToCss(match?.fontName || block.fontName);
-                    const bg = isPaperWhiteHex(block.bgColor) ? '#ffffff' : block.bgColor;
+                    const bg = block.bgColor
+                      ? (isPaperWhiteHex(block.bgColor) ? '#ffffff' : block.bgColor)
+                      : sampleCanvasBgHex(bxX, bxY, bxW, bxH);
+                    const taLayout = getSafeTextareaLayout(
+                      bxH,
+                      fs,
+                      scale,
+                      inlineEdit.text || block.text,
+                      match?.lineCount ?? block.lineCount,
+                      match?.lineHeightRatio ?? block.lineHeightRatio,
+                    );
+                    const baselinePt = match?.baseline || block.pdfBaselineY || ((bxY + (bxH / lc) * 0.78) / scale);
+                    const baselineMarginTop = getTextareaBaselineMarginTop(
+                      bxY,
+                      baselinePt,
+                      fontFam,
+                      fs,
+                      isBold,
+                      isItalic,
+                      taLayout.effLineHeight,
+                    );
+                    const measuredW = measureCanvasTextMetrics(
+                      inlineEdit.text || '',
+                      fontFam,
+                      taLayout.fontPx,
+                      isBold,
+                      isItalic,
+                    ).maxLineW;
+                    const effBoxW = taLayout.whiteSpaceMode === 'pre'
+                      ? Math.max(bxW, 16, Math.ceil(measuredW + 2))
+                      : Math.max(bxW, 24);
                     return (
-                      <div
+                      <motion.div
+                        initial={prefersReduced ? false : { opacity: 0, scale: 0.985 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        transition={prefersReduced ? { duration: 0.08 } : { type: 'spring', stiffness: 520, damping: 34, mass: 0.6 }}
                         style={{
                           position: 'absolute',
-                          left: block.x,
-                          top: block.y,
-                          width: Math.max(block.w, 16),
-                          minHeight: Math.max(block.h, 12),
+                          left: bxX,
+                          top: bxY,
+                          width: effBoxW,
+                          height: Math.max(bxH, 12),
                           zIndex: 100,
                           backgroundColor: bg,
-                          border: '1px solid #2563eb',
-                          boxShadow: '0 1px 4px rgba(37,99,235,0.18)',
-                          borderRadius: 1,
+                          border: 'none',
+                          overflow: 'visible',
+                          boxSizing: 'border-box',
                         }}
                       >
+                        <div
+                          className="pointer-events-none absolute -top-[1px] -bottom-[1px] -left-[2px] -right-[2px] rounded-[4px] border-[1.25px] border-blue-500"
+                          style={{
+                            boxShadow: '0 0 0 1px rgba(59, 130, 246, 0.14)',
+                          }}
+                        />
                         <textarea
                           ref={inlineEditRef}
                           value={inlineEdit.text}
                           onChange={e => setInlineEdit(prev => ({ ...prev, text: e.target.value }))}
+                          onFocus={e => { e.currentTarget.scrollTop = 0; }}
+                          onScroll={e => { if (e.currentTarget.scrollTop !== 0) e.currentTarget.scrollTop = 0; }}
                           onKeyDown={e => {
                             if (e.key === 'Escape') {
                               setInlineEdit({ active: false, block: null, text: '' });
@@ -3254,14 +4496,19 @@ export default function AdvancedEditor() {
                           }}
                           onBlur={() => commitInlineEdit()}
                           style={{
+                            position: 'relative',
+                            top: `${baselineMarginTop}px`,
                             width: '100%',
-                            minHeight: block.h,
-                            fontSize: `${fs * scale}px`,
+                            height: `${taLayout.safeHeightPx}px`,
+                            fontSize: `${taLayout.fontPx}px`,
                             color: fgColor,
                             fontWeight: isBold ? 700 : 400,
                             fontStyle: isItalic ? 'italic' : 'normal',
                             fontFamily: fontFam,
-                            lineHeight: 1.15,
+                            lineHeight: taLayout.effLineHeight,
+                            whiteSpace: taLayout.whiteSpaceMode,
+                            overflow: 'hidden',
+                            scrollbarWidth: 'none',
                             background: 'transparent',
                             border: 'none',
                             outline: 'none',
@@ -3271,11 +4518,31 @@ export default function AdvancedEditor() {
                             boxSizing: 'border-box',
                           }}
                         />
-                        <div style={{ fontSize: 9, color: '#4338ca', padding: '2px 5px', borderTop: '1px solid #e0e7ff', background: '#eef2ff', borderRadius: '0 0 3px 3px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div
+                          style={{
+                            position: 'absolute',
+                            left: -2,
+                            top: 'calc(100% + 4px)',
+                            minWidth: 205,
+                            whiteSpace: 'nowrap',
+                            fontSize: 9,
+                            color: '#4338ca',
+                            padding: '2px 7px',
+                            border: '1px solid rgba(199, 210, 254, 0.9)',
+                            background: 'rgba(238, 242, 255, 0.96)',
+                            backdropFilter: 'blur(6px)',
+                            borderRadius: 9999,
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            gap: 8,
+                            boxShadow: '0 4px 12px rgba(15, 23, 42, 0.08)',
+                          }}
+                        >
                           <span>↵ Enter to save · Esc cancel</span>
                           <span style={{ fontWeight: 600 }}>✨ {match?.fontName || block.fontName || 'Auto-Matched'} {fs}pt</span>
                         </div>
-                      </div>
+                      </motion.div>
                     );
                   })()}
 
@@ -3577,11 +4844,89 @@ export default function AdvancedEditor() {
                     </div>
                   )}
 
+                  {(() => {
+                    const selAnn = annotations.find(a => a.id === selectedId);
+                    if (!selAnn) return null;
+                    if (selAnn.type === 'image') {
+                      return (
+                        <div className="space-y-2.5">
+                          <div className="p-3 rounded-xl border border-emerald-200 dark:border-emerald-800/50 bg-emerald-50/70 dark:bg-emerald-950/30 text-xs text-emerald-900 dark:text-emerald-200">
+                            <p className="font-bold flex items-center gap-1.5">
+                              <ImageIcon className="w-3.5 h-3.5" /> Graphic Layer Selected
+                            </p>
+                            <p className="text-[11px] opacity-80 mt-0.5">
+                              Drag to reposition, use corners to resize, replace the image, or seamlessly erase it.
+                            </p>
+                          </div>
+                          <input
+                            ref={replaceObjectInputRef}
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            onChange={e => {
+                              const rf = e.target.files?.[0];
+                              e.target.value = '';
+                              if (!rf || !selectedId) return;
+                              const reader = new FileReader();
+                              reader.onload = () => {
+                                const newUrl = String(reader.result || '');
+                                if (!newUrl) return;
+                                pushUndo();
+                                updateAnnotation(selectedId, {
+                                  imageDataUrl: newUrl,
+                                  objectAction: selAnn.objectId ? 'replace' : undefined,
+                                });
+                              };
+                              reader.readAsDataURL(rf);
+                            }}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => replaceObjectInputRef.current?.click()}
+                            className="w-full py-2.5 px-3 rounded-xl border border-[var(--pms-border)] bg-white/80 dark:bg-slate-900/80 hover:bg-white text-[var(--pms-ink)] text-xs font-bold flex items-center justify-center gap-2 transition-colors"
+                          >
+                            <ImagePlus className="w-4 h-4 text-[var(--pms-blue)]" /> Replace Graphic Image
+                          </button>
+                          {selAnn.objectId && (
+                            <button
+                              type="button"
+                              onClick={() => convertObjectToErase(selAnn)}
+                              className="w-full py-2.5 px-3 rounded-xl border border-violet-300 dark:border-violet-700 bg-violet-50/80 dark:bg-violet-950/40 hover:bg-violet-100 text-violet-700 dark:text-violet-300 text-xs font-bold flex items-center justify-center gap-2 transition-colors"
+                            >
+                              <Wand2 className="w-4 h-4" /> Magic Erase Original
+                            </button>
+                          )}
+                        </div>
+                      );
+                    }
+                    if (selAnn.type === 'magic_erase') {
+                      return (
+                        <div className="p-3 rounded-xl border border-violet-200 dark:border-violet-800/50 bg-violet-50/70 dark:bg-violet-950/30 text-xs text-violet-900 dark:text-violet-200">
+                          <p className="font-bold flex items-center gap-1.5">
+                            <Wand2 className="w-3.5 h-3.5" /> Magic Erase Region
+                          </p>
+                          <p className="text-[11px] opacity-80 mt-0.5">
+                            When you click Apply Changes, this region blends cleanly with the surrounding paper texture.
+                          </p>
+                        </div>
+                      );
+                    }
+                    return null;
+                  })()}
+
                   <div>
                     <motion.button
                       type="button"
                       whileTap={prefersReduced ? undefined : { scale: 0.98 }}
-                      onClick={() => { pushUndo(); deleteAnnotation(selectedId); }}
+                      onClick={() => {
+                        const selAnn = annotations.find(a => a.id === selectedId);
+                        if (selAnn?.type === 'image' && selAnn.objectId) {
+                          convertObjectToErase(selAnn);
+                        } else if (selectedId) {
+                          pushUndo();
+                          deleteAnnotation(selectedId);
+                        }
+                      }}
                       className="w-full py-2.5 text-red-600 dark:text-red-400 border border-red-500/30 rounded-xl hover:bg-red-500/10 text-sm font-semibold transition-colors"
                     >
                       Delete Element
@@ -3627,9 +4972,30 @@ export default function AdvancedEditor() {
                       </div>
                     </div>
 
-                    <div className="pt-2 flex items-center justify-between text-[11px] text-[var(--pms-muted)] border-t border-[var(--pms-border)]">
-                      <span>Detected on Page {currentPage}:</span>
-                      <span className="font-bold text-[var(--pms-rose)] tabular-nums">{detectedText.length} Text Blocks</span>
+                    <div className="pt-2 space-y-1.5 text-[11px] text-[var(--pms-muted)] border-t border-[var(--pms-border)]">
+                      <div className="flex items-center justify-between">
+                        <span>Detected on Page {currentPage}:</span>
+                        <span className="font-bold text-[var(--pms-rose)] tabular-nums">{detectedText.length} Text Blocks</span>
+                      </div>
+                      {(detectedObjects.length > 0 || detectedTables.length > 0 || detectedFormFields.length > 0) && (
+                        <div className="flex flex-wrap gap-1.5 pt-0.5">
+                          {detectedObjects.length > 0 && (
+                            <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 font-semibold text-[10px]">
+                              {detectedObjects.length} Graphic{detectedObjects.length > 1 ? 's' : ''}
+                            </span>
+                          )}
+                          {detectedTables.length > 0 && (
+                            <span className="px-2 py-0.5 rounded-full bg-sky-500/10 text-sky-700 dark:text-sky-300 font-semibold text-[10px]">
+                              {detectedTables.length} Table{detectedTables.length > 1 ? 's' : ''}
+                            </span>
+                          )}
+                          {detectedFormFields.length > 0 && (
+                            <span className="px-2 py-0.5 rounded-full bg-violet-500/10 text-violet-700 dark:text-violet-300 font-semibold text-[10px]">
+                              {detectedFormFields.length} Form Blank{detectedFormFields.length > 1 ? 's' : ''}
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
                   {/* Freehand settings when freehand tool active */}
@@ -3667,6 +5033,16 @@ export default function AdvancedEditor() {
                         </div>
                       </div>
                       <p className="text-xs text-[var(--pms-muted)]">Click or drag over annotations to erase them.</p>
+                    </div>
+                  )}
+                  {activeTool === 'magic_erase' && (
+                    <div className="space-y-2 border-t border-[var(--pms-border)] pt-4">
+                      <h3 className="text-sm font-bold text-[var(--pms-ink)] flex items-center gap-1.5">
+                        <Wand2 className="w-4 h-4 text-violet-500" /> Magic Erase
+                      </h3>
+                      <p className="text-xs text-[var(--pms-muted)] leading-relaxed">
+                        Drag a box across any unwanted stamp, signature, blemish, or object. On Apply Changes it is seamlessly removed using surrounding paper texture.
+                      </p>
                     </div>
                   )}
                 </motion.div>
@@ -3990,6 +5366,34 @@ export default function AdvancedEditor() {
               }}
             >
               <TypeIcon className="w-4 h-4" /> Copy Text
+            </button>
+            <div className="my-1 border-t border-[var(--pms-border)]" />
+            <div className="px-3.5 py-1 text-[10px] font-bold uppercase tracking-wider text-[var(--pms-muted)]">
+              Smart Text Assist
+            </div>
+            <button
+              disabled={Boolean(contextBusyAction)}
+              className="w-full text-left px-3.5 py-2 text-sm text-[var(--pms-ink)] hover:bg-violet-500/12 hover:text-violet-600 dark:hover:text-violet-300 flex items-center gap-2.5 transition-colors disabled:opacity-50"
+              onClick={() => runContextTextHelper('fix')}
+            >
+              {contextBusyAction === 'fix' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4 text-violet-500" />}
+              Fix Spelling / OCR
+            </button>
+            <button
+              disabled={Boolean(contextBusyAction)}
+              className="w-full text-left px-3.5 py-2 text-sm text-[var(--pms-ink)] hover:bg-indigo-500/12 hover:text-indigo-600 dark:hover:text-indigo-300 flex items-center gap-2.5 transition-colors disabled:opacity-50"
+              onClick={() => runContextTextHelper('translate')}
+            >
+              {contextBusyAction === 'translate' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Languages className="w-4 h-4 text-indigo-500" />}
+              Translate (HI ↔ EN)
+            </button>
+            <button
+              disabled={Boolean(contextBusyAction)}
+              className="w-full text-left px-3.5 py-2 text-sm text-[var(--pms-ink)] hover:bg-emerald-500/12 hover:text-emerald-600 dark:hover:text-emerald-300 flex items-center gap-2.5 transition-colors disabled:opacity-50"
+              onClick={() => runContextTextHelper('shorten')}
+            >
+              {contextBusyAction === 'shorten' ? <Loader2 className="w-4 h-4 animate-spin" /> : <AlignLeft className="w-4 h-4 text-emerald-500" />}
+              Shorten to Fit Box
             </button>
           </motion.div>
         </div>

@@ -1,389 +1,320 @@
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useState } from 'react';
+import { motion, useReducedMotion } from 'motion/react';
+import { Check, Sparkles } from 'lucide-react';
+import { PearlScanOverlay } from './pearl/PearlMotion';
 
-interface Step {
+export interface LoaderStep {
   icon: string;
   label: string;
   detail: string;
 }
 
-interface BackendLoaderProps {
+export interface BackendLoaderProps {
   title?: string;
-  steps?: Step[];
+  steps?: LoaderStep[];
   tips?: string[];
-  accentColor?: 'blue' | 'emerald' | 'orange' | 'indigo' | 'violet';
+  accentColor?: 'rose' | 'blue' | 'emerald' | 'orange' | 'indigo' | 'violet';
+  progressOverride?: number;
+  activeStepOverride?: number;
 }
 
-const DEFAULT_STEPS: Step[] = [
-  { icon: '📤', label: 'Uploading', detail: 'Securely sending your file to server...' },
-  { icon: '🔍', label: 'Analyzing', detail: 'Detecting structure, fonts & layouts...' },
-  { icon: '⚙️', label: 'Processing', detail: 'Backend engine is working its magic...' },
-  { icon: '✨', label: 'Finalizing', detail: 'Polishing the output for perfection...' },
+const DEFAULT_STEPS: LoaderStep[] = [
+  { icon: '📤', label: 'Uploading', detail: 'Securing and validating document layers…' },
+  { icon: '🔍', label: 'Analyzing', detail: 'Detecting layout structure, scripts & tables…' },
+  { icon: '⚡', label: 'Reconstructing', detail: 'Formatting clean vector & text fidelity…' },
+  { icon: '✨', label: 'Finalizing', detail: 'Polishing output for instant download…' },
 ];
 
 const DEFAULT_TIPS = [
-  '💡 Files are processed on our secure server and never stored permanently.',
-  '⚡ Our backend uses Python\'s most powerful PDF processing libraries.',
-  '🔒 Privacy first: Your data is auto-deleted right after you download.',
-  '📊 Fun fact: We can handle PDFs with 1000+ pages seamlessly.',
-  '🌐 Auto-OCR detects scanned pages and makes them searchable.',
+  'Files are processed transiently and automatically purged right after export.',
+  'Smart layout detection preserves merged tables, columns, and reading order.',
+  'Multilingual script recognition automatically adapts to 100+ global languages.',
+  'High-DPI layer analysis isolates stamps, signatures, and tables cleanly.',
 ];
 
-const PALETTES = {
-  blue:    { a: '#3b82f6', b: '#6366f1', glow: 'rgba(99,102,241,0.4)',  text: '#93c5fd' },
-  emerald: { a: '#10b981', b: '#06b6d4', glow: 'rgba(16,185,129,0.4)',  text: '#6ee7b7' },
-  orange:  { a: '#f97316', b: '#f59e0b', glow: 'rgba(249,115,22,0.4)',  text: '#fcd34d' },
-  indigo:  { a: '#6366f1', b: '#8b5cf6', glow: 'rgba(139,92,246,0.4)',  text: '#c4b5fd' },
-  violet:  { a: '#8b5cf6', b: '#ec4899', glow: 'rgba(139,92,246,0.4)',  text: '#f0abfc' },
+const PALETTES: Record<
+  NonNullable<BackendLoaderProps['accentColor']>,
+  { a: string; b: string; glow: string; badgeBg: string; badgeText: string }
+> = {
+  rose: {
+    a: '#E11D48',
+    b: '#7C3AED',
+    glow: 'rgba(225, 29, 72, 0.20)',
+    badgeBg: 'var(--pms-soft-rose)',
+    badgeText: 'var(--pms-rose)',
+  },
+  blue: {
+    a: '#0284C7',
+    b: '#7C3AED',
+    glow: 'rgba(2, 132, 199, 0.20)',
+    badgeBg: 'var(--pms-soft-blue)',
+    badgeText: 'var(--pms-blue)',
+  },
+  emerald: {
+    a: '#059669',
+    b: '#0284C7',
+    glow: 'rgba(5, 150, 105, 0.20)',
+    badgeBg: 'var(--pms-soft-mint)',
+    badgeText: '#059669',
+  },
+  orange: {
+    a: '#EA580C',
+    b: '#E11D48',
+    glow: 'rgba(234, 88, 12, 0.20)',
+    badgeBg: 'rgba(255, 237, 213, 0.7)',
+    badgeText: '#EA580C',
+  },
+  indigo: {
+    a: '#6366F1',
+    b: '#0284C7',
+    glow: 'rgba(99, 102, 241, 0.20)',
+    badgeBg: 'var(--pms-soft-lavender)',
+    badgeText: 'var(--pms-violet)',
+  },
+  violet: {
+    a: '#7C3AED',
+    b: '#E11D48',
+    glow: 'rgba(124, 58, 237, 0.20)',
+    badgeBg: 'var(--pms-soft-lavender)',
+    badgeText: 'var(--pms-violet)',
+  },
 };
 
-interface Particle { id: number; x: number; y: number; size: number; dy: number; dx: number; opacity: number; hue: number }
-
-function useInterval(fn: () => void, ms: number) {
-  const cb = useRef(fn);
-  useEffect(() => { cb.current = fn; }, [fn]);
-  useEffect(() => {
-    const id = setInterval(() => cb.current(), ms);
-    return () => clearInterval(id);
-  }, [ms]);
-}
-
 export default function BackendLoader({
-  title = 'Processing…',
+  title = 'Processing Document…',
   steps = DEFAULT_STEPS,
   tips = DEFAULT_TIPS,
-  accentColor = 'blue',
+  accentColor = 'rose',
+  progressOverride,
+  activeStepOverride,
 }: BackendLoaderProps) {
-  const pal = PALETTES[accentColor];
+  const pal = PALETTES[accentColor] || PALETTES.rose;
+  const prefersReduced = useReducedMotion();
 
-  const [activeStep, setActiveStep] = useState(0);
+  const [autoStep, setAutoStep] = useState(0);
   const [tipIdx, setTipIdx] = useState(0);
-  const [tipFade, setTipFade] = useState(true);
-  const [progress, setProgress] = useState(3);
-  const [particles, setParticles] = useState<Particle[]>([]);
-  const [angle, setAngle] = useState(0);
-  const [pulse, setPulse] = useState(false);
+  const [autoProgress, setAutoProgress] = useState(8);
 
   useEffect(() => {
-    setParticles(Array.from({ length: 20 }, (_, i) => ({
-      id: i,
-      x: Math.random() * 100,
-      y: 20 + Math.random() * 80,
-      size: 2 + Math.random() * 5,
-      dy: 0.06 + Math.random() * 0.1,
-      dx: (Math.random() - 0.5) * 0.05,
-      opacity: 0.1 + Math.random() * 0.35,
-      hue: Math.random() * 60 - 30,
-    })));
-  }, []);
+    if (typeof activeStepOverride === 'number') return;
+    const id = setInterval(() => {
+      setAutoStep((s) => (s + 1) % Math.max(1, steps.length));
+    }, 2200);
+    return () => clearInterval(id);
+  }, [steps.length, activeStepOverride]);
 
-  // Spinner angle
-  useInterval(() => setAngle(a => (a + 4) % 360), 16);
+  useEffect(() => {
+    const id = setInterval(() => {
+      setTipIdx((i) => (i + 1) % Math.max(1, tips.length));
+    }, 4200);
+    return () => clearInterval(id);
+  }, [tips.length]);
 
-  // Pulse ring
-  useInterval(() => setPulse(p => !p), 950);
+  useEffect(() => {
+    if (typeof progressOverride === 'number') return;
+    const id = setInterval(() => {
+      setAutoProgress((p) => {
+        if (p >= 96) return 96;
+        if (p > 82) return p + 0.35;
+        if (p > 60) return p + 0.85;
+        return p + 1.8;
+      });
+    }, 180);
+    return () => clearInterval(id);
+  }, [progressOverride]);
 
-  // Steps
-  useInterval(() => setActiveStep(s => (s + 1) % steps.length), 2400);
-
-  // Tips with fade
-  useInterval(() => {
-    setTipFade(false);
-    setTimeout(() => { setTipIdx(i => (i + 1) % tips.length); setTipFade(true); }, 380);
-  }, 3800);
-
-  // Progress
-  useInterval(() => {
-    setProgress(p => {
-      if (p > 94) return p + 0.05;
-      if (p > 78) return p + 0.2;
-      if (p > 55) return p + 0.45;
-      return p + 1.1;
-    });
-  }, 150);
-
-  // Float particles
-  useInterval(() => {
-    setParticles(prev => prev.map(p => {
-      let ny = p.y - p.dy;
-      let nx = p.x + p.dx + Math.sin(Date.now() * 0.0008 + p.id * 0.7) * 0.06;
-      if (ny < -8) { ny = 108; nx = Math.random() * 100; }
-      if (nx < 0) nx = 100;
-      if (nx > 100) nx = 0;
-      return { ...p, x: nx, y: ny };
-    }));
-  }, 28);
-
-  const pct = Math.min(progress, 97);
-
-  const grad = `linear-gradient(90deg, ${pal.a}, ${pal.b})`;
+  const activeStep =
+    typeof activeStepOverride === 'number'
+      ? Math.max(0, Math.min(steps.length - 1, activeStepOverride))
+      : autoStep;
+  const pct = Math.min(
+    99,
+    Math.max(4, Math.round(typeof progressOverride === 'number' ? progressOverride : autoProgress))
+  );
+  const grad = `linear-gradient(135deg, ${pal.a}, ${pal.b})`;
 
   return (
-    <div style={{
-      position: 'relative',
-      overflow: 'hidden',
-      borderRadius: 20,
-      background: 'linear-gradient(145deg, #0d1117 0%, #161b2e 40%, #0d1117 100%)',
-      border: `1.5px solid ${pal.a}35`,
-      boxShadow: `0 0 80px ${pal.glow}, 0 24px 64px rgba(0,0,0,0.6)`,
-      padding: '36px 28px 32px',
-    }}>
-      {/* Grid overlay */}
-      <div style={{
-        position: 'absolute', inset: 0, pointerEvents: 'none',
-        backgroundImage: `
-          linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px),
-          linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px)
-        `,
-        backgroundSize: '36px 36px',
-      }} />
+    <div
+      className="relative overflow-hidden rounded-3xl pms-glass-panel p-6 sm:p-8 border"
+      style={{
+        borderColor: 'var(--pms-border)',
+        boxShadow: `0 20px 52px -18px ${pal.glow}, var(--pms-shadow-card)`,
+      }}
+      role="status"
+      aria-live="polite"
+    >
+      <PearlScanOverlay active={!prefersReduced} />
 
-      {/* Glow blob behind orb */}
-      <div style={{
-        position: 'absolute',
-        width: 200, height: 200,
-        borderRadius: '50%',
-        background: `radial-gradient(circle, ${pal.a}20 0%, transparent 70%)`,
-        top: -60, left: '50%', transform: 'translateX(-50%)',
-        pointerEvents: 'none',
-        animation: 'none',
-      }} />
+      {/* Subtle radial aurora halo */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute -top-24 left-1/2 -translate-x-1/2 w-80 h-52 rounded-full blur-3xl opacity-45"
+        style={{ background: grad }}
+      />
 
-      {/* Particles */}
-      {particles.map(p => (
-        <div key={p.id} style={{
-          position: 'absolute',
-          left: `${p.x}%`, top: `${p.y}%`,
-          width: p.size, height: p.size,
-          borderRadius: '50%',
-          background: pal.a,
-          opacity: p.opacity,
-          filter: 'blur(1.2px)',
-          pointerEvents: 'none',
-          transition: 'top 0.028s linear, left 0.028s linear',
-        }} />
-      ))}
+      {/* Orbital Aurora Core */}
+      <div className="relative z-10 flex justify-center mb-5">
+        <div className="relative w-20 h-20 flex items-center justify-center">
+          {/* Outer breathing halo */}
+          {!prefersReduced && (
+            <motion.div
+              animate={{ scale: [1, 1.14, 1], opacity: [0.35, 0.7, 0.35] }}
+              transition={{ duration: 2.2, repeat: Infinity, ease: 'easeInOut' }}
+              className="absolute inset-0 rounded-full border"
+              style={{ borderColor: pal.a }}
+            />
+          )}
 
-      {/* ─── ORB ─── */}
-      <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 24, position: 'relative', height: 88 }}>
-        {/* Outer pulse */}
-        <div style={{
-          position: 'absolute', top: '50%', left: '50%',
-          width: 88, height: 88,
-          transform: `translate(-50%,-50%) scale(${pulse ? 1.22 : 1})`,
-          borderRadius: '50%',
-          border: `1.5px solid ${pal.a}40`,
-          transition: 'transform 0.9s cubic-bezier(.4,0,.2,1)',
-        }} />
-        {/* Inner pulse */}
-        <div style={{
-          position: 'absolute', top: '50%', left: '50%',
-          width: 70, height: 70,
-          transform: `translate(-50%,-50%) scale(${pulse ? 1 : 1.14})`,
-          borderRadius: '50%',
-          border: `1.5px solid ${pal.b}50`,
-          transition: 'transform 0.9s cubic-bezier(.4,0,.2,1)',
-        }} />
+          {/* Smooth GPU conic arc */}
+          <div
+            className="absolute inset-1.5 rounded-full"
+            style={{
+              background: `conic-gradient(from 0deg, transparent 35%, ${pal.a} 78%, ${pal.b} 100%)`,
+              animation: prefersReduced ? 'none' : 'pms-conic-spin 1.15s linear infinite',
+              boxShadow: `0 0 20px -4px ${pal.glow}`,
+            }}
+          >
+            <div
+              className="absolute inset-[3.5px] rounded-full"
+              style={{ backgroundColor: 'var(--pms-white)' }}
+            />
+          </div>
 
-        {/* Conic spinner */}
-        <div style={{
-          position: 'absolute', top: '50%', left: '50%',
-          transform: `translate(-50%,-50%) rotate(${angle}deg)`,
-          width: 58, height: 58,
-          borderRadius: '50%',
-          background: `conic-gradient(from 0deg, transparent 40%, ${pal.a} 70%, ${pal.b} 100%)`,
-          boxShadow: `0 0 24px ${pal.glow}`,
-        }}>
-          {/* Mask inner circle */}
-          <div style={{
-            position: 'absolute', inset: 4,
-            borderRadius: '50%',
-            background: '#0d1117',
-          }} />
-        </div>
-
-        {/* Icon center */}
-        <div style={{
-          position: 'absolute', top: '50%', left: '50%',
-          transform: 'translate(-50%,-50%)',
-          fontSize: 20,
-          lineHeight: 1,
-          transition: 'all 0.3s',
-          filter: 'drop-shadow(0 0 6px rgba(255,255,255,0.3))',
-        }}>
-          {steps[activeStep]?.icon}
+          {/* Center active emoji / icon */}
+          <motion.span
+            key={activeStep}
+            initial={prefersReduced ? false : { scale: 0.85, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            transition={{ duration: 0.25 }}
+            className="relative z-10 text-2xl select-none"
+          >
+            {steps[activeStep]?.icon || '⚡'}
+          </motion.span>
         </div>
       </div>
 
-      {/* Title */}
-      <div style={{ textAlign: 'center', marginBottom: 22 }}>
-        <h3 style={{
-          margin: '0 0 5px',
-          fontFamily: 'system-ui, -apple-system, sans-serif',
-          fontWeight: 800,
-          fontSize: 20,
-          color: '#f8fafc',
-          letterSpacing: '-0.4px',
-        }}>
+      {/* Title & Active Stage Badge */}
+      <div className="relative z-10 text-center space-y-1.5 mb-6">
+        <h3 className="text-lg sm:text-xl font-extrabold tracking-tight text-[var(--pms-ink)]">
           {title}
         </h3>
-        <p style={{
-          margin: 0,
-          fontFamily: 'system-ui, sans-serif',
-          fontSize: 11.5,
-          fontWeight: 700,
-          color: pal.text,
-          textTransform: 'uppercase',
-          letterSpacing: 1.2,
-        }}>
-          {steps[activeStep]?.label}
-        </p>
+        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold tracking-wide uppercase"
+          style={{ backgroundColor: pal.badgeBg, color: pal.badgeText }}
+        >
+          <Sparkles className="w-3 h-3" />
+          <span>{steps[activeStep]?.label}</span>
+        </div>
       </div>
 
-      {/* Steps timeline */}
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 0, marginBottom: 22 }}>
-        {steps.map((step, i) => (
-          <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', position: 'relative' }}>
-            {/* Connector */}
-            {i < steps.length - 1 && (
-              <div style={{
-                position: 'absolute',
-                top: 13, left: '50%',
-                width: '100%', height: 2,
-                background: i < activeStep
-                  ? grad
-                  : 'rgba(255,255,255,0.07)',
-                transition: 'background 0.6s ease',
-                zIndex: 0,
-              }} />
-            )}
-
-            {/* Dot */}
-            <div style={{
-              width: 26, height: 26,
-              borderRadius: '50%',
-              background: i < activeStep
-                ? grad
-                : i === activeStep
-                  ? 'transparent'
-                  : 'rgba(255,255,255,0.05)',
-              border: i === activeStep
-                ? `2px solid ${pal.a}`
-                : i < activeStep
-                  ? 'none'
-                  : '1.5px solid rgba(255,255,255,0.1)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              zIndex: 1, position: 'relative',
-              boxShadow: i === activeStep ? `0 0 14px ${pal.glow}` : 'none',
-              transition: 'all 0.5s ease',
-              fontSize: 10,
-            }}>
-              {i < activeStep
-                ? <span style={{ color: '#fff', fontWeight: 900, fontSize: 10 }}>✓</span>
-                : i === activeStep
-                  ? <div style={{
-                      width: 7, height: 7, borderRadius: '50%',
-                      background: pal.a,
-                      boxShadow: `0 0 6px ${pal.a}`,
-                      animation: 'pulse-dot 1.1s ease-in-out infinite',
-                    }} />
-                  : <span style={{ color: 'rgba(255,255,255,0.2)', fontWeight: 600 }}>{i + 1}</span>
-              }
+      {/* Stepper Timeline */}
+      <div className="relative z-10 flex items-start justify-between gap-1 mb-6 px-1">
+        {steps.map((step, i) => {
+          const isDone = i < activeStep;
+          const isCurrent = i === activeStep;
+          return (
+            <div key={step.label + i} className="flex-1 flex flex-col items-center relative">
+              {i < steps.length - 1 && (
+                <div
+                  className="absolute top-3.5 left-1/2 w-full h-[2px] -z-0 transition-all duration-500"
+                  style={{
+                    background: isDone ? grad : 'var(--pms-border)',
+                  }}
+                />
+              )}
+              <div
+                className="w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-bold relative z-10 transition-all duration-300"
+                style={{
+                  background: isDone ? grad : 'var(--pms-white)',
+                  border: isCurrent
+                    ? `2px solid ${pal.a}`
+                    : isDone
+                      ? 'none'
+                      : '1.5px solid var(--pms-border-strong)',
+                  color: isDone ? '#FFFFFF' : isCurrent ? pal.a : 'var(--pms-subtle-text)',
+                  boxShadow: isCurrent ? `0 0 0 4px ${pal.glow}` : 'none',
+                }}
+              >
+                {isDone ? <Check className="w-3.5 h-3.5 stroke-[2.8]" /> : i + 1}
+              </div>
+              <span
+                className="mt-1.5 text-[10px] font-bold text-center leading-tight line-clamp-1"
+                style={{
+                  color: isCurrent
+                    ? 'var(--pms-ink)'
+                    : isDone
+                      ? 'var(--pms-muted)'
+                      : 'var(--pms-subtle-text)',
+                }}
+              >
+                {step.label}
+              </span>
             </div>
-
-            {/* Label */}
-            <span style={{
-              marginTop: 7,
-              fontSize: 9,
-              fontWeight: i <= activeStep ? 700 : 400,
-              color: i === activeStep
-                ? pal.text
-                : i < activeStep
-                  ? 'rgba(255,255,255,0.5)'
-                  : 'rgba(255,255,255,0.2)',
-              textAlign: 'center',
-              fontFamily: 'system-ui, sans-serif',
-              transition: 'color 0.5s',
-              letterSpacing: 0.5,
-              textTransform: 'uppercase',
-            }}>
-              {step.label}
-            </span>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
-      {/* Progress bar */}
-      <div style={{ marginBottom: 20 }}>
-        <div style={{
-          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-          marginBottom: 8,
-          fontFamily: 'system-ui, sans-serif',
-        }}>
-          <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.38)', fontStyle: 'italic' }}>
+      {/* Progress Meter */}
+      <div className="relative z-10 space-y-2 mb-5">
+        <div className="flex items-center justify-between text-xs">
+          <span className="text-[var(--pms-muted)] font-medium truncate pr-3">
             {steps[activeStep]?.detail}
           </span>
-          <span style={{
-            fontSize: 12, fontWeight: 800,
-            background: grad,
-            WebkitBackgroundClip: 'text',
-            WebkitTextFillColor: 'transparent',
-          }}>
-            {Math.round(pct)}%
+          <span
+            className="font-extrabold tabular-nums shrink-0"
+            style={{
+              backgroundImage: grad,
+              WebkitBackgroundClip: 'text',
+              backgroundClip: 'text',
+              color: 'transparent',
+            }}
+          >
+            {pct}%
           </span>
         </div>
 
-        {/* Track */}
-        <div style={{
-          height: 5, borderRadius: 99,
-          background: 'rgba(255,255,255,0.06)',
-          overflow: 'hidden',
-        }}>
-          <div style={{
-            height: '100%',
-            width: `${pct}%`,
-            background: grad,
-            borderRadius: 99,
-            transition: 'width 0.15s linear',
-            position: 'relative',
-            overflow: 'hidden',
-          }}>
-            {/* Shimmer */}
-            <div style={{
-              position: 'absolute', top: 0, bottom: 0,
-              width: '40%',
-              background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent)',
-              animation: 'shimmer-bar 1.8s linear infinite',
-            }} />
+        <div
+          className="h-2 rounded-full overflow-hidden"
+          style={{ backgroundColor: 'var(--pms-lavender-surface)' }}
+        >
+          <div
+            className="h-full rounded-full relative overflow-hidden transition-[width] duration-300 ease-out"
+            style={{ width: `${pct}%`, backgroundImage: grad }}
+          >
+            {!prefersReduced && (
+              <div className="absolute inset-0 pms-shimmer opacity-55" />
+            )}
           </div>
         </div>
       </div>
 
-      {/* Tip */}
-      <div style={{
-        background: `${pal.a}0d`,
-        border: `1px solid ${pal.a}25`,
-        borderRadius: 10,
-        padding: '10px 14px',
-        fontSize: 12,
-        color: 'rgba(255,255,255,0.55)',
-        fontFamily: 'system-ui, sans-serif',
-        lineHeight: 1.6,
-        minHeight: 40,
-        display: 'flex', alignItems: 'center',
-        opacity: tipFade ? 1 : 0,
-        transition: 'opacity 0.35s ease',
-      }}>
-        {tips[tipIdx]}
-      </div>
+      {/* Rotating Pearl Glass Tip */}
+      {tips.length > 0 && (
+        <div
+          className="relative z-10 rounded-2xl px-4 py-3 text-xs font-medium text-[var(--pms-muted)] leading-relaxed border flex items-center gap-2.5"
+          style={{
+            backgroundColor: 'var(--pms-pearl)',
+            borderColor: 'var(--pms-border)',
+          }}
+        >
+          <span
+            className="w-1.5 h-1.5 rounded-full shrink-0"
+            style={{ backgroundImage: grad }}
+          />
+          <motion.span
+            key={tipIdx}
+            initial={prefersReduced ? false : { opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.25 }}
+          >
+            {tips[tipIdx]}
+          </motion.span>
+        </div>
+      )}
 
       <style>{`
-        @keyframes shimmer-bar {
-          from { left: -50%; }
-          to   { left: 140%; }
-        }
-        @keyframes pulse-dot {
-          0%, 100% { transform: scale(1); opacity: 1; }
-          50%       { transform: scale(1.6); opacity: 0.5; }
+        @keyframes pms-conic-spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
         }
       `}</style>
     </div>

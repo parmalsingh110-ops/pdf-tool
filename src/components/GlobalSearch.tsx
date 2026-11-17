@@ -11,6 +11,8 @@ import { Search, ArrowRight, X, Combine, Scissors, Minimize2, FileText, Image as
   Calculator, Monitor, Scale, GraduationCap, Megaphone,
   ShieldAlert, Maximize2, FileWarning, WifiOff,
 } from 'lucide-react';
+import { formatRouteSlugTitle } from '../lib/recentFiles';
+import type { PearlAccentTone } from './pearl/PearlToolCard';
 
 export interface ToolEntry {
   title: string;
@@ -156,6 +158,7 @@ export const ALL_TOOLS: ToolEntry[] = [
   { title: 'PDF Read Aloud', path: '/pdf-to-audio', icon: Volume2, category: 'Pro Tools', keywords: 'tts text speech listen' },
   { title: 'Reading Tracker', path: '/reading-tracker', icon: BookMarked, category: 'Pro Tools', keywords: 'progress bookmark resume' },
   { title: 'Image Insert & Overlay', path: '/image-insert', icon: ImageIcon, category: 'Pro Tools', keywords: 'add image page layer' },
+  { title: 'AI PDF Summarizer', path: '/ai-summarizer', icon: Sparkles, category: 'Pro Tools', keywords: 'ai summary summarize key points insights ask gemini' },
   // Creative
   { title: 'QR Code Generator', path: '/qr-code', icon: QrCode, category: 'Creative', keywords: 'barcode url qr' },
   { title: 'Digital Signature Pad', path: '/signature-pad', icon: Pen, category: 'Creative', keywords: 'draw sign handwritten' },
@@ -174,6 +177,42 @@ export const ALL_TOOLS: ToolEntry[] = [
 ];
 
 export const VERIFIED_TOOL_COUNT = new Set(ALL_TOOLS.map((t) => t.path)).size;
+
+const CATEGORY_TONE_MAP: Record<string, PearlAccentTone> = {
+  'PDF Tools': 'rose',
+  Convert: 'blue',
+  'Image Tools': 'violet',
+  'Text & OCR': 'sky',
+  'Deep-Tech': 'indigo',
+  'Pro Tools': 'emerald',
+  Creative: 'sky',
+  Security: 'amber',
+};
+
+export interface ResolvedToolMeta {
+  title: string;
+  path: string;
+  icon: React.ElementType;
+  category: string;
+  tone: PearlAccentTone;
+}
+
+/** Resolve friendly title, icon, category, and Pearl accent tone for any route path. */
+export function resolveToolMetadata(path: string, storedTitle?: string): ResolvedToolMeta {
+  const normPath = (path || '/').replace(/\/$/, '') || '/';
+  const found = ALL_TOOLS.find((t) => t.path === normPath);
+  const rawStored = typeof storedTitle === 'string' ? storedTitle.trim() : '';
+  const hasHumanStored = Boolean(rawStored && !rawStored.startsWith('/') && rawStored !== normPath);
+  const title = found?.title || (hasHumanStored ? rawStored : formatRouteSlugTitle(normPath));
+  const category = found?.category || 'Workspace';
+  return {
+    title,
+    path: normPath,
+    icon: found?.icon || FileText,
+    category,
+    tone: CATEGORY_TONE_MAP[category] || 'rose',
+  };
+}
 
 interface Props {
   open: boolean;

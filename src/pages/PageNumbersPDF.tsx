@@ -10,6 +10,7 @@ import { useSEO } from '../hooks/useSEO';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 import { AnimatedNumber, PearlScanOverlay, PearlStageSwitch } from '../components/pearl/PearlMotion';
 import { useAutoRevokeUrl, toArrayBufferBytes } from '../lib/blobUrl';
+import { loadPdfDocumentSafely } from '../lib/pdfLoad';
 
 type NumberPosition = 'bottom-center' | 'bottom-right' | 'bottom-left' | 'top-center' | 'top-right' | 'top-left';
 type NumberFormat = 'page-n-of-total' | 'n-of-total' | 'page-n' | 'just-n' | 'dash-n-dash';
@@ -155,7 +156,7 @@ export default function PageNumbersPDF() {
     setNumberedUrl(null);
     try {
       const ab = await f.arrayBuffer();
-      const pdf = await PDFDocument.load(ab);
+      const { pdfDoc: pdf } = await loadPdfDocumentSafely(ab, { fileName: f.name });
       setPageCount(pdf.getPageCount());
     } catch { /* ignore */ }
     renderPreview(f);
@@ -172,7 +173,7 @@ export default function PageNumbersPDF() {
     setIsProcessing(true);
     try {
       const arrayBuffer = await file.arrayBuffer();
-      const pdfDoc = await PDFDocument.load(arrayBuffer);
+      const { pdfDoc } = await loadPdfDocumentSafely(arrayBuffer, { fileName: file.name });
 
       let standardFont = StandardFonts.Helvetica;
       if (fontFamily === 'TimesRoman') standardFont = StandardFonts.TimesRoman;

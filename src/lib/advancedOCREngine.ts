@@ -427,9 +427,8 @@ export async function ocrScannedPages(
       
       if (runs.length > 0) return runs;
     }
-  } catch (aiError) {
-    console.warn("Advanced engine failed, falling back to local Tesseract OCR", aiError);
-    runs.length = 0; // Clear partial runs if any page failed
+  } catch {
+    runs.length = 0; // Silently fall back to local on-device OCR
   }
 
   // Fallback to local Tesseract OCR

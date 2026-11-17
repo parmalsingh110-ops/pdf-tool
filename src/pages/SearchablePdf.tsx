@@ -14,6 +14,8 @@ import { useSEO } from '../hooks/useSEO';
 import { apiFetch } from '../lib/api';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 import { AnimatedNumber, PearlScanOverlay, PearlStageSwitch } from '../components/pearl/PearlMotion';
+import OcrLanguageSelect from '../components/OcrLanguageSelect';
+import { getStoredOcrLang, toBrowserTesseractLang } from '../lib/ocrLanguages';
 import { toArrayBufferBytes } from '../lib/blobUrl';
 import {
   preprocessCanvasForOcr,
@@ -23,25 +25,24 @@ import {
 } from '../lib/ocrLayerRenderer';
 
 type Stage = 'idle' | 'processing' | 'done' | 'error';
-type Lang = 'eng' | 'hin' | 'hin+eng';
 type OcrEngine = 'browser' | 'cloud';
 
 export default function SearchablePdf() {
   useSEO(
     'Make PDF Searchable Online Free — OCR Hidden Text Layer | PDF Media Suite',
-    'Convert scanned PDFs into searchable and selectable PDFs online free. Dual-engine OCR runs in-browser or server Pro AI without altering original document appearance.'
+    'Convert scanned PDFs into searchable and selectable PDFs online free. Dual-engine OCR supports 100+ global languages in-browser or server without altering document appearance.'
   );
 
   usePageSEO(
     'Make PDF Searchable (OCR) — Pixel-Locked Multi-Layer Engine',
-    'Convert scanned PDFs into text-searchable PDFs without changing their appearance. Sub-point 3-Tr text matrix alignment, watermark cleaner, and local RapidOCR AI.',
+    'Convert scanned PDFs into text-searchable PDFs without changing their appearance. Precision invisible text alignment, stamp denoiser, and global multilingual OCR.',
   );
 
   const [file, setFile] = useState<File | null>(null);
   const [stage, setStage] = useState<Stage>('idle');
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState('');
-  const [lang, setLang] = useState<Lang>('eng');
+  const [lang, setLang] = useState<string>(() => getStoredOcrLang());
 
   // Engine: default to browser for 0 server bandwidth & instant execution
   const [engine, setEngine] = useState<OcrEngine>('browser');
@@ -96,7 +97,8 @@ export default function SearchablePdf() {
       const helvetica = await pdfDoc.embedFont(StandardFonts.Helvetica);
 
       let devanagariFont: any = null;
-      if (lang === 'hin' || lang === 'hin+eng') {
+      const needsIndicFont = lang === 'auto' || /(hin|mar|nep)/i.test(lang);
+      if (needsIndicFont) {
         try {
           const fontRes = await fetch('/fonts/NotoSansDevanagari-Regular.ttf');
           if (fontRes.ok) {
@@ -113,10 +115,10 @@ export default function SearchablePdf() {
         currentPage: 0,
         totalPages: total,
         percent: 10,
-        status: 'Starting local Tesseract OCR engine...',
+        status: 'Starting on-device OCR engine...',
       });
 
-      const tesseractLang = lang === 'hin' ? 'hin' : lang === 'hin+eng' ? 'hin+eng' : 'eng';
+      const tesseractLang = toBrowserTesseractLang(lang);
       const worker = await createWorker(tesseractLang, 1, {
         logger: (m) => {
           if (m.status === 'recognizing text') {
@@ -354,36 +356,26 @@ export default function SearchablePdf() {
                       }`}
                     >
                       <div className="flex items-center gap-2 font-bold text-sm mb-1 text-[var(--pms-violet)]">
-                        <Cloud className="w-4 h-4" /> Server Pro AI (RapidOCR + Denoise)
+                        <Cloud className="w-4 h-4" /> Precision Cloud OCR
                       </div>
                       <p className="text-xs text-[var(--pms-muted)]">
-                        Uses RapidOCR PP-OCRv4 ONNX + OpenCV watermark filter + PyMuPDF 3-Tr sub-point alignment (zero external leaks).
+                        Uses high-accuracy neural OCR, automatic background denoising, and exact invisible text alignment.
                       </p>
                     </button>
                   </div>
                 </div>
 
                 {/* Language Selection */}
-                <div className="flex flex-col sm:flex-row gap-4 items-center justify-between pt-4 border-t border-[var(--pms-border)]">
-                  <span className="font-semibold text-[var(--pms-ink)] text-sm">
-                    Recognition Language:
-                  </span>
-                  <div className="flex gap-1.5 bg-[var(--pms-pearl)]/80 dark:bg-slate-900/70 p-1 rounded-2xl border border-[var(--pms-border)] w-full sm:w-auto justify-center">
-                    {(['eng', 'hin', 'hin+eng'] as Lang[]).map((l) => (
-                      <button
-                        key={l}
-                        type="button"
-                        onClick={() => setLang(l)}
-                        className={`px-4 py-1.5 text-xs font-bold rounded-xl capitalize transition-all ${
-                          lang === l
-                            ? 'bg-[var(--pms-blue)] text-white shadow-sm'
-                            : 'text-[var(--pms-muted)] hover:text-[var(--pms-ink)]'
-                        }`}
-                      >
-                        {l === 'eng' ? 'English' : l === 'hin' ? 'Hindi' : 'Hindi + English'}
-                      </button>
-                    ))}
+                <div className="flex flex-col sm:flex-row gap-3 sm:items-center justify-between pt-4 border-t border-[var(--pms-border)]">
+                  <div>
+                    <span className="font-semibold text-[var(--pms-ink)] text-sm block">
+                      Document Language / Script:
+                    </span>
+                    <span className="text-xs text-[var(--pms-muted)]">
+                      Keep Auto Detect or choose any world language
+                    </span>
                   </div>
+                  <OcrLanguageSelect value={lang} onChange={setLang} />
                 </div>
 
                 {/* Shared Multi-Layer & Watermark Filter Option */}
@@ -442,7 +434,7 @@ export default function SearchablePdf() {
                           className="w-4 h-4 rounded accent-emerald-600"
                         />
                         <label htmlFor="strictLocalOcr" className="text-xs font-medium text-emerald-700 dark:text-emerald-400 cursor-pointer">
-                          Privacy Lock: Strictly use local Pro AI OCR (RapidOCR + Tesseract) — never upload to external APIs
+                          Privacy Lock: Strictly process using on-device/local recognition pipelines only
                         </label>
                       </div>
                     </>
@@ -458,8 +450,8 @@ export default function SearchablePdf() {
                   title="Drop your Scanned PDF here"
                   subtitle={
                     engine === 'browser'
-                      ? 'Pixel-Locked Browser OCR (0 MB server data · CropBox + Watermark Filter)'
-                      : 'Server Pro AI (RapidOCR ONNX + OpenCV Denoise + 3-Tr Sub-Point Overlay)'
+                      ? 'Pixel-Locked Browser OCR (0 MB server upload · Local Crop & Filter)'
+                      : 'Precision Hybrid OCR (Denoise + Bilingual Searchable Layer)'
                   }
                 />
               </div>
@@ -518,16 +510,16 @@ export default function SearchablePdf() {
                   title="Running Cloud OCR Engine…"
                   accentColor="blue"
                   steps={[
-                    { icon: '📤', label: 'Uploading', detail: 'Sending scanned PDF to cloud server...' },
-                    { icon: '🧠', label: 'OCR Init', detail: 'Loading OCRmyPDF + Ghostscript...' },
-                    { icon: '🔍', label: 'Reading', detail: 'Recognizing text character by character...' },
-                    { icon: '💾', label: 'Embedding', detail: 'Generating searchable text layer...' },
+                    { icon: '📤', label: 'Uploading', detail: 'Securing document layers for recognition…' },
+                    { icon: '🧠', label: 'Script Detection', detail: 'Preparing global multi-script recognition engine…' },
+                    { icon: '🔍', label: 'Reading', detail: 'Recognizing characters & coordinates accurately…' },
+                    { icon: '💾', label: 'Embedding', detail: 'Generating pixel-locked searchable text layer…' },
                   ]}
                   tips={[
-                    'OCRmyPDF supports high-accuracy Indian language scripts.',
+                    'Auto Detect supports 100+ global languages and mixed-script scans.',
                     'Auto-deskew straightens pages photographed at an angle.',
-                    'The resulting PDF looks identical but is fully searchable.',
-                    'File is deleted from server immediately after download.',
+                    'The resulting PDF looks identical while becoming 100% searchable.',
+                    'Files are processed privately and cleared right after download.',
                   ]}
                 />
               )}

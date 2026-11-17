@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Optional
 
 import cv2
-import fitz
+import pymupdf as fitz
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont, features
 
@@ -117,15 +117,17 @@ def _resolve_render_font_spec(
     is_mono: bool,
     is_bold: bool,
     is_italic: bool,
+    preferred_family: str = "",
 ) -> tuple[Optional[Path], Optional[str]]:
     """
-    Locate best matching valid TTF font path on disk, plus PyMuPDF built-in font key
-    (`helv`/`hebo`/`tiro`/`tibo`/`cour` etc.) whose embedded font buffer always works
-    cross-platform even if OS fonts are absent.
+    Locate best matching valid TTF font path on disk (honoring exact family hints
+    such as Verdana, Georgia, Times, Arial, Courier when available), plus PyMuPDF
+    built-in font key fallback (`helv`/`hebo`/`tiro`/`tibo`/`cour` etc.).
     """
     here = Path(__file__).resolve().parent
     pub_fonts = here.parent / "public" / "fonts"
     be_fonts = here / "fonts"
+    fam = (preferred_family or "").lower()
 
     def _first_valid(paths: list[Path]) -> Optional[Path]:
         for p in paths:
@@ -145,32 +147,33 @@ def _resolve_render_font_spec(
 
     if is_serif:
         fitz_key = "tibi" if (is_bold and is_italic) else ("tibo" if is_bold else ("tiit" if is_italic else "tiro"))
+        prefer_georgia = any(k in fam for k in ("georgia", "cambria", "bookman", "palatino"))
         serif_cands: list[Path] = []
         if is_bold and is_italic:
+            order = ["Georgia Bold Italic.ttf", "Times New Roman Bold Italic.ttf"] if prefer_georgia else ["Times New Roman Bold Italic.ttf", "Georgia Bold Italic.ttf"]
+            serif_cands += [Path("/System/Library/Fonts/Supplemental") / n for n in order]
             serif_cands += [
-                Path("/System/Library/Fonts/Supplemental/Times New Roman Bold Italic.ttf"),
-                Path("/System/Library/Fonts/Supplemental/Georgia Bold Italic.ttf"),
                 Path("/usr/share/fonts/truetype/liberation/LiberationSerif-BoldItalic.ttf"),
                 Path("/usr/share/fonts/truetype/dejavu/DejaVuSerif-BoldItalic.ttf"),
             ]
         elif is_bold:
+            order = ["Georgia Bold.ttf", "Times New Roman Bold.ttf"] if prefer_georgia else ["Times New Roman Bold.ttf", "Georgia Bold.ttf"]
+            serif_cands += [Path("/System/Library/Fonts/Supplemental") / n for n in order]
             serif_cands += [
-                Path("/System/Library/Fonts/Supplemental/Times New Roman Bold.ttf"),
-                Path("/System/Library/Fonts/Supplemental/Georgia Bold.ttf"),
                 Path("/usr/share/fonts/truetype/liberation/LiberationSerif-Bold.ttf"),
                 Path("/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf"),
             ]
         elif is_italic:
+            order = ["Georgia Italic.ttf", "Times New Roman Italic.ttf"] if prefer_georgia else ["Times New Roman Italic.ttf", "Georgia Italic.ttf"]
+            serif_cands += [Path("/System/Library/Fonts/Supplemental") / n for n in order]
             serif_cands += [
-                Path("/System/Library/Fonts/Supplemental/Times New Roman Italic.ttf"),
-                Path("/System/Library/Fonts/Supplemental/Georgia Italic.ttf"),
                 Path("/usr/share/fonts/truetype/liberation/LiberationSerif-Italic.ttf"),
                 Path("/usr/share/fonts/truetype/dejavu/DejaVuSerif-Italic.ttf"),
             ]
         else:
+            order = ["Georgia.ttf", "Times New Roman.ttf"] if prefer_georgia else ["Times New Roman.ttf", "Georgia.ttf"]
+            serif_cands += [Path("/System/Library/Fonts/Supplemental") / n for n in order]
             serif_cands += [
-                Path("/System/Library/Fonts/Supplemental/Times New Roman.ttf"),
-                Path("/System/Library/Fonts/Supplemental/Georgia.ttf"),
                 Path("/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf"),
                 Path("/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf"),
             ]
@@ -185,11 +188,13 @@ def _resolve_render_font_spec(
         ]
         return _first_valid(mono_cands), fitz_key
 
-    # Default clean Sans-Serif (matching Aadhaar / Govt / modern documents)
+    # Default clean Sans-Serif — prioritize exact wide-xheight families like Verdana/DejaVu when hinted
     fitz_key = "hebi" if (is_bold and is_italic) else ("hebo" if is_bold else ("heit" if is_italic else "helv"))
+    prefer_wide_sans = any(k in fam for k in ("verdana", "dejavu", "tahoma", "segoe", "trebuchet", "calibri", "carlito"))
     if is_bold and is_italic:
         sans_names = ["NotoSans-BoldItalic.ttf", "NotoSans-Bold.ttf", "NotoSans-Regular.ttf"]
         os_sans = [
+            *([Path("/System/Library/Fonts/Supplemental/Verdana Bold Italic.ttf"), Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-BoldOblique.ttf")] if prefer_wide_sans else []),
             Path("/System/Library/Fonts/Supplemental/Arial Bold Italic.ttf"),
             Path("/usr/share/fonts/truetype/liberation/LiberationSans-BoldItalic.ttf"),
             Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-BoldOblique.ttf"),
@@ -197,6 +202,7 @@ def _resolve_render_font_spec(
     elif is_bold:
         sans_names = ["NotoSans-Bold.ttf", "NotoSans-Regular.ttf"]
         os_sans = [
+            *([Path("/System/Library/Fonts/Supplemental/Verdana Bold.ttf"), Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf")] if prefer_wide_sans else []),
             Path("/System/Library/Fonts/Supplemental/Arial Bold.ttf"),
             Path("/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"),
             Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
@@ -204,6 +210,7 @@ def _resolve_render_font_spec(
     elif is_italic:
         sans_names = ["NotoSans-Italic.ttf", "NotoSans-Regular.ttf"]
         os_sans = [
+            *([Path("/System/Library/Fonts/Supplemental/Verdana Italic.ttf"), Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-Oblique.ttf")] if prefer_wide_sans else []),
             Path("/System/Library/Fonts/Supplemental/Arial Italic.ttf"),
             Path("/usr/share/fonts/truetype/liberation/LiberationSans-Italic.ttf"),
             Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-Oblique.ttf"),
@@ -211,12 +218,16 @@ def _resolve_render_font_spec(
     else:
         sans_names = ["NotoSans-Regular.ttf", "NotoSans-Bold.ttf"]
         os_sans = [
+            *([Path("/System/Library/Fonts/Supplemental/Verdana.ttf"), Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf")] if prefer_wide_sans else []),
             Path("/System/Library/Fonts/Supplemental/Arial.ttf"),
             Path("/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"),
             Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
         ]
 
-    cands = [d / n for n in sans_names for d in (pub_fonts, be_fonts)] + os_sans
+    if prefer_wide_sans:
+        cands = os_sans + [d / n for n in sans_names for d in (pub_fonts, be_fonts)]
+    else:
+        cands = [d / n for n in sans_names for d in (pub_fonts, be_fonts)] + os_sans
     return _first_valid(cands), fitz_key
 
 
@@ -230,14 +241,322 @@ def _estimate_smooth_bg_gray(gray: np.ndarray) -> np.ndarray:
     return cv2.GaussianBlur(closed, (blur_k, blur_k), 0)
 
 
+def _is_serif_from_glyph_mask(glyph_mask: np.ndarray, median_h: float) -> bool:
+    """
+    Visually classify Serif (Times/Georgia) vs Sans-Serif (Helvetica/Arial)
+    by measuring baseline serif-foot flare on vertical stems of glyphs in a row.
+    """
+    if np.count_nonzero(glyph_mask) < 40 or median_h < 10.0:
+        return False
+    n_lbl, labels, stats, _ = cv2.connectedComponentsWithStats(glyph_mask, connectivity=8)
+    stem_foot_ratios: list[float] = []
+    narrow_ratios: list[float] = []
+    for i in range(1, n_lbl):
+        w = int(stats[i, cv2.CC_STAT_WIDTH])
+        h = int(stats[i, cv2.CC_STAT_HEIGHT])
+        area = int(stats[i, cv2.CC_STAT_AREA])
+        if h < median_h * 0.58 or area < 15:
+            continue
+        x0 = int(stats[i, cv2.CC_STAT_LEFT])
+        y0 = int(stats[i, cv2.CC_STAT_TOP])
+        sub = (labels[y0:y0 + h, x0:x0 + w] == i)
+
+        shaft = sub[int(h * 0.30):max(int(h * 0.30) + 1, int(h * 0.78)), :]
+        if shaft.shape[0] >= 4:
+            stem_cols = np.where(np.mean(shaft, axis=0) >= 0.70)[0]
+            if stem_cols.size > 0:
+                mid = sub[int(h * 0.52):max(int(h * 0.52) + 1, int(h * 0.76)), :]
+                bot = sub[max(0, int(h * 0.87)):, :]
+                splits = np.where(np.diff(stem_cols) > 2)[0] + 1
+                for grp in np.split(stem_cols, splits):
+                    c0, c1 = int(grp[0]), int(grp[-1])
+                    sw = c1 - c0 + 1
+                    if sw > median_h * 0.35:
+                        continue
+                    pad = max(2, int(sw * 1.4))
+                    xl, xr = max(0, c0 - pad), min(w, c1 + pad + 1)
+                    mid_w = float(np.median(np.sum(mid[:, xl:xr], axis=1))) if mid.shape[0] else 0.0
+                    bot_w = float(np.max(np.sum(bot[:, xl:xr], axis=1))) if bot.shape[0] else 0.0
+                    if mid_w >= 1.1:
+                        stem_foot_ratios.append(bot_w / mid_w)
+
+        if 3 <= w <= median_h * 0.45:
+            row_sums = np.sum(sub, axis=1).astype(np.float32)
+            if row_sums.size >= 10:
+                mw = float(np.median(row_sums[int(h * 0.38):max(int(h * 0.38) + 1, int(h * 0.70))]))
+                bw = float(np.max(row_sums[max(0, int(h * 0.85)):]))
+                tw = float(np.max(row_sums[:max(2, int(h * 0.14))]))
+                if mw >= 1.2:
+                    narrow_ratios.append(max(bw, 0.9 * tw) / mw)
+
+    if len(stem_foot_ratios) >= 2:
+        return float(np.median(stem_foot_ratios)) >= 1.42
+    if len(stem_foot_ratios) == 1:
+        return stem_foot_ratios[0] >= 1.65
+    if len(narrow_ratios) >= 2:
+        return float(np.median(narrow_ratios)) >= 1.40
+    if len(narrow_ratios) == 1:
+        return narrow_ratios[0] >= 1.60
+    return False
+
+
+def _cluster_row_baseline_and_cap(
+    glyph_tops: list[int],
+    glyph_bots: list[int],
+    glyph_heights: list[int],
+    eh: int,
+    fallback_top: float,
+    fallback_base: float,
+) -> tuple[float, float, float]:
+    """
+    Estimate exact row baseline & tall cap height without being skewed up by
+    punctuation dots or pulled down by descenders (`g, j, p, q, y`).
+    """
+    if not glyph_bots:
+        return fallback_top, fallback_base, max(6.0, fallback_base - fallback_top)
+
+    bots_arr = np.array(glyph_bots, dtype=np.float32)
+    # Build dense clusters within +-max(2.0, eh*0.10) to find the true main baseline mode
+    tol = max(2.2, eh * 0.10)
+    best_cluster = bots_arr
+    best_score = -1.0
+    for cand in bots_arr:
+        in_c = bots_arr[np.abs(bots_arr - cand) <= tol]
+        # Prefer larger cluster, tie-break toward upper-main cluster if descenders exist below
+        score = float(in_c.size) - 0.02 * float(np.median(in_c) - np.min(bots_arr))
+        if score > best_score:
+            best_score = score
+            best_cluster = in_c
+
+    baseline_px = float(np.median(best_cluster))
+
+    # Measure true tall ascenders/caps that terminate ON the main baseline (not floating apostrophes/dots)
+    tall_tops: list[float] = []
+    min_tall_h = max(float(eh) * 0.54, float(np.percentile(glyph_heights, 72)) * 0.86)
+    for t, b, h in zip(glyph_tops, glyph_bots, glyph_heights):
+        if abs(float(b) - baseline_px) <= max(3.5, eh * 0.14) and float(h) >= min_tall_h:
+            tall_tops.append(float(t))
+
+    if tall_tops:
+        cap_top_px = float(np.percentile(tall_tops, 20))
+    else:
+        cap_top_px = float(np.percentile(glyph_tops, 20))
+
+    visual_h_px = max(float(eh) * 0.56, baseline_px - cap_top_px)
+    return cap_top_px, baseline_px, visual_h_px
+
+
+def _measure_word_tight_ink_box(
+    roi_bgr: np.ndarray,
+    roi_gray: np.ndarray,
+    bg_gray: np.ndarray,
+    wx0: int,
+    wy0: int,
+    wx1: int,
+    wy1: int,
+) -> tuple[int, int, int, int]:
+    """Refine a single word's pixel bounds tightly around dark ink (ignoring yellow/pastel wash)."""
+    ih, iw = roi_gray.shape[:2]
+    px0 = max(0, wx0 - 1)
+    py0 = max(0, wy0 - 1)
+    px1 = min(iw, wx1 + 1)
+    py1 = min(ih, wy1 + 1)
+    if (px1 - px0) < 3 or (py1 - py0) < 3:
+        return wx0, wy0, wx1, wy1
+
+    sub_bgr = roi_bgr[py0:py1, px0:px1]
+    sub_gray = roi_gray[py0:py1, px0:px1]
+    sub_diff = bg_gray[py0:py1, px0:px1].astype(np.float32) - sub_gray.astype(np.float32)
+    bright_wm = (
+        (sub_gray >= 165)
+        & (sub_bgr[:, :, 2].astype(np.int16) >= 175)
+        & (sub_bgr[:, :, 1].astype(np.int16) >= 170)
+        & (sub_diff < 52)
+    )
+    pos = sub_diff[(sub_diff > 18) & (~bright_wm)]
+    if pos.size < 6:
+        return wx0, wy0, wx1, wy1
+    thr = max(24.0, float(np.percentile(pos, 78)) * 0.42)
+    ink = (sub_diff > thr) & (~bright_wm)
+    ys, xs = np.where(ink)
+    if ys.size < 4:
+        return wx0, wy0, wx1, wy1
+    tx0 = max(0, px0 + int(xs.min()) - 1)
+    ty0 = max(0, py0 + int(ys.min()) - 1)
+    tx1 = min(iw, px0 + int(xs.max()) + 2)
+    ty1 = min(ih, py0 + int(ys.max()) + 2)
+    # Never expand wildly outside the OCR box if adjacent neighbors leaked into 1px pad
+    if (tx1 - tx0) > (wx1 - wx0) + 6:
+        tx0, tx1 = wx0, wx1
+    if (ty1 - ty0) > (wy1 - wy0) + 6:
+        ty0, ty1 = wy0, wy1
+    return tx0, ty0, max(tx0 + 2, tx1), max(ty0 + 3, ty1)
+
+
+def profile_scanned_word_rows(
+    img_bgr: np.ndarray,
+    word_boxes_px: list[tuple[float, float, float, float, str]],
+) -> list[dict]:
+    """
+    Analyze groups of scanned words sharing a visual horizontal line so even
+    tiny or lowercase-only words (`no.`, `name`, `parmal`) receive accurate row-level
+    baseline, cap height, bold weight, tight ink bounds, and serif/sans style metadata.
+    Never mixes photo/emblem blocks outside word regions into row glyph statistics.
+    """
+    if not word_boxes_px or img_bgr.size == 0:
+        return []
+
+    ih, iw = img_bgr.shape[:2]
+    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+    bg_gray = _estimate_smooth_bg_gray(gray)
+    diff = bg_gray.astype(np.float32) - gray.astype(np.float32)
+
+    # First tighten each word's bounds around actual ink pixels for exact X/Y hitboxes
+    tight_boxes: list[tuple[int, int, int, int]] = []
+    for wx0, wy0, wx1, wy1, _txt in word_boxes_px:
+        ix0 = max(0, min(iw - 1, int(round(wx0))))
+        iy0 = max(0, min(ih - 1, int(round(wy0))))
+        ix1 = max(ix0 + 1, min(iw, int(round(wx1))))
+        iy1 = max(iy0 + 1, min(ih, int(round(wy1))))
+        tight_boxes.append(_measure_word_tight_ink_box(img_bgr, gray, bg_gray, ix0, iy0, ix1, iy1))
+
+    # Group words into visual horizontal rows using BOTH overlap & compatible heights
+    indexed = sorted(enumerate(tight_boxes), key=lambda kv: ((kv[1][1] + kv[1][3]) * 0.5, kv[1][0]))
+    rows: list[list[int]] = []
+    row_meta: list[tuple[float, float]] = []  # (median_cy, median_h)
+
+    for idx, (tx0, ty0, tx1, ty1) in indexed:
+        wcy = (ty0 + ty1) * 0.5
+        wh = max(4.0, float(ty1 - ty0))
+        placed = False
+        for r_i, (rcy, rh) in enumerate(row_meta):
+            h_ratio = min(wh, rh) / max(wh, rh, 1.0)
+            if h_ratio < 0.45:
+                continue
+            ov_y = min(ty1, rcy + rh * 0.5) - max(ty0, rcy - rh * 0.5)
+            if ov_y >= min(wh, rh) * 0.22 or abs(wcy - rcy) <= min(wh, rh) * 0.35:
+                rows[r_i].append(idx)
+                cys = [(tight_boxes[k][1] + tight_boxes[k][3]) * 0.5 for k in rows[r_i]]
+                hs = [float(max(4, tight_boxes[k][3] - tight_boxes[k][1])) for k in rows[r_i]]
+                row_meta[r_i] = (float(np.median(cys)), float(np.median(hs)))
+                placed = True
+                break
+        if not placed:
+            rows.append([idx])
+            row_meta.append((wcy, wh))
+
+    out: list[dict] = [{} for _ in word_boxes_px]
+    row_results: list[tuple[list[int], float, float, Optional[bool], bool]] = []
+
+    for r_indices in rows:
+        row_hs_raw = [float(max(4, tight_boxes[i][3] - tight_boxes[i][1])) for i in r_indices]
+        row_med_h = max(6.0, float(np.median(row_hs_raw)))
+        inlier_indices = [
+            i for i in r_indices
+            if 0.45 * row_med_h <= float(tight_boxes[i][3] - tight_boxes[i][1]) <= 1.85 * row_med_h
+        ] or r_indices
+
+        pad_v = max(3, int(round(row_med_h * 0.22)))
+        ry0 = max(0, int(round(float(np.min([tight_boxes[i][1] for i in inlier_indices])))) - pad_v)
+        ry1 = min(ih, int(round(float(np.max([tight_boxes[i][3] for i in inlier_indices])))) + pad_v)
+        eh = max(6, int(round(row_med_h * 1.15)))
+
+        # CRITICAL: restrict horizontal scan strictly to actual word X intervals in this row
+        # so nearby passport photos / holograms / seals at the same Y NEVER poison row font metrics!
+        x_mask = np.zeros(iw, dtype=bool)
+        pad_x = max(6, int(round(row_med_h * 0.45)))
+        for i in inlier_indices:
+            kx0 = max(0, tight_boxes[i][0] - pad_x)
+            kx1 = min(iw, tight_boxes[i][2] + pad_x)
+            x_mask[kx0:kx1] = True
+
+        band_diff = diff[ry0:ry1, :].copy()
+        band_gray = gray[ry0:ry1, :]
+        band_bgr = img_bgr[ry0:ry1, :, :]
+        bright_wm_band = (
+            (band_gray >= 165)
+            & (band_bgr[:, :, 2].astype(np.int16) >= 175)
+            & (band_bgr[:, :, 1].astype(np.int16) >= 170)
+            & (band_diff < 52)
+        )
+        band_diff[:, ~x_mask] = 0.0
+        band_diff[bright_wm_band] = 0.0
+
+        pos = band_diff[band_diff > 18]
+        thr = max(24.0, float(np.percentile(pos, 78)) * 0.48) if pos.size >= 16 else 30.0
+        band_bin = (band_diff > thr).astype(np.uint8) * 255
+
+        n_lbl, labels, stats, _ = cv2.connectedComponentsWithStats(band_bin, connectivity=8)
+        clean_mask = np.zeros_like(band_bin)
+        g_tops, g_bots, g_hs = [], [], []
+        for l_idx in range(1, n_lbl):
+            cw = int(stats[l_idx, cv2.CC_STAT_WIDTH])
+            ch = int(stats[l_idx, cv2.CC_STAT_HEIGHT])
+            gt = int(stats[l_idx, cv2.CC_STAT_TOP]) + ry0
+            area = int(stats[l_idx, cv2.CC_STAT_AREA])
+            if area < 6 or ch < max(4, int(row_med_h * 0.28)) or ch > int(row_med_h * 1.48) or cw > int(row_med_h * 4.5):
+                continue
+            # Ignore solid opaque photo rectangles or heavy box lines
+            if cw > row_med_h * 0.85 and ch > row_med_h * 0.75 and (area / float(max(1, cw * ch))) > 0.82:
+                continue
+            clean_mask[labels == l_idx] = 255
+            g_tops.append(gt)
+            g_bots.append(gt + ch)
+            g_hs.append(ch)
+
+        fallback_top = float(np.median([tight_boxes[i][1] for i in inlier_indices]))
+        fallback_base = float(np.median([tight_boxes[i][3] for i in inlier_indices]))
+        _, baseline_px, visual_h_px = _cluster_row_baseline_and_cap(
+            g_tops, g_bots, g_hs, eh, fallback_top, fallback_base
+        )
+        # Keep row visual_h_px bounded cleanly around the row's real median word height
+        visual_h_px = min(max(visual_h_px, row_med_h * 0.52), row_med_h * 1.15)
+        baseline_px = max(fallback_top + row_med_h * 0.52, min(fallback_base + 2.0, baseline_px))
+
+        med_glyph_h = float(np.percentile(g_hs, 75)) if g_hs else row_med_h
+        is_serif: Optional[bool] = (
+            _is_serif_from_glyph_mask(clean_mask, med_glyph_h)
+            if np.count_nonzero(clean_mask) >= 36
+            else None
+        )
+        auto_bold = False
+        if np.count_nonzero(clean_mask) >= 24:
+            dist = cv2.distanceTransform(clean_mask, cv2.DIST_L2, 3)
+            dvals = dist[dist > 0.5]
+            if dvals.size > 12:
+                stroke_w = float(np.percentile(dvals, 78)) * 2.0
+                if (stroke_w / max(8.0, visual_h_px)) >= 0.175:
+                    auto_bold = True
+
+        row_results.append((r_indices, baseline_px, visual_h_px, is_serif, auto_bold))
+
+    # Page-level serif fallback only when an isolated short row couldn't decide
+    serif_votes = [1 if sr else 0 for _, _, _, sr, _ in row_results if sr is not None]
+    page_serif_prior = (sum(serif_votes) / len(serif_votes) >= 0.6) if serif_votes else False
+
+    for r_indices, baseline_px, visual_h_px, is_serif, auto_bold in row_results:
+        resolved_serif = bool(page_serif_prior if is_serif is None else is_serif)
+        for i in r_indices:
+            tb = tight_boxes[i]
+            out[i] = {
+                "baseline_px": baseline_px,
+                "visual_h_px": visual_h_px,
+                "is_serif": resolved_serif,
+                "auto_bold": auto_bold,
+                "tight_box_px": tb,
+                "word_ink_h_px": float(max(4, tb[3] - tb[1])),
+            }
+    return out
+
+
 def _extract_ink_mask_in_box(
     roi_bgr: np.ndarray,
     box_px: tuple[int, int, int, int],
-    dilate_px: int = 2,
+    dilate_px: int = 1,
 ) -> tuple[np.ndarray, np.ndarray]:
     """
-    Build an accurate binary mask (255 = ink pixels) strictly inside `box_px`,
-    plus return smoothed illumination gray of the ROI.
+    Build a tight, watermark-safe binary mask (255 = foreground ink pixels) inside `box_px`,
+    preserving bright pastel/yellow watermarks between characters, plus smoothed ROI illumination.
     """
     H, W = roi_bgr.shape[:2]
     gray = cv2.cvtColor(roi_bgr, cv2.COLOR_BGR2GRAY)
@@ -251,23 +570,36 @@ def _extract_ink_mask_in_box(
 
     diff = bg_gray.astype(np.int16) - gray.astype(np.int16)
     sub_diff = diff[by0:by1, bx0:bx1]
+    sub_gray = gray[by0:by1, bx0:bx1]
+    sub_bgr = roi_bgr[by0:by1, bx0:bx1]
 
-    # Chromatic difference from local background helps catch colored ink on darkish cards too
-    roi_blur = cv2.GaussianBlur(roi_bgr, (21, 21), 0)
-    color_dist = np.linalg.norm(
-        roi_bgr.astype(np.float32) - roi_blur.astype(np.float32), axis=2
-    )
-    sub_cdist = color_dist[by0:by1, bx0:bx1]
-
-    # Dynamic contrast threshold calibrated inside target box
-    pos_vals = sub_diff[sub_diff > 8]
-    if pos_vals.size >= 12:
-        p85 = float(np.percentile(pos_vals, 85))
-        thresh_diff = max(16.0, min(52.0, p85 * 0.42))
+    # Measure true foreground dark ink level vs pastel/yellow watermark wash inside box
+    strong_diffs = sub_diff[sub_diff > 24]
+    if strong_diffs.size >= 12:
+        p88 = float(np.percentile(strong_diffs, 88))
+        thresh_diff = max(24.0, min(68.0, p88 * 0.45))
     else:
-        thresh_diff = 22.0
+        pos_vals = sub_diff[sub_diff > 10]
+        p85 = float(np.percentile(pos_vals, 85)) if pos_vals.size >= 8 else 36.0
+        thresh_diff = max(22.0, min(62.0, p85 * 0.46))
 
-    local_ink = (sub_diff > thresh_diff) | ((sub_diff > 10) & (sub_cdist > thresh_diff * 1.15))
+    # Protect bright yellow/pastel watermark washes (high Red & Green, luminance near paper)
+    # when strong dark text strokes are present inside the target word box
+    bright_yellow_wm = (
+        (sub_gray >= 165)
+        & (sub_bgr[:, :, 2].astype(np.int16) >= 175)
+        & (sub_bgr[:, :, 1].astype(np.int16) >= 170)
+        & (sub_diff < 52)
+    )
+    local_ink = (sub_diff > thresh_diff) & (~bright_yellow_wm)
+
+    # Also catch saturated colored stamp/signature/blue ink if genuinely darker than bg
+    roi_blur = cv2.GaussianBlur(roi_bgr, (21, 21), 0)
+    sub_cdist = np.linalg.norm(
+        sub_bgr.astype(np.float32) - roi_blur[by0:by1, bx0:bx1].astype(np.float32), axis=2
+    )
+    colored_ink = (sub_diff > max(20.0, thresh_diff * 0.8)) & (sub_cdist > 42.0) & (~bright_yellow_wm)
+    local_ink = local_ink | colored_ink
 
     mask = np.zeros((H, W), dtype=np.uint8)
     mask[by0:by1, bx0:bx1] = (local_ink.astype(np.uint8)) * 255
@@ -275,7 +607,6 @@ def _extract_ink_mask_in_box(
     if dilate_px > 0:
         dk = dilate_px * 2 + 1
         k_el = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (dk, dk))
-        # Restrict dilation slightly around box so neighboring words aren't touched
         pad_lim = np.zeros((H, W), dtype=np.uint8)
         px0 = max(0, bx0 - dilate_px)
         py0 = max(0, by0 - dilate_px)
@@ -298,7 +629,8 @@ def _analyze_local_typography_and_optics(
     on the same line to extract:
     - True dark ink BGR color (e.g. warm charcoal #221d18 vs synthetic #000000)
     - Stroke thickness & whether text looks medium/bold (PSF-compensated)
-    - Visual ink height (cap height or Devanagari shirorekha->core base in px) and baseline y
+    - Visual Serif vs Sans-Serif typography class from neighbor glyph flares
+    - Row-calibrated visual cap height & baseline y (immune to isolated lowercase/descenders)
     - Right-neighbor glyph start x (to prevent colliding when replacement word is wider)
     - Scanner PSF edge blur sigma (px)
     """
@@ -309,77 +641,86 @@ def _analyze_local_typography_and_optics(
 
     diff = bg_gray.astype(np.float32) - gray.astype(np.float32)
 
-    # 1. Analyze original word ink before erasure + horizontal row neighbors
+    # 1. Analyze original word ink + horizontal neighbors across the SAME baseline row
     row_y0 = max(0, ey0 - int(eh * 0.25))
     row_y1 = min(H, ey1 + int(eh * 0.25))
     row_mask = np.zeros((H, W), dtype=np.uint8)
-    row_diff = diff[row_y0:row_y1, :]
-    row_pos = row_diff[row_diff > 10]
-    row_thr = max(18.0, float(np.percentile(row_pos, 80)) * 0.45) if row_pos.size >= 16 else 24.0
+    row_diff = diff[row_y0:row_y1, :].copy()
+    band_gray = gray[row_y0:row_y1, :]
+    band_bgr = roi_bgr[row_y0:row_y1, :, :]
+    bright_wm_band = (
+        (band_gray >= 165)
+        & (band_bgr[:, :, 2].astype(np.int16) >= 175)
+        & (band_bgr[:, :, 1].astype(np.int16) >= 170)
+        & (row_diff < 52)
+    )
+    row_diff[bright_wm_band] = 0.0
+    row_pos = row_diff[row_diff > 16]
+    row_thr = max(24.0, float(np.percentile(row_pos, 80)) * 0.48) if row_pos.size >= 16 else 28.0
     row_bin = ((row_diff > row_thr).astype(np.uint8)) * 255
 
-    # Filter connected components to letter-sized glyphs (ignore borders / huge lines / tiny speckles)
+    # Filter connected components to letter-sized glyphs (ignore borders / photos / huge lines / tiny dots)
     n_lbl, labels, stats, _ = cv2.connectedComponentsWithStats(row_bin, connectivity=8)
     valid_glyph_mask = np.zeros_like(row_bin)
     right_neighbor_px: Optional[int] = None
+
+    row_tops, row_bots, row_hs = [], [], []
+    orig_tops, orig_bots, orig_hs = [], [], []
+
     for i in range(1, n_lbl):
-        cx = stats[i, cv2.CC_STAT_LEFT]
-        cw = stats[i, cv2.CC_STAT_WIDTH]
-        ch = stats[i, cv2.CC_STAT_HEIGHT]
-        area = stats[i, cv2.CC_STAT_AREA]
+        cx = int(stats[i, cv2.CC_STAT_LEFT])
+        cy = int(stats[i, cv2.CC_STAT_TOP]) + row_y0
+        cw = int(stats[i, cv2.CC_STAT_WIDTH])
+        ch = int(stats[i, cv2.CC_STAT_HEIGHT])
+        area = int(stats[i, cv2.CC_STAT_AREA])
         if area < 6:
             continue
-        if ch < max(4, int(eh * 0.24)) or ch > int(eh * 1.45):
+        if ch < max(4, int(eh * 0.26)) or ch > int(eh * 1.45):
             continue
-        if cw > int(eh * 6.0):  # horizontal rule/border
+        if cw > int(eh * 5.0):  # horizontal rule/border
+            continue
+        if cw > eh * 0.85 and ch > eh * 0.75 and (area / float(max(1, cw * ch))) > 0.82:
             continue
         valid_glyph_mask[labels == i] = 255
+        row_tops.append(cy)
+        row_bots.append(cy + ch)
+        row_hs.append(ch)
+        gx_mid = cx + cw * 0.5
+        if ex0 - 2 <= gx_mid <= ex1 + 2:
+            orig_tops.append(cy)
+            orig_bots.append(cy + ch)
+            orig_hs.append(ch)
         if cx >= ex1 + 2 and (right_neighbor_px is None or cx < right_neighbor_px):
             right_neighbor_px = int(cx)
 
     row_mask[row_y0:row_y1, :] = valid_glyph_mask
 
-    # Restrict strictly to inside orig_box first for baseline/height precision
     orig_only = np.zeros_like(row_mask)
     orig_only[max(0, ey0):min(H, ey1), max(0, ex0):min(W, ex1)] = row_mask[
         max(0, ey0):min(H, ey1), max(0, ex0):min(W, ex1)
     ]
 
-    # Measure visual tall cap/ascender height & baseline (ignoring shorter lowercase x-height tops!)
-    active_glyphs = orig_only if np.count_nonzero(orig_only) >= 24 else row_mask
-    glyph_tops, glyph_bots, tall_tops = [], [], []
-    if np.count_nonzero(active_glyphs) >= 24:
-        n2, _, s2, _ = cv2.connectedComponentsWithStats(active_glyphs, connectivity=8)
-        for i in range(1, n2):
-            ch = s2[i, cv2.CC_STAT_HEIGHT]
-            if ch >= max(4, int(eh * 0.28)) and s2[i, cv2.CC_STAT_AREA] >= 6:
-                gt = s2[i, cv2.CC_STAT_TOP]
-                glyph_tops.append(gt)
-                glyph_bots.append(gt + ch)
-                if ch >= int(eh * 0.62):
-                    tall_tops.append(gt)
+    # Separate untouched neighbor glyphs from the word being replaced
+    neighbor_mask = row_mask.copy()
+    neighbor_mask[:, max(0, ex0 - 2):min(W, ex1 + 2)] = 0
+    has_row_neighbors = len(row_hs) > len(orig_hs) + 1
 
-    if has_hindi and np.count_nonzero(active_glyphs) >= 24:
-        # Devanagari horizontal projection: locate shirorekha bar peak & main body baseline
+    if has_hindi and np.count_nonzero(row_mask) >= 24:
         gy0 = max(0, ey0 - 2)
         gy1 = min(H, ey1 + 2)
-        sub_mask = active_glyphs[gy0:gy1, :] > 0
+        sub_mask = (orig_only[gy0:gy1, :] if np.count_nonzero(orig_only) >= 24 else row_mask[gy0:gy1, :]) > 0
         row_proj = np.sum(sub_mask, axis=1).astype(np.float32)
         max_proj = float(row_proj.max()) if row_proj.size > 0 else 0.0
         sh = gy1 - gy0
         shiro_idx = None
         core_bot_idx = None
         if max_proj >= 6.0 and sh >= 8:
-            # Shirorekha sits in upper 55% of box
             upper_end = max(3, int(sh * 0.56))
             shiro_rel = int(np.argmax(row_proj[:upper_end]))
-            # Walk down from shirorekha through vertical stems until density drops sharply (<22% max_proj)
             stem_band = row_proj[shiro_rel:]
             core_rows = np.where(stem_band >= max_proj * 0.22)[0]
             if core_rows.size >= 4:
                 shiro_idx = gy0 + shiro_rel
-                # Check if below core body there's a sparse lower matra tail (<22% density);
-                # walk linearly down from peak body density to separate sub-baseline matras (`ु/ू`)
                 last_strong = shiro_rel + int(core_rows[-1])
                 core_bot_idx = gy0 + last_strong
         if shiro_idx is not None and core_bot_idx is not None and (core_bot_idx - shiro_idx) >= max(6, int(eh * 0.48)):
@@ -387,24 +728,32 @@ def _analyze_local_typography_and_optics(
             baseline_px = float(core_bot_idx)
             visual_h_px = max(float(eh) * 0.50, baseline_px - cap_top_px)
         else:
-            baseline_px = float(np.percentile(glyph_bots, 60)) if glyph_bots else float(ey0) + eh * 0.88
-            cap_top_px = float(ey0) + eh * 0.16
-            visual_h_px = max(float(eh) * 0.55, baseline_px - cap_top_px)
-    elif glyph_bots:
-        baseline_px = float(np.percentile(glyph_bots, 60))
-        cap_top_px = float(np.percentile(tall_tops if tall_tops else glyph_tops, 20))
-        visual_h_px = max(float(eh) * 0.62, baseline_px - cap_top_px)
+            cap_top_px, baseline_px, visual_h_px = _cluster_row_baseline_and_cap(
+                row_tops, row_bots, row_hs, eh, float(ey0) + eh * 0.14, float(ey0) + eh * 0.88
+            )
+    elif has_row_neighbors or len(row_hs) >= 4:
+        # Calibrate primarily against full row (keeps lowercase-only orig words synced to neighbors!)
+        cap_top_px, baseline_px, visual_h_px = _cluster_row_baseline_and_cap(
+            row_tops, row_bots, row_hs, eh, float(ey0) + eh * 0.08, float(ey0) + eh * 0.90
+        )
+    elif orig_bots:
+        cap_top_px, baseline_px, visual_h_px = _cluster_row_baseline_and_cap(
+            orig_tops, orig_bots, orig_hs, eh, float(ey0) + eh * 0.08, float(ey0) + eh * 0.90
+        )
     else:
         cap_top_px = float(ey0) + eh * 0.08
         baseline_px = float(ey0) + eh * 0.90
         visual_h_px = eh * 0.76
 
-    # Ink color: prefer neighbor/row core pixels (inner eroded core so no edge fringe bleed)
-    sample_mask = row_mask if np.count_nonzero(row_mask) >= 30 else active_glyphs
+    # Measure Serif vs Sans-Serif visually from full row (prefer untouched neighbors when available)
+    serif_probe_mask = neighbor_mask if np.count_nonzero(neighbor_mask) >= 45 else row_mask
+    is_serif_visual = _is_serif_from_glyph_mask(serif_probe_mask, visual_h_px)
+
+    # Ink color, PSF softness, and stroke thickness
+    sample_mask = row_mask if np.count_nonzero(row_mask) >= 30 else orig_only
     ink_bgr = np.array([24, 22, 20], dtype=np.float32)
     psf_sigma = 0.55
     auto_bold = False
-    is_serif_visual = False
 
     if np.count_nonzero(sample_mask) >= 20:
         core_mask = cv2.erode(sample_mask, np.ones((3, 3), np.uint8), iterations=1)
@@ -415,24 +764,25 @@ def _analyze_local_typography_and_optics(
             ink_pts = core_pts[dark_keep] if np.any(dark_keep) else core_pts
             ink_bgr = np.median(ink_pts, axis=0).astype(np.float32)
 
-        # Optical edge sharpness -> match PSF Gaussian blur
         edge_ring = cv2.dilate(sample_mask, np.ones((3, 3), np.uint8)) - cv2.erode(sample_mask, np.ones((3, 3), np.uint8))
         lap = np.abs(cv2.Laplacian(gray.astype(np.float32), cv2.CV_32F, ksize=3))
         ring_lap = lap[edge_ring > 0]
-        bg_contrast = max(25.0, float(np.median(bg_gray[sample_mask > 0])) - float(0.114 * ink_bgr[0] + 0.587 * ink_bgr[1] + 0.299 * ink_bgr[2]))
+        bg_contrast = max(
+            25.0,
+            float(np.median(bg_gray[sample_mask > 0]))
+            - float(0.114 * ink_bgr[0] + 0.587 * ink_bgr[1] + 0.299 * ink_bgr[2]),
+        )
         if ring_lap.size > 10:
             norm_edge = float(np.percentile(ring_lap, 80)) / bg_contrast
-            # Sharp vector/600dpi ~ >2.8, soft 150-250dpi scan ~ 1.1..2.0
-            psf_sigma = float(np.clip(1.35 - 0.30 * norm_edge, 0.35, 0.95))
+            psf_sigma = float(np.clip(1.30 - 0.30 * norm_edge, 0.30, 0.90))
 
-        # Stroke width estimation via distance transform (with PSF blur compensation)
         dist = cv2.distanceTransform(sample_mask, cv2.DIST_L2, 3)
         dist_vals = dist[dist > 0.5]
         if dist_vals.size > 15:
             stroke_w = float(np.percentile(dist_vals, 78)) * 2.0
             eff_stroke_w = max(1.0, stroke_w - 1.25 * psf_sigma)
             stroke_ratio = eff_stroke_w / max(8.0, visual_h_px)
-            if stroke_ratio >= 0.154:
+            if stroke_ratio >= 0.156:
                 auto_bold = True
 
     return {
@@ -444,6 +794,7 @@ def _analyze_local_typography_and_optics(
         "cap_top_px": cap_top_px,
         "visual_h_px": visual_h_px,
         "right_neighbor_px": right_neighbor_px,
+        "has_measured_baseline": bool(row_bots or orig_bots),
     }
 
 
@@ -455,7 +806,8 @@ def _reconstruct_textured_background(
 ) -> np.ndarray:
     """
     Remove ONLY the masked old text ink inside `erase_mask` while preserving
-    authentic surrounding paper texture, color shading, and scanner grain.
+    authentic surrounding paper texture, watermarks, color shading, and scanner grain
+    without halo bleed or blurry cloud patches.
     """
     H, W = roi_bgr.shape[:2]
     if np.count_nonzero(erase_mask) == 0:
@@ -464,64 +816,85 @@ def _reconstruct_textured_background(
     # 1. Try optional LaMa ONNX neural inpainting if model file is available
     lama_out = _run_lama_patch(roi_bgr, erase_mask)
     if lama_out is not None:
-        alpha = cv2.GaussianBlur(erase_mask.astype(np.float32) / 255.0, (5, 5), 1.4)[:, :, None]
+        alpha = cv2.GaussianBlur(erase_mask.astype(np.float32) / 255.0, (3, 3), 0.9)[:, :, None]
         blended = np.clip(roi_bgr.astype(np.float32) * (1.0 - alpha) + lama_out.astype(np.float32) * alpha, 0, 255).astype(np.uint8)
         return blended
 
-    # 2. Zero-bloat Two-Band OpenCV Paper Texture Synthesis (Illumination + High-Freq Grain)
-    # Inpaint smooth base across strokes + narrow surrounding box for gradient continuity
-    smooth_inpaint = cv2.inpaint(roi_bgr, erase_mask, inpaintRadius=5, flags=cv2.INPAINT_NS)
-
-    # Identify CLEAN untouched paper pixels across the whole ROI (excluding all dark ink)
+    # 2. Identify clean paper pixels (never seed inpainting from dark anti-aliased fringes!)
     gray = cv2.cvtColor(roi_bgr, cv2.COLOR_BGR2GRAY)
-    all_ink = (bg_gray.astype(np.int16) - gray.astype(np.int16)) > 14
-    all_ink_dil = cv2.dilate((all_ink.astype(np.uint8)) * 255, np.ones((5, 5), np.uint8)) > 0
+    all_ink = (bg_gray.astype(np.int16) - gray.astype(np.int16)) > 20
+    all_ink_dil = cv2.dilate((all_ink.astype(np.uint8)) * 255, np.ones((3, 3), np.uint8)) > 0
     clean_mask = (~all_ink_dil) & (erase_mask == 0)
+
+    ex0, ey0, ex1, ey1 = erase_box
+    ex0 = max(0, ex0); ey0 = max(0, ey0); ex1 = min(W, ex1); ey1 = min(H, ey1)
+
+    # Expand erase_mask slightly over dark ringing pixels strictly inside erase_box
+    # so cv2.inpaint samples ONLY verified clean paper/watermark perimeter pixels
+    box_roi_mask = np.zeros((H, W), dtype=np.uint8)
+    box_roi_mask[ey0:ey1, ex0:ex1] = 255
+    ring_band = cv2.dilate(erase_mask, np.ones((5, 5), np.uint8)) & (erase_mask == 0) & box_roi_mask
+    residual_fringe = (ring_band > 0) & ((bg_gray.astype(np.int16) - gray.astype(np.int16)) > 16)
+    inpaint_mask = erase_mask.copy()
+    inpaint_mask[residual_fringe] = 255
+
+    # Pre-purge any dark perimeter fringe in seed image before Telea/NS inpaint
+    seed_bgr = roi_bgr.copy()
+    clean_blur = cv2.GaussianBlur(roi_bgr.astype(np.float32), (5, 5), 1.4)
+    dirty_border = (cv2.dilate(inpaint_mask, np.ones((3, 3), np.uint8)) > 0) & (~clean_mask) & (inpaint_mask == 0)
+    if np.any(dirty_border):
+        seed_bgr[dirty_border] = np.clip(clean_blur[dirty_border], 0, 255).astype(np.uint8)
+
+    telea_bgr = cv2.inpaint(seed_bgr, inpaint_mask, inpaintRadius=3, flags=cv2.INPAINT_TELEA)
+    ns_bgr = cv2.inpaint(seed_bgr, inpaint_mask, inpaintRadius=3, flags=cv2.INPAINT_NS)
+    smooth_inpaint = cv2.addWeighted(telea_bgr, 0.65, ns_bgr, 0.35, 0.0)
 
     # Compute high-frequency paper grain (deviation from smoothed ROI)
     roi_f = roi_bgr.astype(np.float32)
     base_blur = cv2.GaussianBlur(roi_f, (9, 9), 2.5)
     high_freq = roi_f - base_blur
 
-    ex0, ey0, ex1, ey1 = erase_box
-    ex0 = max(0, ex0); ey0 = max(0, ey0); ex1 = min(W, ex1); ey1 = min(H, ey1)
-
-    # Build a clean donor texture strip from nearest margins right above / below / beside erase_box
-    donor_patches: list[np.ndarray] = []
-    # Top clean strip & Bottom clean strip match horizontal color/grain pattern best on cards
     strip_rects = [
-        (max(0, ex0 - 20), max(0, ey0 - 26), min(W, ex1 + 20), max(0, ey0 - 3)),
-        (max(0, ex0 - 20), min(H, ey1 + 3), min(W, ex1 + 20), min(H, ey1 + 26)),
-        (max(0, ex0 - 40), max(0, ey0 - 10), max(0, ex0 - 4), min(H, ey1 + 10)),
-        (min(W, ex1 + 4), max(0, ey0 - 10), min(W, ex1 + 40), min(H, ey1 + 10)),
+        (max(0, ex0 - 20), max(0, ey0 - 24), min(W, ex1 + 20), max(0, ey0 - 3)),
+        (max(0, ex0 - 20), min(H, ey1 + 3), min(W, ex1 + 20), min(H, ey1 + 24)),
+        (max(0, ex0 - 36), max(0, ey0 - 8), max(0, ex0 - 4), min(H, ey1 + 8)),
+        (min(W, ex1 + 4), max(0, ey0 - 8), min(W, ex1 + 36), min(H, ey1 + 8)),
     ]
     clean_grain_pool = []
+    clean_bgr_pool = []
     for sx0, sy0, sx1, sy1 in strip_rects:
         if sx1 - sx0 < 6 or sy1 - sy0 < 4:
             continue
         sub_c = clean_mask[sy0:sy1, sx0:sx1]
-        sub_g = high_freq[sy0:sy1, sx0:sx1]
         if np.count_nonzero(sub_c) >= 16:
-            clean_grain_pool.append(sub_g[sub_c])
+            clean_grain_pool.append(high_freq[sy0:sy1, sx0:sx1][sub_c])
+            clean_bgr_pool.append(roi_f[sy0:sy1, sx0:sx1][sub_c])
 
     if not clean_grain_pool and np.count_nonzero(clean_mask) >= 24:
         clean_grain_pool.append(high_freq[clean_mask])
+        clean_bgr_pool.append(roi_f[clean_mask])
+
+    is_patterned_bg = False
+    if clean_bgr_pool:
+        clean_bgr_arr = np.vstack(clean_bgr_pool)
+        if float(np.max(np.std(clean_bgr_arr, axis=0))) >= 9.0:
+            is_patterned_bg = True
 
     if clean_grain_pool:
         grain_samples = np.vstack(clean_grain_pool)  # (N, 3)
-        # Synthesize correlated 2D paper grain matching spatial smoothness of local scanner noise
         rng = np.random.default_rng(abs(hash(erase_box)) % (2**31 - 1))
         idx_map = rng.integers(0, len(grain_samples), size=(H, W))
         noise_field = grain_samples[idx_map].astype(np.float32)
-        # Light 3x3 smoothing reproduces realistic ~2px scanner grain cluster correlation
-        noise_field = cv2.GaussianBlur(noise_field, (3, 3), 0.75) * 1.15
+        # Watermarked paper uses softer micro-grain so watermark strokes aren't salted with snow
+        amp = 0.45 if is_patterned_bg else 1.05
+        noise_field = cv2.GaussianBlur(noise_field, (3, 3), 0.8) * amp
     else:
         noise_field = np.zeros_like(roi_f)
 
     reconstructed = np.clip(smooth_inpaint.astype(np.float32) + noise_field, 0, 255)
 
-    # Blend ONLY over the erased ink mask with smooth soft feathering
-    soft_mask = cv2.GaussianBlur(erase_mask.astype(np.float32) / 255.0, (5, 5), 1.3)[:, :, None]
+    # Blend ONLY over the tight stroke mask with crisp feathering
+    soft_mask = cv2.GaussianBlur(inpaint_mask.astype(np.float32) / 255.0, (3, 3), 0.9)[:, :, None]
     out_f = roi_f * (1.0 - soft_mask) + reconstructed * soft_mask
     return np.clip(out_f, 0, 255).astype(np.uint8)
 
@@ -541,6 +914,7 @@ def _render_text_alpha_mask(
     italic_fallback_shear: bool,
     underline: bool,
     strikethrough: bool,
+    line_height_ratio: float = 1.25,
 ) -> tuple[np.ndarray, tuple[int, int, int, int]]:
     """
     Render crisp text onto a high-res grayscale alpha mask `[0..1]` at exact
@@ -576,7 +950,8 @@ def _render_text_alpha_mask(
         pil_font = ImageFont.load_default()
 
     lines = text.replace("\r\n", "\n").split("\n")
-    line_h_ss = font_sz_px * 1.25 * SS
+    eff_lh_ratio = max(1.02, min(1.85, float(line_height_ratio or 1.25)))
+    line_h_ss = font_sz_px * eff_lh_ratio * SS
 
     try:
         ascent, descent = pil_font.getmetrics()
@@ -658,6 +1033,8 @@ def apply_seamless_scan_edit(
     strikethrough: bool,
     text_align: int,
     has_explicit_size: bool = False,
+    preferred_family: str = "",
+    line_height_ratio: float = 1.25,
 ) -> Optional[dict]:
     """
     Render a seamless, texture-inpainted, optical-scan-matched RGBA PNG patch
@@ -724,10 +1101,10 @@ def apply_seamless_scan_edit(
 
     has_hindi = bool(_DEVANAGARI_RE.search(new_text))
 
-    # 1. Extract ink-stroke mask of old word + local illumination
-    erase_mask, bg_gray = _extract_ink_mask_in_box(roi_bgr, orig_box, dilate_px=2)
+    # 1. Extract tight, watermark-safe ink-stroke mask of old word + local illumination
+    erase_mask, bg_gray = _extract_ink_mask_in_box(roi_bgr, orig_box, dilate_px=1)
 
-    # 2. Profile surrounding text optics, ink color, stroke weight, and baseline
+    # 2. Profile surrounding text optics, ink color, stroke weight, serif style, and baseline
     profile = _analyze_local_typography_and_optics(roi_bgr, bg_gray, orig_box, has_hindi=has_hindi)
 
     # 3. Reconstruct seamless textured paper background (no flat patch!)
@@ -736,9 +1113,9 @@ def apply_seamless_scan_edit(
     # If deleting text only (empty new_text), composite feathered inpainted patch
     if not new_text.strip():
         patch_alpha = cv2.GaussianBlur(
-            cv2.dilate(erase_mask, np.ones((5, 5), np.uint8)).astype(np.float32) / 255.0,
-            (7, 7),
-            1.8,
+            cv2.dilate(erase_mask, np.ones((3, 3), np.uint8)).astype(np.float32) / 255.0,
+            (5, 5),
+            1.1,
         )
         nz = np.argwhere(patch_alpha > 0.02)
         if nz.size == 0:
@@ -765,29 +1142,38 @@ def apply_seamless_scan_edit(
             "baseline_pt": baseline_pt,
         }
 
-    # 4. Match typography weight & ink color to local document
+    # 4. Match typography family (Serif/Sans), weight & ink color to local document
     effective_bold = bool(is_bold or profile["auto_bold"])
-    font_path, fitz_font_key = _resolve_render_font_spec(has_hindi, is_serif, is_mono, effective_bold, is_italic)
+    effective_serif = bool(is_serif or (not is_mono and profile.get("is_serif_visual", False)))
+    font_path, fitz_font_key = _resolve_render_font_spec(
+        has_hindi, effective_serif, is_mono, effective_bold, is_italic, preferred_family=preferred_family
+    )
     has_dedicated_italic = (
         (font_path is not None and "italic" in font_path.name.lower())
         or (font_path is None and fitz_font_key in ("heit", "hebi", "tiit", "tibi", "coit", "cobi"))
     )
 
-    # Align visual font size & baseline with neighboring text when not heavily resized by user
+    # Guard tiny subpixel vertical jitter (< 1.2pt) so in-place edits lock strictly to neighbor baseline
     dy_pt = new_y - orig_rect.y0
+    if abs(dy_pt) < 1.2:
+        dy_pt = 0.0
     measured_base_px = profile["baseline_px"] + dy_pt * sy
     req_base_px = _pt_to_px_y(baseline_pt)
-    # Blend measured visual baseline with OCR baseline (preferring visual bottom of original glyphs)
-    final_base_px = 0.72 * measured_base_px + 0.28 * req_base_px
+    if profile.get("has_measured_baseline") and abs(dy_pt) < 1.2:
+        final_base_px = 0.90 * measured_base_px + 0.10 * req_base_px
+    elif profile.get("has_measured_baseline"):
+        final_base_px = 0.78 * measured_base_px + 0.22 * req_base_px
+    else:
+        final_base_px = req_base_px
 
-    # Calibrate em size: visual cap height ≈ 0.72*em (Latin) or shirorekha->core-base ≈ 0.68*em (Devanagari)
-    cap_ratio = 0.68 if has_hindi else 0.72
+    # Calibrate em size using font-family accurate CapHeight/Em ratio
+    cap_ratio = 0.68 if has_hindi else (0.662 if effective_serif else 0.716)
     est_em_from_visual = profile["visual_h_px"] / cap_ratio
     req_em_px = font_size_pt * sy
     if not has_explicit_size:
         font_sz_px = est_em_from_visual
-    elif abs(req_em_px - est_em_from_visual) <= max(6.0, est_em_from_visual * 0.28):
-        font_sz_px = 0.68 * est_em_from_visual + 0.32 * req_em_px
+    elif abs(req_em_px - est_em_from_visual) <= max(8.0, est_em_from_visual * 0.32):
+        font_sz_px = 0.85 * est_em_from_visual + 0.15 * req_em_px
     else:
         font_sz_px = req_em_px
 
@@ -809,6 +1195,7 @@ def apply_seamless_scan_edit(
         italic_fallback_shear=not has_dedicated_italic,
         underline=underline,
         strikethrough=strikethrough,
+        line_height_ratio=line_height_ratio,
     )
 
     # Smart Right-Neighbor Collision Guard: if an inline replacement word is slightly wider
@@ -868,8 +1255,8 @@ def apply_seamless_scan_edit(
         (erase_mask > 0).astype(np.float32),
         (text_alpha > 0.02).astype(np.float32),
     )
-    mod_dil = cv2.dilate((mod_mask > 0.05).astype(np.uint8) * 255, np.ones((7, 7), np.uint8))
-    patch_alpha = cv2.GaussianBlur(mod_dil.astype(np.float32) / 255.0, (5, 5), 1.3)
+    mod_dil = cv2.dilate((mod_mask > 0.05).astype(np.uint8) * 255, np.ones((3, 3), np.uint8))
+    patch_alpha = cv2.GaussianBlur(mod_dil.astype(np.float32) / 255.0, (3, 3), 0.9)
 
     nz = np.argwhere(patch_alpha > 0.02)
     if nz.size == 0:
@@ -911,4 +1298,91 @@ def apply_seamless_scan_edit(
         "text_rect": text_rect,
         "font_size_pt": round(font_sz_px / sy, 2),
         "baseline_pt": round(roi_rect.y0 + final_base_px / sy, 2),
+    }
+
+
+def erase_region_seamlessly(
+    page: fitz.Page,
+    target_rect: fitz.Rect,
+) -> Optional[dict]:
+    """
+    Seamlessly erase any arbitrary stamp, signature, logo, stain, or raster object
+    inside `target_rect` using texture-preserving two-band OpenCV/LaMa inpainting
+    and donor scanner grain sampled from clean surrounding margins.
+
+    Returns dict `{paste_rect, png_bytes}` or None if target_rect is invalid.
+    """
+    pr = page.rect
+    rect = target_rect & pr
+    if rect.width < 2 or rect.height < 2:
+        return None
+
+    pad_x = max(24.0, min(90.0, rect.width * 0.45))
+    pad_y = max(24.0, min(90.0, rect.height * 0.45))
+    roi_rect = fitz.Rect(
+        max(pr.x0, rect.x0 - pad_x),
+        max(pr.y0, rect.y0 - pad_y),
+        min(pr.x1, rect.x1 + pad_x),
+        min(pr.y1, rect.y1 + pad_y),
+    )
+
+    max_side_pt = max(roi_rect.width, roi_rect.height, 1.0)
+    eff_dpi = min(300, max(140, int((1350.0 * 72.0) / max_side_pt)))
+    pix = page.get_pixmap(dpi=eff_dpi, clip=roi_rect, alpha=False)
+    if pix.width < 8 or pix.height < 8:
+        return None
+
+    img_rgb = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, pix.n)
+    if pix.n == 3:
+        roi_bgr = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
+    elif pix.n == 4:
+        roi_bgr = cv2.cvtColor(img_rgb, cv2.COLOR_RGBA2BGR)
+    else:
+        roi_bgr = cv2.cvtColor(img_rgb, cv2.COLOR_GRAY2BGR)
+
+    sx = pix.width / roi_rect.width
+    sy = pix.height / roi_rect.height
+    ex0 = max(1, int(round((rect.x0 - roi_rect.x0) * sx)))
+    ey0 = max(1, int(round((rect.y0 - roi_rect.y0) * sy)))
+    ex1 = min(pix.width - 1, int(round((rect.x1 - roi_rect.x0) * sx)))
+    ey1 = min(pix.height - 1, int(round((rect.y1 - roi_rect.y0) * sy)))
+    if ex1 <= ex0 or ey1 <= ey0:
+        return None
+
+    erase_mask = np.zeros((pix.height, pix.width), dtype=np.uint8)
+    erase_mask[ey0:ey1, ex0:ex1] = 255
+
+    gray = cv2.cvtColor(roi_bgr, cv2.COLOR_BGR2GRAY)
+    bg_gray = _estimate_smooth_bg_gray(gray)
+    clean_roi_bgr = _reconstruct_textured_background(roi_bgr, bg_gray, erase_mask, (ex0, ey0, ex1, ey1))
+
+    feather = cv2.GaussianBlur(
+        cv2.dilate(erase_mask, np.ones((5, 5), np.uint8)).astype(np.float32) / 255.0,
+        (7, 7),
+        1.8,
+    )
+    nz = np.argwhere(feather > 0.02)
+    if nz.size == 0:
+        return None
+
+    py0 = max(0, int(nz[:, 0].min()) - 2)
+    px0 = max(0, int(nz[:, 1].min()) - 2)
+    py1 = min(pix.height, int(nz[:, 0].max()) + 3)
+    px1 = min(pix.width, int(nz[:, 1].max()) + 3)
+
+    sub_bgr = clean_roi_bgr[py0:py1, px0:px1]
+    sub_a = np.clip(feather[py0:py1, px0:px1] * 255.0, 0, 255).astype(np.uint8)
+    sub_rgba = np.dstack([sub_bgr[:, :, 2], sub_bgr[:, :, 1], sub_bgr[:, :, 0], sub_a])
+
+    out_buf = io.BytesIO()
+    Image.fromarray(sub_rgba, mode="RGBA").save(out_buf, format="PNG")
+    paste_rect = fitz.Rect(
+        roi_rect.x0 + px0 / sx,
+        roi_rect.y0 + py0 / sy,
+        roi_rect.x0 + px1 / sx,
+        roi_rect.y0 + py1 / sy,
+    )
+    return {
+        "paste_rect": paste_rect,
+        "png_bytes": out_buf.getvalue(),
     }

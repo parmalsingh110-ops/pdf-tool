@@ -16,7 +16,16 @@ import { useSEO } from '../hooks/useSEO';
 import { apiFetch } from '../lib/api';
 import '../lib/pdfWorker';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
-import { AnimatedNumber, PearlScanOverlay, PearlStageSwitch } from '../components/pearl/PearlMotion';
+import { AnimatedNumber, PearlProcessCard, PearlStageSwitch } from '../components/pearl/PearlMotion';
+import VisionLayerControls from '../components/VisionLayerControls';
+import { appendVisionLayerParams, type DocumentLayerMode } from '../lib/advancedVisionEngine';
+import { getStoredOcrLang } from '../lib/ocrLanguages';
+import {
+  SCAN_CONVERTER_ACCEPT,
+  detectIfPdfScannedOrOcr,
+  isRasterImageFile,
+  stripDocumentExt,
+} from '../utils/scanDetector';
 
 type Stage = 'idle' | 'analyzing' | 'converting' | 'backend' | 'done' | 'error';
 type EngineMode = 'precision' | 'frontend' | 'ocr';
@@ -31,16 +40,9 @@ interface ConversionStats {
   fileSizeBytes?: number;
 }
 
-// ─── Detect if PDF is scanned (image-only, no real text) ────────────────────
+// ─── Detect if PDF is scanned (raw image OR OCR-layered scan) ─────────────────
 async function detectIfScanned(pdf: pdfjsLib.PDFDocumentProxy): Promise<boolean> {
-  let totalText = 0;
-  const checkPages = Math.min(3, pdf.numPages);
-  for (let i = 1; i <= checkPages; i++) {
-    const page = await pdf.getPage(i);
-    const tc = await page.getTextContent();
-    totalText += tc.items.reduce((s: number, it: any) => s + (it.str || '').trim().length, 0);
-  }
-  return totalText < 50; // Less than 50 chars across 3 pages → scanned
+  return detectIfPdfScannedOrOcr(pdf);
 }
 
 // ─── Extract rich text spans with font info from a page ─────────────────────
@@ -342,11 +344,18 @@ async function convertFrontend(
   };
 }
 
-// ─── Backend conversion (Precision layout with pdf2docx & PyMuPDF) ───────────
-async function convertBackend(file: File, forceOcr: boolean): Promise<Blob> {
+// ─── Backend conversion (3-Layer CV + Bilingual OCR + Optional Vision AI) ────
+async function convertBackend(
+  file: File,
+  forceOcr: boolean,
+  layerMode: DocumentLayerMode,
+  strictLocal: boolean,
+  lang: string
+): Promise<Blob> {
   const formData = new FormData();
   formData.append('file', file);
   formData.append('force_ocr', forceOcr ? 'true' : 'false');
+  appendVisionLayerParams(formData, { layerMode, strictLocal, lang });
   const res = await apiFetch('/convert/pdf-to-word', {
     method: 'POST',
     body: formData
@@ -374,6 +383,9 @@ export default function PdfToWord() {
   const [stats, setStats] = useState<ConversionStats | null>(null);
   const [errorMsg, setErrorMsg] = useState('');
   const [engineMode, setEngineMode] = useState<EngineMode>('precision');
+  const [layerMode, setLayerMode] = useState<DocumentLayerMode>('clean_real');
+  const [strictLocal, setStrictLocal] = useState<boolean>(false);
+  const [ocrLang, setOcrLang] = useState<string>(() => getStoredOcrLang());
   const [fallbackNotice, setFallbackNotice] = useState<string | null>(null);
 
   const resultUrlRef = useRef<string | null>(null);
@@ -402,25 +414,34 @@ export default function PdfToWord() {
     const t0 = Date.now();
 
     try {
-      // Step 1: Rapid client-side pre-analysis
+      // Step 1: Rapid client-side pre-analysis (raster image uploads skip pdf.js cleanly)
       setStage('analyzing');
       setProgress('Analyzing document geometry & structure...');
 
-      const buf = await f.arrayBuffer();
-      const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buf) }).promise;
-      const numPages = pdf.numPages;
-      const isScanned = await detectIfScanned(pdf);
+      const isImage = isRasterImageFile(f);
+      let numPages = 1;
+      let isScanned = isImage;
+      if (!isImage) {
+        const buf = await f.arrayBuffer();
+        const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buf) }).promise;
+        numPages = pdf.numPages;
+        isScanned = await detectIfScanned(pdf);
+        try {
+          await pdf.cleanup?.();
+          await pdf.loadingTask?.destroy?.();
+        } catch {}
+      }
 
       // Determine actual path based on user choice and scan status
-      const needsOcr = engineMode === 'ocr' || isScanned;
-      const useBackend = engineMode === 'precision' || engineMode === 'ocr' || isScanned;
+      const needsOcr = isImage || engineMode === 'ocr' || isScanned;
+      const useBackend = isImage || engineMode === 'precision' || engineMode === 'ocr' || isScanned;
 
       if (useBackend) {
         setStage('backend');
-        setProgress(needsOcr ? 'Running Deep OCR & Layout Reconstruction...' : 'Reconstructing Word Document via AI Layout Engine...');
+        setProgress(needsOcr ? 'Running Deep Bilingual OCR & Layout Reconstruction...' : 'Reconstructing Word Document via AI Layout Engine...');
 
         try {
-          const blob = await convertBackend(f, needsOcr);
+          const blob = await convertBackend(f, needsOcr, layerMode, strictLocal, ocrLang);
           const url = URL.createObjectURL(blob);
           setResultUrl(url);
           setStats({
@@ -435,6 +456,9 @@ export default function PdfToWord() {
           setStage('done');
           return;
         } catch (backendErr: any) {
+          if (isImage) {
+            throw new Error('Image-to-Word AI reconstruction requires the backend server. Please wait a few seconds and retry.');
+          }
           console.warn('[PdfToWord] Backend error, gracefully falling back to high-fidelity frontend:', backendErr);
           setFallbackNotice('Server is currently offline. Automatically converted using Client-Side Precision Engine!');
           // Cascade down to frontend conversion!
@@ -454,7 +478,7 @@ export default function PdfToWord() {
       setErrorMsg(err.message || 'Conversion failed. Please try a different document.');
       setStage('error');
     }
-  }, [engineMode]);
+  }, [engineMode, layerMode, strictLocal, ocrLang]);
 
   const reset = () => {
     if (resultUrlRef.current) URL.revokeObjectURL(resultUrlRef.current);
@@ -513,28 +537,21 @@ export default function PdfToWord() {
                   </span>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   {[
                     {
                       id: 'precision' as EngineMode,
-                      badge: 'Recommended',
-                      title: '⭐ Ultra-Precision AI Engine',
-                      desc: 'Preserves tables, complex columns, images, fonts, and exact alignments via pdf2docx.',
+                      badge: 'Recommended · Auto OCR + AI Layout',
+                      title: '⭐ Smart AI & Exact Layout Engine (Auto)',
+                      desc: 'Automatically detects digital PDFs, scanned pages, 29+ row tables, certificates, and 100+ languages — self-verifying output in one pass.',
                       tagColor: 'bg-blue-600 text-white',
                     },
                     {
                       id: 'frontend' as EngineMode,
                       badge: '100% Client-Side',
                       title: '⚡ Instant Browser Engine',
-                      desc: 'Converts in milliseconds right on your device. Zero server upload, maximum privacy.',
+                      desc: 'Converts digital text PDFs in milliseconds right on your device. Zero server upload, maximum offline speed.',
                       tagColor: 'bg-emerald-600 text-white',
-                    },
-                    {
-                      id: 'ocr' as EngineMode,
-                      badge: 'Scanned & Photos',
-                      title: '🔍 Deep OCR Scanned Engine',
-                      desc: 'Optical Character Recognition for image-only PDFs, camera scans, and receipts.',
-                      tagColor: 'bg-purple-600 text-white',
                     },
                   ].map(m => {
                     const active = engineMode === m.id;
@@ -580,12 +597,24 @@ export default function PdfToWord() {
                 </div>
               </div>
 
+              {/* 3-Layer + AI Vision Boost Controls */}
+              <VisionLayerControls
+                showLayerMode={true}
+                layerMode={layerMode}
+                onLayerModeChange={setLayerMode}
+                strictLocal={strictLocal}
+                onStrictLocalChange={setStrictLocal}
+                lang={ocrLang}
+                onLangChange={setOcrLang}
+              />
+
               {/* Dropzone */}
               <FileDropzone
                 onDrop={handleDrop}
                 multiple={false}
-                title="Drag & Drop PDF to Convert to Word"
-                subtitle="Supports single & multi-page PDFs • Tables, columns & formatting guaranteed"
+                accept={SCAN_CONVERTER_ACCEPT}
+                title="Drag & Drop PDF or Scan Image to Convert to Word"
+                subtitle="Supports PDFs, JPG, PNG, WebP & TIFF scans • Global multilingual OCR & exact table grids preserved"
               />
 
               {/* Feature highlights */}
@@ -634,35 +663,23 @@ export default function PdfToWord() {
 
           {/* Analyzing stage */}
           {stage === 'analyzing' && (
-            <div className="pms-glass-panel rounded-3xl p-10 text-center space-y-4 relative overflow-hidden">
-              <PearlScanOverlay active={true} label={progress || 'Analyzing document geometry...'} />
-              <div
-                className="w-14 h-14 rounded-full border-4 border-t-transparent animate-spin mx-auto"
-                style={{ borderColor: 'var(--pms-blue)', borderTopColor: 'transparent' }}
-              />
-              <div>
-                <p className="text-lg font-bold text-[var(--pms-ink)]">Analyzing Document Geometry</p>
-                <p className="text-sm text-[var(--pms-muted)] mt-1">{progress}</p>
-              </div>
-            </div>
+            <PearlProcessCard
+              title="Analyzing Document Geometry"
+              stageLabel="Scanning layers & scripts"
+              subtitle={progress || 'Detecting fonts, columns, tables, and visual elements…'}
+              accent="blue"
+            />
           )}
 
           {/* Frontend converting stage */}
           {stage === 'converting' && (
-            <div className="pms-glass-panel rounded-3xl p-10 text-center space-y-4 relative overflow-hidden">
-              <PearlScanOverlay active={true} label={progress || 'Reconstructing Word document layout...'} />
-              <div className="w-16 h-16 rounded-full border-4 border-emerald-200 border-t-emerald-600 animate-spin mx-auto" />
-              <div
-                className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold border border-[var(--pms-border)]"
-                style={{ backgroundColor: 'var(--pms-soft-mint)', color: 'var(--pms-ink)' }}
-              >
-                <Zap className="w-3.5 h-3.5 text-emerald-600" /> High-Fidelity Client-Side Engine
-              </div>
-              <div>
-                <p className="text-lg font-bold text-[var(--pms-ink)]">{progress || 'Reconstructing document layout...'}</p>
-                <p className="text-sm text-[var(--pms-muted)] mt-1">Zero data leaves your browser • Pure local conversion</p>
-              </div>
-            </div>
+            <PearlProcessCard
+              title="Building Editable Word Document"
+              stageLabel="On-Device Engine · Zero Upload"
+              subtitle={progress || 'Mapping paragraphs, aligned tables & styles locally…'}
+              accent="emerald"
+              badge="100% Private Local Processing"
+            />
           )}
 
           {/* Backend stage */}
@@ -739,7 +756,7 @@ export default function PdfToWord() {
                   whileHover={prefersReduced ? undefined : { scale: 1.01 }}
                   whileTap={prefersReduced ? undefined : { scale: 0.98 }}
                   href={resultUrl}
-                  download={file.name.replace(/\.pdf$/i, '') + '_converted.docx'}
+                  download={stripDocumentExt(file.name) + '_converted.docx'}
                   className="pms-btn-primary flex items-center justify-center gap-2.5 w-full px-6 py-4 font-bold text-base rounded-2xl"
                 >
                   <Download className="w-5 h-5" /> Download Editable Word Document (.docx)

@@ -15,7 +15,7 @@ import {
   FileDown,
 } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
-import * as XLSX from 'xlsx';
+import { downloadXlsxFile, parseXlsxWorkbook } from '../lib/excelCodec';
 import '../lib/pdfWorker';
 import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
@@ -121,7 +121,7 @@ export default function ExtractTables() {
     try {
       let extracted: ExtractedTable[] = [];
       if (engineMode === 'camelot') {
-        setStatusMsg('Analyzing document with Camelot-py ML table parser...');
+        setStatusMsg('Analyzing document with adaptive table & vision parser...');
         try {
           const fd = new FormData();
           fd.append('file', f);
@@ -134,30 +134,21 @@ export default function ExtractTables() {
 
           if (res.ok) {
             const arrayBuf = await res.arrayBuffer();
-            const wb = XLSX.read(arrayBuf, { type: 'array' });
+            const parsedSheets = await parseXlsxWorkbook(arrayBuf);
 
-            wb.SheetNames.forEach((sheetName, sIdx) => {
-              const ws = wb.Sheets[sheetName];
-              const rawData = XLSX.utils.sheet_to_json<string[]>(ws, { header: 1 }) as string[][];
-              if (rawData && rawData.length > 0) {
-                const stringRows = rawData.map(r => (Array.isArray(r) ? r.map(c => String(c ?? '')) : []));
-                const maxC = Math.max(...stringRows.map(r => r.length));
-                const normalized = stringRows.map(r => {
-                  while (r.length < maxC) r.push('');
-                  return r;
-                });
-
+            parsedSheets.forEach((sheet, sIdx) => {
+              if (sheet.rowsAsStrings.length > 0) {
                 extracted.push({
                   id: `camelot_${sIdx}`,
                   pageIndex: sIdx + 1,
-                  name: sheetName.replace(/_/g, ' '),
-                  rows: normalized,
+                  name: sheet.name.replace(/_/g, ' '),
+                  rows: sheet.rowsAsStrings.map(r => [...r]),
                 });
               }
             });
           }
         } catch (camelotErr) {
-          console.warn('Backend Camelot extraction failed or offline, falling back to spatial:', camelotErr);
+          console.warn('Backend table extraction failed or offline, falling back to spatial:', camelotErr);
         }
       }
 
@@ -217,18 +208,16 @@ export default function ExtractTables() {
   };
 
   // Export Formats
-  const downloadExcel = () => {
+  const downloadExcel = async () => {
     if (!tables.length) return;
-    const wb = XLSX.utils.book_new();
-
-    tables.forEach((t, i) => {
-      const ws = XLSX.utils.aoa_to_sheet(t.rows);
-      const sheetName = (t.name || `Table_${i + 1}`).substring(0, 31);
-      XLSX.utils.book_append_sheet(wb, ws, sheetName);
-    });
-
     const outName = `${file?.name.replace(/\.pdf$/i, '') || 'extracted'}_tables.xlsx`;
-    XLSX.writeFile(wb, outName);
+    await downloadXlsxFile(
+      tables.map((t, i) => ({
+        name: (t.name || `Table_${i + 1}`).substring(0, 31),
+        rows: t.rows,
+      })),
+      outName
+    );
   };
 
   const downloadCsv = () => {
@@ -288,12 +277,12 @@ export default function ExtractTables() {
   return (
     <ToolWorkspaceShell
       title="PDF Table Extractor & Spreadsheet Studio"
-      subtitle="Extract tabular data from any PDF with Camelot-py accuracy. Live editable grid, cell editing, and 1-click export to Excel (.xlsx), CSV, JSON, and Markdown."
+      subtitle="Extract tabular data from any PDF with high structural precision. Live editable grid, cell editing, and 1-click export to Excel (.xlsx), CSV, JSON, and Markdown."
       categoryLabel="Structured Data & Spreadsheets"
       icon={FileSpreadsheet}
       microVariant="convert"
       tone="emerald"
-      trustNote="Camelot-py ML lattice detection · 100% private client spatial fallback"
+      trustNote="Cloud Vision & Lattice table detection · 100% private client spatial fallback"
     >
       <PearlStageSwitch stageKey={stageKey}>
         {!file ? (
@@ -301,7 +290,7 @@ export default function ExtractTables() {
             {/* Engine Selector */}
             <div className="pms-glass-panel flex p-1.5 rounded-2xl max-w-md mx-auto">
               {[
-                { id: 'camelot', label: 'Camelot-py ML', icon: Server, iconColor: 'text-emerald-600 dark:text-emerald-400' },
+                { id: 'camelot', label: 'Cloud Precision AI', icon: Server, iconColor: 'text-emerald-600 dark:text-emerald-400' },
                 { id: 'spatial', label: 'Client Spatial (Private)', icon: Cpu, iconColor: 'text-[var(--pms-blue)]' },
               ].map(eng => {
                 const active = engineMode === eng.id;
@@ -390,7 +379,7 @@ export default function ExtractTables() {
             </div>
             <h3 className="text-lg font-extrabold text-slate-900 dark:text-white">No Structured Tables Detected</h3>
             <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto leading-relaxed">
-              We could not detect clear grid or column-aligned tables in this PDF. Try switching between Camelot-py and Client Spatial modes, or upload a document with clear borders.
+              We could not detect clear grid or column-aligned tables in this PDF. Try switching between Cloud Precision and Client Spatial modes, or upload a document with clear borders.
             </p>
             <button
               onClick={reset}

@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useRef, Suspense } from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
-import { AnimatePresence, motion, useReducedMotion, useScroll, useSpring } from 'motion/react';
+import { AnimatePresence, motion, useReducedMotion, useScroll } from 'motion/react';
 import {
   FileText,
   Search,
@@ -44,12 +44,13 @@ import {
   WifiOff,
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
-import { readRecentTools, recordToolVisit, type RecentEntry } from '../lib/recentFiles';
+import { formatRelativeVisit, readRecentTools, recordToolVisit, type RecentEntry } from '../lib/recentFiles';
 import { getFavorites, toggleFavorite, type FavoriteItem } from '../lib/favorites';
 import { wipeAllBrowserTraces } from '../lib/privacy';
 import KeyboardShortcutsModal from './KeyboardShortcutsModal';
 import ErrorBoundary from './ErrorBoundary';
-import GlobalSearch, { VERIFIED_TOOL_COUNT } from './GlobalSearch';
+import GlobalSearch, { resolveToolMetadata, VERIFIED_TOOL_COUNT } from './GlobalSearch';
+import { TONE_MAP } from './pearl/PearlToolCard';
 import ToolFeedback from './ToolFeedback';
 import BrandLogo from './BrandLogo';
 import { PearlRouteSkeleton } from './pearl/PearlMotion';
@@ -392,15 +393,31 @@ export default function Layout() {
   const [scrolled, setScrolled] = useState(false);
   const recentRef = useRef<HTMLDivElement>(null);
   const favRef = useRef<HTMLDivElement>(null);
+  const scrolledRef = useRef(false);
   const prefersReduced = useReducedMotion();
   const { scrollYProgress } = useScroll();
-  const scaleX = useSpring(scrollYProgress, { stiffness: 180, damping: 28, restDelta: 0.001 });
 
   useEffect(() => {
-    const onScroll = () => setScrolled(window.scrollY > 12);
-    onScroll();
+    let rafId = 0;
+    const updateScroll = () => {
+      rafId = 0;
+      const next = window.scrollY > 12;
+      if (next !== scrolledRef.current) {
+        scrolledRef.current = next;
+        setScrolled(next);
+      }
+    };
+    const onScroll = () => {
+      if (!rafId) {
+        rafId = window.requestAnimationFrame(updateScroll);
+      }
+    };
+    updateScroll();
     window.addEventListener('scroll', onScroll, { passive: true });
-    return () => window.removeEventListener('scroll', onScroll);
+    return () => {
+      window.removeEventListener('scroll', onScroll);
+      if (rafId) window.cancelAnimationFrame(rafId);
+    };
   }, []);
 
   const handleWipeTraces = useCallback(async () => {
@@ -424,8 +441,8 @@ export default function Layout() {
 
   useEffect(() => {
     const path = location.pathname.replace(/\/$/, '') || '/';
-    const title = ROUTE_TITLES[path] || path;
-    recordToolVisit(path, title);
+    const resolved = resolveToolMetadata(path, ROUTE_TITLES[path]);
+    recordToolVisit(path, ROUTE_TITLES[path] || resolved.title);
     setRecent(readRecentTools());
   }, [location.pathname]);
 
@@ -480,7 +497,7 @@ export default function Layout() {
             aria-hidden="true"
             className="absolute bottom-0 left-0 right-0 h-[2px] origin-left pointer-events-none"
             style={{
-              scaleX,
+              scaleX: scrollYProgress,
               background: 'var(--pms-hero-gradient)',
             }}
           />
@@ -555,32 +572,56 @@ export default function Layout() {
               >
                 Recent
               </button>
-              {recentOpen && (
-                <div
-                  className="absolute right-0 top-full mt-2 w-56 max-h-72 overflow-y-auto rounded-xl border py-2 z-[60]"
-                  style={{
-                    backgroundColor: 'var(--pms-white)',
-                    borderColor: 'var(--pms-border-strong)',
-                    boxShadow: 'var(--pms-shadow-float)',
-                  }}
-                >
-                  {recent.length === 0 ? (
-                    <p className="px-3 py-2 text-xs" style={{ color: 'var(--pms-muted)' }}>No recent tools yet.</p>
-                  ) : (
-                    recent.map((r) => (
-                      <Link
-                        key={`${r.path}-${r.at}`}
-                        to={r.path}
-                        onClick={() => setRecentOpen(false)}
-                        className="block px-3 py-2 text-sm text-[var(--pms-ink)] hover:bg-[var(--pms-lavender-surface)] truncate"
-                        title={r.title}
-                      >
-                        {r.title}
-                      </Link>
-                    ))
-                  )}
-                </div>
-              )}
+              <AnimatePresence>
+                {recentOpen && (
+                  <motion.div
+                    initial={prefersReduced ? false : { opacity: 0, y: 6, scale: 0.98 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={prefersReduced ? undefined : { opacity: 0, y: 4, scale: 0.98 }}
+                    transition={{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }}
+                    className="absolute right-0 top-full mt-2 w-64 max-h-80 overflow-y-auto rounded-2xl border p-1.5 z-[60]"
+                    style={{
+                      backgroundColor: 'var(--pms-white)',
+                      borderColor: 'var(--pms-border-strong)',
+                      boxShadow: 'var(--pms-shadow-float)',
+                    }}
+                  >
+                    {recent.length === 0 ? (
+                      <p className="px-3 py-2 text-xs" style={{ color: 'var(--pms-muted)' }}>No recent tools yet.</p>
+                    ) : (
+                      recent.map((r) => {
+                        const meta = resolveToolMetadata(r.path, r.title);
+                        const tone = TONE_MAP[meta.tone] || TONE_MAP.rose;
+                        const Icon = meta.icon;
+                        return (
+                          <Link
+                            key={`${r.path}-${r.at}`}
+                            to={meta.path}
+                            onClick={() => setRecentOpen(false)}
+                            className="flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-sm text-[var(--pms-ink)] hover:bg-[var(--pms-lavender-surface)] transition-colors"
+                            title={meta.title}
+                          >
+                            <span
+                              className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0"
+                              style={{ backgroundColor: tone.iconBg, color: tone.iconColor }}
+                            >
+                              <Icon className="w-3.5 h-3.5" />
+                            </span>
+                            <span className="flex-1 min-w-0">
+                              <span className="block text-xs font-bold truncate" style={{ color: 'var(--pms-ink)' }}>
+                                {meta.title}
+                              </span>
+                              <span className="block text-[10px]" style={{ color: 'var(--pms-subtle-text)' }}>
+                                {meta.category} · {formatRelativeVisit(r.at)}
+                              </span>
+                            </span>
+                          </Link>
+                        );
+                      })
+                    )}
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
 
             {/* Favorites */}
@@ -597,47 +638,66 @@ export default function Layout() {
               >
                 <Star className="w-4 h-4" />
               </button>
-              {favOpen && (
-                <div
-                  className="absolute right-0 top-full mt-2 w-64 rounded-xl border py-2 z-[60]"
-                  style={{
-                    backgroundColor: 'var(--pms-white)',
-                    borderColor: 'var(--pms-border-strong)',
-                    boxShadow: 'var(--pms-shadow-float)',
-                  }}
-                >
-                  <p className="px-3 pb-1 text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--pms-subtle-text)' }}>
-                    Favorites
-                  </p>
-                  {favorites.length === 0 ? (
-                    <p className="px-3 py-3 text-xs" style={{ color: 'var(--pms-muted)' }}>
-                      No favorites yet. Click ⭐ on any tool in All Tools.
+              <AnimatePresence>
+                {favOpen && (
+                  <motion.div
+                    initial={prefersReduced ? false : { opacity: 0, y: 6, scale: 0.98 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={prefersReduced ? undefined : { opacity: 0, y: 4, scale: 0.98 }}
+                    transition={{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }}
+                    className="absolute right-0 top-full mt-2 w-64 rounded-2xl border p-1.5 z-[60]"
+                    style={{
+                      backgroundColor: 'var(--pms-white)',
+                      borderColor: 'var(--pms-border-strong)',
+                      boxShadow: 'var(--pms-shadow-float)',
+                    }}
+                  >
+                    <p className="px-2.5 pt-1 pb-1.5 text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--pms-subtle-text)' }}>
+                      Favorites
                     </p>
-                  ) : (
-                    favorites.map((f) => (
-                      <div key={f.path} className="flex items-center gap-2 px-3 py-1.5 hover:bg-[var(--pms-lavender-surface)] group">
-                        <Link
-                          to={f.path}
-                          onClick={() => setFavOpen(false)}
-                          className="flex-1 text-sm text-[var(--pms-ink)] truncate"
-                        >
-                          {f.title}
-                        </Link>
-                        <button
-                          onClick={() => {
-                            toggleFavorite(f);
-                            setFavorites(getFavorites());
-                          }}
-                          className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-[var(--pms-soft-rose)] transition-all"
-                          title="Remove from favorites"
-                        >
-                          <Trash2 className="w-3 h-3 text-[var(--pms-rose)]" />
-                        </button>
-                      </div>
-                    ))
-                  )}
-                </div>
-              )}
+                    {favorites.length === 0 ? (
+                      <p className="px-2.5 py-2.5 text-xs" style={{ color: 'var(--pms-muted)' }}>
+                        No favorites yet. Click ⭐ on any tool in All Tools.
+                      </p>
+                    ) : (
+                      favorites.map((f) => {
+                        const meta = resolveToolMetadata(f.path, f.title);
+                        const tone = TONE_MAP[meta.tone] || TONE_MAP.rose;
+                        const Icon = meta.icon;
+                        return (
+                          <div key={f.path} className="flex items-center gap-2 px-2 py-1.5 rounded-xl hover:bg-[var(--pms-lavender-surface)] group">
+                            <Link
+                              to={meta.path}
+                              onClick={() => setFavOpen(false)}
+                              className="flex-1 flex items-center gap-2.5 min-w-0"
+                            >
+                              <span
+                                className="w-6 h-6 rounded-lg flex items-center justify-center shrink-0"
+                                style={{ backgroundColor: tone.iconBg, color: tone.iconColor }}
+                              >
+                                <Icon className="w-3.5 h-3.5" />
+                              </span>
+                              <span className="text-xs font-bold text-[var(--pms-ink)] truncate">
+                                {meta.title}
+                              </span>
+                            </Link>
+                            <button
+                              onClick={() => {
+                                toggleFavorite(f);
+                                setFavorites(getFavorites());
+                              }}
+                              className="opacity-0 group-hover:opacity-100 p-1 rounded-lg hover:bg-[var(--pms-soft-rose)] transition-all"
+                              title="Remove from favorites"
+                            >
+                              <Trash2 className="w-3 h-3 text-[var(--pms-rose)]" />
+                            </button>
+                          </div>
+                        );
+                      })
+                    )}
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
 
             <button
@@ -651,19 +711,44 @@ export default function Layout() {
             <button
               type="button"
               onClick={toggleTheme}
-              title={theme === 'dark' ? 'Light mode' : 'Dark mode'}
-              className="p-2 rounded-full text-[var(--pms-muted)] hover:text-[var(--pms-ink)] hover:bg-[var(--pms-lavender-surface)] transition-colors"
+              title={theme === 'dark' ? 'Switch to Light Pearl mode' : 'Switch to Dark Obsidian mode'}
+              className="relative p-2 rounded-full text-[var(--pms-muted)] hover:text-[var(--pms-ink)] hover:bg-[var(--pms-lavender-surface)] transition-colors overflow-hidden"
             >
-              {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+              <AnimatePresence mode="wait" initial={false}>
+                <motion.span
+                  key={theme}
+                  initial={prefersReduced ? false : { rotate: -65, scale: 0.5, opacity: 0 }}
+                  animate={{ rotate: 0, scale: 1, opacity: 1 }}
+                  exit={prefersReduced ? undefined : { rotate: 65, scale: 0.5, opacity: 0 }}
+                  transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
+                  className="block"
+                >
+                  {theme === 'dark' ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4" />}
+                </motion.span>
+              </AnimatePresence>
             </button>
             {/* Search — opens Cmd+K modal */}
             <button
               type="button"
               onClick={() => setSearchOpen(true)}
               title="Search tools (⌘K)"
-              className="p-2 rounded-full text-[var(--pms-muted)] hover:text-[var(--pms-ink)] hover:bg-[var(--pms-lavender-surface)] transition-colors"
+              className="inline-flex items-center gap-1.5 p-2 sm:px-3 sm:py-1.5 rounded-full border text-xs font-bold text-[var(--pms-muted)] hover:text-[var(--pms-ink)] hover:border-rose-300 dark:hover:border-rose-700 transition-colors"
+              style={{
+                backgroundColor: 'var(--pms-pearl)',
+                borderColor: 'var(--pms-border)',
+              }}
             >
-              <Search className="w-4 h-4" />
+              <Search className="w-3.5 h-3.5 text-[var(--pms-rose)]" />
+              <span className="hidden lg:inline">Search</span>
+              <kbd
+                className="hidden sm:inline-flex items-center px-1.5 py-[1px] rounded text-[10px] font-extrabold"
+                style={{
+                  backgroundColor: 'var(--pms-lavender-surface)',
+                  color: 'var(--pms-muted)',
+                }}
+              >
+                ⌘K
+              </kbd>
             </button>
 
             {/* Mobile hamburger */}

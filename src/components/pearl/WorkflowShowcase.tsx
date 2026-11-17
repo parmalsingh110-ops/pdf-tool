@@ -1,35 +1,19 @@
-import { useRef } from 'react';
 import { Link } from 'react-router-dom';
-import { motion, useScroll, useTransform, useSpring, useReducedMotion } from 'motion/react';
-import { ArrowRight, CheckCircle2, Cpu, FileSpreadsheet, FileText, Layers, ScanSearch, Sparkles } from 'lucide-react';
+import { motion, useReducedMotion } from 'motion/react';
+import { ArrowDown, ArrowRight, CheckCircle2, Cpu, FileSpreadsheet, FileText, Layers, ScanSearch, Sparkles } from 'lucide-react';
 
 /**
- * Scroll-linked editorial workflow demonstration:
+ * Editorial workflow demonstration:
  * Source Input -> Browser WebAssembly / OCR Engine -> Clean Aligned Export.
- * Purely illustrative (no fabricated metrics, no scroll-jacking).
+ * Uses GPU-composited once-on-view entrances + visible mobile/desktop flow connectors (zero scroll-tick overhead).
  */
 export default function WorkflowShowcase() {
-  const containerRef = useRef<HTMLDivElement>(null);
   const prefersReduced = useReducedMotion();
-
-  const { scrollYProgress } = useScroll({
-    target: containerRef,
-    offset: ['start end', 'end start'],
-  });
-
-  const smooth = useSpring(scrollYProgress, { stiffness: 110, damping: 24, mass: 0.5 });
-
-  // Gentle scroll-linked 2.5D flatten & convergence as user scrolls into center of section
-  const stageRotateX = useTransform(smooth, [0.08, 0.45, 0.85], [10, 0, -4]);
-  const stageScale = useTransform(smooth, [0.08, 0.45, 0.85], [0.96, 1, 0.99]);
-  const leftCardX = useTransform(smooth, [0.1, 0.48], [-18, 0]);
-  const rightCardX = useTransform(smooth, [0.1, 0.48], [18, 0]);
 
   return (
     <section
-      ref={containerRef}
       aria-labelledby="workflow-showcase-heading"
-      className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-14 md:py-20"
+      className="pms-cv-auto relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-14 md:py-20"
     >
       <div
         className="rounded-[2rem] border p-6 sm:p-10 lg:p-12 overflow-hidden relative"
@@ -98,27 +82,18 @@ export default function WorkflowShowcase() {
           </div>
         </div>
 
-        {/* 3-Stage Scroll-Linked Interactive Sheet Pipeline */}
+        {/* 3-Stage Interactive Sheet Pipeline */}
         <motion.div
-          style={
-            prefersReduced
-              ? undefined
-              : {
-                  rotateX: stageRotateX,
-                  scale: stageScale,
-                  transformPerspective: 1100,
-                }
-          }
-          className="relative z-10 grid grid-cols-1 lg:grid-cols-11 gap-4 lg:gap-5 items-stretch"
+          initial={prefersReduced ? false : { opacity: 0, y: 16 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true, amount: 0.15 }}
+          transition={{ duration: 0.42, ease: [0.22, 1, 0.36, 1] }}
+          className="relative z-10 grid grid-cols-1 lg:grid-cols-11 gap-3 sm:gap-4 lg:gap-5 items-stretch"
         >
           {/* Stage 1: Input File */}
-          <motion.div
+          <div
             className="lg:col-span-3 rounded-2xl border p-5 flex flex-col justify-between"
-            style={
-              prefersReduced
-                ? { backgroundColor: 'var(--pms-pearl)', borderColor: 'var(--pms-border)' }
-                : { x: leftCardX, backgroundColor: 'var(--pms-pearl)', borderColor: 'var(--pms-border)' }
-            }
+            style={{ backgroundColor: 'var(--pms-pearl)', borderColor: 'var(--pms-border)' }}
           >
             <div>
               <div className="flex items-center justify-between mb-3">
@@ -153,23 +128,21 @@ export default function WorkflowShowcase() {
                 <div className="h-2 w-3/5 rounded-full bg-slate-200/60 dark:bg-slate-700/50 rotate-[0.5deg]" />
               </div>
             </div>
-          </motion.div>
+          </div>
 
-          {/* Connector 1 */}
-          <div className="hidden lg:flex lg:col-span-1 items-center justify-center relative">
+          {/* Connector 1 (Desktop + Mobile) */}
+          <div className="flex lg:col-span-1 items-center justify-center relative py-1 lg:py-0">
             {!prefersReduced && (
               <motion.span
                 aria-hidden="true"
-                className="absolute w-12 h-[2px] rounded-full opacity-50"
+                className="hidden lg:block absolute w-12 h-[2px] rounded-full opacity-50"
                 style={{ background: 'linear-gradient(90deg, var(--pms-rose), var(--pms-violet))' }}
                 animate={{ opacity: [0.25, 0.75, 0.25] }}
                 transition={{ duration: 2.4, repeat: Infinity, ease: 'easeInOut' }}
               />
             )}
-            <motion.div
-              animate={prefersReduced ? undefined : { x: [0, 3, 0] }}
-              transition={{ duration: 2.2, repeat: Infinity, ease: 'easeInOut' }}
-              className="relative z-10 w-9 h-9 rounded-full border flex items-center justify-center"
+            <div
+              className="pms-float-a pms-gpu-layer relative z-10 w-8 h-8 lg:w-9 lg:h-9 rounded-full border flex items-center justify-center"
               style={{
                 backgroundColor: 'var(--pms-white)',
                 borderColor: 'var(--pms-border-strong)',
@@ -177,8 +150,9 @@ export default function WorkflowShowcase() {
                 boxShadow: 'var(--pms-shadow-sm)',
               }}
             >
-              <ArrowRight className="w-4 h-4" />
-            </motion.div>
+              <ArrowDown className="w-4 h-4 lg:hidden" />
+              <ArrowRight className="w-4 h-4 hidden lg:block" />
+            </div>
           </div>
 
           {/* Stage 2: Processing Engine */}
@@ -234,21 +208,19 @@ export default function WorkflowShowcase() {
             </div>
           </div>
 
-          {/* Connector 2 */}
-          <div className="hidden lg:flex lg:col-span-1 items-center justify-center relative">
+          {/* Connector 2 (Desktop + Mobile) */}
+          <div className="flex lg:col-span-1 items-center justify-center relative py-1 lg:py-0">
             {!prefersReduced && (
               <motion.span
                 aria-hidden="true"
-                className="absolute w-12 h-[2px] rounded-full opacity-50"
+                className="hidden lg:block absolute w-12 h-[2px] rounded-full opacity-50"
                 style={{ background: 'linear-gradient(90deg, var(--pms-violet), var(--pms-blue))' }}
                 animate={{ opacity: [0.25, 0.75, 0.25] }}
                 transition={{ duration: 2.4, delay: 0.6, repeat: Infinity, ease: 'easeInOut' }}
               />
             )}
-            <motion.div
-              animate={prefersReduced ? undefined : { x: [0, 3, 0] }}
-              transition={{ duration: 2.2, delay: 0.6, repeat: Infinity, ease: 'easeInOut' }}
-              className="relative z-10 w-9 h-9 rounded-full border flex items-center justify-center"
+            <div
+              className="pms-float-b pms-gpu-layer relative z-10 w-8 h-8 lg:w-9 lg:h-9 rounded-full border flex items-center justify-center"
               style={{
                 backgroundColor: 'var(--pms-white)',
                 borderColor: 'var(--pms-border-strong)',
@@ -256,17 +228,14 @@ export default function WorkflowShowcase() {
                 boxShadow: 'var(--pms-shadow-sm)',
               }}
             >
-              <ArrowRight className="w-4 h-4" />
-            </motion.div>
+              <ArrowDown className="w-4 h-4 lg:hidden" />
+              <ArrowRight className="w-4 h-4 hidden lg:block" />
+            </div>
           </div>
 
           {/* Stage 3: Clean Output */}
-          <motion.div
-            style={
-              prefersReduced
-                ? { backgroundColor: 'var(--pms-pearl)', borderColor: 'var(--pms-border)' }
-                : { x: rightCardX, backgroundColor: 'var(--pms-pearl)', borderColor: 'var(--pms-border)' }
-            }
+          <div
+            style={{ backgroundColor: 'var(--pms-pearl)', borderColor: 'var(--pms-border)' }}
             className="lg:col-span-3 rounded-2xl border p-5 flex flex-col justify-between"
           >
             <div>
@@ -314,7 +283,7 @@ export default function WorkflowShowcase() {
                 Ready
               </span>
             </div>
-          </motion.div>
+          </div>
         </motion.div>
       </div>
     </section>

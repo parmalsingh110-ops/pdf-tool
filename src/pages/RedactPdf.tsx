@@ -689,7 +689,7 @@ export default function RedactPdf() {
                 onClick={scanWithOcr}
                 disabled={isScanningPii}
                 className="py-2 px-3 bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-sm transition-all disabled:opacity-50"
-                title="Scan document images via Tesseract OCR for scanned/paper PDFs"
+                title="Scan document images with deep OCR for scanned or paper PDFs"
               >
                 {ocrStatus ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileText className="w-4 h-4" />}
                 OCR Deep Scan

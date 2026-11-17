@@ -782,7 +782,7 @@ export default function AllTools() {
                     return (
                       <div
                         key={idx}
-                        className="group relative rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 hover:border-rose-500 dark:hover:border-rose-500 shadow-sm hover:shadow-md transition-all flex flex-col justify-between"
+                        className="group pms-card relative rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 hover:border-rose-500 dark:hover:border-rose-500 shadow-sm hover:shadow-md flex flex-col justify-between"
                       >
                         <div>
                           <div className="flex items-start justify-between mb-3">
@@ -842,7 +842,7 @@ export default function AllTools() {
                   <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
                     <Link
                       to="/merge"
-                      className="lg:col-span-8 rounded-3xl border p-8 hover:-translate-y-1 transition-all group"
+                      className="lg:col-span-8 pms-card rounded-3xl border p-8 group"
                       style={{ backgroundColor: 'var(--pms-white)', borderColor: 'var(--pms-border)', boxShadow: 'var(--pms-shadow-card)' }}
                     >
                       <div className="flex items-start justify-between gap-3">
@@ -859,7 +859,7 @@ export default function AllTools() {
                     </Link>
                     <Link
                       to="/compress"
-                      className="lg:col-span-4 rounded-3xl border p-8 hover:-translate-y-1 transition-all group"
+                      className="lg:col-span-4 pms-card rounded-3xl border p-8 group"
                       style={{ backgroundColor: 'var(--pms-white)', borderColor: 'var(--pms-border)', boxShadow: 'var(--pms-shadow-card)' }}
                     >
                       <div className="flex items-start justify-between gap-3 mb-4">
@@ -880,7 +880,11 @@ export default function AllTools() {
 
               <div className="space-y-16">
                 {sortedCategories.map((category, catIdx) => (
-                  <section key={catIdx} id={categoryAnchor(category.title)}>
+                  <section
+                    key={catIdx}
+                    id={categoryAnchor(category.title)}
+                    className={catIdx > 0 ? 'pms-cv-auto' : undefined}
+                  >
                     <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-6 pb-2 border-b border-slate-200 dark:border-slate-700">
                       {category.title}
                     </h2>

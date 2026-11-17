@@ -166,8 +166,8 @@ export default function PdfRepair() {
         const res = await apiFetch('/repair-pdf', { method: 'POST', body: fd, timeoutMs: 60000 });
         if (res.ok) {
           const blob = await res.blob();
-          const strat = res.headers.get('X-Repair-Strategy') || 'Ghostscript Deep Rebuild';
-          diagList.push({ name: 'Server Ghostscript Engine', status: 'repaired', detail: 'Repaired low-level linearized objects & CFF fonts.' });
+          const strat = res.headers.get('X-Repair-Strategy') || 'Deep Stream Rebuild';
+          diagList.push({ name: 'Deep Structural Recovery', status: 'repaired', detail: 'Repaired low-level linearized objects & embedded font tables.' });
           setResultUrl(URL.createObjectURL(blob));
           setResultName(`repaired_${file.name}`);
           setStrategyUsed(strat);
@@ -261,7 +261,7 @@ export default function PdfRepair() {
               </p>
               <p>1. <strong>In-Browser XREF Reconstruct:</strong> Strips prepended garbage bytes & rebuilds dictionary offsets.</p>
               <p>2. <strong>Visual Stream Salvage:</strong> Extracts readable page objects and compiles a pristine PDF.</p>
-              <p>3. <strong>Ghostscript Deep Clean:</strong> Rebuilds linearized stream structures.</p>
+              <p>3. <strong>Deep Stream Rebuild:</strong> Rebuilds corrupted cross-references and linearized object streams.</p>
             </div>
 
             <button

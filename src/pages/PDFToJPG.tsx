@@ -11,7 +11,7 @@ import { useSEO } from '../hooks/useSEO';
 import { dataUrlToBytes } from '../lib/utils';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 import { toArrayBufferBytes } from '../lib/blobUrl';
-import { AnimatedNumber, PearlScanOverlay, PearlStageSwitch } from '../components/pearl/PearlMotion';
+import { AnimatedNumber, PearlProcessCard, PearlScanOverlay, PearlStageSwitch } from '../components/pearl/PearlMotion';
 
 // Initialize pdf.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
@@ -271,17 +271,13 @@ export default function PDFToJPG() {
               />
             </div>
           ) : isLoadingPages ? (
-            <div className="w-full max-w-2xl pms-glass-panel rounded-3xl p-12 text-center relative overflow-hidden">
-              <PearlScanOverlay
-                active={true}
-                label="Rendering visual thumbnails for interactive page selection..."
+            <div className="w-full max-w-2xl">
+              <PearlProcessCard
+                title="Analyzing PDF Pages..."
+                stageLabel="Preparing visual thumbnails"
+                subtitle="Rendering high-clarity thumbnails for interactive page selection"
+                accent="rose"
               />
-              <div
-                className="w-14 h-14 border-4 border-t-transparent rounded-full animate-spin mx-auto mb-4"
-                style={{ borderColor: 'var(--pms-rose)', borderTopColor: 'transparent' }}
-              />
-              <h3 className="text-xl font-bold text-[var(--pms-ink)] mb-2">Analyzing PDF Pages...</h3>
-              <p className="text-sm text-[var(--pms-muted)]">Rendering visual thumbnails for interactive page selection</p>
             </div>
           ) : convertedImages.length > 0 ? (
             /* Results View */

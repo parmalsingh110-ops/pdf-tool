@@ -1,16 +1,52 @@
 import { isAllowedBackendOverride } from './privacy';
 
 /**
- * Centralized API configuration and resilient fetch helper.
- * Prevents Mixed Content errors in production, avoids hardcoded localhost leaks,
- * and adds automatic timeout protection so spinners never get stuck infinitely.
+ * Centralized API Gateway, Client-Side Load Balancer & Resilient Fetch Engine
+ * ===========================================================================
+ * - Supports single backend URL or comma-separated multi-node load balancing pool
+ *   (VITE_API_URL / VITE_API_POOL_URLS) with latency-aware routing & circuit breaking.
+ * - Automatically handles IRCTC-style Virtual Waiting Room backpressure (HTTP 503 / 429
+ *   with Retry-After) and Render cold-start 502/504 errors using jittered backoff.
+ * - Coalesces concurrent identical GET requests in-flight to eliminate duplicate network calls.
+ * - Prevents Mixed Content errors in production and enforces hard request timeouts.
  */
 
-export function getApiBaseUrl(): string {
+interface NodeHealth {
+  url: string;
+  ewmaLatencyMs: number;
+  failures: number;
+  cooldownUntil: number;
+}
+
+const NODE_HEALTH = new Map<string, NodeHealth>();
+const IN_FLIGHT_GET = new Map<string, Promise<{ status: number; statusText: string; headers: [string, string][]; body: ArrayBuffer }>>();
+
+function sanitizeNodeUrl(raw: string, isLiveHost: boolean): string | null {
+  let cleaned = raw.trim().replace(/\/+$/, '');
+  if (!cleaned) return null;
+
+  // In live production (e.g. pdfmediasuite.in), ignore localhost entries to prevent Mixed Content
+  if (isLiveHost && (cleaned.includes('localhost') || cleaned.includes('127.0.0.1'))) {
+    return null;
+  }
+
+  // Upgrade HTTP to HTTPS when served from an HTTPS origin
+  if (
+    typeof window !== 'undefined' &&
+    window.location.protocol === 'https:' &&
+    cleaned.startsWith('http://') &&
+    !cleaned.includes('localhost')
+  ) {
+    cleaned = cleaned.replace(/^http:\/\//, 'https://');
+  }
+  return cleaned;
+}
+
+export function getApiPoolUrls(): string[] {
   if (typeof window !== 'undefined') {
     const custom = localStorage.getItem('pdf_admin_backend_url');
     if (custom && custom.trim() && isAllowedBackendOverride(custom)) {
-      return custom.trim().replace(/\/+$/, '');
+      return [custom.trim().replace(/\/+$/, '')];
     }
   }
 
@@ -19,33 +55,82 @@ export function getApiBaseUrl(): string {
     window.location.hostname !== 'localhost' &&
     window.location.hostname !== '127.0.0.1';
 
-  const envUrl = import.meta.env.VITE_API_URL;
-  if (envUrl && typeof envUrl === 'string' && envUrl.trim()) {
-    let cleaned = envUrl.trim().replace(/\/+$/, '');
+  const rawPool = [
+    import.meta.env.VITE_API_POOL_URLS,
+    import.meta.env.VITE_API_URL,
+  ]
+    .filter((v): v is string => typeof v === 'string' && Boolean(v.trim()))
+    .join(',');
 
-    // In live production (e.g. pdfmediasuite.in), if envUrl points to localhost, ignore it to prevent Mixed Content
-    if (isLiveHost && (cleaned.includes('localhost') || cleaned.includes('127.0.0.1'))) {
-      return '';
-    }
-
-    // If the browser page is HTTPS but VITE_API_URL is HTTP (and not localhost), upgrade or alert
-    if (typeof window !== 'undefined' && window.location.protocol === 'https:' && cleaned.startsWith('http://') && !cleaned.includes('localhost')) {
-      cleaned = cleaned.replace(/^http:\/\//, 'https://');
-    }
-    return cleaned;
+  if (rawPool) {
+    const urls = Array.from(
+      new Set(
+        rawPool
+          .split(',')
+          .map((part) => sanitizeNodeUrl(part, isLiveHost))
+          .filter((u): u is string => u !== null)
+      )
+    );
+    if (urls.length > 0) return urls;
   }
 
-  // Development fallback
   if (import.meta.env.DEV) {
-    return 'http://localhost:8000';
+    return ['http://localhost:8000'];
   }
 
-  // Production fallback: If running on HTTPS, avoid mixed content block
   if (typeof window !== 'undefined' && window.location.protocol === 'https:') {
-    return ''; // Relative path, handled by server proxy/rewrite
+    return [''];
   }
 
-  return isLiveHost ? '' : 'http://localhost:8000';
+  return [isLiveHost ? '' : 'http://localhost:8000'];
+}
+
+export function getApiBaseUrl(): string {
+  return selectBestBackendNode();
+}
+
+function selectBestBackendNode(): string {
+  const pool = getApiPoolUrls();
+  if (pool.length <= 1) return pool[0] ?? '';
+
+  const now = Date.now();
+  let bestUrl = pool[0];
+  let bestScore = Number.POSITIVE_INFINITY;
+
+  for (const url of pool) {
+    let state = NODE_HEALTH.get(url);
+    if (!state) {
+      state = { url, ewmaLatencyMs: 250, failures: 0, cooldownUntil: 0 };
+      NODE_HEALTH.set(url, state);
+    }
+    const inCooldown = now < state.cooldownUntil;
+    const score = state.ewmaLatencyMs + state.failures * 600 + (inCooldown ? 50000 : 0);
+    if (score < bestScore) {
+      bestScore = score;
+      bestUrl = url;
+    }
+  }
+  return bestUrl;
+}
+
+function recordNodeOutcome(baseUrl: string, ok: boolean, elapsedMs: number): void {
+  const state = NODE_HEALTH.get(baseUrl) || {
+    url: baseUrl,
+    ewmaLatencyMs: elapsedMs,
+    failures: 0,
+    cooldownUntil: 0,
+  };
+  if (ok) {
+    state.ewmaLatencyMs = Math.round(state.ewmaLatencyMs * 0.7 + elapsedMs * 0.3);
+    state.failures = 0;
+    state.cooldownUntil = 0;
+  } else {
+    state.failures += 1;
+    if (state.failures >= 2) {
+      state.cooldownUntil = Date.now() + Math.min(30000, state.failures * 5000);
+    }
+  }
+  NODE_HEALTH.set(baseUrl, state);
 }
 
 export const API_BASE = getApiBaseUrl();
@@ -54,34 +139,122 @@ export const API_BASE_URL = API_BASE;
 export interface ApiFetchOptions extends RequestInit {
   timeoutMs?: number;
   suppressTelemetry?: boolean;
+  maxRetries?: number;
+}
+
+function sleepWithSignal(ms: number, signal?: AbortSignal | null): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(signal.reason || new DOMException('Request aborted', 'AbortError'));
+      return;
+    }
+    const timer = setTimeout(() => {
+      if (signal) signal.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal?.reason || new DOMException('Request aborted', 'AbortError'));
+    };
+    if (signal) signal.addEventListener('abort', onAbort, { once: true });
+  });
 }
 
 /**
- * Resilient fetch wrapper with automatic timeout and meaningful error formatting.
+ * Resilient load-balanced fetch wrapper with automatic Virtual Waiting Room retry,
+ * in-flight GET deduplication, and timeout protection.
  */
 export async function apiFetch(endpoint: string, options: ApiFetchOptions = {}): Promise<Response> {
-  const { timeoutMs = 60000, ...fetchOptions } = options;
+  const { timeoutMs = 60000, maxRetries = 2, suppressTelemetry, ...fetchOptions } = options;
+  const method = (fetchOptions.method || 'GET').toUpperCase();
+  const isAbsolute = endpoint.startsWith('http://') || endpoint.startsWith('https://');
 
-  const url = endpoint.startsWith('http://') || endpoint.startsWith('https://')
-    ? endpoint
-    : `${API_BASE}${endpoint.startsWith('/') ? '' : '/'}${endpoint}`;
+  // Coalesce identical concurrent GET requests (e.g. /vision/status, /health)
+  if (method === 'GET' && !fetchOptions.signal) {
+    const existing = IN_FLIGHT_GET.get(endpoint);
+    if (existing) {
+      const snap = await existing;
+      return new Response(snap.body.slice(0), {
+        status: snap.status,
+        statusText: snap.statusText,
+        headers: snap.headers,
+      });
+    }
+  }
 
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => {
-    controller.abort(new DOMException('Request timeout', 'AbortError'));
-  }, timeoutMs);
+  const execRequest = async (): Promise<Response> => {
+    const pool = isAbsolute ? [''] : getApiPoolUrls();
+    let lastError: any = null;
 
-  const combined = fetchOptions.signal
-    ? anySignal([fetchOptions.signal, controller.signal])
-    : { signal: controller.signal, cleanup: () => {} };
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      const chosenBase = isAbsolute
+        ? ''
+        : attempt === 0
+          ? selectBestBackendNode()
+          : pool[attempt % pool.length];
 
-  try {
-    const response = await fetch(url, {
-      ...fetchOptions,
-      signal: combined.signal,
-    });
-    return response;
-  } catch (err: any) {
+      const url = isAbsolute
+        ? endpoint
+        : `${chosenBase}${endpoint.startsWith('/') ? '' : '/'}${endpoint}`;
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => {
+        controller.abort(new DOMException('Request timeout', 'AbortError'));
+      }, timeoutMs);
+
+      const combined = fetchOptions.signal
+        ? anySignal([fetchOptions.signal, controller.signal])
+        : { signal: controller.signal, cleanup: () => {} };
+
+      const startMs = performance.now();
+      try {
+        const response = await fetch(url, {
+          ...fetchOptions,
+          signal: combined.signal,
+        });
+        const elapsedMs = Math.round(performance.now() - startMs);
+
+        // Handle Virtual Waiting Room backpressure (503) or temporary gateway warmup (502/504)
+        if ((response.status === 503 || response.status === 502 || response.status === 504) && attempt < maxRetries) {
+          recordNodeOutcome(chosenBase, false, elapsedMs);
+          const retryAfterHdr = Number(response.headers.get('Retry-After'));
+          const baseDelayMs = Number.isFinite(retryAfterHdr) && retryAfterHdr > 0
+            ? Math.min(8000, retryAfterHdr * 1000)
+            : 1200 * (attempt + 1);
+          const jitterMs = Math.floor(Math.random() * 450);
+          await sleepWithSignal(baseDelayMs + jitterMs, fetchOptions.signal);
+          continue;
+        }
+
+        recordNodeOutcome(chosenBase, response.status < 500, elapsedMs);
+        return response;
+      } catch (err: any) {
+        lastError = err;
+        const elapsedMs = Math.round(performance.now() - startMs);
+        recordNodeOutcome(chosenBase, false, elapsedMs);
+
+        const callerAborted = Boolean(fetchOptions.signal?.aborted);
+        if (callerAborted) {
+          throw err;
+        }
+
+        // Retry transient network drops across alternate pool nodes or brief wait
+        if (attempt < maxRetries) {
+          const backoffMs = 900 * (attempt + 1) + Math.floor(Math.random() * 350);
+          try {
+            await sleepWithSignal(backoffMs, fetchOptions.signal);
+            continue;
+          } catch {
+            break;
+          }
+        }
+      } finally {
+        clearTimeout(timeoutId);
+        combined.cleanup();
+      }
+    }
+
+    const err = lastError;
     const isAborted =
       err?.name === 'AbortError' ||
       err?.message?.toLowerCase().includes('abort') ||
@@ -93,8 +266,7 @@ export async function apiFetch(endpoint: string, options: ApiFetchOptions = {}):
       err?.message?.includes('ERR_CONNECTION_REFUSED') ||
       err?.message?.includes('Load failed');
 
-    // Never log normal client timeouts, network offline, routine poll aborts, or suppressed endpoints to telemetry
-    if (!isAborted && !isNetworkDown && !options.suppressTelemetry && !endpoint.includes('/api/telemetry')) {
+    if (!isAborted && !isNetworkDown && !suppressTelemetry && !endpoint.includes('/api/telemetry')) {
       try {
         const { reportToolError } = await import('./telemetry');
         void reportToolError({
@@ -110,10 +282,34 @@ export async function apiFetch(endpoint: string, options: ApiFetchOptions = {}):
       throw new Error('Could not connect to the backend server. If using free hosting, please wait 30 seconds for the server to wake up and try again.');
     }
     throw err;
-  } finally {
-    clearTimeout(timeoutId);
-    combined.cleanup();
+  };
+
+  if (method === 'GET' && !fetchOptions.signal) {
+    const sharedPromise = execRequest().then(async (res) => {
+      const body = await res.arrayBuffer();
+      const headers: [string, string][] = [];
+      res.headers.forEach((v, k) => headers.push([k, v]));
+      return {
+        status: res.status,
+        statusText: res.statusText,
+        headers,
+        body,
+      };
+    });
+    IN_FLIGHT_GET.set(endpoint, sharedPromise);
+    try {
+      const snap = await sharedPromise;
+      return new Response(snap.body.slice(0), {
+        status: snap.status,
+        statusText: snap.statusText,
+        headers: snap.headers,
+      });
+    } finally {
+      IN_FLIGHT_GET.delete(endpoint);
+    }
   }
+
+  return execRequest();
 }
 
 /**

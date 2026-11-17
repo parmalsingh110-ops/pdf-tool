@@ -35,6 +35,7 @@ import logging
 import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any, Optional
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form, BackgroundTasks, Request, Response
 from fastapi.concurrency import run_in_threadpool
@@ -47,6 +48,20 @@ from dotenv import load_dotenv
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
+
+from vision_reconstructor import (
+    normalize_input_to_pdf,
+    is_pdf_scanned_or_raster,
+    build_exact_docx_from_scans,
+    build_exact_xlsx_from_scans,
+    build_exact_pptx_from_scans,
+)
+from security_shield import (
+    LOAD_BALANCER,
+    RESULT_CACHE,
+    LoadBalancerAndFirewallMiddleware,
+    verify_upload_payload_safety,
+)
 
 load_dotenv(Path(__file__).resolve().parent / ".env")
 load_dotenv()
@@ -134,6 +149,71 @@ def get_real_client_ip(request: Request) -> str:
 
 limiter = Limiter(key_func=get_real_client_ip)
 
+
+# ─── Secret redaction (API keys can NEVER reach logs, Discord/Telegram alerts or responses) ───
+_SECRET_PATTERNS = [
+    re.compile(r"AIza[0-9A-Za-z\-_]{20,}"),
+    re.compile(r"\bAQ\.[0-9A-Za-z\-_.]{20,}"),
+    re.compile(r"sk-ant-[0-9A-Za-z\-_]{16,}"),
+    re.compile(r"\bsk-[0-9A-Za-z\-_]{20,}"),
+]
+_SECRET_KEEP_PREFIX_PATTERNS = [
+    re.compile(r"(?i)((?:x-goog-api-key|x-api-key|authorization)\s*[:=]\s*)['\"]?(?:Bearer\s+)?[^\s'\",}]+"),
+    re.compile(r"(?i)([?&](?:key|api_key|apikey|token)=)[^&\s'\"]+"),
+]
+
+
+def redact_secrets(text: Any) -> str:
+    """Scrub provider keys / auth headers / env-key values from any string before it is logged or sent out."""
+    s = str(text)
+    for env_name in ("GEMINI_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "ILOVEPDF_SECRET_KEY",
+                     "TELEGRAM_BOT_TOKEN", "ADMIN_SECRET_KEY"):
+        val = os.environ.get(env_name, "").strip()
+        if len(val) >= 8 and val in s:
+            s = s.replace(val, "[REDACTED_KEY]")
+    for pat in _SECRET_PATTERNS:
+        s = pat.sub("[REDACTED_KEY]", s)
+    for pat in _SECRET_KEEP_PREFIX_PATTERNS:
+        s = pat.sub(lambda m: m.group(1) + "[REDACTED_KEY]", s)
+    return s
+
+
+class _SecretRedactingFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            rendered = record.getMessage()
+            cleaned = redact_secrets(rendered)
+            if cleaned != rendered:
+                record.msg = cleaned
+                record.args = ()
+        except Exception:
+            pass
+        return True
+
+
+for _lg_name in ("", "uvicorn", "uvicorn.error", "uvicorn.access", "pdf_tool", "mediasuite.ai_vision"):
+    _lg = logging.getLogger(_lg_name)
+    _lg.addFilter(_SecretRedactingFilter())
+    for _h in _lg.handlers:
+        _h.addFilter(_SecretRedactingFilter())
+
+
+def server_ai_quota_ok(request: Request, user_key_supplied: bool, strict_local: bool) -> bool:
+    """
+    Per-client daily quota for AI requests that would spend the OPERATOR's server key.
+    Returns False -> caller silently switches to the strong local engines (no error, no waiting).
+    User-supplied keys and local-only runs are never counted.
+    """
+    if strict_local or user_key_supplied:
+        return True
+    try:
+        from ai_vision_refiner import consume_client_ai_quota, get_server_vision_status
+        if not get_server_vision_status().get("enhanced_available"):
+            return True
+        return consume_client_ai_quota(get_real_client_ip(request))
+    except Exception:
+        return True
+
 @asynccontextmanager
 async def _app_lifespan(app_instance: FastAPI):
     """Startup & background janitor: sweeps stale temp/spool files so abandoned uploads never linger."""
@@ -207,33 +287,68 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 
+@app.exception_handler(Exception)
+async def _global_crash_shield_handler(request: Request, exc: Exception):
+    """
+    Last-resort crash boundary: ensures no unhandled exception (including MemoryError)
+    ever kills the worker or strips CORS headers.
+    """
+    if isinstance(exc, MemoryError):
+        import gc
+        gc.collect()
+    err_type = type(exc).__name__
+    err_msg = redact_secrets(str(exc))[:300]
+    logger.error(f"[CRASH-SHIELD] path={request.url.path} type={err_type} msg={err_msg}")
+    return JSONResponse(
+        status_code=500,
+        content={
+            "detail": "Server encountered a temporary processing error and recovered safely. Please try again.",
+            "recovered": True,
+        },
+    )
+
+
 # ─── Middleware Stack ───────────────────────────────────────────
 
 # 1. GZip compression
 app.add_middleware(GZipMiddleware, minimum_size=500)
 
-# 2. CORS — restricted to known production origins & subdomains
+# 2. Multi-Lane Priority Load Balancer, Virtual Waiting Room & Edge WAF
+app.add_middleware(LoadBalancerAndFirewallMiddleware, ip_resolver=get_real_client_ip)
+
+# 3. CORS — restricted to known production origins & subdomains (outermost so 429/503 carry CORS headers)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
     allow_origin_regex=r"^https:\/\/([a-zA-Z0-9-]+\.)*pdfmediasuite\.in$",
-    allow_methods=["GET", "POST", "HEAD", "OPTIONS"],
+    allow_methods=["GET", "POST", "DELETE", "HEAD", "OPTIONS"],
     allow_headers=[
         "Content-Type",
         "Authorization",
         "X-Admin-Key",
         "X-Room-Token",
+        "X-Request-Id",
+        "X-Idempotency-Key",
         "Accept",
         "Origin",
         "X-Requested-With",
         "Cache-Control",
     ],
-    expose_headers=["X-Match-Count"],
+    expose_headers=[
+        "X-Match-Count",
+        "X-Request-Id",
+        "X-Load-Lane",
+        "X-Queue-Wait-Ms",
+        "X-Cache",
+        "X-Orig-Bytes",
+        "X-Compressed-Bytes",
+        "Retry-After",
+    ],
     allow_credentials=False,
 )
 
 
-# 3. Security Headers Middleware
+# 4. Security Headers Middleware
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     """Adds security response headers to every response."""
 
@@ -270,10 +385,15 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-        response.headers["Permissions-Policy"] = "geolocation=(), camera=(), microphone=()"
-        # HSTS: only send on HTTPS (Render always serves HTTPS in production)
-        if request.url.scheme == "https":
-            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        response.headers["Permissions-Policy"] = "geolocation=(), camera=(), microphone=(), payment=(), usb=()"
+        response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
+        response.headers["Cross-Origin-Resource-Policy"] = "cross-origin"
+        response.headers["X-Permitted-Cross-Domain-Policies"] = "none"
+        response.headers["Origin-Agent-Cluster"] = "?1"
+        # HSTS: check both direct scheme and reverse-proxy X-Forwarded-Proto (Render / Cloudflare)
+        forwarded_proto = request.headers.get("x-forwarded-proto", "").lower()
+        if request.url.scheme == "https" or "https" in forwarded_proto:
+            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload"
         return response
 
 
@@ -357,7 +477,9 @@ async def safe_read_upload(file: UploadFile) -> bytes:
                 detail=f"File too large. Maximum allowed size is {MAX_UPLOAD_MB} MB."
             )
         chunks.append(chunk)
-    return b"".join(chunks)
+    raw_data = b"".join(chunks)
+    verify_upload_payload_safety(raw_data, getattr(file, "filename", "") or "")
+    return raw_data
 
 
 def safe_filename(user_filename: str | None, fallback: str = "output") -> str:
@@ -386,7 +508,7 @@ def safe_error(e: Exception, endpoint: str = "") -> HTTPException:
     Returns a generic HTTP 500 that does NOT expose internal state to the user.
     """
     err_type = type(e).__name__
-    err_msg = str(e)[:500]
+    err_msg = redact_secrets(str(e))[:500]
     logger.error(f"[ERROR] endpoint={endpoint} type={err_type} msg={err_msg}")
 
     try:
@@ -395,7 +517,7 @@ def safe_error(e: Exception, endpoint: str = "") -> HTTPException:
             tool_path=f"/{endpoint.lstrip('/')}",
             tool_name=f"Backend: {endpoint}",
             error_message=f"[{err_type}] {err_msg}",
-            error_stack=str(e)
+            error_stack=redact_secrets(str(e))
         )
     except Exception as tel_err:
         logger.error(f"[TELEMETRY] Failed to dispatch error alert: {tel_err}")
@@ -412,7 +534,7 @@ def check_pdf_page_count(path: Path, endpoint: str = "") -> int:
     Raises HTTP 400 if too many pages. Returns page count on success.
     """
     try:
-        import fitz
+        import pymupdf as fitz
         doc = fitz.open(str(path))
         pages = len(doc)
         doc.close()
@@ -476,6 +598,13 @@ def health(request: Request, response: Response):
         return Response(status_code=200)
     # GET: return a tiny JSON (only ~15 bytes after GZip)
     return JSONResponse(content={"status": "ok"}, status_code=200)
+
+
+@app.get("/api/system/health")
+@limiter.limit("30/minute")
+def system_load_health(request: Request):
+    """Live multi-lane load balancer, virtual waiting queue, and cache metrics."""
+    return JSONResponse(content=LOAD_BALANCER.snapshot(), status_code=200)
 
 
 # Web Share Target Fallback: hydrates shared files into client CacheStorage + IndexedDB if SW was bypassed
@@ -565,25 +694,11 @@ async def share_target_fallback(request: Request):
 # If >= 50% pages are mostly blank of text → treat as scanned.
 
 def is_pdf_scanned(inp_path: Path) -> bool:
-    """Returns True if the PDF is a scanned/image-based document."""
-    try:
-        import fitz
-        doc = fitz.open(inp_path)
-        scanned_pages = 0
-        total_pages = len(doc)
-        if total_pages == 0:
-            doc.close()
-            return False
-        for page in doc:
-            text = page.get_text("text").strip()
-            # A normal page with real text has at least 20 chars
-            if len(text) < 20:
-                scanned_pages += 1
-        doc.close()
-        # Consider scanned if >50% pages have very little text
-        return scanned_pages / total_pages > 0.5
-    except Exception:
-        return False
+    """
+    Returns True if the PDF is a scanned/image-based document, including
+    OCR-layered scanned PDFs (`3 Tr`, `GlyphLessFont`, full-page camera scans).
+    """
+    return is_pdf_scanned_or_raster(inp_path)
 
 
 async def run_hybrid_ocr(
@@ -693,8 +808,13 @@ async def run_hybrid_ocr(
         raise RuntimeError("ocrmypdf is not installed. Run: pip install ocrmypdf")
 
     def run_ocrmypdf():
+        from ocr_engine import resolve_ocr_lang
+
+        ocrmypdf_lang = resolve_ocr_lang(lang)
+        if ocrmypdf_lang == "auto":
+            ocrmypdf_lang = "eng"
         ocrmypdf.ocr(
-            str(inp_path), str(out_path), language=lang,
+            str(inp_path), str(out_path), language=ocrmypdf_lang,
             deskew=deskew, rotate_pages=rotate,
             skip_text=not force_ocr, force_ocr=force_ocr,
             output_type="pdf",
@@ -722,7 +842,7 @@ def validate_ocr_output(original_pdf: Path, ocr_pdf: Path) -> tuple[bool, str]:
       6. No page renders as a completely blank (all-zero) pixmap
     """
     try:
-        import fitz
+        import pymupdf as fitz
 
         # 1. Existence
         if not ocr_pdf.exists():
@@ -874,7 +994,7 @@ def remove_scanned_page_backgrounds_from_docx(docx_path: str, pdf_path: str):
         import shutil
         import copy
         import xml.etree.ElementTree as ET
-        import fitz
+        import pymupdf as fitz
         import cv2
         import numpy as np
 
@@ -1311,7 +1431,7 @@ def _build_clean_docx_from_ocr_pdf(pdf_path: Path, out_path: Path):
     """
     import re
     import statistics
-    import fitz  # PyMuPDF
+    import pymupdf as fitz  # PyMuPDF
     from docx import Document
     from docx.shared import Pt, Inches, RGBColor
     from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -1509,79 +1629,376 @@ def _build_clean_docx_from_ocr_pdf(pdf_path: Path, out_path: Path):
     )
 
 
+def _inspect_digital_pdf_complexity(pdf_path: Path) -> dict[str, int]:
+    """
+    Fast PyMuPDF structural scan (<10ms/page) of a born-digital PDF to detect:
+    - `raster_assets`: distinct placed raster images (photos, signatures, stamps, logos)
+    - `vector_clusters`: dense non-gridline vector drawing clusters (vector signatures/QRs/crests)
+    - `raster_text_boxes`: large text-free embedded raster boxes likely containing OCR-needed text
+    - `side_by_side_assets`: images positioned horizontally beside text or tables
+    - `src_chars`, `src_tbl_rows`, `page_count`
+    """
+    import pymupdf as fitz
+
+    stats = {
+        "page_count": 0,
+        "src_chars": 0,
+        "src_tbl_rows": 0,
+        "raster_assets": 0,
+        "vector_clusters": 0,
+        "raster_text_boxes": 0,
+        "side_by_side_assets": 0,
+        "corrupt_cmap_chars": 0,
+        "rotated_watermark_chars": 0,
+        "bilingual_two_col_pages": 0,
+    }
+    _corrupt_re = re.compile(r"[\u0130-\u02ff\ufffd]")
+    _legacy_font_re = re.compile(r"(?:krutidev|devlys|chanakya|kundli|shusha|aps-?c|agra|walkman)", re.IGNORECASE)
+    doc = fitz.open(str(pdf_path))
+    try:
+        stats["page_count"] = len(doc)
+        for _p in doc:
+            p_w = max(1.0, float(_p.rect.width))
+            p_area = max(1.0, float(p_w * _p.rect.height))
+            stats["src_chars"] += len(re.sub(r"\s+", "", _p.get_text("text") or ""))
+            try:
+                _pdict = _p.get_text("dict")
+                _left_col = 0
+                _right_col = 0
+                for _blk in _pdict.get("blocks", []):
+                    if _blk.get("type") != 0:
+                        continue
+                    for _ln in _blk.get("lines", []):
+                        _dir = _ln.get("dir", (1.0, 0.0))
+                        _diag = abs(float(_dir[0])) < 0.90 and abs(float(_dir[1])) < 0.90
+                        _lb = _ln.get("bbox")
+                        for _sp in _ln.get("spans", []):
+                            _st = (_sp.get("text") or "").strip()
+                            if not _st:
+                                continue
+                            _col = int(_sp.get("color", 0) or 0)
+                            _r, _g, _b = (_col >> 16) & 0xFF, (_col >> 8) & 0xFF, _col & 0xFF
+                            _sz = float(_sp.get("size", 10.0) or 10.0)
+                            _fn = str(_sp.get("font", "") or "")
+                            if _diag and (min(_r, _g, _b) >= 145 or _sz >= 13.0):
+                                stats["rotated_watermark_chars"] += len(re.sub(r"\s+", "", _st))
+                                continue
+                            _bad_cnt = len(_corrupt_re.findall(_st))
+                            if _bad_cnt:
+                                stats["corrupt_cmap_chars"] += _bad_cnt
+                            elif _legacy_font_re.search(_fn) and len(re.sub(r"\s+", "", _st)) >= 3:
+                                stats["corrupt_cmap_chars"] += len(re.sub(r"\s+", "", _st))
+                        if not _diag and _lb and len(_lb) >= 4:
+                            if _lb[2] <= p_w * 0.49 and _lb[0] >= p_w * 0.04:
+                                _left_col += 1
+                            elif _lb[0] >= p_w * 0.50 and _lb[2] <= p_w * 0.96:
+                                _right_col += 1
+                if _left_col >= 8 and _right_col >= 8:
+                    stats["bilingual_two_col_pages"] += 1
+            except Exception:
+                pass
+            tbl_rects = []
+            try:
+                _ft = _p.find_tables()
+                for _t in (_ft.tables if _ft else []):
+                    if getattr(_t, "row_count", 0) >= 3 and getattr(_t, "col_count", 0) >= 3:
+                        stats["src_tbl_rows"] += int(_t.row_count)
+                    if getattr(_t, "bbox", None):
+                        tbl_rects.append(fitz.Rect(_t.bbox))
+            except Exception:
+                pass
+
+            words = _p.get_text("words") or []
+            seen_boxes: list[fitz.Rect] = []
+            for info in _p.get_image_info(xrefs=False):
+                bbox = info.get("bbox")
+                if not bbox or len(bbox) < 4:
+                    continue
+                r = fitz.Rect(bbox) & _p.rect
+                if r.is_empty or r.width < 18.0 or r.height < 14.0:
+                    continue
+                r_area = float(r.width * r.height)
+                if r_area > p_area * 0.74 or (r.width > _p.rect.width * 0.65 and r.height < 14.0):
+                    continue
+                # Deduplicate overlapping placements
+                dup = False
+                for sb in seen_boxes:
+                    inter = (r & sb)
+                    inter_a = 0.0 if inter.is_empty else float(inter.width * inter.height)
+                    union_a = max(1e-6, r_area + float(sb.width * sb.height) - inter_a)
+                    if (inter_a / union_a) > 0.70:
+                        dup = True
+                        break
+                if dup:
+                    continue
+                seen_boxes.append(r)
+                stats["raster_assets"] += 1
+
+                inside_words = sum(
+                    1
+                    for wt in words
+                    if len(wt) >= 4
+                    and r.x0 - 2 <= ((wt[0] + wt[2]) * 0.5) <= r.x1 + 2
+                    and r.y0 - 2 <= ((wt[1] + wt[3]) * 0.5) <= r.y1 + 2
+                )
+                img_aspect = float(r.width / max(1.0, r.height))
+                # Detect boxes large enough to hold pasted screenshot tables/clauses (skip portrait photos)
+                if (
+                    inside_words == 0
+                    and r.height >= 40.0
+                    and (
+                        (r.width >= 165.0 and r_area >= 8000.0)
+                        or (img_aspect >= 1.35 and r.width >= 125.0 and r_area >= 5500.0 and not (r.height <= 65.0 and r.width <= 190.0))
+                    )
+                ):
+                    stats["raster_text_boxes"] += 1
+
+                # Detect horizontal neighbor overlap with text lines or tables
+                has_side_text = any(
+                    len(wt) >= 4
+                    and (min(r.y1, wt[3]) - max(r.y0, wt[1])) >= min(r.height, wt[3] - wt[1]) * 0.35
+                    and (wt[2] <= r.x0 - 6.0 or wt[0] >= r.x1 + 6.0)
+                    for wt in words
+                )
+                has_side_tbl = any(
+                    (min(r.y1, tr.y1) - max(r.y0, tr.y0)) >= min(r.height, tr.height) * 0.35
+                    and (tr.x1 <= r.x0 - 6.0 or tr.x0 >= r.x1 + 6.0)
+                    for tr in tbl_rects
+                )
+                if has_side_text or has_side_tbl:
+                    stats["side_by_side_assets"] += 1
+
+            # Check non-table dense vector clusters (e.g. vector signature/logo/QR strokes)
+            try:
+                non_line_paths = 0
+                for dr in _p.get_drawings():
+                    dr_rect = dr.get("rect")
+                    if not dr_rect:
+                        continue
+                    rr = fitz.Rect(dr_rect)
+                    if rr.width < 2.0 or rr.height < 2.0 or (rr.width > _p.rect.width * 0.45 and rr.height < 6.0):
+                        continue
+                    if any(rr.intersects(tr) for tr in tbl_rects):
+                        continue
+                    if rr.width < _p.rect.width * 0.35 and rr.height < _p.rect.height * 0.30:
+                        non_line_paths += 1
+                if non_line_paths >= 14:
+                    stats["vector_clusters"] += 1
+            except Exception:
+                pass
+    finally:
+        doc.close()
+    return stats
+
+
+def _form_str(val, default: Optional[str] = None) -> Optional[str]:
+    """Resolve FastAPI `Form(...)` defaults cleanly when handlers are invoked both via HTTP and directly in Python."""
+    if isinstance(val, str):
+        return val
+    if val is None:
+        return default
+    raw = getattr(val, "default", default)
+    return raw if isinstance(raw, str) else default
+
+
+def _form_bool(val, default: bool = False) -> bool:
+    if isinstance(val, bool):
+        return val
+    raw = getattr(val, "default", default)
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, str):
+        return raw.strip().lower() in ("1", "true", "yes")
+    return default
+
+
 @app.post("/convert/pdf-to-word")
 @limiter.limit("10/minute")
-async def pdf_to_word(request: Request, file: UploadFile = File(...), force_ocr: bool = Form(False), strict_local: bool = Form(False)):
+async def pdf_to_word(
+    request: Request,
+    file: UploadFile = File(...),
+    force_ocr: bool = Form(False),
+    strict_local: bool = Form(False),
+    layer_mode: str = Form("clean_real"),
+    ai_provider: str = Form("auto"),
+    ai_api_key: Optional[str] = Form(None),
+    lang: str = Form("auto"),
+):
     inp = temp_path(".pdf")
     out = temp_path(".docx")
     try:
-        inp.write_bytes(await safe_read_upload(file))
+        raw_bytes = await safe_read_upload(file)
+        inp, was_image = normalize_input_to_pdf(raw_bytes, file.filename, inp)
         check_pdf_page_count(inp, "pdf-to-word")
 
+        eff_strict = _form_bool(strict_local, False)
+        eff_layer_raw = _form_str(layer_mode, "clean_real") or "clean_real"
+        eff_provider = _form_str(ai_provider, "auto") or "auto"
+        raw_ai_key = _form_str(ai_api_key, None)
+        eff_lang = _form_str(lang, "auto") or "auto"
+        eff_layer_mode = "layered_replica" if eff_layer_raw.strip().lower() == "layered_replica" else "clean_real"
+        eff_strict = eff_strict or not server_ai_quota_ok(request, bool(raw_ai_key and raw_ai_key.strip()), eff_strict)
+        eff_ai_key = None if eff_strict else (raw_ai_key.strip() if raw_ai_key else None)
+
         # ── Path detection ────────────────────────────────────────────────────
-        was_scanned = force_ocr or is_pdf_scanned(inp)
+        was_scanned = was_image or force_ocr or is_pdf_scanned(inp)
 
         if was_scanned:
             # ══════════════════════════════════════════════════════════════════
-            # PATH A — SCANNED / IMAGE PDF  (Adobe Scan, phone camera, etc.)
-            # APPROACH: OCR → extract text via PyMuPDF → fresh python-docx
+            # PATH A — SCANNED / OCR-LAYERED / IMAGE DOCUMENT
+            # 3-Layer CV + Global Multi-Script OCR + Smart-Gated Vision AI
             # ══════════════════════════════════════════════════════════════════
-            logger.info(f"[PDF2Word] Scanned PDF detected → OCR + clean DOCX path")
-            inp = await ensure_auto_ocr(inp, force=True, strict_local=strict_local)
-            from fastapi.concurrency import run_in_threadpool
-            await run_in_threadpool(_build_clean_docx_from_ocr_pdf, inp, out)
+            logger.info(f"[PDF2Word] Scanned/OCR/Image input detected → 3-Layer Vision DOCX ({eff_layer_mode}, lang={eff_lang})")
+            await run_in_threadpool(
+                build_exact_docx_from_scans,
+                inp,
+                out,
+                eff_lang,
+                200,
+                eff_layer_mode,
+                eff_ai_key,
+                eff_provider,
+                eff_strict,
+            )
 
         else:
             # ══════════════════════════════════════════════════════════════════
             # PATH B — TEXT-BASED PDF  (digital/born-digital documents)
-            # PRIMARY:  pdf2docx — best layout/table/image preservation
-            # FALLBACK: Rich PyMuPDF span-level builder (exact font/size/color)
+            # PRIMARY:  pdf2docx (verified for text, tables, AND images/assets)
+            # UPGRADE:  Digital Vision + Transparent-Asset + Local/AI Hybrid Builder
             # ══════════════════════════════════════════════════════════════════
-            from fastapi.concurrency import run_in_threadpool
-
+            digital_stats = await run_in_threadpool(_inspect_digital_pdf_complexity, inp)
+            need_image_ocr_upgrade = digital_stats.get("raster_text_boxes", 0) >= 1
+            need_cmap_or_layout_upgrade = (
+                digital_stats.get("corrupt_cmap_chars", 0) >= 4
+                or (digital_stats.get("rotated_watermark_chars", 0) >= 10 and digital_stats.get("src_tbl_rows", 0) >= 4)
+                or (
+                    digital_stats.get("raster_assets", 0) >= 2
+                    and digital_stats.get("side_by_side_assets", 0) >= 1
+                    and digital_stats.get("src_tbl_rows", 0) >= 4
+                )
+            )
             pdf2docx_ok = False
-            try:
-                from pdf2docx import Converter
-                logger.info(f"[PDF2Word] Text PDF → pdf2docx (primary path)")
+            if need_image_ocr_upgrade or need_cmap_or_layout_upgrade:
+                logger.info(
+                    f"[PDF2Word] Digital PDF complexity (raster_boxes={digital_stats.get('raster_text_boxes', 0)}, "
+                    f"corrupt_cmap={digital_stats.get('corrupt_cmap_chars', 0)}, "
+                    f"wm={digital_stats.get('rotated_watermark_chars', 0)}, "
+                    f"tbl_rows={digital_stats.get('src_tbl_rows', 0)}, "
+                    f"side_assets={digital_stats.get('side_by_side_assets', 0)}) "
+                    "→ routing directly to Digital Vision + Local/AI Reconstructor"
+                )
+            else:
+                try:
+                    from pdf2docx import Converter
+                    logger.info("[PDF2Word] Text PDF → pdf2docx (primary path)")
 
-                def _run_pdf2docx():
-                    _cv = Converter(str(inp))
-                    _cv.convert(
-                        str(out),
-                        multi_processing=False,
-                        # Fine-tuned thresholds for accurate layout reconstruction
-                        line_overlap_threshold=0.9,       # merge lines that overlap ≥90%
-                        line_break_width_ratio=0.5,       # conservative line-break detection
-                        min_svg_gap_dx=15.0,              # SVG shape gap tolerance
-                        connected_border_tolerance=3.0,   # table border snapping
-                        page_margin_factor=0.02,          # ignore very small margins
-                        float_image_ignorable_gap=5.0,    # float image merge gap
-                        line_break_free_space_ratio=0.1,  # paragraph break sensitivity
-                    )
-                    _cv.close()
+                    def _run_pdf2docx():
+                        _cv = Converter(str(inp))
+                        _cv.convert(
+                            str(out),
+                            multi_processing=False,
+                            # Fine-tuned thresholds for accurate layout reconstruction
+                            line_overlap_threshold=0.9,       # merge lines that overlap ≥90%
+                            line_break_width_ratio=0.5,       # conservative line-break detection
+                            min_svg_gap_dx=15.0,              # SVG shape gap tolerance
+                            connected_border_tolerance=3.0,   # table border snapping
+                            page_margin_factor=0.02,          # ignore very small margins
+                            float_image_ignorable_gap=5.0,    # float image merge gap
+                            line_break_free_space_ratio=0.1,  # paragraph break sensitivity
+                        )
+                        _cv.close()
 
-                await run_in_threadpool(_run_pdf2docx)
+                    await run_in_threadpool(_run_pdf2docx)
 
-                # Validate: pdf2docx can sometimes produce empty/broken output
-                if out.exists() and out.stat().st_size > 5000:
-                    pdf2docx_ok = True
-                else:
-                    logger.warning("[PDF2Word] pdf2docx output too small/empty, trying rich span builder")
+                    # Self-Verify pdf2docx output against source PDF text, tables & embedded visual assets
+                    if out.exists() and out.stat().st_size > 4500:
+                        def _verify_pdf2docx() -> bool:
+                            try:
+                                from docx import Document as _VDoc
+                                from docx.oxml.ns import qn as _v_qn
+                                _vd = _VDoc(str(out))
+                                _WT = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t"
+                                docx_chars = sum(len((el.text or "").strip()) for el in _vd.element.iter(_WT))
+                                docx_tbl_rows = sum(len(t.rows) for t in _vd.tables)
+                                total_all_tbls = sum(1 for _ in _vd.element.body.iter(_v_qn("w:tbl")))
+                                has_nested_tbl = total_all_tbls > len(_vd.tables)
+                                docx_drawings = sum(1 for _ in _vd.element.iter(_v_qn("w:drawing")))
+                                docx_media = sum(
+                                    1 for p in _vd.part.package.parts if "/word/media/" in str(getattr(p, "partname", ""))
+                                )
+                                eff_docx_imgs = max(docx_drawings, docx_media)
 
-            except Exception as pdf2docx_err:
-                logger.warning(f"[PDF2Word] pdf2docx failed: {pdf2docx_err} — falling back to rich span builder")
+                                src_chars = int(digital_stats.get("src_chars", 0))
+                                src_tbl_rows = int(digital_stats.get("src_tbl_rows", 0))
+                                expected_assets = int(digital_stats.get("raster_assets", 0))
+                                vector_clusters = int(digital_stats.get("vector_clusters", 0))
+                                side_assets = int(digital_stats.get("side_by_side_assets", 0))
+
+                                if has_nested_tbl and (side_assets >= 1 or expected_assets >= 1):
+                                    logger.warning(
+                                        "[PDF2Word] Self-verify: pdf2docx wrapped content in nested tables beside visual assets; upgrading to Digital Vision Builder"
+                                    )
+                                    return False
+
+                                if src_chars >= 40 and docx_chars < src_chars * 0.65:
+                                    logger.warning(
+                                        f"[PDF2Word] Self-verify: pdf2docx char coverage low ({docx_chars}/{src_chars}); upgrading to Digital Vision Builder"
+                                    )
+                                    return False
+                                if src_tbl_rows >= 4 and docx_tbl_rows < max(2, int(src_tbl_rows * 0.55)):
+                                    logger.warning(
+                                        f"[PDF2Word] Self-verify: pdf2docx table rows incomplete ({docx_tbl_rows}/{src_tbl_rows}); upgrading to Digital Vision Builder"
+                                    )
+                                    return False
+                                if expected_assets >= 1 and eff_docx_imgs < max(1, int(expected_assets * 0.6)):
+                                    logger.warning(
+                                        f"[PDF2Word] Self-verify: pdf2docx dropped visual assets ({eff_docx_imgs}/{expected_assets}); upgrading to Digital Vision Builder"
+                                    )
+                                    return False
+                                if vector_clusters >= 1 and eff_docx_imgs == 0 and docx_tbl_rows == 0:
+                                    logger.warning(
+                                        "[PDF2Word] Self-verify: vector graphics/signatures uncaptured by pdf2docx; upgrading to Digital Vision Builder"
+                                    )
+                                    return False
+                                if side_assets >= 1 and len(_vd.tables) >= 4 and len(_vd.paragraphs) < 2:
+                                    logger.warning(
+                                        "[PDF2Word] Self-verify: heavy wrapper table nesting around side assets; upgrading to Digital Vision Builder"
+                                    )
+                                    return False
+                                return True
+                            except Exception:
+                                return True
+
+                        pdf2docx_ok = await run_in_threadpool(_verify_pdf2docx)
+                    else:
+                        logger.warning("[PDF2Word] pdf2docx output too small/empty, upgrading to Digital Vision Builder")
+
+                except Exception as pdf2docx_err:
+                    logger.warning(f"[PDF2Word] pdf2docx failed: {pdf2docx_err} — falling back to Digital Vision Builder")
 
             if not pdf2docx_ok:
-                # ── FALLBACK: Rich PyMuPDF span-level DOCX builder ─────────────
-                # Extracts exact font name, size, bold, italic, color, alignment
-                # per span and writes a clean python-docx file preserving all
-                # text formatting faithfully.
-                logger.info("[PDF2Word] Using rich PyMuPDF span-level DOCX builder")
-                await run_in_threadpool(_build_rich_span_docx, inp, out)
+                # ── AUTO-UPGRADE PATH: Transparent Native Assets + Exact Styles + Local/AI Vision ──
+                logger.info("[PDF2Word] Running Digital Vision + Native Asset & Layout Reconstructor")
+                try:
+                    await run_in_threadpool(
+                        build_exact_docx_from_scans,
+                        inp,
+                        out,
+                        eff_lang,
+                        200,
+                        eff_layer_mode,
+                        eff_ai_key,
+                        eff_provider,
+                        eff_strict,
+                        digital_layout_fallback=True,
+                    )
+                except Exception as vis_err:
+                    logger.warning(f"[PDF2Word] Vision builder fallback error ({vis_err}), using rich span builder")
+                    await run_in_threadpool(_build_rich_span_docx, inp, out)
 
         # ── Optimize & sanitize output for Apple Pages & Word ─────────────────
         if out.exists() and out.stat().st_size > 0:
-            from fastapi.concurrency import run_in_threadpool
             await run_in_threadpool(_clean_and_optimize_docx, out)
 
         # ── Validate output ───────────────────────────────────────────────────
@@ -1655,7 +2072,7 @@ def _clean_and_optimize_docx(docx_path: Path):
             if t.text and ctrl_re.search(t.text):
                 t.text = ctrl_re.sub('', t.text)
 
-        # 2. Unwrap 1x1 container tables
+        # 2. Unwrap 1x1 borderless dummy container tables ONLY (keep styled bordered/shaded 1x1 cells intact)
         while True:
             unwrapped_any = False
             for elem in list(body):
@@ -1665,6 +2082,19 @@ def _clean_and_optimize_docx(docx_path: Path):
                         cells = rows[0].findall(qn('w:tc'))
                         if len(cells) == 1:
                             tc = cells[0]
+                            tcPr = tc.find(qn('w:tcPr'))
+                            has_visible_style = False
+                            if tcPr is not None:
+                                if tcPr.find(qn('w:shd')) is not None:
+                                    has_visible_style = True
+                                borders = tcPr.find(qn('w:tcBorders'))
+                                if borders is not None:
+                                    for side in borders:
+                                        if side.get(qn('w:val')) not in (None, 'none', 'nil'):
+                                            has_visible_style = True
+                                            break
+                            if has_visible_style:
+                                continue
                             parent = elem.getparent()
                             idx = parent.index(elem)
                             for child in list(tc):
@@ -1689,7 +2119,7 @@ def _build_rich_span_docx(pdf_path: Path, out_path: Path):
     indentation, heading detection, multi-column layout (columns merged left→right),
     and inter-paragraph spacing.
     """
-    import fitz
+    import pymupdf as fitz
     import re
     from docx import Document
     from docx.shared import Pt, RGBColor, Inches
@@ -1765,11 +2195,19 @@ def _build_rich_span_docx(pdf_path: Path, out_path: Path):
             flags=fitz.TEXT_PRESERVE_WHITESPACE | fitz.TEXT_PRESERVE_LIGATURES
         )
 
-        text_blocks = [b for b in blocks_data.get("blocks", []) if b.get("type") == 0]
-        if not text_blocks:
+        from vision_reconstructor import build_alpha_image_bbox_map
+        all_blocks = [
+            b for b in blocks_data.get("blocks", [])
+            if b.get("type") in (0, 1)
+        ]
+        all_blocks.sort(key=lambda b: (b.get("bbox", [0, 0, 0, 0])[1], b.get("bbox", [0, 0, 0, 0])[0]))
+        text_blocks = [b for b in all_blocks if b.get("type") == 0]
+        if not all_blocks:
             if page_num < total_pages - 1:
                 doc.add_page_break()
             continue
+
+        img_alpha_map = build_alpha_image_bbox_map(page)
 
         # Compute global median font size for heading detection
         all_sizes = []
@@ -1781,7 +2219,29 @@ def _build_rich_span_docx(pdf_path: Path, out_path: Path):
         all_sizes.sort()
         median_size = all_sizes[len(all_sizes) // 2] if all_sizes else 11.0
 
-        for blk in text_blocks:
+        p_area = max(1.0, float(page.rect.width * page.rect.height))
+        for blk in all_blocks:
+            if blk.get("type") == 1:
+                bb = blk.get("bbox", [0, 0, 0, 0])
+                bw = float(bb[2] - bb[0])
+                bh = float(bb[3] - bb[1])
+                if bw >= 16.0 and bh >= 12.0 and (bw * bh) < p_area * 0.74:
+                    k = (int(round(bb[0])), int(round(bb[1])), int(round(bb[2])), int(round(bb[3])))
+                    ibytes = img_alpha_map.get(k) or blk.get("image")
+                    if ibytes and len(ibytes) >= 32:
+                        try:
+                            import io as _io
+                            ip = doc.add_paragraph()
+                            ip.paragraph_format.space_before = Pt(2)
+                            ip.paragraph_format.space_after = Pt(2)
+                            if (bb[0] + bb[2]) * 0.5 > page_width * 0.58:
+                                ip.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+                            elif abs((bb[0] + bb[2]) * 0.5 - page_width * 0.5) < page_width * 0.14:
+                                ip.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                            ip.add_run().add_picture(_io.BytesIO(ibytes), width=Pt(min(page_width - 80.0, bw)))
+                        except Exception:
+                            pass
+                continue
             lines = blk.get("lines", [])
             if not lines:
                 continue
@@ -1892,7 +2352,7 @@ def _build_rich_span_docx(pdf_path: Path, out_path: Path):
 @limiter.limit("10/minute")
 async def pdf_to_word_plaintext(request: Request, file: UploadFile = File(...), force_ocr: bool = Form(False), strict_local: bool = Form(False)):
     try:
-        import fitz
+        import pymupdf as fitz
         from docx import Document
     except ImportError:
         raise HTTPException(500, "Run: pip install PyMuPDF python-docx")
@@ -2047,7 +2507,16 @@ def _extract_tables_to_excel(inp: Path, out: Path, method: str) -> int:
 
 @app.post("/convert/pdf-to-excel")
 @limiter.limit("10/minute")
-async def pdf_to_excel(request: Request, file: UploadFile = File(...), method: str = Form("auto"), force_ocr: bool = Form(False), strict_local: bool = Form(False)):
+async def pdf_to_excel(
+    request: Request,
+    file: UploadFile = File(...),
+    method: str = Form("auto"),
+    force_ocr: bool = Form(False),
+    strict_local: bool = Form(False),
+    ai_provider: str = Form("auto"),
+    ai_api_key: Optional[str] = Form(None),
+    lang: str = Form("auto"),
+):
     try:
         import pdfplumber, openpyxl
     except ImportError:
@@ -2056,13 +2525,58 @@ async def pdf_to_excel(request: Request, file: UploadFile = File(...), method: s
     inp = temp_path(".pdf")
     out = temp_path(".xlsx")
     try:
-        inp.write_bytes(await safe_read_upload(file))
+        raw_bytes = await safe_read_upload(file)
+        inp, was_image = normalize_input_to_pdf(raw_bytes, file.filename, inp)
         check_pdf_page_count(inp, "pdf-to-excel")
-        # Raises HTTP 422 on OCR failure — never silently continues with image-only PDF
-        inp = await ensure_auto_ocr(inp, force=force_ocr, strict_local=strict_local)
+        eff_strict = _form_bool(strict_local, False)
+        eff_provider = _form_str(ai_provider, "auto") or "auto"
+        raw_ai_key = _form_str(ai_api_key, None)
+        eff_lang = _form_str(lang, "auto") or "auto"
+        eff_strict = eff_strict or not server_ai_quota_ok(request, bool(raw_ai_key and raw_ai_key.strip()), eff_strict)
+        eff_ai_key = None if eff_strict else (raw_ai_key.strip() if raw_ai_key else None)
 
-        from fastapi.concurrency import run_in_threadpool
-        await run_in_threadpool(_extract_tables_to_excel, inp, out, method)
+        was_scanned = was_image or force_ocr or is_pdf_scanned(inp)
+        if was_scanned:
+            logger.info(f"[PDF2Excel] Scanned/OCR/Image input detected → 3-Layer Vision XLSX builder (lang={eff_lang})")
+            _, tables_cnt = await run_in_threadpool(
+                build_exact_xlsx_from_scans, inp, out, eff_lang, 200, eff_ai_key, eff_provider, eff_strict
+            )
+            logger.info(f"[PDF2Excel] Vision builder wrote {tables_cnt} reconstructed table(s)")
+        else:
+            digital_stats = await run_in_threadpool(_inspect_digital_pdf_complexity, inp)
+            if digital_stats.get("raster_text_boxes", 0) >= 1 and digital_stats.get("src_tbl_rows", 0) == 0:
+                logger.info(
+                    f"[PDF2Excel] Digital PDF has {digital_stats['raster_text_boxes']} embedded raster image box(es) and 0 vector tables "
+                    "→ routing to Digital Vision XLSX builder"
+                )
+                _, tables_cnt = await run_in_threadpool(
+                    build_exact_xlsx_from_scans,
+                    inp,
+                    out,
+                    eff_lang,
+                    200,
+                    eff_ai_key,
+                    eff_provider,
+                    eff_strict,
+                    digital_layout_fallback=True,
+                )
+                logger.info(f"[PDF2Excel] Digital Vision builder wrote {tables_cnt} table(s)")
+            else:
+                try:
+                    await run_in_threadpool(_extract_tables_to_excel, inp, out, method)
+                except Exception as ex:
+                    logger.warning(f"[PDF2Excel] Vector extraction fallback to Vision builder ({type(ex).__name__})")
+                    await run_in_threadpool(
+                        build_exact_xlsx_from_scans,
+                        inp,
+                        out,
+                        eff_lang,
+                        200,
+                        eff_ai_key,
+                        eff_provider,
+                        eff_strict,
+                        digital_layout_fallback=True,
+                    )
 
         stem = safe_filename(file.filename, "document")
         out_name = Path(stem).stem + ".xlsx"
@@ -2101,7 +2615,7 @@ def _build_structural_pptx(pdf_path: Path, out_path: Path):
     NOTE: For scanned PDFs, OCRmyPDF must have already run before calling
     this function so that a proper text layer exists in the PDF.
     """
-    import fitz  # PyMuPDF
+    import pymupdf as fitz  # PyMuPDF
     import pdfplumber
     from pptx import Presentation
     from pptx.util import Inches, Pt, Emu
@@ -2269,16 +2783,21 @@ def _build_structural_pptx(pdf_path: Path, out_path: Path):
                         return True
                 return False
 
+            # Also render native transparent SMask / clipped images cleanly instead of raw opaque dict bytes
+            from vision_reconstructor import build_alpha_image_bbox_map
+            img_info_smask = build_alpha_image_bbox_map(page_fitz)
+
             fitz_blocks = page_fitz.get_text("dict", sort=True).get("blocks", [])
 
             for block in fitz_blocks:
                 if block["type"] == 1:
-                    # Preserve embedded PDF images/logos on the slide
-                    img_bytes = block.get("image")
+                    # Preserve embedded PDF images/logos/signatures (with SMask transparency!) on the slide
+                    ibx0, iby0, ibx1, iby1 = block["bbox"]
+                    key = (int(round(ibx0)), int(round(iby0)), int(round(ibx1)), int(round(iby1)))
+                    img_bytes = img_info_smask.get(key) or block.get("image")
                     if img_bytes and len(img_bytes) >= 32:
                         try:
                             import io as _io
-                            ibx0, iby0, ibx1, iby1 = block["bbox"]
                             img_x = Inches(max(0.0, ibx0) / 72.0)
                             img_y = Inches(max(0.0, iby0) / 72.0)
                             img_w = Inches(max(0.25, ibx1 - ibx0) / 72.0)
@@ -2296,12 +2815,13 @@ def _build_structural_pptx(pdf_path: Path, out_path: Path):
                 if _overlaps_table(bx0, by0, bx1, by1):
                     continue
 
-                # Gather text + style from spans
+                # Gather text + style + exact color from spans
                 lines_data   = block.get("lines", [])
                 text_lines   = []
                 max_size     = 11.0
                 has_bold     = False
-                all_caps     = False
+                has_italic   = False
+                dom_rgb      = CLR_TEXT
 
                 for line in lines_data:
                     line_parts = []
@@ -2312,8 +2832,14 @@ def _build_structural_pptx(pdf_path: Path, out_path: Path):
                             sz = span.get("size", 11.0)
                             if sz > max_size:
                                 max_size = sz
-                            if span.get("flags", 0) & (1 << 4):
+                            s_flags = span.get("flags", 0)
+                            if s_flags & (1 << 4):
                                 has_bold = True
+                            if s_flags & (1 << 1):
+                                has_italic = True
+                            scol = int(span.get("color", 0) or 0)
+                            if scol:
+                                dom_rgb = RGBColor((scol >> 16) & 0xFF, (scol >> 8) & 0xFF, scol & 0xFF)
                     joined = " ".join(line_parts).strip()
                     if joined:
                         text_lines.append(joined)
@@ -2350,9 +2876,10 @@ def _build_structural_pptx(pdf_path: Path, out_path: Path):
                         run.text = line_text
 
                         font_pt = max(7.0, min(max_size, 32.0))
-                        run.font.size  = Pt(font_pt)
-                        run.font.bold  = has_bold or is_heading
-                        run.font.color.rgb = CLR_TEXT
+                        run.font.size   = Pt(font_pt)
+                        run.font.bold   = has_bold or is_heading
+                        run.font.italic = has_italic
+                        run.font.color.rgb = dom_rgb
 
                         if is_heading:
                             p.alignment = PP_ALIGN.CENTER if len(line_text) < 60 else PP_ALIGN.LEFT
@@ -2389,25 +2916,113 @@ async def pdf_to_ppt(
     file: UploadFile = File(...),
     force_ocr: bool = Form(False),
     strict_local: bool = Form(False),
+    slide_mode: str = Form("structural"),
+    layer_mode: str = Form("clean_real"),
+    ai_provider: str = Form("auto"),
+    ai_api_key: Optional[str] = Form(None),
+    lang: str = Form("auto"),
 ):
     """
-    Scanned PDF → Structural PowerPoint (tables + text boxes, no background image).
-
-    The result is fully editable: editing text does NOT reveal a scan underneath
-    because there is no background image — only native PPT shapes.
+    PDF / Scan / Image → 3-Layer Editable Structural PowerPoint
+    - For scanned, OCR-layered scanned PDFs, or image uploads: runs 3-Layer CV Table+Span
+      Reconstruction + Global Multi-Script OCR + Cropped Visual Assets + Smart-Gated
+      Vision AI Semantic Boost directly into native PowerPoint tables, pictures, & textboxes.
+    - `layer_mode="clean_real"` / `slide_mode="structural"` builds clean native slides;
+      `layer_mode="layered_replica"` / `slide_mode="hybrid"` adds an ink-free Layer-1 canvas.
     """
     inp = temp_path(".pdf")
     out = temp_path(".pptx")
     try:
-        inp.write_bytes(await safe_read_upload(file))
+        raw_bytes = await safe_read_upload(file)
+        inp, was_image = normalize_input_to_pdf(raw_bytes, file.filename, inp)
         check_pdf_page_count(inp, "pdf-to-ppt")
 
-        # OCR step: adds a text layer to scanned PDFs
-        inp = await ensure_auto_ocr(inp, force=force_ocr, strict_local=strict_local)
+        eff_strict = _form_bool(strict_local, False)
+        slide_mode_raw = _form_str(slide_mode, "structural") or "structural"
+        layer_mode_raw = _form_str(layer_mode, "clean_real") or "clean_real"
+        eff_provider = _form_str(ai_provider, "auto") or "auto"
+        raw_ai_key = _form_str(ai_api_key, None)
+        eff_lang = _form_str(lang, "auto") or "auto"
 
-        # Build structural PPTX in a threadpool (CPU-bound)
-        from fastapi.concurrency import run_in_threadpool
-        await run_in_threadpool(_build_structural_pptx, inp, out)
+        mode_clean = "hybrid" if (
+            slide_mode_raw.strip().lower() == "hybrid"
+            or layer_mode_raw.strip().lower() == "layered_replica"
+        ) else "structural"
+        eff_layer_mode = "layered_replica" if mode_clean == "hybrid" else "clean_real"
+        eff_strict = eff_strict or not server_ai_quota_ok(request, bool(raw_ai_key and raw_ai_key.strip()), eff_strict)
+        eff_ai_key = None if eff_strict else (raw_ai_key.strip() if raw_ai_key else None)
+        was_scanned = was_image or force_ocr or is_pdf_scanned(inp)
+
+        if was_scanned:
+            logger.info(f"[PDF2PPT] Scanned/OCR/Image input detected → 3-Layer Vision PPTX ({eff_layer_mode}, lang={eff_lang})")
+            await run_in_threadpool(
+                build_exact_pptx_from_scans,
+                inp,
+                out,
+                eff_lang,
+                200,
+                mode_clean,
+                eff_layer_mode,
+                eff_ai_key,
+                eff_provider,
+                eff_strict,
+            )
+        else:
+            digital_stats = await run_in_threadpool(_inspect_digital_pdf_complexity, inp)
+            use_digital_vision = (
+                digital_stats.get("raster_text_boxes", 0) >= 1
+                or (digital_stats.get("vector_clusters", 0) >= 1 and digital_stats.get("raster_assets", 0) == 0)
+            )
+            if use_digital_vision:
+                logger.info(
+                    f"[PDF2PPT] Complex born-digital PDF (raster_txt={digital_stats['raster_text_boxes']}, "
+                    f"vec_clusters={digital_stats['vector_clusters']}) → Digital Vision PPTX builder"
+                )
+                await run_in_threadpool(
+                    build_exact_pptx_from_scans,
+                    inp,
+                    out,
+                    eff_lang,
+                    200,
+                    mode_clean,
+                    eff_layer_mode,
+                    eff_ai_key,
+                    eff_provider,
+                    eff_strict,
+                    digital_layout_fallback=True,
+                )
+            else:
+                try:
+                    await run_in_threadpool(_build_structural_pptx, inp, out)
+                    if not out.exists() or out.stat().st_size < 1800:
+                        await run_in_threadpool(
+                            build_exact_pptx_from_scans,
+                            inp,
+                            out,
+                            eff_lang,
+                            200,
+                            mode_clean,
+                            eff_layer_mode,
+                            eff_ai_key,
+                            eff_provider,
+                            eff_strict,
+                            digital_layout_fallback=True,
+                        )
+                except Exception as ppt_err:
+                    logger.warning(f"[PDF2PPT] Structural digital builder fallback to Vision PPTX ({type(ppt_err).__name__})")
+                    await run_in_threadpool(
+                        build_exact_pptx_from_scans,
+                        inp,
+                        out,
+                        eff_lang,
+                        200,
+                        mode_clean,
+                        eff_layer_mode,
+                        eff_ai_key,
+                        eff_provider,
+                        eff_strict,
+                        digital_layout_fallback=True,
+                    )
 
         if not out.exists() or out.stat().st_size < 1000:
             raise HTTPException(
@@ -2415,7 +3030,7 @@ async def pdf_to_ppt(
                 detail="Conversion produced an empty presentation. Please try a different file."
             )
 
-        stem    = safe_filename(file.filename, "presentation")
+        stem = safe_filename(file.filename, "presentation")
         out_name = Path(stem).stem + "_converted.pptx"
         return FileResponse(
             str(out),
@@ -2516,7 +3131,7 @@ async def office_to_pdf(request: Request, file: UploadFile = File(...)):
 async def make_searchable(
     request: Request,
     file: UploadFile = File(...),
-    lang: str = Form("hin+eng"),
+    lang: str = Form("auto"),
     deskew: bool = Form(True),
     rotate: bool = Form(True),
     force_ocr: bool = Form(False),
@@ -3121,9 +3736,10 @@ async def ppt_to_excel(request: Request, file: UploadFile = File(...)):
                         row_idx += 1
 
             # Auto-column widths
+            from openpyxl.utils import get_column_letter
             for col in ws.columns:
                 max_len = 0
-                col_letter = col[0].column_letter
+                col_letter = get_column_letter(col[0].column)
                 for cell in col:
                     try:
                         if cell.value:
@@ -3158,7 +3774,7 @@ async def ppt_to_excel(request: Request, file: UploadFile = File(...)):
 @app.post("/edit-pdf")
 @limiter.limit("15/minute")
 async def edit_pdf_endpoint(request: Request, file: UploadFile = File(...), edits: str = Form(...)):
-    import fitz
+    import pymupdf as fitz
     inp = temp_path(".pdf")
     out = temp_path(".pdf")
     try:
@@ -3166,7 +3782,7 @@ async def edit_pdf_endpoint(request: Request, file: UploadFile = File(...), edit
         check_pdf_page_count(inp, "edit-pdf")
 
         # Validate edits JSON — cap payload size to prevent memory abuse
-        if len(edits) > 512_000:  # 512 KB max for edits JSON
+        if len(edits) > 12_000_000:  # 12 MB max (allows replacement image assets)
             raise HTTPException(400, "Edit data is too large.")
         edit_actions = json.loads(edits)
         if not isinstance(edit_actions, list):
@@ -3337,11 +3953,22 @@ async def edit_pdf_endpoint(request: Request, file: UploadFile = File(...), edit
 
             return max_adv
 
+        def _decode_data_url_bytes(raw_url: str) -> bytes | None:
+            if not raw_url or not isinstance(raw_url, str):
+                return None
+            import base64 as _b64
+            payload_b64 = raw_url.split(",", 1)[-1] if raw_url.startswith("data:") else raw_url
+            try:
+                return _b64.b64decode(payload_b64)
+            except Exception:
+                return None
+
         for action in edit_actions:
             page_idx = action.get("page", 0)
             if page_idx >= len(doc):
                 continue
             page = doc[page_idx]
+            action_type = str(action.get("type") or "text").strip().lower()
 
             # PyMuPDF uses TOP-LEFT origin (same as browser canvas).
             # Frontend divides canvas coords by viewport.scale before sending,
@@ -3354,18 +3981,108 @@ async def edit_pdf_endpoint(request: Request, file: UploadFile = File(...), edit
             orig_y = float(action.get("origY", y))
             orig_w = float(action.get("origW", w))
             orig_h = float(action.get("origH", h))
+
+            if action_type == "magic_erase":
+                erase_rect = fitz.Rect(x, y, x + w, y + h) & page.rect
+                if erase_rect.width < 2 or erase_rect.height < 2:
+                    continue
+                # Strip text & annotations inside erase_rect without painting flat fill first
+                try:
+                    page.add_redact_annot(erase_rect, fill=None)
+                    page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE)
+                except Exception:
+                    pass
+                try:
+                    from scan_blender import erase_region_seamlessly
+                    erase_res = erase_region_seamlessly(page, erase_rect)
+                    if erase_res is not None:
+                        page.insert_image(erase_res["paste_rect"], stream=erase_res["png_bytes"])
+                except Exception as erase_err:
+                    logger.warning(f"[EditPDF] Magic erase fallback triggered: {erase_err}")
+                    page.add_redact_annot(erase_rect, fill=(1, 1, 1))
+                    page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_PIXELS)
+                continue
+
+            if action_type in ("delete_image", "replace_image", "move_image"):
+                orig_rect = fitz.Rect(orig_x, orig_y, orig_x + orig_w, orig_y + orig_h) & page.rect
+                target_rect = fitz.Rect(x, y, x + w, y + h) & page.rect
+                try:
+                    xref = int(action.get("xref") or 0)
+                except (TypeError, ValueError):
+                    xref = 0
+                asset_source = str(action.get("source") or ("native" if xref > 0 else "scan")).lower()
+                img_bytes = _decode_data_url_bytes(str(action.get("imageDataUrl") or ""))
+
+                # Same-box native replace stays cleanly in-place via doc.replace_image
+                same_box = (
+                    abs(target_rect.x0 - orig_rect.x0) < 1.5
+                    and abs(target_rect.y0 - orig_rect.y0) < 1.5
+                    and abs(target_rect.width - orig_rect.width) < 1.5
+                    and abs(target_rect.height - orig_rect.height) < 1.5
+                )
+                if action_type == "replace_image" and asset_source == "native" and xref > 0 and same_box and img_bytes:
+                    try:
+                        page.replace_image(xref, stream=img_bytes)
+                        continue
+                    except Exception:
+                        pass
+
+                # If moving a raster crop without imageDataUrl, snapshot it before inpainting orig_rect
+                if action_type == "move_image" and not img_bytes and orig_rect.width >= 2 and orig_rect.height >= 2:
+                    try:
+                        snap_pix = page.get_pixmap(dpi=200, clip=orig_rect, alpha=False)
+                        img_bytes = snap_pix.tobytes("png")
+                    except Exception:
+                        img_bytes = None
+
+                # Remove old placement cleanly
+                removed_native = False
+                if asset_source == "native" and xref > 0:
+                    try:
+                        rects_for_xref = page.get_image_rects(xref)
+                        if len(rects_for_xref) <= 1 and hasattr(page, "delete_image"):
+                            page.delete_image(xref)
+                            removed_native = True
+                    except Exception:
+                        removed_native = False
+
+                if not removed_native and orig_rect.width >= 2 and orig_rect.height >= 2:
+                    if asset_source == "native":
+                        try:
+                            page.add_redact_annot(orig_rect, fill=None)
+                            page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_REMOVE)
+                            removed_native = True
+                        except Exception:
+                            removed_native = False
+                    if not removed_native:
+                        try:
+                            from scan_blender import erase_region_seamlessly
+                            erase_res = erase_region_seamlessly(page, orig_rect)
+                            if erase_res is not None:
+                                page.insert_image(erase_res["paste_rect"], stream=erase_res["png_bytes"])
+                        except Exception:
+                            page.add_redact_annot(orig_rect, fill=(1, 1, 1))
+                            page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_PIXELS)
+
+                if action_type in ("replace_image", "move_image") and img_bytes and target_rect.width >= 2 and target_rect.height >= 2:
+                    page.insert_image(target_rect, stream=img_bytes, keep_proportion=False)
+                continue
+
             new_text = action.get("newText", "")
 
             # Redact: use exact bounding box of the ORIGINAL text to delete it from source
             rect = fitz.Rect(orig_x, orig_y, orig_x + orig_w, orig_y + orig_h)
             annot_rect = fitz.Rect(orig_x - 0.5, orig_y - 0.5, orig_x + orig_w + 0.5, orig_y + orig_h + 0.5)
 
-            # Extract dominant visible/matching span inside annot_rect
+            # Extract dominant visible/matching span inside annot_rect by overlap ratio & center proximity
             orig_dict = page.get_text("dict", clip=annot_rect)
             detected_baseline = None
             detected_font = None
             detected_size = None
-            best_score = -1.0
+            tight_redact_rect = None
+            best_score = -1e9
+            rect_mid_x = (rect.x0 + rect.x1) * 0.5
+            rect_mid_y = (rect.y0 + rect.y1) * 0.5
             for blk in orig_dict.get("blocks", []):
                 for ln in blk.get("lines", []):
                     for sp in ln.get("spans", []):
@@ -3373,14 +4090,55 @@ async def edit_pdf_endpoint(request: Request, file: UploadFile = File(...), edit
                         if not sp_txt:
                             continue
                         sb = sp.get("bbox", [0, 0, 0, 0])
-                        overlap = fitz.Rect(sb) & rect
+                        sp_r = fitz.Rect(sb)
+                        overlap = sp_r & rect
                         ov_area = overlap.width * overlap.height if not overlap.is_empty else 0.0
-                        score = ov_area + len(sp_txt) * 0.5
+                        if ov_area <= 0.0:
+                            continue
+                        sp_area = max(1.0, sp_r.width * sp_r.height)
+                        ov_frac = ov_area / min(sp_area, max(1.0, rect.width * rect.height))
+                        sp_mid_y = (sb[1] + sb[3]) * 0.5
+                        sp_mid_x = (sb[0] + sb[2]) * 0.5
+                        score = ov_frac * 50.0 + ov_area - abs(sp_mid_y - rect_mid_y) * 6.0 - abs(sp_mid_x - rect_mid_x) * 0.2
                         if score > best_score:
                             best_score = score
                             detected_baseline = sp.get("origin", [0, 0])[1]
                             detected_font = sp.get("font")
                             detected_size = sp.get("size")
+                        # Include span vertically in tight redaction bounds if on same visual line
+                        if abs(sp_mid_y - rect_mid_y) <= max(3.5, rect.height * 0.42):
+                            clipped_sp = fitz.Rect(
+                                max(rect.x0 - 0.25, sp_r.x0),
+                                max(rect.y0 - 0.25, sp_r.y0),
+                                min(rect.x1 + 0.25, sp_r.x1),
+                                min(rect.y1 + 0.25, sp_r.y1),
+                            )
+                            if clipped_sp.width > 0 and clipped_sp.height > 0:
+                                tight_redact_rect = clipped_sp if tight_redact_rect is None else (tight_redact_rect | clipped_sp)
+
+            # Narrow redaction rect slightly away from vector table borders so borders stay 100% intact
+            redact_box = tight_redact_rect if (tight_redact_rect is not None and not tight_redact_rect.is_empty) else rect
+            try:
+                for dr in page.get_drawings():
+                    dr_r = fitz.Rect(dr.get("rect", (0, 0, 0, 0)))
+                    if dr_r.is_empty or not dr_r.intersects(redact_box):
+                        continue
+                    # Horizontal border rule (wide & thin)
+                    if dr_r.width >= 12.0 and dr_r.height <= 3.0:
+                        if dr_r.y1 <= redact_box.y0 + 3.0 and dr_r.y1 < redact_box.y1 - 2.0:
+                            redact_box.y0 = max(redact_box.y0, dr_r.y1 + 0.35)
+                        elif dr_r.y0 >= redact_box.y1 - 3.0 and dr_r.y0 > redact_box.y0 + 2.0:
+                            redact_box.y1 = min(redact_box.y1, dr_r.y0 - 0.35)
+                    # Vertical border rule (tall & thin)
+                    elif dr_r.height >= 12.0 and dr_r.width <= 3.0:
+                        if dr_r.x1 <= redact_box.x0 + 3.0 and dr_r.x1 < redact_box.x1 - 2.0:
+                            redact_box.x0 = max(redact_box.x0, dr_r.x1 + 0.35)
+                        elif dr_r.x0 >= redact_box.x1 - 3.0 and dr_r.x0 > redact_box.x0 + 2.0:
+                            redact_box.x1 = min(redact_box.x1, dr_r.x0 - 0.35)
+            except Exception:
+                pass
+            if redact_box.width < 1.0 or redact_box.height < 1.0:
+                redact_box = rect
 
             # Distinguish true VISIBLE vector text (render_mode != 3) from invisible OCR 3-Tr text
             # sitting over a scanned raster image!
@@ -3448,6 +4206,29 @@ async def edit_pdf_endpoint(request: Request, file: UploadFile = File(...), edit
                 else:
                     fontname = "helv"
 
+            # Resolve exact metric-matched TTF font on disk when available (e.g. Verdana/Georgia/Arial/Times)
+            native_ttf_path: Path | None = None
+            native_fitz_font = None
+            if new_text and not has_non_latin(new_text):
+                try:
+                    from scan_blender import _resolve_render_font_spec
+                    cand_ttf, _ = _resolve_render_font_spec(
+                        has_hindi=False,
+                        is_serif=is_serif,
+                        is_mono=is_mono,
+                        is_bold=is_bold,
+                        is_italic=is_italic,
+                        preferred_family=f_fam,
+                    )
+                    if cand_ttf is not None:
+                        cand_font_obj = fitz.Font(fontfile=str(cand_ttf))
+                        if all(ch.isspace() or cand_font_obj.has_glyph(ord(ch)) > 0 for ch in new_text):
+                            native_ttf_path = cand_ttf
+                            native_fitz_font = cand_font_obj
+                except Exception:
+                    native_ttf_path = None
+                    native_fitz_font = None
+
             # Alignment support
             align_req = str(action.get("align", "left")).lower()
             if align_req == "center":
@@ -3460,17 +4241,25 @@ async def edit_pdf_endpoint(request: Request, file: UploadFile = File(...), edit
                 align = fitz.TEXT_ALIGN_LEFT
 
             dy = y - orig_y
-            raw_baseline = action.get("baseline") or detected_baseline
-            if raw_baseline is not None:
-                baseline_y = raw_baseline + dy
+            dy_eff = 0.0 if (detected_baseline is not None and abs(dy) < 1.2) else dy
+            req_baseline = action.get("baseline")
+            if detected_baseline is not None and (req_baseline is None or abs(float(req_baseline) - detected_baseline) <= 3.5):
+                base_anchor = detected_baseline
+            elif req_baseline is not None:
+                base_anchor = float(req_baseline)
+            else:
+                base_anchor = detected_baseline
+
+            if base_anchor is not None:
+                baseline_y = base_anchor + dy_eff
             elif h > 0:
                 baseline_y = y + orig_size * 0.94
             else:
                 baseline_y = None
 
             if has_visible_native or (has_invisible_ocr and not has_raster_underneath):
-                # Pure vector PDF: clean text deletion without painting any colored box
-                page.add_redact_annot(annot_rect, fill=None)
+                # Pure vector PDF: tight layer-safe text deletion protecting adjacent borders & rows
+                page.add_redact_annot(redact_box, fill=None)
                 page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE)
             else:
                 # Scanned PDF OR Searchable OCR PDF over raster image:
@@ -3499,6 +4288,8 @@ async def edit_pdf_endpoint(request: Request, file: UploadFile = File(...), edit
                         strikethrough=is_strike,
                         text_align=align,
                         has_explicit_size=has_explicit_size,
+                        preferred_family=f_fam,
+                        line_height_ratio=float(action.get("lineHeightRatio") or 1.25),
                     )
                     if scan_res is not None:
                         # Remove old invisible 3-Tr OCR text cleanly without painting flat boxes
@@ -3667,40 +4458,77 @@ async def edit_pdf_endpoint(request: Request, file: UploadFile = File(...), edit
                     logger.warning(f"[EditPDF] Devanagari font not found at {_fonts_dir}.")
             # ─────────────────────────────────────────────────────────────────
 
-            # If native text baseline is detected and single line text, insert at exact baseline
-            if not inserted and baseline_y is not None and "\n" not in new_text:
+            # Register matched metric TTF font on page if available
+            active_fontname = fontname
+            active_fontfile = None
+            if native_ttf_path is not None and native_fitz_font is not None:
+                try:
+                    ttf_key = f"EdTTF_{abs(hash(str(native_ttf_path))) % 100000}"
+                    page_fonts = _registered_fonts.setdefault(page_idx, set())
+                    if ttf_key not in page_fonts:
+                        page.insert_font(fontname=ttf_key, fontfile=str(native_ttf_path))
+                        page_fonts.add(ttf_key)
+                    active_fontname = ttf_key
+                    active_fontfile = str(native_ttf_path)
+                except Exception:
+                    active_fontname = fontname
+                    active_fontfile = None
+
+            # If native text baseline is detected, insert each line anchored at exact PDF baseline
+            if not inserted and baseline_y is not None:
                 try:
                     text_size = orig_size
                     if not has_explicit_size and detected_size is not None:
                         text_size = detected_size
 
-                    # Compute insertion X based on alignment
-                    ins_x = x
-                    ins_w = fitz.get_text_length(new_text, fontname=fontname, fontsize=text_size)
-                    if align == fitz.TEXT_ALIGN_CENTER and w > ins_w:
-                        ins_x = x + (w - ins_w) / 2
-                    elif align == fitz.TEXT_ALIGN_RIGHT and w > ins_w:
-                        ins_x = x + w - ins_w
+                    eff_lh_ratio = max(1.02, min(1.85, float(action.get("lineHeightRatio") or 1.22)))
+                    text_lines = new_text.replace("\r\n", "\n").split("\n")
+                    line_step_pt = text_size * eff_lh_ratio
+                    all_lines_ok = True
 
-                    page.insert_text(
-                        fitz.Point(ins_x, baseline_y),
-                        new_text,
-                        fontsize=text_size,
-                        fontname=fontname,
-                        color=fg_color
-                    )
-                    if is_underline or is_strike:
-                        deco_shape = page.new_shape()
-                        stroke_w = max(0.55, text_size * 0.068)
-                        if is_underline:
-                            uy = baseline_y + text_size * 0.14
-                            deco_shape.draw_line(fitz.Point(ins_x, uy), fitz.Point(ins_x + ins_w, uy))
-                        if is_strike:
-                            sy = baseline_y - text_size * 0.30
-                            deco_shape.draw_line(fitz.Point(ins_x, sy), fitz.Point(ins_x + ins_w, sy))
-                        deco_shape.finish(color=fg_color, width=stroke_w)
-                        deco_shape.commit()
-                    inserted = True
+                    for li, line_txt in enumerate(text_lines):
+                        if not line_txt:
+                            continue
+                        cur_base_y = baseline_y + li * line_step_pt
+                        ins_x = x
+                        if native_fitz_font is not None and active_fontfile is not None:
+                            ins_w = native_fitz_font.text_length(line_txt, fontsize=text_size)
+                        else:
+                            ins_w = fitz.get_text_length(line_txt, fontname=fontname, fontsize=text_size)
+                        if align == fitz.TEXT_ALIGN_CENTER and w > ins_w:
+                            ins_x = x + (w - ins_w) / 2
+                        elif align == fitz.TEXT_ALIGN_RIGHT and w > ins_w:
+                            ins_x = x + w - ins_w
+
+                        try:
+                            page.insert_text(
+                                fitz.Point(ins_x, cur_base_y),
+                                line_txt,
+                                fontsize=text_size,
+                                fontname=active_fontname,
+                                fontfile=active_fontfile,
+                                color=fg_color,
+                            )
+                        except Exception:
+                            page.insert_text(
+                                fitz.Point(ins_x, cur_base_y),
+                                line_txt,
+                                fontsize=text_size,
+                                fontname=fontname,
+                                color=fg_color,
+                            )
+                        if is_underline or is_strike:
+                            deco_shape = page.new_shape()
+                            stroke_w = max(0.55, text_size * 0.068)
+                            if is_underline:
+                                uy = cur_base_y + text_size * 0.14
+                                deco_shape.draw_line(fitz.Point(ins_x, uy), fitz.Point(ins_x + ins_w, uy))
+                            if is_strike:
+                                sy = cur_base_y - text_size * 0.30
+                                deco_shape.draw_line(fitz.Point(ins_x, sy), fitz.Point(ins_x + ins_w, sy))
+                            deco_shape.finish(color=fg_color, width=stroke_w)
+                            deco_shape.commit()
+                    inserted = all_lines_ok
                 except Exception as ins_err:
                     logger.warning(f"[EditPDF] Baseline text insert error: {ins_err}")
 
@@ -3710,31 +4538,41 @@ async def edit_pdf_endpoint(request: Request, file: UploadFile = File(...), edit
                 rc = -1
                 final_size = orig_size
                 min_size = max(0.5, orig_size * 0.3)
-                
+
                 # Try to fit the text box, reducing font size if it doesn't fit
                 while final_size >= min_size:
                     rc = page.insert_textbox(
                         text_rect,
                         new_text,
                         fontsize=final_size,
-                        fontname=fontname,
+                        fontname=active_fontname,
                         color=fg_color,
-                        align=align
+                        align=align,
                     )
                     if rc >= 0:
                         break
                     final_size -= max(0.2, orig_size * 0.05)
-                    
+
                 # If it still didn't fit, force it at the minimum size
                 if rc < 0:
-                    page.insert_textbox(
-                        text_rect,
-                        new_text,
-                        fontsize=final_size,
-                        fontname=fontname,
-                        color=fg_color,
-                        align=align
-                    )
+                    try:
+                        page.insert_textbox(
+                            text_rect,
+                            new_text,
+                            fontsize=final_size,
+                            fontname=active_fontname,
+                            color=fg_color,
+                            align=align,
+                        )
+                    except Exception:
+                        page.insert_textbox(
+                            text_rect,
+                            new_text,
+                            fontsize=final_size,
+                            fontname=fontname,
+                            color=fg_color,
+                            align=align,
+                        )
 
         doc.save(str(out), garbage=3, deflate=True)
         doc.close()
@@ -3767,144 +4605,86 @@ async def analyze_text_layout(
 ):
     """
     Analyze a single page of a PDF and return span-level text layout info.
-    Returns a JSON list of text spans with font, size, color, bold, italic, bbox.
-    Used by the Advanced Editor frontend to accurately detect and replace text.
     """
-    import fitz
+    import pymupdf as fitz
+    from vision_reconstructor import extract_native_text_layout
+
     inp = temp_path(".pdf")
     try:
-        inp.write_bytes(await safe_read_upload(file))
+        raw_bytes = await safe_read_upload(file)
+        cache_key = f"text_layout:{hashlib.sha256(raw_bytes).hexdigest()}:{page}"
+        cached = RESULT_CACHE.get(cache_key)
+        if cached is not None:
+            return Response(content=cached[0], media_type=cached[1], headers={"X-Cache": "HIT"})
+
+        inp.write_bytes(raw_bytes)
         doc = fitz.open(str(inp))
+        try:
+            if page < 0 or page >= len(doc):
+                raise HTTPException(400, f"Page index {page} is out of range (0 to {len(doc)-1}).")
+            layout = extract_native_text_layout(doc[page])
+        finally:
+            doc.close()
 
-        if page < 0 or page >= len(doc):
-            raise HTTPException(400, f"Page index {page} is out of range (0 to {len(doc)-1}).")
-
-        pg = doc[page]
-        page_height = pg.rect.height
-        page_width = pg.rect.width
-
-        # Check which text spans are invisible OCR (render_mode == 3)
-        invisible_boxes = [
-            fitz.Rect(t.get("bbox", (0, 0, 0, 0)))
-            for t in pg.get_texttrace()
-            if t.get("type", 0) == 3
-        ]
-
-        # get_text("dict") returns blocks > lines > spans
-        # Each span has: text, font, size, color (int RGB), bbox, flags (bold/italic)
-        blocks_data = pg.get_text("dict", flags=fitz.TEXT_PRESERVE_WHITESPACE)
-
-        spans_out = []
-        for block in blocks_data.get("blocks", []):
-            if block.get("type") != 0:  # 0 = text, 1 = image
-                continue
-            for line in block.get("lines", []):
-                for span in line.get("spans", []):
-                    text = span.get("text", "").strip()
-                    if not text:
-                        continue
-
-                    bbox = span.get("bbox", [0, 0, 0, 0])  # (x0, y0, x1, y1) in PDF points (top-left origin in fitz)
-                    x0, y0, x1, y1 = bbox
-                    w = x1 - x0
-                    h = y1 - y0
-
-                    if w <= 0 or h <= 0:
-                        continue
-
-                    font_name: str = span.get("font", "")
-                    font_size: float = round(span.get("size", 12), 2)
-
-                    span_rect = fitz.Rect(bbox)
-                    is_invisible_ocr = any(span_rect.intersects(ib) for ib in invisible_boxes)
-
-                    # flags bit 4 = bold, bit 1 = italic (fitz PDF flags)
-                    flags = span.get("flags", 0)
-                    is_bold = bool(flags & (1 << 4))  # bold = bit 4 (16)
-                    is_italic = bool(flags & (1 << 1))  # italic = bit 1 (2)
-                    is_mono = bool(flags & (1 << 3))    # monospace = bit 3
-
-                    # Also detect from font name (some PDFs don't set flags)
-                    fname_lower = font_name.lower()
-                    if not is_bold:
-                        is_bold = "bold" in fname_lower or "heavy" in fname_lower or "black" in fname_lower
-                    if not is_italic:
-                        is_italic = "italic" in fname_lower or "oblique" in fname_lower or "slant" in fname_lower
-
-                    # Color: fitz returns as integer 0xRRGGBB or -1 for default
-                    raw_color = span.get("color", 0)
-                    if raw_color is None or raw_color < 0:
-                        raw_color = 0  # black
-                    r_comp = (raw_color >> 16) & 0xFF
-                    g_comp = (raw_color >> 8) & 0xFF
-                    b_comp = raw_color & 0xFF
-                    color_hex = f"#{r_comp:02x}{g_comp:02x}{b_comp:02x}"
-
-                    # Determine a "clean" font family name for display
-                    # Strip common prefixes like "ABCDEF+FontName" (PDF embedded subset notation)
-                    clean_font = font_name
-                    if "+" in clean_font:
-                        clean_font = clean_font.split("+", 1)[-1]
-
-                    origin = span.get("origin", (x0, y1))
-                    spans_out.append({
-                        "text": text,
-                        "x": round(x0, 2),
-                        "y": round(y0, 2),          # top-left y from top of page (fitz convention)
-                        "w": round(w, 2),
-                        "h": round(h, 2),
-                        "fontSize": font_size,
-                        "fontName": clean_font,
-                        "fontNameRaw": font_name,
-                        "bold": is_bold,
-                        "italic": is_italic,
-                        "mono": is_mono,
-                        "color": color_hex,
-                        "baseline": round(origin[1], 2),
-                        "isInvisibleOcr": is_invisible_ocr,
-                    })
-
-        words_out = []
-        for w_tuple in pg.get_text("words"):
-            wx0, wy0, wx1, wy1, wtext, blk_idx, line_idx, word_idx = w_tuple
-            if not wtext.strip():
-                continue
-            w_mid_x = (wx0 + wx1) / 2
-            w_mid_y = (wy0 + wy1) / 2
-            matched_s = None
-            for s in spans_out:
-                if (s["x"] - 5) <= w_mid_x <= (s["x"] + s["w"] + 5) and (s["y"] - 6) <= w_mid_y <= (s["y"] + s["h"] + 6):
-                    matched_s = s
-                    break
-            words_out.append({
-                "text": wtext,
-                "x": round(wx0, 2),
-                "y": round(wy0, 2),
-                "w": round(wx1 - wx0, 2),
-                "h": round(wy1 - wy0, 2),
-                "fontSize": matched_s["fontSize"] if matched_s else 11.0,
-                "fontName": matched_s["fontName"] if matched_s else "Helvetica",
-                "fontNameRaw": matched_s["fontNameRaw"] if matched_s else "Helvetica",
-                "bold": matched_s["bold"] if matched_s else False,
-                "italic": matched_s["italic"] if matched_s else False,
-                "color": matched_s["color"] if matched_s else "#000000",
-                "baseline": matched_s.get("baseline", round(wy1, 2)) if matched_s else round(wy1, 2),
-                "isInvisibleOcr": matched_s.get("isInvisibleOcr", False) if matched_s else False,
-            })
-
-        doc.close()
-
-        return JSONResponse({
-            "page": page,
-            "pageWidth": round(page_width, 2),
-            "pageHeight": round(page_height, 2),
-            "spans": spans_out,
-            "words": words_out,
-        })
+        payload_bytes = json.dumps({"page": page, **layout}).encode("utf-8")
+        RESULT_CACHE.put(cache_key, payload_bytes, "application/json")
+        return Response(content=payload_bytes, media_type="application/json", headers={"X-Cache": "MISS"})
     except HTTPException:
         raise
     except Exception as e:
         raise safe_error(e, "analyze/text-layout")
+    finally:
+        cleanup(inp)
+
+
+@app.post("/analyze/page-layers")
+@limiter.limit("20/minute")
+async def analyze_page_layers(
+    request: Request,
+    file: UploadFile = File(...),
+    page: int = Form(0),
+    lang: str = Form("auto"),
+    strict_local: bool = Form(False),
+):
+    """
+    Extract unified layer-wise page metadata (text, objects/images, tables, blank form fields)
+    for both native vector and scanned PDFs.
+    """
+    import pymupdf as fitz
+    from ocr_engine import resolve_ocr_lang
+    from vision_reconstructor import extract_page_layers_for_editor
+
+    inp = temp_path(".pdf")
+    try:
+        raw_bytes = await safe_read_upload(file)
+        norm_lang = resolve_ocr_lang(lang)
+        cache_key = f"page_layers:{hashlib.sha256(raw_bytes).hexdigest()}:{page}:{norm_lang}:{int(bool(strict_local))}"
+        cached = RESULT_CACHE.get(cache_key)
+        if cached is not None:
+            return Response(content=cached[0], media_type=cached[1], headers={"X-Cache": "HIT"})
+
+        inp.write_bytes(raw_bytes)
+        check_pdf_page_count(inp, "analyze/page-layers")
+        doc = fitz.open(str(inp))
+        total_pages = len(doc)
+        doc.close()
+        if page < 0 or page >= total_pages:
+            raise HTTPException(400, f"Page index {page} is out of range (0 to {total_pages - 1}).")
+
+        layers = await run_in_threadpool(
+            extract_page_layers_for_editor,
+            inp,
+            page,
+            norm_lang,
+            bool(strict_local),
+        )
+        payload_bytes = json.dumps(layers).encode("utf-8")
+        RESULT_CACHE.put(cache_key, payload_bytes, "application/json")
+        return Response(content=payload_bytes, media_type="application/json", headers={"X-Cache": "MISS"})
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise safe_error(e, "analyze/page-layers")
     finally:
         cleanup(inp)
 
@@ -3927,7 +4707,7 @@ async def replace_pdf_image(
     xref: the PDF object reference number of the image to replace.
           If -1, the first image found on the page is replaced.
     """
-    import fitz
+    import pymupdf as fitz
     inp = temp_path(".pdf")
     out = temp_path(".pdf")
     img_path = temp_path(".png")
@@ -3961,7 +4741,7 @@ async def replace_pdf_image(
             raise HTTPException(404, f"Image xref {target_xref} not found on page {page}.")
 
         # Replace the image
-        doc.replace_image(target_xref, filename=str(img_path))
+        pg.replace_image(target_xref, filename=str(img_path))
 
         doc.save(str(out), garbage=3, deflate=True)
         doc.close()
@@ -4100,7 +4880,7 @@ async def repair_pdf(request: Request, file: UploadFile = File(...)):
         # Strategy 3: PyMuPDF garbage collection
         if not repaired:
             try:
-                import fitz
+                import pymupdf as fitz
                 doc = fitz.open(str(inp))
                 doc.save(str(out), garbage=4, deflate=True, clean=True)
                 doc.close()
@@ -4139,17 +4919,17 @@ async def repair_pdf(request: Request, file: UploadFile = File(...)):
 # rasterizing — preserves all text, links, and vector content.
 
 @app.post("/unlock-pdf")
-@limiter.limit("10/minute")
+@limiter.limit("30/minute")
 async def unlock_pdf(
     request: Request,
     file: UploadFile = File(...),
-    password: str = Form(...)
+    password: str = Form("")
 ):
     """
-    Losslessly decrypt a password-protected PDF using PyMuPDF.
+    Losslessly decrypt a password-protected or owner-permission-locked PDF using PyMuPDF.
     Preserves full vector content, text selectability, and metadata.
     """
-    import fitz  # PyMuPDF
+    import pymupdf as fitz  # PyMuPDF
     inp = temp_path(".pdf")
     out = temp_path("_unlocked.pdf")
     try:
@@ -4158,16 +4938,22 @@ async def unlock_pdf(
 
         doc = fitz.open(str(inp))
 
-        if not doc.is_encrypted:
+        has_encrypt_dict = doc.xref_get_key(-1, "Encrypt")[0] != "null"
+        if not doc.is_encrypted and not has_encrypt_dict:
             doc.close()
             cleanup(inp, out)
             raise HTTPException(400, "PDF is not encrypted.")
 
-        authenticated = doc.authenticate(password)
-        if not authenticated:
-            doc.close()
-            cleanup(inp, out)
-            raise HTTPException(403, "Incorrect password. Could not unlock PDF.")
+        eff_pass = _form_str(password, "") or ""
+        if doc.needs_pass:
+            authenticated = doc.authenticate(eff_pass)
+            if not authenticated:
+                doc.close()
+                cleanup(inp, out)
+                raise HTTPException(403, "Incorrect password. Could not unlock PDF.")
+        elif eff_pass:
+            # Owner-locked viewable PDF (empty user password): optional owner password check is tolerant
+            doc.authenticate(eff_pass)
 
         # Save with no encryption — lossless vector preservation
         doc.save(str(out), encryption=fitz.PDF_ENCRYPT_NONE, garbage=1, deflate=True)
@@ -4250,8 +5036,100 @@ def _validate_url(url: str) -> str:
     return url
 
 
+_ALLOWED_PLAYWRIGHT_FORMATS = {"A4", "A3", "Letter", "Legal", "Tabloid"}
+_ALLOWED_PLAYWRIGHT_MARGINS = {"0cm", "0.5cm", "1cm", "1.5cm", "2cm"}
+_LOW_RAM_CHROMIUM_ARGS = [
+    "--no-sandbox",
+    "--disable-dev-shm-usage",
+    "--disable-gpu",
+    "--disable-extensions",
+    "--disable-background-networking",
+    "--disable-sync",
+    "--mute-audio",
+    "--no-first-run",
+]
+
+
+async def _launch_low_ram_browser(playwright_inst: Any):
+    """Launch headless Chromium tuned for low-memory containers with auto-install fallback."""
+    try:
+        return await playwright_inst.chromium.launch(headless=True, args=_LOW_RAM_CHROMIUM_ARGS)
+    except Exception as launch_err:
+        err_msg = str(launch_err)
+        if "Executable doesn't exist" in err_msg or "playwright install" in err_msg:
+            logger.info("[WebpageToPdf] Chromium binary missing on server — downloading automatically...")
+            import sys
+            await run_in_threadpool(
+                subprocess.run,
+                [sys.executable, "-m", "playwright", "install", "chromium"],
+                check=True,
+                timeout=180,
+            )
+            return await playwright_inst.chromium.launch(headless=True, args=_LOW_RAM_CHROMIUM_ARGS)
+        raise launch_err
+
+
+async def _attach_ssrf_guard(page: Any) -> None:
+    """Attach SSRF route interceptor blocking internal/private IPs, file://, and cloud metadata."""
+    validated_hosts: dict[str, float] = {}
+    from urllib.parse import urlparse as _urlparse
+
+    async def _ssrf_route_guard(route):
+        req_url = route.request.url
+        lower_u = req_url.lower()
+        if lower_u.startswith(("data:", "blob:", "about:")):
+            await route.continue_()
+            return
+        try:
+            parsed = _urlparse(req_url)
+            if parsed.scheme not in ALLOWED_URL_SCHEMES:
+                await route.abort()
+                return
+            host_key = (parsed.hostname or "").lower()
+            now_t = time.monotonic()
+            cached_at = validated_hosts.get(host_key)
+            if cached_at is None or (now_t - cached_at) > 3.0:
+                await run_in_threadpool(_validate_url, req_url)
+                validated_hosts[host_key] = now_t
+            await route.continue_()
+        except Exception:
+            logger.warning(f"[WebpageToPdf] Blocked restricted subresource URL: {req_url[:120]}")
+            await route.abort()
+
+    await page.route("**/*", _ssrf_route_guard)
+
+
+async def _finalize_playwright_pdf(
+    page: Any,
+    out_path: Path,
+    paper_format: str,
+    landscape: bool,
+    margin: str,
+    background: bool,
+) -> None:
+    """Wait briefly for fonts, preserve screen CSS if background enabled, and render PDF."""
+    safe_fmt = paper_format if paper_format in _ALLOWED_PLAYWRIGHT_FORMATS else "A4"
+    safe_margin = margin if margin in _ALLOWED_PLAYWRIGHT_MARGINS else "1cm"
+    try:
+        await page.evaluate("() => document.fonts ? document.fonts.ready : Promise.resolve()")
+    except Exception:
+        pass
+    await asyncio.sleep(0.55)
+    try:
+        await page.emulate_media(media="screen" if background else "print")
+    except Exception:
+        pass
+    await page.pdf(
+        path=str(out_path),
+        format=safe_fmt,
+        landscape=landscape,
+        print_background=background,
+        margin={"top": safe_margin, "right": safe_margin, "bottom": safe_margin, "left": safe_margin},
+    )
+
+
 @app.post("/convert/webpage-to-pdf")
-@limiter.limit("5/minute")
+@limiter.limit("8/minute")
 async def webpage_to_pdf(
     request: Request,
     url: str = Form(...),
@@ -4264,10 +5142,6 @@ async def webpage_to_pdf(
     Convert a public webpage URL to a paginated PDF using Playwright (Headless Chromium).
     """
     _validate_url(url)
-
-    ALLOWED_FORMATS = {"A4", "A3", "Letter", "Legal", "Tabloid"}
-    if paper_format not in ALLOWED_FORMATS:
-        paper_format = "A4"
 
     out = temp_path(".pdf")
     try:
@@ -4283,85 +5157,27 @@ async def webpage_to_pdf(
             async with async_playwright() as p:
                 browser = None
                 try:
-                    try:
-                        browser = await p.chromium.launch(
-                            headless=True,
-                            args=["--no-sandbox", "--disable-dev-shm-usage"]
-                        )
-                    except Exception as launch_err:
-                        err_msg = str(launch_err)
-                        if "Executable doesn't exist" in err_msg or "playwright install" in err_msg:
-                            logger.info("[WebpageToPdf] Chromium binary missing on server — downloading automatically...")
-                            import subprocess
-                            import sys
-                            await run_in_threadpool(
-                                subprocess.run,
-                                [sys.executable, "-m", "playwright", "install", "chromium"],
-                                check=True,
-                                timeout=180
-                            )
-                            browser = await p.chromium.launch(
-                                headless=True,
-                                args=["--no-sandbox", "--disable-dev-shm-usage"]
-                            )
-                        else:
-                            raise launch_err
-
+                    browser = await _launch_low_ram_browser(p)
                     page = await browser.new_page(
+                        viewport={"width": 1280, "height": 800},
                         user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
                     )
+                    await _attach_ssrf_guard(page)
 
-                    # Subresource / Redirect SSRF Interceptor (blocks internal IPs, file://, cloud metadata)
-                    validated_hosts: set[str] = set()
-                    from urllib.parse import urlparse as _urlparse
-
-                    async def _ssrf_route_guard(route):
-                        req_url = route.request.url
-                        lower_u = req_url.lower()
-                        if lower_u.startswith(("data:", "blob:", "about:")):
-                            await route.continue_()
-                            return
-                        try:
-                            parsed = _urlparse(req_url)
-                            if parsed.scheme not in ALLOWED_URL_SCHEMES:
-                                await route.abort()
-                                return
-                            host_key = (parsed.hostname or "").lower()
-                            if host_key not in validated_hosts:
-                                await run_in_threadpool(_validate_url, req_url)
-                                validated_hosts.add(host_key)
-                            await route.continue_()
-                        except Exception:
-                            logger.warning(f"[WebpageToPdf] Blocked restricted subresource URL: {req_url[:120]}")
-                            await route.abort()
-
-                    await page.route("**/*", _ssrf_route_guard)
-
+                    # Single fast navigation: wait for DOM first, then up to 10s for subresources (no duplicate goto!)
                     try:
-                        await page.goto(url, wait_until="load", timeout=20000)
-                    except Exception as goto_err:
-                        logger.warning(f"[WebpageToPdf] Initial load wait timed out ({goto_err}) — continuing with domcontentloaded state")
+                        await page.goto(url, wait_until="domcontentloaded", timeout=22000)
                         try:
-                            await page.goto(url, wait_until="domcontentloaded", timeout=10000)
+                            await page.wait_for_load_state("load", timeout=10000)
                         except Exception:
-                            pass  # If page is already partially loaded, proceed to render
+                            logger.info("[WebpageToPdf] Subresource load timeout — rendering DOM as loaded")
+                    except Exception as goto_err:
+                        logger.warning(f"[WebpageToPdf] Navigation notice: {goto_err}")
 
-                    # Post-navigation SSRF guard: ensure HTTP 301/302 redirects did not land on internal/private IPs
                     if page.url and page.url != "about:blank":
                         _validate_url(page.url)
 
-                    await asyncio.sleep(1.0)
-
-                    await page.pdf(
-                        path=str(out),
-                        format=paper_format,
-                        landscape=landscape,
-                        print_background=background,
-                        margin={
-                            "top": margin, "right": margin,
-                            "bottom": margin, "left": margin
-                        }
-                    )
+                    await _finalize_playwright_pdf(page, out, paper_format, landscape, margin, background)
                 finally:
                     if browser is not None:
                         try:
@@ -4373,11 +5189,10 @@ async def webpage_to_pdf(
             raise RuntimeError("Playwright did not generate a PDF.")
 
         from urllib.parse import urlparse
-        domain = urlparse(url).netloc.replace(".", "_")[:50]
-        out_name = f"webpage_{domain}.pdf"
+        domain = safe_filename(urlparse(url).netloc.replace(".", "_")[:50], "page")
         return FileResponse(
             str(out), media_type="application/pdf",
-            filename=out_name,
+            filename=f"webpage_{domain}.pdf",
             background=BackgroundTask(cleanup, out)
         )
     except HTTPException:
@@ -4388,8 +5203,69 @@ async def webpage_to_pdf(
         logger.error(f"[ERROR] endpoint=webpage-to-pdf type={type(e).__name__} msg={str(e)[:500]}")
         raise HTTPException(
             status_code=500,
-            detail="Failed to convert webpage to PDF. Please ensure the URL is publicly accessible and does not require private login authentication (e.g. Google Search Console, private dashboards)."
+            detail="Failed to convert webpage to PDF. Please ensure the URL is publicly accessible and does not require login authentication."
         )
+
+
+@app.post("/convert/html-to-pdf")
+@limiter.limit("12/minute")
+async def html_to_pdf(
+    request: Request,
+    html: str = Form(...),
+    paper_format: str = Form("A4"),
+    landscape: bool = Form(False),
+    margin: str = Form("1cm"),
+    background: bool = Form(True),
+):
+    """
+    Render raw HTML/CSS markup into a paginated vector PDF using Playwright (Chromium)
+    with full SSRF guard blocking private/internal network subresources.
+    """
+    if not html or not html.strip():
+        raise HTTPException(400, "HTML content cannot be empty.")
+    if len(html.encode("utf-8", errors="ignore")) > 2 * 1024 * 1024:
+        raise HTTPException(413, "HTML payload exceeds 2 MB limit.")
+
+    out = temp_path(".pdf")
+    try:
+        try:
+            from playwright.async_api import async_playwright
+        except ImportError:
+            raise HTTPException(
+                500,
+                "Playwright is not installed. Run: pip install playwright && playwright install chromium"
+            )
+
+        async with WEBPAGE_TO_PDF_SEMAPHORE:
+            async with async_playwright() as p:
+                browser = None
+                try:
+                    browser = await _launch_low_ram_browser(p)
+                    page = await browser.new_page(viewport={"width": 1240, "height": 1754})
+                    await _attach_ssrf_guard(page)
+                    await page.set_content(html, wait_until="domcontentloaded", timeout=15000)
+                    await _finalize_playwright_pdf(page, out, paper_format, landscape, margin, background)
+                finally:
+                    if browser is not None:
+                        try:
+                            await browser.close()
+                        except Exception:
+                            pass
+
+        if not out.exists() or out.stat().st_size == 0:
+            raise RuntimeError("Playwright did not generate a PDF from HTML.")
+
+        return FileResponse(
+            str(out), media_type="application/pdf",
+            filename="html_document.pdf",
+            background=BackgroundTask(cleanup, out)
+        )
+    except HTTPException:
+        cleanup(out)
+        raise
+    except Exception as e:
+        cleanup(out)
+        raise safe_error(e, "html-to-pdf")
 
 
 # ─── 12. PDF Font Replacer ─────────────────────────────────────
@@ -4415,7 +5291,7 @@ async def replace_font(
     if font_name not in ALLOWED_REPLACE_FONTS:
         font_name = "helv"
 
-    import fitz
+    import pymupdf as fitz
     import subprocess
     import shutil
     
@@ -4525,7 +5401,7 @@ async def auto_crop_margins(
     Automatically detect and remove white margins from every PDF page.
     Sets the CropBox to the content bounding box + optional padding.
     """
-    import fitz
+    import pymupdf as fitz
     padding_pt = max(0, min(padding_pt, 72))  # clamp 0–72pt
 
     inp = temp_path(".pdf")
@@ -4540,7 +5416,6 @@ async def auto_crop_margins(
             blocks = page.get_text("blocks")
             # Also include drawings/images
             paths = page.get_drawings()
-            images = page.get_image_rects(full=True)  # Returns list of (Rect, transform, ...)
 
             all_rects = []
             for b in blocks:
@@ -4549,11 +5424,13 @@ async def auto_crop_margins(
             for path in paths:
                 if path.get("rect"):
                     all_rects.append(path["rect"])
-            for img_info in images:
-                if isinstance(img_info, (list, tuple)) and len(img_info) >= 1:
-                    rect = img_info[0] if isinstance(img_info[0], fitz.Rect) else None
-                    if rect:
-                        all_rects.append(rect)
+            for img_info in page.get_images(full=True):
+                try:
+                    for rect in page.get_image_rects(img_info[0]):
+                        if isinstance(rect, fitz.Rect):
+                            all_rects.append(rect)
+                except Exception:
+                    pass
 
             if all_rects:
                 content_bbox = all_rects[0]
@@ -4594,10 +5471,16 @@ async def extract_links(request: Request, file: UploadFile = File(...)):
     """
     Extract all hyperlinks from a PDF and return them as JSON.
     """
-    import fitz
+    import pymupdf as fitz
     inp = temp_path(".pdf")
     try:
-        inp.write_bytes(await safe_read_upload(file))
+        raw_bytes = await safe_read_upload(file)
+        cache_key = f"links:{hashlib.sha256(raw_bytes).hexdigest()}"
+        cached = RESULT_CACHE.get(cache_key)
+        if cached is not None:
+            return Response(content=cached[0], media_type=cached[1], headers={"X-Cache": "HIT"})
+
+        inp.write_bytes(raw_bytes)
         check_pdf_page_count(inp, "extract-links")
 
         doc = fitz.open(str(inp))
@@ -4613,11 +5496,13 @@ async def extract_links(request: Request, file: UploadFile = File(...)):
                     })
         doc.close()
 
-        return JSONResponse({
+        payload_bytes = json.dumps({
             "success": True,
             "total_links": len(links_found),
             "links": links_found
-        })
+        }).encode("utf-8")
+        RESULT_CACHE.put(cache_key, payload_bytes, "application/json")
+        return Response(content=payload_bytes, media_type="application/json", headers={"X-Cache": "MISS"})
     except HTTPException:
         raise
     except Exception as e:
@@ -4631,12 +5516,143 @@ async def extract_links(request: Request, file: UploadFile = File(...)):
 
 ALLOWED_QUALITY_VALUES = {"screen", "ebook", "printer", "prepress"}
 
+_QUALITY_IMG_CONFIG = {
+    "screen": (96, 52),
+    "ebook": (144, 68),
+    "printer": (210, 80),
+    "prepress": (260, 88),
+}
+
+
+def _recompress_pdf_with_fitz(src: Path, dst: Path, dpi_target: int, jpeg_q: int) -> bool:
+    """
+    In-place vector-preserving PDF compression via PyMuPDF + Pillow:
+    Recompresses large non-alpha embedded raster XObjects, subsets fonts, and strips bloat.
+    Returns True if valid compressed output was written.
+    """
+    import pymupdf as fitz
+    import io as _io
+    from PIL import Image
+
+    doc = fitz.open(str(src))
+    seen_xrefs: set[int] = set()
+    try:
+        for page in doc:
+            for img_info in page.get_images(full=True):
+                xref = img_info[0]
+                smask = img_info[1] if len(img_info) > 1 else 0
+                if xref in seen_xrefs or smask != 0:
+                    continue
+                seen_xrefs.add(xref)
+                try:
+                    extracted = doc.extract_image(xref)
+                    raw_img = extracted.get("image") or b""
+                    if len(raw_img) < 12 * 1024:
+                        continue
+                    pil_img = Image.open(_io.BytesIO(raw_img))
+                    if pil_img.mode not in ("RGB", "L"):
+                        pil_img = pil_img.convert("RGB")
+                    # Compute scale bound relative to target DPI
+                    max_side = int(max(400, dpi_target * 11.5))
+                    if max(pil_img.size) > max_side:
+                        ratio = max_side / max(pil_img.size)
+                        new_sz = (max(32, int(pil_img.width * ratio)), max(32, int(pil_img.height * ratio)))
+                        pil_img = pil_img.resize(new_sz, Image.Resampling.LANCZOS)
+                    buf = _io.BytesIO()
+                    pil_img.save(buf, format="JPEG", quality=jpeg_q, optimize=True)
+                    new_bytes = buf.getvalue()
+                    if 0 < len(new_bytes) < len(raw_img):
+                        page.replace_image(xref, stream=new_bytes)
+                except Exception:
+                    continue
+        try:
+            doc.subset_fonts()
+        except Exception:
+            pass
+        doc.save(str(dst), garbage=4, deflate=True, clean=True)
+        return dst.exists() and dst.stat().st_size > 0
+    finally:
+        doc.close()
+
+
+def _run_best_pdf_compression(inp: Path, out: Path, quality: str, target_kb: int) -> tuple[int, int]:
+    """Run Ghostscript + PyMuPDF vector-preserving compression and pick strictly the smallest output."""
+    orig_size = inp.stat().st_size
+    target_bytes = target_kb * 1024 if target_kb > 0 else 0
+    best_path: Optional[Path] = None
+    best_size = orig_size
+    tmp_candidates: list[Path] = []
+
+    def _consider(candidate: Path):
+        nonlocal best_path, best_size
+        if candidate.exists():
+            sz = candidate.stat().st_size
+            if 0 < sz < best_size:
+                best_size = sz
+                best_path = candidate
+
+    gs_presets = [quality]
+    if target_bytes > 0 and quality != "screen":
+        gs_presets.append("screen")
+
+    dpi_map = {"screen": 96, "ebook": 144, "printer": 220, "prepress": 300}
+    for gs_q in gs_presets:
+        dpi_val = dpi_map.get(gs_q, 144)
+        cand_gs = temp_path("_gs.pdf")
+        tmp_candidates.append(cand_gs)
+        gs_cmd = [
+            "gs", "-dSAFER", "-sDEVICE=pdfwrite", "-dCompatibilityLevel=1.4",
+            f"-dPDFSETTINGS=/{gs_q}", "-dNOPAUSE", "-dQUIET", "-dBATCH",
+            "-dDetectDuplicateImages=true", "-dCompressFonts=true", "-dSubsetFonts=true",
+            "-dDownsampleColorImages=true", f"-dColorImageResolution={dpi_val}",
+            "-dDownsampleGrayImages=true", f"-dGrayImageResolution={dpi_val}",
+            f"-sOutputFile={cand_gs}", str(inp),
+        ]
+        try:
+            subprocess.run(gs_cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=120)
+            _consider(cand_gs)
+            if target_bytes > 0 and best_size <= target_bytes:
+                break
+        except Exception:
+            pass
+
+    # If Ghostscript missing, barely compressed (< 6% reduction), or still above target_bytes -> try PyMuPDF pass
+    needs_fitz = (best_path is None) or (best_size > orig_size * 0.94) or (target_bytes > 0 and best_size > target_bytes)
+    if needs_fitz:
+        dpi_target, jpeg_q = _QUALITY_IMG_CONFIG.get(quality, (144, 68))
+        fitz_passes = [(dpi_target, jpeg_q)]
+        if target_bytes > 0:
+            fitz_passes.extend([(110, 52), (82, 38)])
+        for f_dpi, f_q in fitz_passes:
+            cand_fitz = temp_path("_fitz.pdf")
+            tmp_candidates.append(cand_fitz)
+            try:
+                if _recompress_pdf_with_fitz(inp, cand_fitz, f_dpi, f_q):
+                    _consider(cand_fitz)
+                    if target_bytes > 0 and best_size <= target_bytes:
+                        break
+            except Exception:
+                pass
+
+    if best_path is not None and best_path.exists():
+        shutil.copyfile(str(best_path), str(out))
+    else:
+        # Never return a bigger PDF than input
+        shutil.copyfile(str(inp), str(out))
+
+    for p in tmp_candidates:
+        cleanup(p)
+
+    return orig_size, out.stat().st_size
+
+
 @app.post("/compress-pdf")
 @limiter.limit("15/minute")
 async def compress_pdf(
     request: Request,
     file: UploadFile = File(...),
-    quality: str = Form("ebook")   # screen | ebook | printer | prepress
+    quality: str = Form("ebook"),  # screen | ebook | printer | prepress
+    target_kb: int = Form(0),
 ):
     if quality not in ALLOWED_QUALITY_VALUES:
         quality = "ebook"
@@ -4647,25 +5663,22 @@ async def compress_pdf(
         inp.write_bytes(await safe_read_upload(file))
         check_pdf_page_count(inp, "compress-pdf")
 
-        gs_cmd = [
-            "gs", "-dSAFER", "-sDEVICE=pdfwrite", "-dCompatibilityLevel=1.4",
-            f"-dPDFSETTINGS=/{quality}", "-dNOPAUSE", "-dQUIET",
-            "-dBATCH", f"-sOutputFile={out}", str(inp)
-        ]
-        try:
-            subprocess.run(gs_cmd, check=True, stdout=subprocess.DEVNULL,
-                           stderr=subprocess.DEVNULL, timeout=120)
-        except Exception:
-            import fitz
-            doc = fitz.open(inp)
-            doc.save(str(out), garbage=4, deflate=True, clean=True)
-            doc.close()
+        orig_bytes, out_bytes = await run_in_threadpool(
+            _run_best_pdf_compression, inp, out, quality, max(0, int(target_kb or 0))
+        )
 
         stem = safe_filename(file.filename, "document")
         out_name = "compressed_" + stem
-        return FileResponse(str(out), media_type="application/pdf",
-                            filename=out_name,
-                            background=BackgroundTask(cleanup, inp, out))
+        return FileResponse(
+            str(out),
+            media_type="application/pdf",
+            filename=out_name,
+            headers={
+                "X-Orig-Bytes": str(orig_bytes),
+                "X-Compressed-Bytes": str(out_bytes),
+            },
+            background=BackgroundTask(cleanup, inp, out),
+        )
     except HTTPException:
         cleanup(inp, out)
         raise
@@ -4678,7 +5691,14 @@ async def compress_pdf(
 
 @app.post("/extract-tables")
 @limiter.limit("10/minute")
-async def extract_tables(request: Request, file: UploadFile = File(...)):
+async def extract_tables(
+    request: Request,
+    file: UploadFile = File(...),
+    strict_local: bool = Form(False),
+    ai_provider: str = Form("auto"),
+    ai_api_key: Optional[str] = Form(None),
+    lang: str = Form("auto"),
+):
     try:
         import camelot, pandas as pd
     except ImportError:
@@ -4687,31 +5707,45 @@ async def extract_tables(request: Request, file: UploadFile = File(...)):
     inp = temp_path(".pdf")
     out = temp_path(".xlsx")
     try:
-        inp.write_bytes(await safe_read_upload(file))
+        raw_bytes = await safe_read_upload(file)
+        inp, was_image = normalize_input_to_pdf(raw_bytes, file.filename, inp)
         check_pdf_page_count(inp, "extract-tables")
+        eff_strict = _form_bool(strict_local, False)
+        eff_provider = _form_str(ai_provider, "auto") or "auto"
+        raw_ai_key = _form_str(ai_api_key, None)
+        eff_lang = _form_str(lang, "auto") or "auto"
+        eff_strict = eff_strict or not server_ai_quota_ok(request, bool(raw_ai_key and raw_ai_key.strip()), eff_strict)
+        eff_ai_key = None if eff_strict else (raw_ai_key.strip() if raw_ai_key else None)
 
-        if is_pdf_scanned(inp):
-            inp = await ensure_auto_ocr(inp, force=True)
+        if was_image or is_pdf_scanned(inp):
+            _, tables_cnt = await run_in_threadpool(
+                build_exact_xlsx_from_scans, inp, out, eff_lang, 200, eff_ai_key, eff_provider, eff_strict
+            )
+            if tables_cnt == 0 and (not out.exists() or out.stat().st_size < 1500):
+                raise HTTPException(400, "No tables found in this document.")
+        else:
+            tables = None
+            for flavor in ["lattice", "stream"]:
+                try:
+                    t = camelot.read_pdf(str(inp), pages="all", flavor=flavor)
+                    if t and len(t) > 0:
+                        tables = t
+                        break
+                except Exception:
+                    continue
 
-        tables = None
-        for flavor in ["lattice", "stream"]:
-            try:
-                t = camelot.read_pdf(str(inp), pages="all", flavor=flavor)
-                if t and len(t) > 0:
-                    tables = t
-                    break
-            except Exception:
-                continue
-
-        if not tables:
-            raise HTTPException(400, "No tables found in this PDF.")
-
-        with pd.ExcelWriter(str(out), engine="openpyxl") as writer:
-            for i, table in enumerate(tables):
-                sheet_name = f"Table_{i+1}"[:31]
-                df = table.df
-                # Use first row as header if it looks like one
-                df.to_excel(writer, sheet_name=sheet_name, index=False, header=False)
+            if not tables:
+                _, tables_cnt = await run_in_threadpool(
+                    build_exact_xlsx_from_scans, inp, out, eff_lang, 200, eff_ai_key, eff_provider, eff_strict
+                )
+                if tables_cnt == 0 and (not out.exists() or out.stat().st_size < 1500):
+                    raise HTTPException(400, "No tables found in this PDF.")
+            else:
+                with pd.ExcelWriter(str(out), engine="openpyxl") as writer:
+                    for i, table in enumerate(tables):
+                        sheet_name = f"Table_{i+1}"[:31]
+                        df = table.df
+                        df.to_excel(writer, sheet_name=sheet_name, index=False, header=False)
 
         stem = safe_filename(file.filename, "document")
         out_name = "tables_" + Path(stem).stem + ".xlsx"
@@ -4744,7 +5778,7 @@ async def extract_images(request: Request, file: UploadFile = File(...)):
         inp.write_bytes(await safe_read_upload(file))
         check_pdf_page_count(inp, "extract-images")
 
-        import fitz
+        import pymupdf as fitz
         doc = fitz.open(inp)
         count = 0
         seen_xrefs = set()  # deduplicate images appearing on multiple pages
@@ -4808,7 +5842,7 @@ async def search_replace(
         inp.write_bytes(await safe_read_upload(file))
         check_pdf_page_count(inp, "search-replace")
 
-        import fitz
+        import pymupdf as fitz
         doc = fitz.open(inp)
         match_count = 0
 
@@ -4907,7 +5941,7 @@ async def ocr_analyze(request: Request, file: UploadFile = File(...)):
         inp.write_bytes(await safe_read_upload(file))
         check_pdf_page_count(inp, "ocr-analyze")
 
-        import fitz
+        import pymupdf as fitz
         doc = fitz.open(inp)
         pages_data = []
         total_chars = 0
@@ -4938,12 +5972,12 @@ async def ocr_page_words(
     request: Request,
     file: UploadFile = File(...),
     page: int = Form(0),
-    lang: str = Form("hin+eng"),
+    lang: str = Form("auto"),
 ):
     """
     Fast single-page word-level OCR endpoint for the Advanced PDF Editor.
-    Uses hybrid RapidOCR (ONNX PP-OCRv4) + OpenCV watermark/illumination cleaner + Tesseract TSV
-    so scanned/colored cards (like Aadhaar with Hindi+English) produce accurate clickable word boxes.
+    Uses hybrid RapidOCR (ONNX PP-OCRv4) + OpenCV watermark/illumination cleaner + global Tesseract TSV
+    so scanned/colored documents in any script produce accurate clickable word boxes.
     Coordinates returned are in CropBox-relative top-left PDF points (matching pdf.js canvas at scale=1).
     """
     inp = temp_path(".pdf")
@@ -4951,18 +5985,12 @@ async def ocr_page_words(
         inp.write_bytes(await safe_read_upload(file))
         check_pdf_page_count(inp, "ocr-page-words")
 
-        import fitz
+        import pymupdf as fitz
         import cv2
         import numpy as np
-        from ocr_engine import _ocr_page_words, find_devanagari_font
+        from ocr_engine import _ocr_page_words, find_devanagari_font, resolve_ocr_lang
 
-        raw_lang = (lang or "hin+eng").strip().lower()
-        if "hin" in raw_lang and "eng" in raw_lang:
-            norm_lang = "hin+eng"
-        elif "hin" in raw_lang:
-            norm_lang = "hin"
-        else:
-            norm_lang = "eng"
+        norm_lang = resolve_ocr_lang(lang)
 
         doc = fitz.open(str(inp))
         try:
@@ -5010,112 +6038,20 @@ async def ocr_page_words(
             dev_font,
         )
 
-        sx = page_w / float(pix.width)
-        sy = page_h / float(pix.height)
-        ih, iw = img_bgr.shape[:2]
-        words_out = []
-
-        for w in ocr_words:
-            txt = (w.text or "").strip()
-            if not txt:
-                continue
-            ix0 = max(0, min(iw - 1, int(round(w.x0))))
-            iy0 = max(0, min(ih - 1, int(round(w.y0))))
-            ix1 = max(ix0 + 1, min(iw, int(round(w.x1))))
-            iy1 = max(iy0 + 1, min(ih, int(round(w.y1))))
-            bw_px = ix1 - ix0
-            bh_px = iy1 - iy0
-            if bw_px < 2 or bh_px < 2:
-                continue
-
-            # Sample foreground ink color from darkest pixels inside the box
-            fg_hex = "#000000"
-            patch = img_bgr[iy0:iy1, ix0:ix1]
-            if patch.size > 0:
-                lum_patch = 0.114 * patch[:, :, 0] + 0.587 * patch[:, :, 1] + 0.299 * patch[:, :, 2]
-                flat_lum = lum_patch.reshape(-1)
-                flat_bgr = patch.reshape(-1, 3)
-                k_dark = max(1, len(flat_lum) // 10)
-                dark_idx = np.argpartition(flat_lum, k_dark - 1)[:k_dark]
-                fg_bgr = np.median(flat_bgr[dark_idx], axis=0)
-                fg_b, fg_g, fg_r = int(round(fg_bgr[0])), int(round(fg_bgr[1])), int(round(fg_bgr[2]))
-                fg_hex = f"#{fg_r:02x}{fg_g:02x}{fg_b:02x}"
-
-            # Sample background color from outer margin strips (preserving tinted ID/card paper!)
-            bg_hex = "#ffffff"
-            pad_px = max(3, int(round(bh_px * 0.28)))
-            samples_bgr = []
-            if ix0 - pad_px >= 0:
-                left_strip = img_bgr[iy0:iy1, max(0, ix0 - pad_px):ix0]
-                if left_strip.size > 0:
-                    samples_bgr.append(left_strip.reshape(-1, 3))
-            if ix1 + pad_px <= iw:
-                right_strip = img_bgr[iy0:iy1, ix1:min(iw, ix1 + pad_px)]
-                if right_strip.size > 0:
-                    samples_bgr.append(right_strip.reshape(-1, 3))
-            if not samples_bgr:
-                rx0 = max(0, ix0 - pad_px)
-                ry0 = max(0, iy0 - pad_px)
-                rx1 = min(iw, ix1 + pad_px)
-                ry1 = min(ih, iy1 + pad_px)
-                ring_all = img_bgr[ry0:ry1, rx0:rx1]
-                if ring_all.size > 0:
-                    samples_bgr.append(ring_all.reshape(-1, 3))
-
-            if samples_bgr:
-                ring_px = np.vstack(samples_bgr)
-                lum_ring = 0.114 * ring_px[:, 0] + 0.587 * ring_px[:, 1] + 0.299 * ring_px[:, 2]
-                bright_mask = lum_ring >= float(np.percentile(lum_ring, 65))
-                bright_px = ring_px[bright_mask] if np.any(bright_mask) else ring_px
-                bg_bgr = np.median(bright_px, axis=0)
-                bg_b, bg_g, bg_r = int(round(bg_bgr[0])), int(round(bg_bgr[1])), int(round(bg_bgr[2]))
-                lum_b = 0.299 * bg_r + 0.587 * bg_g + 0.114 * bg_b
-                chroma_b = max(bg_r, bg_g, bg_b) - min(bg_r, bg_g, bg_b)
-                if lum_b >= 242 or (chroma_b <= 22 and lum_b >= 195):
-                    bg_hex = "#ffffff"
-                else:
-                    bg_hex = f"#{bg_r:02x}{bg_g:02x}{bg_b:02x}"
-
-            x_pt = round(w.x0 * sx, 2)
-            y_pt = round(w.y0 * sy, 2)
-            w_pt = round(max(1.0, (w.x1 - w.x0) * sx), 2)
-            h_pt = round(max(2.0, (w.y1 - w.y0) * sy), 2)
-            # Tight OCR ink boxes cover ascender/cap-to-baseline (~0.76*em) OR upper matra + body (~0.98*em)
-            # OR descenders/lower matras (`gjpqy`, `ुूृ्`). Compute accurate typographic em size & baseline:
-            has_descender = any(c in "gjpqy" for c in txt) or any(c in "\u0941\u0942\u0943" for c in txt)
-            has_dev_upper = ("\u0930\u094D" in txt) or any(c in "\u093F\u0940\u0947\u0948\u094B\u094C\u0902\u0901\u0945\u0949" for c in txt)
-            if has_descender and has_dev_upper:
-                em_divisor = 1.20
-                base_frac = 0.78
-            elif has_descender:
-                em_divisor = 0.96
-                base_frac = 0.78
-            elif has_dev_upper:
-                em_divisor = 0.98
-                base_frac = 0.95
-            else:
-                em_divisor = 0.76
-                base_frac = 0.95
-            font_sz = round(max(4.0, min(160.0, h_pt / em_divisor)), 1)
-            base_pt = round(y_pt + h_pt * base_frac, 2)
-
-            words_out.append({
-                "text": txt,
-                "x": x_pt,
-                "y": y_pt,
-                "w": w_pt,
-                "h": h_pt,
-                "fontSize": font_sz,
-                "baseline": base_pt,
-                "fgColor": fg_hex,
-                "bgColor": bg_hex,
-            })
+        from vision_reconstructor import build_lines_and_paragraphs, ocr_words_to_editor_blocks
+        words_out = [
+            {k: v for k, v in b.items() if k != "conf"}
+            for b in ocr_words_to_editor_blocks(img_bgr, ocr_words, page_w, page_h)
+        ]
+        lines_out, paragraphs_out = build_lines_and_paragraphs(words_out)
 
         return JSONResponse({
             "page": page,
             "pageWidth": round(page_w, 2),
             "pageHeight": round(page_h, 2),
             "words": words_out,
+            "lines": lines_out,
+            "paragraphs": paragraphs_out,
         })
     except HTTPException:
         raise
@@ -5159,7 +6095,7 @@ async def remove_watermark(
         # Clamp bottom_percentage to a safe range
         bottom_pct = max(1.0, min(float(bottom_percentage), 40.0))
 
-        import fitz  # PyMuPDF — already a project dependency
+        import pymupdf as fitz  # PyMuPDF — already a project dependency
 
         doc = fitz.open(str(inp))
 
@@ -5607,6 +6543,7 @@ async def print_drop_upload(
     sender_device_id: str = Form(""),
     job_id: str = Form(""),
     device_label: str = Form(""),
+    enc_meta: str = Form(""),
 ):
     """
     Zero-RAM disk streaming relay:
@@ -5677,14 +6614,16 @@ async def print_drop_upload(
 
     safe_label = re.sub(r"[\x00-\x1f\x7f<>]", "", (device_label or "Mobile Phone").strip())[:32] or "Mobile Phone"
     safe_doc_name = safe_filename(file.filename, "Document.pdf")
+    clean_enc_meta = re.sub(r"[^A-Za-z0-9\-_]", "", (enc_meta or "").strip())[:4096]
 
-    # Lightweight metadata (< 250 bytes in RAM)
+    # Lightweight metadata (< 250 bytes in RAM; encrypted metadata keeps original filename hidden)
     job = {
         "id": final_job_id,
         "tokenNum": room_token,
         "senderDeviceId": clean_device_id,
         "deviceLabel": safe_label,
         "name": safe_doc_name,
+        "encMeta": clean_enc_meta,
         "size": total_size,
         "type": mime,
         "fileUrl": f"/api/print-drop/file/{clean_session}/{final_job_id}",
@@ -5758,277 +6697,265 @@ async def print_drop_download_file(request: Request, session_id: str, job_id: st
     )
 
 
-# ─── 16. Deep-Tech DocForensics: Tamper & Forgery Inspector ────────────────
+@app.delete("/api/print-drop/session/{session_id}")
+@limiter.limit("20/minute")
+async def print_drop_purge_session(request: Request, session_id: str):
+    """Immediately destroy a counter station room and wipe all spooled files on demand."""
+    clean_session = re.sub(r"[^A-Z0-9]", "", session_id.strip().upper())
+    expected_hash = _get_room_secret_hash(clean_session)
+    if not expected_hash:
+        return {"success": True, "purged": False}
+    provided = _extract_room_token(request)
+    if not provided or not hmac.compare_digest(_hash_room_token(provided), expected_hash):
+        raise HTTPException(status_code=403, detail="Unauthorized: Invalid room token")
 
-SUSPICIOUS_PRODUCERS = [
-    "canva", "photoshop", "illustrator", "coreldraw", "gimp", "sejda",
-    "ilovepdf", "pdfescape", "smallpdf", "inkscape", "pdf24", "phantompdf",
-    "nitro", "wondershare", "foxit phantom"
-]
+    PRINT_DROP_ROOMS.pop(clean_session, None)
+    PRINT_DROP_ROOM_TIMESTAMPS.pop(clean_session, None)
+    PRINT_DROP_ROOM_TOKENS.pop(clean_session, None)
+    PRINT_DROP_DEVICE_TOKENS.pop(clean_session, None)
+    PRINT_DROP_ROOM_SECRETS.pop(clean_session, None)
+    session_folder = PRINT_DROP_SPOOL_DIR / clean_session
+    if session_folder.exists():
+        shutil.rmtree(session_folder, ignore_errors=True)
+    return {"success": True, "purged": True, "session_id": clean_session}
+
+
+# ─── 16. Deep-Tech Forensic, Vectorizer & Contract Engines ─────────────────
 
 @app.post("/analyze/forensics")
 @limiter.limit("20/minute")
 async def analyze_forensics(request: Request, file: UploadFile = File(...)):
     """
-    Forensic deep-inspection of PDF for tampering, forgery, whiteout attacks,
-    font inconsistencies, incremental update revisions, and metadata anomalies.
+    Deep multimodal forensic inspection of PDFs & raster image scans:
+      - SHA-256 checksum & editing-tool EXIF/XMP fingerprinting
+      - Cryptographic /Sig ByteRange coverage & incremental XRef revisions
+      - Whiteout mask detection with concealed underlying text X-Ray recovery
+      - Inline font splicing, baseline vertical jitter & text-over-scan detection
+      - Real JPEG Error Level Analysis (ELA) heatmap & splice hotspot detection
     """
-    inp = temp_path(".pdf")
+    from deep_tech_engine import analyze_forensics_deep, IMAGE_EXTENSIONS
+
+    inp = None
     try:
-        inp.write_bytes(await safe_read_upload(file))
-        check_pdf_page_count(inp, "analyze-forensics")
+        raw_bytes = await safe_read_upload(file)
+        fname = file.filename or "Document.pdf"
+        ext = Path(fname).suffix.lower()
+        is_img = ext in IMAGE_EXTENSIONS or raw_bytes[:3] == b"\xff\xd8\xff" or raw_bytes[:8] == b"\x89PNG\r\n\x1a\n"
+        if not is_img:
+            inp = temp_path(".pdf")
+            inp.write_bytes(raw_bytes)
+            check_pdf_page_count(inp, "analyze-forensics")
+            cleanup(inp)
+            inp = None
 
-        import fitz
-        from collections import Counter
-
-        doc = fitz.open(str(inp))
-        anomalies = []
-        tamper_points = 0
-
-        # 1. METADATA & REVISION AUDIT (Document-Level Anomalies: bbox=None to avoid fake boxes on page text)
-        meta = doc.metadata or {}
-        producer = (meta.get("producer") or "").strip().lower()
-        creator = (meta.get("creator") or "").strip().lower()
-        creation_date = (meta.get("creationDate") or "").strip()
-        mod_date = (meta.get("modDate") or "").strip()
-
-        suspicious_tool = None
-        for sp in SUSPICIOUS_PRODUCERS:
-            if sp in producer or sp in creator:
-                suspicious_tool = sp.title()
-                break
-
-        meta_audit = {
-            "producer": meta.get("producer") or "Not Specified",
-            "creator": meta.get("creator") or "Not Specified",
-            "creation_date": creation_date or "Unknown",
-            "mod_date": mod_date or "Unknown",
-            "is_encrypted": doc.is_encrypted,
-            "is_repaired": doc.is_repaired,
-            "page_count": len(doc),
-            "software_warning": None,
-            "revision_warning": None,
-        }
-
-        if suspicious_tool:
-            tamper_points += 25
-            warning_msg = f"Document traces indicate graphic design software ({suspicious_tool}). Official banking/legal documents are generated via automated enterprise systems."
-            meta_audit["software_warning"] = warning_msg
-            anomalies.append({
-                "id": "anom_meta_tool",
-                "page": 0,
-                "type": "GRAPHIC_EDITOR_METADATA",
-                "title": f"Editing Software Detected: {suspicious_tool}",
-                "description": warning_msg,
-                "bbox": None,
-                "severity": "HIGH",
-            })
-
-        # Incremental XRef / Trailer check (indicates post-generation edits)
-        try:
-            raw_bytes = inp.read_bytes()
-            startxref_count = len(re.findall(rb"startxref", raw_bytes))
-            if startxref_count > 1:
-                tamper_points += 15
-                rev_msg = f"Document contains {startxref_count} incremental revisions. Content was modified and re-saved on top of the original stream."
-                meta_audit["revision_warning"] = rev_msg
-                anomalies.append({
-                    "id": "anom_incremental_update",
-                    "page": 0,
-                    "type": "INCREMENTAL_REVISION",
-                    "title": f"Multiple Revisions Detected ({startxref_count} Saves)",
-                    "description": rev_msg,
-                    "bbox": None,
-                    "severity": "HIGH",
-                })
-        except Exception:
-            pass
-
-        # 2. PAGE LEVEL DEEP FORENSICS AUDIT
-        for p_idx in range(len(doc)):
-            page = doc[p_idx]
-            page_rect = page.rect
-            pw, ph = page_rect.width, page_rect.height
-
-            # Detect if page is a scanned document (contains a large background image)
-            img_info_list = page.get_image_info()
-            has_bg_scan = any(
-                fitz.Rect(info["bbox"]).width > pw * 0.65 and fitz.Rect(info["bbox"]).height > ph * 0.65
-                for info in img_info_list
-            )
-
-            # A. ANNOTATIONS & FREETEXT LAYERS (Acrobat / Editor 'Add Text' / Whiteout Boxes)
-            for annot in page.annots():
-                a_rect = annot.rect
-                a_type = annot.type[1] if isinstance(annot.type, tuple) else str(annot.type)
-                a_info = annot.info or {}
-                a_content = (a_info.get("content") or "").strip()
-
-                if a_type in ("FreeText", "Square", "Stamp", "Ink", "Redact", "Text"):
-                    tamper_points += 30
-                    anomalies.append({
-                        "id": f"anom_annot_p{p_idx+1}_{len(anomalies)}",
-                        "page": p_idx + 1,
-                        "type": f"ANNOTATION_{a_type.upper()}",
-                        "title": f"Injected {a_type} Layer (p.{p_idx+1})",
-                        "description": f"External {a_type} object added post-generation: '{a_content[:40]}'. Frequently used in PDF editors to modify numbers or cover original text.",
-                        "bbox": [round(a_rect.x0, 1), round(a_rect.y0, 1), round(a_rect.x1, 1), round(a_rect.y1, 1)],
-                        "severity": "CRITICAL",
-                    })
-
-            # B. VECTOR WHITEOUT / PATCH BOXES
-            drawings = page.get_drawings()
-            for d in drawings:
-                fill = d.get("fill")
-                if fill is not None:
-                    if isinstance(fill, (list, tuple)):
-                        is_white = all(c >= 0.93 for c in fill[:3])
-                    elif isinstance(fill, (int, float)):
-                        is_white = fill >= 0.93
-                    else:
-                        is_white = False
-
-                    if is_white and d.get("rect"):
-                        r = d["rect"]
-                        # Filter out whole page background canvas
-                        if (r.width < pw * 0.92 or r.height < ph * 0.92) and r.width > 8 and r.height > 6:
-                            tamper_points += 35
-                            anomalies.append({
-                                "id": f"anom_whiteout_p{p_idx+1}_{len(anomalies)}",
-                                "page": p_idx + 1,
-                                "type": "WHITEOUT_MASK_TAMPER",
-                                "title": f"Whiteout Patch Box (p.{p_idx+1})",
-                                "description": f"Opaque white vector rectangle ({round(r.width)}x{round(r.height)}pt) concealing background content. Typical indicator of erased figures/dates.",
-                                "bbox": [round(r.x0, 1), round(r.y0, 1), round(r.x1, 1), round(r.y1, 1)],
-                                "severity": "CRITICAL",
-                            })
-
-            # C. SPLICED SECONDARY IMAGE PATCHES (Signatures / Rubber Stamps / Photos)
-            if has_bg_scan and len(img_info_list) > 1:
-                for info in img_info_list:
-                    ibox = fitz.Rect(info["bbox"])
-                    if ibox.width < pw * 0.8 and ibox.height < ph * 0.8 and (ibox.width * ibox.height) > 150:
-                        tamper_points += 25
-                        anomalies.append({
-                            "id": f"anom_imgpatch_p{p_idx+1}_{len(anomalies)}",
-                            "page": p_idx + 1,
-                            "type": "SPLICED_IMAGE_LAYER",
-                            "title": f"Overlaid Image Patch (p.{p_idx+1})",
-                            "description": f"Secondary image ({round(ibox.width)}x{round(ibox.height)}pt) pasted on top of document scan. Common in forged signatures, stamps, and altered photos.",
-                            "bbox": [round(ibox.x0, 1), round(ibox.y0, 1), round(ibox.x1, 1), round(ibox.y1, 1)],
-                            "severity": "HIGH",
-                        })
-
-            # D. TEXT SPAN EXTRACTION & OVERWRITE / COLLISION ANALYSIS
-            blocks = page.get_text("dict", flags=fitz.TEXT_PRESERVE_WHITESPACE).get("blocks", [])
-            spans_list = []
-            for b in blocks:
-                if b.get("type") == 0:
-                    for line in b.get("lines", []):
-                        for span in line.get("spans", []):
-                            txt = span.get("text", "").strip()
-                            if txt:
-                                spans_list.append(span)
-
-            # Check if vector text is typed directly over a scanned raster document
-            if has_bg_scan and spans_list:
-                # Scanned PDFs have text in pixels; vector text typed on top is a spliced edit
-                for s in spans_list:
-                    s_text = s.get("text", "").strip()
-                    if len(s_text) > 1 and re.search(r"[\d\w]", s_text):
-                        tamper_points += 20
-                        s_bbox = s.get("bbox", [0, 0, 0, 0])
-                        anomalies.append({
-                            "id": f"anom_vectorscan_p{p_idx+1}_{len(anomalies)}",
-                            "page": p_idx + 1,
-                            "type": "SPLICED_VECTOR_ON_SCAN",
-                            "title": f"Spliced Text on Scan: '{s_text[:25]}'",
-                            "description": f"Vector computer font text '{s_text}' injected directly over scanned document raster image.",
-                            "bbox": [round(s_bbox[0], 1), round(s_bbox[1], 1), round(s_bbox[2], 1), round(s_bbox[3], 1)],
-                            "severity": "CRITICAL",
-                        })
-
-            # Check for overlapping text collisions (typing new text over old without deleting)
-            for i in range(len(spans_list)):
-                r1 = fitz.Rect(spans_list[i].get("bbox", [0, 0, 0, 0]))
-                t1 = spans_list[i].get("text", "").strip()
-                for j in range(i + 1, min(i + 15, len(spans_list))):
-                    r2 = fitz.Rect(spans_list[j].get("bbox", [0, 0, 0, 0]))
-                    t2 = spans_list[j].get("text", "").strip()
-                    inter = r1 & r2
-                    if inter.width > 4 and inter.height > 4 and t1 != t2:
-                        tamper_points += 25
-                        anomalies.append({
-                            "id": f"anom_collision_p{p_idx+1}_{len(anomalies)}",
-                            "page": p_idx + 1,
-                            "type": "OVERWRITTEN_TEXT_COLLISION",
-                            "title": f"Overwritten Text Collision (p.{p_idx+1})",
-                            "description": f"Text '{t2[:20]}' collides with underlying '{t1[:20]}'.",
-                            "bbox": [round(inter.x0, 1), round(inter.y0, 1), round(inter.x1, 1), round(inter.y1, 1)],
-                            "severity": "CRITICAL",
-                        })
-
-            # Check for in-line font family splicing in numeric / critical fields
-            for b in blocks:
-                if b.get("type") == 0:
-                    for line in b.get("lines", []):
-                        line_spans = [s for s in line.get("spans", []) if s.get("text", "").strip()]
-                        if len(line_spans) > 1:
-                            # Count fonts in this specific line
-                            line_fonts = Counter(s.get("font", "") for s in line_spans)
-                            dom_font, dom_cnt = line_fonts.most_common(1)[0]
-                            if dom_cnt >= 2:
-                                for s in line_spans:
-                                    s_font = s.get("font", "")
-                                    s_text = s.get("text", "").strip()
-                                    # If font differs within same line and contains digits
-                                    if s_font != dom_font and re.search(r"\d", s_text):
-                                        tamper_points += 15
-                                        s_bbox = s.get("bbox", [0, 0, 0, 0])
-                                        anomalies.append({
-                                            "id": f"anom_font_p{p_idx+1}_{len(anomalies)}",
-                                            "page": p_idx + 1,
-                                            "type": "FONT_MISMATCH_ANOMALY",
-                                            "title": f"In-Line Font Splicing on '{s_text[:20]}'",
-                                            "description": f"Numeric field '{s_text}' is rendered with font '{s_font}' while surrounding line uses '{dom_font}'.",
-                                            "bbox": [round(s_bbox[0], 1), round(s_bbox[1], 1), round(s_bbox[2], 1), round(s_bbox[3], 1)],
-                                            "severity": "HIGH",
-                                        })
-        doc.close()
-
-        # Score & Risk Calculation
-        final_score = min(100, tamper_points)
-        if final_score >= 60:
-            risk_level = "CRITICAL"
-            verdict = "High probability of document modification or artificial tampering."
-        elif final_score >= 35:
-            risk_level = "HIGH"
-            verdict = "Significant anomalies detected. Manual verification strongly recommended."
-        elif final_score >= 15:
-            risk_level = "MEDIUM"
-            verdict = "Minor formatting or font variance found. Possible non-standard PDF generation."
-        else:
-            risk_level = "LOW"
-            verdict = "Document appears consistent with standard automated output. No obvious vector tampering detected."
-
-        return JSONResponse({
-            "success": True,
-            "filename": file.filename or "Document.pdf",
-            "tamper_score": final_score,
-            "risk_level": risk_level,
-            "verdict": verdict,
-            "metadata_audit": meta_audit,
-            "total_anomalies": len(anomalies),
-            "anomalies": anomalies,
-        })
+        result = await asyncio.to_thread(analyze_forensics_deep, raw_bytes, fname)
+        return JSONResponse(result)
     except HTTPException:
-        cleanup(inp)
+        if inp:
+            cleanup(inp)
         raise
     except Exception as e:
-        cleanup(inp)
+        if inp:
+            cleanup(inp)
         raise safe_error(e, "analyze-forensics")
 
 
+@app.post("/convert/true-vector-4k")
+@limiter.limit("20/minute")
+async def convert_true_vector_4k(
+    request: Request,
+    file: UploadFile = File(...),
+    mode: str = Form("adaptive_4k"),
+    color_mode: str = Form("color"),
+    sharpness: float = Form(1.6),
+    paper_whitening: int = Form(212),
+    ink_darkness: int = Form(75),
+    color_vibrance: int = Form(130),
+    shadow_removal: int = Form(85),
+    dpi_target: int = Form(280),
+    page_num: int = Form(1),
+    include_ocr: bool = Form(False),
+    output_format: str = Form("json_bundle"),
+):
+    """
+    Deep-Tech TrueVector 4K Engine:
+      - Morphological LAB shadow/illumination normalization & bilateral denoising
+      - Authentic colored ink / stamp separation & adaptive 4K sharpening
+      - Mathematical OpenCV RETR_CCOMP Cubic Bezier SVG & native Vector PDF tracing
+      - Optional RapidOCR searchable invisible text layer
+    """
+    from deep_tech_engine import process_true_vector_4k, IMAGE_EXTENSIONS
+
+    inp = None
+    try:
+        raw_bytes = await safe_read_upload(file)
+        fname = file.filename or "scan.pdf"
+        ext = Path(fname).suffix.lower()
+        is_img = ext in IMAGE_EXTENSIONS or raw_bytes[:3] == b"\xff\xd8\xff" or raw_bytes[:8] == b"\x89PNG\r\n\x1a\n"
+        if not is_img:
+            inp = temp_path(".pdf")
+            inp.write_bytes(raw_bytes)
+            check_pdf_page_count(inp, "true-vector-4k")
+            cleanup(inp)
+            inp = None
+
+        res = await asyncio.to_thread(
+            process_true_vector_4k,
+            raw_bytes,
+            fname,
+            mode=mode,
+            color_mode=color_mode,
+            sharpness=float(sharpness),
+            paper_whitening=int(paper_whitening),
+            ink_darkness=int(ink_darkness),
+            color_vibrance=int(color_vibrance),
+            shadow_removal=int(shadow_removal),
+            dpi_target=int(dpi_target),
+            page_num=int(page_num),
+            include_ocr=bool(include_ocr),
+            output_format=output_format,
+        )
+
+        if output_format in ("svg", "pdf"):
+            return Response(
+                content=res["bytes"],
+                media_type=res["content_type"],
+                headers={
+                    "X-Vector-Paths": str(res.get("path_count", 0)),
+                    "X-Bezier-Nodes": str(res.get("bezier_nodes", 0)),
+                    "X-Ocr-Words": str(res.get("ocr_words", 0)),
+                },
+            )
+        return JSONResponse(res)
+    except HTTPException:
+        if inp:
+            cleanup(inp)
+        raise
+    except Exception as e:
+        if inp:
+            cleanup(inp)
+        raise safe_error(e, "true-vector-4k")
 
 
+@app.post("/analyze/contract-redline")
+@limiter.limit("20/minute")
+async def analyze_contract_redline_endpoint(
+    request: Request,
+    file: UploadFile = File(...),
+    use_ai: bool = Form(True),
+):
+    """
+    Deep-Tech Contract Trap Redliner:
+      - 14+ comprehensive legal/financial risk patterns & missing safeguard checks
+      - Automatic RapidOCR fallback for scanned stamp papers & image agreements
+      - Exact PDF coordinate bounding-box extraction for clause-level highlighting
+      - Optional server-side Gemini semantic deep audit (budget & quota protected)
+    """
+    from deep_tech_engine import analyze_contract_redline_deep
+
+    inp = temp_path(".pdf")
+    try:
+        raw_bytes = await safe_read_upload(file)
+        inp.write_bytes(raw_bytes)
+        check_pdf_page_count(inp, "contract-redline")
+        cleanup(inp)
+        inp = None
+
+        quota_ok = bool(use_ai) and server_ai_quota_ok(request, user_key_supplied=False, strict_local=False)
+        res = await asyncio.to_thread(
+            analyze_contract_redline_deep,
+            raw_bytes,
+            file.filename or "Agreement.pdf",
+            use_ai=bool(use_ai),
+            ai_quota_ok=quota_ok,
+        )
+        return JSONResponse(res)
+    except HTTPException:
+        if inp:
+            cleanup(inp)
+        raise
+    except Exception as e:
+        if inp:
+            cleanup(inp)
+        raise safe_error(e, "contract-redline")
+
+
+@app.get("/vision/status")
+async def vision_status():
+    """
+    Lightweight status check reporting whether enhanced document processing is available.
+    Returns capability booleans only; never exposes internal provider details or credentials.
+    """
+    from ai_vision_refiner import get_server_vision_status
+
+    return JSONResponse(get_server_vision_status())
+
+
+@app.post("/vision/assist")
+@limiter.limit("30/minute")
+async def vision_assist(request: Request):
+    """
+    Server-side document intelligence helper so browser JS never calls external
+    endpoints directly or exposes credentials or provider details in Network/Console.
+    """
+    from ai_vision_refiner import run_vision_assist_task
+
+    try:
+        raw_bytes = await request.body()
+        if len(raw_bytes) > 12 * 1024 * 1024:
+            raise HTTPException(413, "Vision payload exceeds 12MB limit.")
+        payload = json.loads(raw_bytes.decode("utf-8"))
+        if not isinstance(payload, dict):
+            raise HTTPException(400, "Invalid JSON payload.")
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(400, "Invalid JSON request body.")
+
+    task = str(payload.get("task") or "").strip().lower()
+    if task not in (
+        "document_layout",
+        "text_regions",
+        "table_data",
+        "enhance_text",
+        "polish_paragraphs",
+        "universal_layout",
+        "fix_text",
+        "translate_hi_en",
+        "shorten_text",
+    ):
+        raise HTTPException(400, "Unsupported document assist task.")
+
+    strict_local = bool(payload.get("strict_local", False))
+    provider = str(payload.get("ai_provider") or "auto").strip()
+    user_api_key = payload.get("ai_api_key")
+    if not strict_local and not server_ai_quota_ok(request, bool(user_api_key and str(user_api_key).strip()), strict_local):
+        strict_local = True
+    text_in = str(payload.get("text") or "")
+    if len(text_in) > 20000:
+        raise HTTPException(413, "Text payload too large.")
+    image_b64 = str(payload.get("image_b64") or "")
+    text = str(payload.get("text") or "")
+    paras = payload.get("paras") if isinstance(payload.get("paras"), list) else None
+    lang = str(payload.get("lang") or "auto").strip()
+    try:
+        max_chars = int(payload.get("max_chars") or 0)
+    except (TypeError, ValueError):
+        max_chars = 0
+
+    result = await run_in_threadpool(
+        run_vision_assist_task,
+        task,
+        image_b64=image_b64,
+        text=text,
+        paras=paras,
+        provider=provider,
+        user_api_key=str(user_api_key) if user_api_key else None,
+        strict_local=strict_local,
+        max_chars=max_chars,
+        lang=lang,
+    )
+    if result is None:
+        return JSONResponse({"ok": False, "result": None}, status_code=503)
+    return JSONResponse({"ok": True, "result": result})
 

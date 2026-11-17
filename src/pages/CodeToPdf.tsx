@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { motion, useReducedMotion } from 'motion/react';
-import { FileCode, Download, Copy, Check, Upload, Trash2, RefreshCw, CheckCircle2 } from 'lucide-react';
+import { FileCode, Download, Copy, Check, Upload, Trash2, RefreshCw, CheckCircle2, Eye, Code2 } from 'lucide-react';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import { useSEO } from '../hooks/useSEO';
+import { apiFetch } from '../lib/api';
 import { toArrayBufferBytes } from '../lib/blobUrl';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 import { AnimatedNumber, PearlScanOverlay } from '../components/pearl/PearlMotion';
@@ -489,6 +490,9 @@ export default function CodeToPdf() {
   const [code, setCode]             = useState('');
   const [filename, setFilename]     = useState('untitled');
   const [langId, setLangId]         = useState('auto');
+  const [outputMode, setOutputMode] = useState<'syntax' | 'render-html'>('syntax');
+  const [paperFormat, setPaperFormat] = useState('A4');
+  const [htmlMargin, setHtmlMargin] = useState('1cm');
   const [showLineNums, setShowLineNums] = useState(true);
   const [fontSize, setFontSize]     = useState(9);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -524,8 +528,14 @@ export default function CodeToPdf() {
   const detectedLang = useCallback((): string => {
     if (langId !== 'auto') return langId;
     const ext = filename.split('.').pop()?.toLowerCase() ?? '';
-    return EXT_TO_LANG[ext] ?? 'txt';
-  }, [langId, filename]);
+    if (EXT_TO_LANG[ext]) return EXT_TO_LANG[ext];
+    const trimmed = code.trim();
+    if (/^\s*(<!doctype\s+html|<html|<div|<section|<body|<table|<head|<h[1-6]|<p)\b/i.test(trimmed)) return 'html';
+    if (/^\s*[\[{]/.test(trimmed) && trimmed.includes(':')) return 'json';
+    if (/^\s*(SELECT|INSERT|UPDATE|DELETE|CREATE\s+TABLE)\b/i.test(trimmed)) return 'sql';
+    if (/^\s*(def\s+\w+|import\s+\w+|from\s+\w+\s+import)\b/m.test(trimmed)) return 'py';
+    return 'txt';
+  }, [langId, filename, code]);
 
   const lang = detectedLang();
   const langLabel = LANGUAGES.find(l => l.id === lang)?.label ?? lang;
@@ -582,6 +592,28 @@ export default function CodeToPdf() {
     setError(null);
     setPdfUrlSafe(null);
     try {
+      if (outputMode === 'render-html') {
+        const fd = new FormData();
+        fd.append('html', code);
+        fd.append('paper_format', paperFormat);
+        fd.append('landscape', 'false');
+        fd.append('margin', htmlMargin);
+        fd.append('background', 'true');
+        const res = await apiFetch('/convert/html-to-pdf', {
+          method: 'POST',
+          body: fd,
+          timeoutMs: 90000,
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ detail: 'HTML rendering failed.' }));
+          throw new Error(err.detail || 'HTML rendering failed.');
+        }
+        const blob = await res.blob();
+        if (!mountedRef.current || jobIdRef.current !== myJobId) return;
+        setPdfUrlSafe(URL.createObjectURL(blob));
+        return;
+      }
+
       const blob = await generateCodePdf(code, filename, lang, showLineNums, fontSize);
       if (!mountedRef.current || jobIdRef.current !== myJobId) return;
       setPdfUrlSafe(URL.createObjectURL(blob));
@@ -633,42 +665,97 @@ export default function CodeToPdf() {
 
           {/* Toolbar */}
           <div className="pms-glass-panel rounded-2xl p-3.5 flex flex-wrap items-center gap-3">
-            {/* Language */}
-            <div className="flex items-center gap-2">
-              <label className="text-xs font-semibold text-slate-600 dark:text-slate-400 whitespace-nowrap">Language</label>
-              <select
-                value={langId}
-                onChange={e => setLangId(e.target.value)}
-                className="text-sm px-2.5 py-1.5 border border-[var(--pms-border)] rounded-xl bg-white/90 dark:bg-slate-800 text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-violet-300"
+            {/* Output Mode Switch: Syntax Source vs Rendered Visual HTML */}
+            <div className="inline-flex rounded-xl p-1 bg-white/80 dark:bg-slate-800/80 border border-[var(--pms-border)]">
+              <button
+                type="button"
+                onClick={() => { setOutputMode('syntax'); setPdfUrlSafe(null); setError(null); }}
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-bold rounded-lg transition-colors cursor-pointer ${
+                  outputMode === 'syntax'
+                    ? 'bg-[var(--pms-soft-lavender)] text-[var(--pms-violet)]'
+                    : 'text-slate-600 dark:text-slate-400'
+                }`}
               >
-                {LANGUAGES.map(l => <option key={l.id} value={l.id}>{l.label}</option>)}
-              </select>
-            </div>
-            {/* Font size */}
-            <div className="flex items-center gap-2">
-              <label className="text-xs font-semibold text-slate-600 dark:text-slate-400">Font</label>
-              <select
-                value={fontSize}
-                onChange={e => setFontSize(Number(e.target.value))}
-                className="text-sm px-2.5 py-1.5 border border-[var(--pms-border)] rounded-xl bg-white/90 dark:bg-slate-800 text-slate-900 dark:text-white outline-none"
+                <Code2 className="w-3.5 h-3.5" />
+                Code Syntax
+              </button>
+              <button
+                type="button"
+                onClick={() => { setOutputMode('render-html'); setPdfUrlSafe(null); setError(null); }}
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-bold rounded-lg transition-colors cursor-pointer ${
+                  outputMode === 'render-html'
+                    ? 'bg-[var(--pms-soft-lavender)] text-[var(--pms-violet)]'
+                    : 'text-slate-600 dark:text-slate-400'
+                }`}
               >
-                <option value={7}>7pt (tiny)</option>
-                <option value={8}>8pt (small)</option>
-                <option value={9}>9pt (default)</option>
-                <option value={10}>10pt</option>
-                <option value={11}>11pt (large)</option>
-              </select>
+                <Eye className="w-3.5 h-3.5" />
+                Render HTML
+              </button>
             </div>
-            {/* Line numbers */}
-            <label className="flex items-center gap-1.5 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={showLineNums}
-                onChange={e => setShowLineNums(e.target.checked)}
-                className="rounded accent-violet-600"
-              />
-              <span className="text-xs font-semibold text-slate-600 dark:text-slate-400">Line numbers</span>
-            </label>
+
+            {outputMode === 'syntax' ? (
+              <>
+                {/* Language */}
+                <div className="flex items-center gap-2">
+                  <label className="text-xs font-semibold text-slate-600 dark:text-slate-400 whitespace-nowrap">Language</label>
+                  <select
+                    value={langId}
+                    onChange={e => setLangId(e.target.value)}
+                    className="text-sm px-2.5 py-1.5 border border-[var(--pms-border)] rounded-xl bg-white/90 dark:bg-slate-800 text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-violet-300"
+                  >
+                    {LANGUAGES.map(l => <option key={l.id} value={l.id}>{l.label}</option>)}
+                  </select>
+                </div>
+                {/* Font size */}
+                <div className="flex items-center gap-2">
+                  <label className="text-xs font-semibold text-slate-600 dark:text-slate-400">Font</label>
+                  <select
+                    value={fontSize}
+                    onChange={e => setFontSize(Number(e.target.value))}
+                    className="text-sm px-2.5 py-1.5 border border-[var(--pms-border)] rounded-xl bg-white/90 dark:bg-slate-800 text-slate-900 dark:text-white outline-none"
+                  >
+                    <option value={7}>7pt (tiny)</option>
+                    <option value={8}>8pt (small)</option>
+                    <option value={9}>9pt (default)</option>
+                    <option value={10}>10pt</option>
+                    <option value={11}>11pt (large)</option>
+                  </select>
+                </div>
+                {/* Line numbers */}
+                <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={showLineNums}
+                    onChange={e => setShowLineNums(e.target.checked)}
+                    className="rounded accent-violet-600"
+                  />
+                  <span className="text-xs font-semibold text-slate-600 dark:text-slate-400">Line numbers</span>
+                </label>
+              </>
+            ) : (
+              <>
+                <div className="flex items-center gap-2">
+                  <label className="text-xs font-semibold text-slate-600 dark:text-slate-400">Paper</label>
+                  <select
+                    value={paperFormat}
+                    onChange={e => setPaperFormat(e.target.value)}
+                    className="text-sm px-2.5 py-1.5 border border-[var(--pms-border)] rounded-xl bg-white/90 dark:bg-slate-800 text-slate-900 dark:text-white outline-none"
+                  >
+                    {['A4', 'Letter', 'A3', 'Legal'].map(f => <option key={f}>{f}</option>)}
+                  </select>
+                </div>
+                <div className="flex items-center gap-2">
+                  <label className="text-xs font-semibold text-slate-600 dark:text-slate-400">Margin</label>
+                  <select
+                    value={htmlMargin}
+                    onChange={e => setHtmlMargin(e.target.value)}
+                    className="text-sm px-2.5 py-1.5 border border-[var(--pms-border)] rounded-xl bg-white/90 dark:bg-slate-800 text-slate-900 dark:text-white outline-none"
+                  >
+                    {['0cm', '0.5cm', '1cm', '1.5cm', '2cm'].map(m => <option key={m}>{m}</option>)}
+                  </select>
+                </div>
+              </>
+            )}
             {/* Upload file */}
             <button
               onClick={() => fileRef.current?.click()}
@@ -770,6 +857,14 @@ export default function CodeToPdf() {
             </div>
             <div className="flex-1 overflow-auto p-4 bg-white" style={{ minHeight: '280px' }}>
               {code ? (
+                outputMode === 'render-html' ? (
+                  <iframe
+                    title="Rendered HTML Live Preview"
+                    sandbox=""
+                    srcDoc={code}
+                    className="w-full h-full min-h-[260px] bg-white rounded-xl border border-slate-200"
+                  />
+                ) : (
                 <pre
                   className="text-xs leading-relaxed font-mono text-slate-900"
                   style={{ fontFamily: "'Courier New', Courier, monospace" }}
@@ -798,6 +893,7 @@ export default function CodeToPdf() {
                     );
                   })}
                 </pre>
+                )
               ) : (
                 <div className="h-full min-h-[240px] flex items-center justify-center">
                   <p className="text-xs text-slate-500 text-center">

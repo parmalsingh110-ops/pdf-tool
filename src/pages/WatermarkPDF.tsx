@@ -11,8 +11,9 @@ import { dataUrlToBytes } from '../lib/utils';
 import { useToast } from '../components/Toast';
 import { embedSmartFont } from '../lib/pdfFontHelper';
 import { toArrayBufferBytes } from '../lib/blobUrl';
+import { loadPdfDocumentSafely } from '../lib/pdfLoad';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
-import { PearlScanOverlay, PearlStageSwitch } from '../components/pearl/PearlMotion';
+import { PearlScanOverlay, PearlSpinner, PearlStageSwitch } from '../components/pearl/PearlMotion';
 
 type WatermarkType = 'text' | 'image';
 type Position = 'center' | 'diagonal' | 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' | 'top-center' | 'bottom-center';
@@ -169,7 +170,7 @@ export default function WatermarkPDF() {
     setIsProcessing(true);
     try {
       const ab = await file.arrayBuffer();
-      const pdfDoc = await PDFDocument.load(ab);
+      const { pdfDoc } = await loadPdfDocumentSafely(ab, { fileName: file.name });
       const pages = pdfDoc.getPages();
 
       if (type === 'text') {
@@ -446,8 +447,8 @@ export default function WatermarkPDF() {
             </h3>
             {loadingPreview ? (
               <div className="flex flex-col items-center justify-center h-64 gap-3">
-                <div className="w-8 h-8 border-3 border-sky-400 border-t-transparent rounded-full animate-spin" />
-                <p className="text-xs text-gray-500 dark:text-slate-400">Rendering preview...</p>
+                <PearlSpinner size="md" accent="blue" />
+                <p className="text-xs font-medium text-[var(--pms-muted)]">Rendering preview...</p>
               </div>
             ) : previewThumb ? (
               <div className="rounded-2xl overflow-hidden border border-gray-200 dark:border-slate-700 bg-white shadow-sm p-1">

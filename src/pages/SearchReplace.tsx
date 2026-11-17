@@ -28,7 +28,7 @@ interface SearchMatch {
 export default function SearchReplace() {
   useSEO(
     'Search & Replace in PDF Online Free — Live Visual Vector Text Replacer',
-    'Find and replace text in PDF files with vector quality preservation. Case-sensitive, whole-word matching, PyMuPDF vector engine, and 100% private text replacement.'
+    'Find and replace text in PDF files with vector quality preservation. Case-sensitive, whole-word matching, lossless font preservation, and 100% private text replacement.'
   );
 
   usePageSEO(
@@ -339,7 +339,7 @@ export default function SearchReplace() {
                 Replaced <AnimatedNumber value={matches.length} className="font-bold" /> instance{matches.length > 1 ? 's' : ''} of &ldquo;{searchTerm}&rdquo; with &ldquo;{replaceTerm}&rdquo;.
                 <br />
                 <span className="text-emerald-700 dark:text-emerald-400 font-semibold text-xs mt-1 inline-block">
-                  {engineUsed === 'backend' ? 'Vector quality 100% preserved (PyMuPDF Engine).' : 'Vector quality 100% preserved (pdf-lib Engine).'}
+                  {engineUsed === 'backend' ? 'Vector quality 100% preserved (Precision Server Engine).' : 'Vector quality 100% preserved (Instant Browser Engine).'}
                 </span>
               </p>
             </div>

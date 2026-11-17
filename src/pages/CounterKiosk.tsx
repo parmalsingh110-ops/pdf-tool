@@ -27,6 +27,9 @@ import {
   generateSecretToken,
   encryptBytesWithKey,
   decryptBytesWithKey,
+  isEncryptedEnvelope,
+  encryptJsonWithKey,
+  decryptJsonWithKey,
 } from '../lib/privacy';
 
 interface KioskJob {
@@ -234,6 +237,9 @@ export default function CounterKiosk() {
           const incomingJobs: KioskJob[] = [];
           for (const j of data.jobs) {
             let blobUrl = '';
+            let resolvedName = j.name || 'Document.pdf';
+            let resolvedType = j.type || 'application/pdf';
+            let resolvedSize = j.size || 0;
             try {
               const fileRes = await apiFetch(
                 `/api/print-drop/file/${stationId}/${encodeURIComponent(j.id)}`,
@@ -242,7 +248,16 @@ export default function CounterKiosk() {
               if (fileRes.ok) {
                 const rawBuf = await fileRes.arrayBuffer();
                 const { buffer: plainBuf } = await decryptBytesWithKey(rawBuf, stationE2eeKey);
-                blobUrl = URL.createObjectURL(new Blob([plainBuf], { type: j.type || 'application/pdf' }));
+                if (j.encMeta && stationE2eeKey) {
+                  const meta = await decryptJsonWithKey<{ name?: string; type?: string; size?: number }>(
+                    j.encMeta,
+                    stationE2eeKey
+                  );
+                  if (meta?.name) resolvedName = meta.name;
+                  if (meta?.type) resolvedType = meta.type;
+                  if (typeof meta?.size === 'number' && meta.size > 0) resolvedSize = meta.size;
+                }
+                blobUrl = URL.createObjectURL(new Blob([plainBuf], { type: resolvedType }));
                 queueUrlsRef.current.add(blobUrl);
               }
             } catch {}
@@ -251,8 +266,8 @@ export default function CounterKiosk() {
               tokenNumber: j.tokenNum || j.token_num || 1,
               customerName: j.deviceLabel || j.device_label || `Customer #${j.tokenNum || j.token_num || 1}`,
               phone: j.senderDeviceId && j.senderDeviceId !== 'kiosk_tablet' ? j.senderDeviceId : '',
-              fileName: j.name || 'Document.pdf',
-              fileSize: j.size || 0,
+              fileName: resolvedName,
+              fileSize: resolvedSize,
               fileDataUrl: blobUrl,
               totalPages: 1,
               printType: (j.colorMode || j.color_mode) === 'color' ? 'color' : 'bw',
@@ -318,7 +333,10 @@ export default function CounterKiosk() {
         const buf = await file.arrayBuffer();
         const doc = await pdfjsLib.getDocument({ data: new Uint8Array(buf) }).promise;
         setPageCount(Math.max(1, doc.numPages));
-        try { await doc.destroy(); } catch {}
+        try {
+          await doc.cleanup();
+          await doc.loadingTask?.destroy();
+        } catch {}
       } catch {
         setPageCount(1);
       }
@@ -366,10 +384,20 @@ export default function CounterKiosk() {
       void (async () => {
         try {
           let payloadBlob: Blob = uploadedFile;
+          let uploadFileName = uploadedFile.name;
+          let encMeta = '';
           if (stationE2eeKey) {
             const plainBuf = await uploadedFile.arrayBuffer();
             const encBuf = await encryptBytesWithKey(plainBuf, stationE2eeKey);
+            if (!isEncryptedEnvelope(encBuf)) {
+              throw new Error('AES-256-GCM encryption unavailable in this browser.');
+            }
             payloadBlob = new Blob([encBuf], { type: 'application/octet-stream' });
+            encMeta = await encryptJsonWithKey(
+              { name: uploadedFile.name, type: uploadedFile.type || 'application/pdf', size: uploadedFile.size },
+              stationE2eeKey
+            );
+            uploadFileName = 'sealed_doc.bin';
           }
           const fd = new FormData();
           fd.append('session_id', stationId);
@@ -379,7 +407,8 @@ export default function CounterKiosk() {
           fd.append('copies', String(copies));
           fd.append('color_mode', printType);
           fd.append('orientation', 'auto');
-          fd.append('file', payloadBlob, uploadedFile.name);
+          if (encMeta) fd.append('enc_meta', encMeta);
+          fd.append('file', payloadBlob, uploadFileName);
           await apiFetch('/api/print-drop/upload', {
             method: 'POST',
             body: fd,

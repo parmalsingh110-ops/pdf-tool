@@ -85,12 +85,12 @@ export default function WordToPdfExact() {
   return (
     <ToolWorkspaceShell
       title="Office to PDF"
-      subtitle="Convert Word, Excel, and PowerPoint files to PDF using LibreOffice for 100% exact formatting preservation."
+      subtitle="Convert Word, Excel, and PowerPoint files to PDF with 100% exact layout, font, and table preservation."
       categoryLabel="Convert to PDF"
       icon={FileText}
       microVariant="convert"
       tone="indigo"
-      trustNote="LibreOffice exact layout engine • Files deleted immediately after conversion"
+      trustNote="Exact layout rendering engine • Files deleted immediately after conversion"
     >
       <div className="max-w-3xl mx-auto">
         <PearlStageSwitch stageKey={stage}>
@@ -107,20 +107,20 @@ export default function WordToPdfExact() {
 
           {stage === 'processing' && (
             <div className="pms-glass-panel rounded-3xl p-4 sm:p-6 relative overflow-hidden">
-              <PearlScanOverlay active label="Rendering pixel-perfect PDF via LibreOffice..." />
+              <PearlScanOverlay active label="Rendering pixel-perfect PDF..." />
               <BackendLoader
                 title="Converting to PDF…"
                 accentColor="indigo"
                 steps={[
-                  { icon: '📤', label: 'Uploading', detail: 'Sending your Office file to server...' },
-                  { icon: '📚', label: 'Loading', detail: 'LibreOffice engine initializing...' },
+                  { icon: '📤', label: 'Uploading', detail: 'Sending your Office file securely...' },
+                  { icon: '📚', label: 'Loading', detail: 'Initializing document layout engine...' },
                   { icon: '🖨️', label: 'Rendering', detail: 'Rendering to pixel-perfect PDF...' },
                   { icon: '🎯', label: 'Done', detail: 'Packaging your PDF output...' },
                 ]}
                 tips={[
-                  '📚 LibreOffice preserves 100% of your original formatting.',
+                  '📚 Preserves 100% of your original fonts, margins, and formatting.',
                   '📄 Supports .docx .pptx .xlsx .doc .ppt .xls .odt and more.',
-                  '⚡ Same engine used by enterprise PDF workflows globally.',
+                  '⚡ High-fidelity enterprise conversion pipeline.',
                   '🔒 File is deleted from server immediately after download.',
                   '🎨 Fonts, tables, images — everything rendered precisely.',
                 ]}

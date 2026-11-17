@@ -365,7 +365,7 @@ export default function RemoveWatermark() {
             </h2>
             <p className="text-xs sm:text-sm text-[var(--pms-muted)] mt-1.5">
               {engineUsed === 'backend'
-                ? 'Processed with PyMuPDF High-Precision Vector Engine (Vector quality 100% preserved).'
+                ? 'Processed with Precision Vector Cleaner (Original sharpness 100% preserved).'
                 : engineUsed === 'client-vector'
                 ? 'Processed with Lossless Vector Whiteout (Original text sharpness 100% intact).'
                 : 'Processed with High-Resolution Contrast Washout.'}

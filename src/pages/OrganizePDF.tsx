@@ -8,8 +8,9 @@ import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
-import { AnimatedNumber, PearlScanOverlay, PearlStageSwitch } from '../components/pearl/PearlMotion';
+import { AnimatedNumber, PearlProcessCard, PearlScanOverlay, PearlStageSwitch } from '../components/pearl/PearlMotion';
 import { useAutoRevokeUrl, toArrayBufferBytes } from '../lib/blobUrl';
+import { loadPdfDocumentSafely } from '../lib/pdfLoad';
 
 // Initialize pdf.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
@@ -215,7 +216,7 @@ export default function OrganizePDF() {
     setIsProcessing(true);
     try {
       const arrayBuffer = await file.arrayBuffer();
-      const sourcePdf = await PDFDocument.load(arrayBuffer);
+      const { pdfDoc: sourcePdf } = await loadPdfDocumentSafely(arrayBuffer, { fileName: file.name });
       const newPdf = await PDFDocument.create();
 
       for (const pageData of pages) {
@@ -269,11 +270,13 @@ export default function OrganizePDF() {
             />
           </div>
         ) : isLoadingPages ? (
-          <div className="relative overflow-hidden w-full max-w-2xl mx-auto pms-glass-panel rounded-3xl p-12 text-center">
-            <PearlScanOverlay active label="Rendering interactive page thumbnails..." />
-            <div className="w-14 h-14 border-4 border-sky-500 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-            <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Extracting Pages...</h3>
-            <p className="text-sm text-gray-500 dark:text-slate-400">Loading interactive page thumbnails</p>
+          <div className="w-full max-w-2xl mx-auto">
+            <PearlProcessCard
+              title="Extracting Pages..."
+              stageLabel="Preparing page deck"
+              subtitle="Rendering interactive page thumbnails"
+              accent="blue"
+            />
           </div>
         ) : organizedUrl ? (
           /* Results View */

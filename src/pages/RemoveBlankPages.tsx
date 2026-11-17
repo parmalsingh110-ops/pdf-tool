@@ -9,8 +9,9 @@ import { usePageSEO } from '../lib/usePageSEO';
 import { useToast } from '../components/Toast';
 import { useSEO } from '../hooks/useSEO';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
-import { AnimatedNumber, PearlScanOverlay, PearlStageSwitch } from '../components/pearl/PearlMotion';
+import { AnimatedNumber, PearlProcessCard, PearlScanOverlay, PearlStageSwitch } from '../components/pearl/PearlMotion';
 import { useAutoRevokeUrl, toArrayBufferBytes } from '../lib/blobUrl';
+import { loadPdfDocumentSafely } from '../lib/pdfLoad';
 
 interface PageAnalysis {
   pageNum: number;
@@ -164,7 +165,7 @@ export default function RemoveBlankPages() {
 
     setBusy(true);
     try {
-      const srcDoc = await PDFDocument.load(await file.arrayBuffer());
+      const { pdfDoc: srcDoc } = await loadPdfDocumentSafely(await file.arrayBuffer(), { fileName: file.name });
       const newDoc = await PDFDocument.create();
 
       const keepIndices = pagesToKeep.map((p) => p.pageNum - 1);
@@ -210,11 +211,13 @@ export default function RemoveBlankPages() {
           />
         </div>
       ) : analyzing ? (
-        <div className="relative overflow-hidden w-full max-w-2xl mx-auto pms-glass-panel rounded-3xl p-12 text-center">
-          <PearlScanOverlay active label="Inspecting pixels and text density per page..." />
-          <div className="w-14 h-14 border-4 border-[var(--pms-rose)] border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-          <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Analyzing Document Density...</h3>
-          <p className="text-sm text-gray-500 dark:text-slate-400">Inspecting each page for blank pixels, margin artifacts, and text</p>
+        <div className="w-full max-w-2xl mx-auto">
+          <PearlProcessCard
+            title="Analyzing Document Density..."
+            stageLabel="Inspecting page density"
+            subtitle="Inspecting pixels, margins, and text density per page"
+            accent="rose"
+          />
         </div>
       ) : resultUrl ? (
         /* Results View */

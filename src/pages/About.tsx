@@ -359,7 +359,7 @@ export default function About() {
                 <Cpu className="w-4 h-4 text-rose-500" /> Compute Microservices
               </h4>
               <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-                Python FastAPI engine powered by PyMuPDF, LibreOffice CLI conversion, Poppler, and Tesseract OCR pipelines.
+                High-precision stateless document microservices with vector layout preservation and bilingual OCR pipelines.
               </p>
             </div>
 

@@ -5,7 +5,7 @@ import { useSEO } from '../hooks/useSEO';
 import { PDFDocument } from 'pdf-lib';
 import { motion, AnimatePresence, useReducedMotion } from 'motion/react';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
-import { AnimatedNumber, PearlScanOverlay } from '../components/pearl/PearlMotion';
+import { AnimatedNumber, PearlScanOverlay, PearlSpinner } from '../components/pearl/PearlMotion';
 import { safeRevokeUrl, toArrayBufferBytes, useAutoRevokeUrl, useAutoRevokeUrls } from '../lib/blobUrl';
 
 interface DocItem {
@@ -422,7 +422,7 @@ export default function ExamDocumentMerger() {
                     style={{ backgroundColor: 'var(--pms-soft-blue)' }}
                   >
                     <div className="flex items-center gap-3">
-                      <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-[var(--pms-blue)] shrink-0"></div>
+                      <PearlSpinner size="xs" accent="blue" />
                       <p className="text-xs font-semibold text-slate-800 dark:text-slate-100">{progressMsg}</p>
                     </div>
                   </div>
@@ -438,7 +438,7 @@ export default function ExamDocumentMerger() {
                 >
                   {isProcessing ? (
                     <span className="flex items-center gap-2">
-                      <span className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin inline-block" />
+                      <PearlSpinner size="xs" accent="rose" />
                       <span>Processing {docs.length} Documents...</span>
                     </span>
                   ) : (

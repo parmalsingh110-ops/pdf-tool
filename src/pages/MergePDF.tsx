@@ -10,6 +10,7 @@ import { useSEO } from '../hooks/useSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
 import { useToast } from '../components/Toast';
 import { toArrayBufferBytes } from '../lib/blobUrl';
+import { loadPdfDocumentSafely } from '../lib/pdfLoad';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 import { AnimatedNumber, PearlScanOverlay, PearlStageSwitch } from '../components/pearl/PearlMotion';
 
@@ -218,8 +219,14 @@ export default function MergePDF() {
         setMergeProgress(`Processing file ${fi + 1} of ${entries.length}: ${entry.file.name}...`);
         const ab = await entry.file.arrayBuffer();
         let pdf: PDFDocument;
+        let workingBuffer = ab;
         try {
-          pdf = await PDFDocument.load(ab);
+          const loaded = await loadPdfDocumentSafely(ab, {
+            fileName: entry.file.name,
+            onStatus: (msg) => setMergeProgress(`${entry.file.name}: ${msg}`),
+          });
+          pdf = loaded.pdfDoc;
+          workingBuffer = toArrayBufferBytes(loaded.bytes);
         } catch (loadErr: any) {
           const errMsg = loadErr?.message?.toLowerCase() || '';
           if (errMsg.includes('encrypt') || errMsg.includes('password')) {
@@ -231,7 +238,7 @@ export default function MergePDF() {
         let pdfJsDoc: any = null;
         if (removeBlankPages) {
           try {
-            pdfJsDoc = await pdfjsLib.getDocument({ data: ab.slice(0) }).promise;
+            pdfJsDoc = await pdfjsLib.getDocument({ data: workingBuffer.slice(0) }).promise;
           } catch {}
         }
 
@@ -249,7 +256,10 @@ export default function MergePDF() {
         }
 
         if (pdfJsDoc) {
-          try { pdfJsDoc.destroy(); } catch {}
+          try {
+            await pdfJsDoc.cleanup?.();
+            await pdfJsDoc.loadingTask?.destroy?.();
+          } catch {}
         }
 
         if (pagesToInclude.length === 0) continue;

@@ -6,7 +6,6 @@ import {
   useMotionTemplate,
   useMotionValue,
   useReducedMotion,
-  useScroll,
   useSpring,
   useTransform,
 } from 'motion/react';
@@ -124,15 +123,17 @@ export default function HeroDocumentStage() {
   const [selectedRow, setSelectedRow] = useState(0);
   const [cutoutSplit, setCutoutSplit] = useState(56);
 
-  // Smooth auto-cycle through showcase tabs unless hovered, manually selected, or reduced motion
+  // Auto-cycle studio tabs so Windows, macOS & Mobile visitors immediately see live workflow motion
+  // (Respects explicit user tab selection or active pointer hover)
   useEffect(() => {
-    if (prefersReduced || isHovered || userLockedMode) return;
+    if (isHovered || userLockedMode) return;
+    const intervalMs = prefersReduced ? 5600 : 4400;
     const timer = window.setInterval(() => {
       setActiveMode((prev) => {
         const nextIdx = (MODE_ORDER.indexOf(prev) + 1) % MODE_ORDER.length;
         return MODE_ORDER[nextIdx];
       });
-    }, 4600);
+    }, intervalMs);
     return () => window.clearInterval(timer);
   }, [prefersReduced, isHovered, userLockedMode]);
 
@@ -141,7 +142,7 @@ export default function HeroDocumentStage() {
     setUserLockedMode(true);
   };
 
-  // Multi-axis pointer 3D physics + specular cursor highlight
+  // Multi-axis pointer & touch 3D physics + specular cursor highlight (no scroll-event jank)
   const rawX = useMotionValue(0);
   const rawY = useMotionValue(0);
   const glareRawX = useMotionValue(260);
@@ -164,27 +165,31 @@ export default function HeroDocumentStage() {
   const specularGlare = useMotionTemplate`radial-gradient(280px circle at ${glareX}px ${glareY}px, rgba(255,255,255,0.65), rgba(238,231,255,0.22) 45%, transparent 72%)`;
   const darkSpecularGlare = useMotionTemplate`radial-gradient(280px circle at ${glareX}px ${glareY}px, rgba(167,139,250,0.18), rgba(56,189,248,0.08) 45%, transparent 72%)`;
 
-  // Subtle scroll-linked separation over hero scroll range
-  const { scrollYProgress } = useScroll({
-    target: containerRef,
-    offset: ['start start', 'end start'],
-  });
-  const stageLift = useTransform(scrollYProgress, [0, 1], [0, -24]);
-  const frontScrollY = useTransform(scrollYProgress, [0, 1], [0, -14]);
-
-  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+  const updatePointerTilt = (clientX: number, clientY: number) => {
     if (prefersReduced || !containerRef.current) return;
     const rect = containerRef.current.getBoundingClientRect();
-    const lx = e.clientX - rect.left;
-    const ly = e.clientY - rect.top;
-    rawX.set(lx / rect.width - 0.5);
-    rawY.set(ly / rect.height - 0.5);
+    if (rect.width <= 0 || rect.height <= 0) return;
+    const lx = clientX - rect.left;
+    const ly = clientY - rect.top;
+    rawX.set(Math.max(-0.5, Math.min(0.5, lx / rect.width - 0.5)));
+    rawY.set(Math.max(-0.5, Math.min(0.5, ly / rect.height - 0.5)));
     glareRawX.set(lx);
     glareRawY.set(ly);
   };
 
-  const handleMouseEnter = () => setIsHovered(true);
-  const handleMouseLeave = () => {
+  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.pointerType === 'mouse' || e.buttons > 0) {
+      updatePointerTilt(e.clientX, e.clientY);
+    }
+  };
+
+  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.pointerType !== 'mouse') {
+      updatePointerTilt(e.clientX, e.clientY);
+    }
+  };
+
+  const handlePointerReset = () => {
     setIsHovered(false);
     rawX.set(0);
     rawY.set(0);
@@ -195,45 +200,48 @@ export default function HeroDocumentStage() {
   return (
     <div
       ref={containerRef}
-      onMouseMove={handleMouseMove}
-      onMouseEnter={handleMouseEnter}
-      onMouseLeave={handleMouseLeave}
-      className="relative w-full max-w-[560px] mx-auto select-none pt-3 pb-4"
-      style={{ perspective: '1400px' }}
+      onPointerMove={handlePointerMove}
+      onPointerDown={handlePointerDown}
+      onPointerUp={(e) => {
+        if (e.pointerType !== 'mouse') {
+          rawX.set(0);
+          rawY.set(0);
+        }
+      }}
+      onPointerCancel={handlePointerReset}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={handlePointerReset}
+      className="relative w-full max-w-[560px] mx-auto select-none pt-4 pb-5 px-1 sm:px-0"
+      style={{ perspective: '1250px', touchAction: 'pan-y' }}
     >
-      {/* Ambient Pearl Aurora Halo */}
+      {/* Ambient Pearl Aurora Halo (pure radial gradient, zero GPU blur-2xl pass) */}
       <div
         aria-hidden="true"
-        className="absolute -inset-6 rounded-[44px] opacity-85 dark:opacity-45 blur-2xl pointer-events-none"
+        className="pms-gpu-layer absolute -inset-6 sm:-inset-8 rounded-[48px] opacity-90 dark:opacity-50 pointer-events-none"
         style={{
           background:
-            'radial-gradient(circle at 30% 25%, rgba(255,228,237,0.9), transparent 55%), radial-gradient(circle at 78% 65%, rgba(225,245,255,0.88), transparent 58%), radial-gradient(circle at 50% 85%, rgba(238,231,255,0.92), transparent 64%)',
+            'radial-gradient(circle at 28% 24%, rgba(255,220,234,0.88) 0%, rgba(255,228,237,0.35) 36%, transparent 62%), radial-gradient(circle at 78% 66%, rgba(215,242,255,0.88) 0%, rgba(225,245,255,0.35) 38%, transparent 64%), radial-gradient(circle at 50% 82%, rgba(235,226,255,0.88) 0%, transparent 66%)',
         }}
       />
 
       {/* Outer 3D Perspective Stage */}
       <motion.div
-        initial={prefersReduced ? false : { opacity: 0, y: 18, scale: 0.97 }}
+        initial={prefersReduced ? false : { opacity: 0, y: 14, scale: 0.98 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
-        transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
-        style={
-          prefersReduced
-            ? undefined
-            : {
-                rotateX,
-                rotateY,
-                y: stageLift,
-                transformStyle: 'preserve-3d',
-              }
-        }
-        className="relative rounded-[28px] p-4 sm:p-5 will-change-transform"
+        transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
+        style={{
+          rotateX: prefersReduced ? 0 : rotateX,
+          rotateY: prefersReduced ? 0 : rotateY,
+          transformStyle: 'preserve-3d',
+        }}
+        className="relative rounded-[26px] sm:rounded-[28px] p-3.5 sm:p-5 will-change-transform"
         aria-label="Interactive 3D Document Atelier previewing PDF Editor, Word Sync, Table Extraction, and 4K Cutout OCR"
       >
-        {/* Light / Dark Frosted Glass Chassis + Subtle Paper Grid (backdrop-blur lives on sibling so preserve-3d stays active) */}
+        {/* Light / Dark Chassis + Subtle Paper Grid (no backdrop-blur-xl so Windows/Mobile preserve-3d stays crisp!) */}
         <div
-          className="dark:hidden absolute inset-0 rounded-[28px] -z-20 border backdrop-blur-xl overflow-hidden"
+          className="dark:hidden absolute inset-0 rounded-[26px] sm:rounded-[28px] -z-20 border overflow-hidden"
           style={{
-            background: 'linear-gradient(155deg, rgba(255,255,255,0.9) 0%, rgba(244,241,255,0.76) 100%)',
+            background: 'linear-gradient(155deg, rgba(255,255,255,0.96) 0%, rgba(244,241,255,0.9) 100%)',
             borderColor: 'var(--pms-border-strong)',
             boxShadow: 'var(--pms-shadow-float)',
           }}
@@ -241,9 +249,9 @@ export default function HeroDocumentStage() {
           <div className="absolute inset-0 pms-paper-grid opacity-55" />
         </div>
         <div
-          className="hidden dark:block absolute inset-0 rounded-[28px] -z-20 border backdrop-blur-xl overflow-hidden"
+          className="hidden dark:block absolute inset-0 rounded-[26px] sm:rounded-[28px] -z-20 border overflow-hidden"
           style={{
-            background: 'linear-gradient(155deg, rgba(24,24,48,0.9) 0%, rgba(15,15,32,0.86) 100%)',
+            background: 'linear-gradient(155deg, rgba(22,22,46,0.96) 0%, rgba(14,14,30,0.92) 100%)',
             borderColor: 'var(--pms-border-strong)',
             boxShadow: 'var(--pms-shadow-float)',
           }}
@@ -256,7 +264,7 @@ export default function HeroDocumentStage() {
           <>
             <motion.div
               aria-hidden="true"
-              className="dark:hidden absolute inset-0 rounded-[28px] pointer-events-none -z-10 transition-opacity duration-300"
+              className="dark:hidden absolute inset-0 rounded-[26px] sm:rounded-[28px] pointer-events-none -z-10 transition-opacity duration-300"
               style={{
                 background: specularGlare,
                 opacity: isHovered ? 0.9 : 0.35,
@@ -264,7 +272,7 @@ export default function HeroDocumentStage() {
             />
             <motion.div
               aria-hidden="true"
-              className="hidden dark:block absolute inset-0 rounded-[28px] pointer-events-none -z-10 transition-opacity duration-300"
+              className="hidden dark:block absolute inset-0 rounded-[26px] sm:rounded-[28px] pointer-events-none -z-10 transition-opacity duration-300"
               style={{
                 background: darkSpecularGlare,
                 opacity: isHovered ? 1 : 0.35,
@@ -273,26 +281,24 @@ export default function HeroDocumentStage() {
           </>
         )}
 
-        {/* Magic UI Border Beam Perimeter Ring */}
+        {/* Magic UI Border Beam Perimeter Ring (pure GPU CSS rotate animation) */}
         {!prefersReduced && (
           <div
             aria-hidden="true"
-            className="pms-border-beam-ring absolute inset-0 rounded-[28px] pointer-events-none overflow-hidden transition-opacity duration-300"
-            style={{ opacity: isHovered ? 0.92 : 0.45 }}
+            className="pms-border-beam-ring absolute inset-0 rounded-[26px] sm:rounded-[28px] pointer-events-none overflow-hidden transition-opacity duration-300"
+            style={{ opacity: isHovered ? 0.95 : 0.58 }}
           >
-            <motion.div
-              animate={{ rotate: 360 }}
-              transition={{ duration: 7.5, repeat: Infinity, ease: 'linear' }}
-              className="absolute -inset-[65%]"
+            <div
+              className="pms-ring-rotate pms-gpu-layer absolute -inset-[55%]"
               style={{
                 background:
-                  'conic-gradient(from 0deg, transparent 68%, rgba(225,29,72,0.85) 78%, rgba(124,58,237,0.92) 88%, rgba(2,132,199,0.85) 97%, transparent 100%)',
+                  'conic-gradient(from 0deg, transparent 66%, rgba(225,29,72,0.85) 77%, rgba(124,58,237,0.92) 88%, rgba(2,132,199,0.85) 97%, transparent 100%)',
               }}
             />
           </div>
         )}
 
-        {/* Pop-Out Top-Right 3D Floating Trust Badge */}
+        {/* Pop-Out Top-Right 3D Floating Trust Badge (visible & gently floating on Desktop + Mobile) */}
         <motion.div
           style={
             prefersReduced
@@ -300,21 +306,23 @@ export default function HeroDocumentStage() {
               : {
                   x: badgeFloatX,
                   y: badgeFloatY,
-                  z: 112,
+                  z: 108,
                 }
           }
-          className="hidden sm:flex items-center gap-1.5 absolute -top-3.5 right-5 z-30 px-3 py-1.5 rounded-full border backdrop-blur-md shadow-lg bg-white/92 dark:bg-[#171732]/92 border-[#D4CDE8] dark:border-slate-700"
+          className="flex items-center gap-1.5 absolute -top-3 right-3 sm:right-5 z-30"
         >
-          <span className="relative flex h-2 w-2">
-            {!prefersReduced && (
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-            )}
-            <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
-          </span>
-          <ShieldCheck className="w-3.5 h-3.5 text-[#0284C7]" />
-          <span className="text-[10px] font-bold tracking-tight text-[#17172F] dark:text-slate-100">
-            Browser WASM · 0 Watermark
-          </span>
+          <div className="pms-float-a pms-gpu-layer flex items-center gap-1.5 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-full border shadow-lg bg-white dark:bg-[#171732] border-[#D4CDE8] dark:border-slate-700">
+            <span className="relative flex h-2 w-2">
+              {!prefersReduced && (
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+              )}
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+            </span>
+            <ShieldCheck className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-[#0284C7]" />
+            <span className="text-[9.5px] sm:text-[10px] font-bold tracking-tight text-[#17172F] dark:text-slate-100 whitespace-nowrap">
+              Browser WASM · 0 Watermark
+            </span>
+          </div>
         </motion.div>
 
         {/* Top Studio Chrome Bar with Interactive Mode Pills */}
@@ -365,10 +373,12 @@ export default function HeroDocumentStage() {
           </div>
         </div>
 
-        {/* Interactive Multi-Plane 3D Stack */}
+        {/* Interactive Multi-Plane 3D Stack (idle GPU 3D sway on mobile & untouched desktops) */}
         <div
-          className="relative h-[306px] sm:h-[324px] flex items-center justify-center"
-          style={prefersReduced ? undefined : { transformStyle: 'preserve-3d' }}
+          className={`relative h-[296px] sm:h-[324px] flex items-center justify-center ${
+            !prefersReduced && !isHovered ? 'pms-stage-sway' : ''
+          }`}
+          style={{ transformStyle: 'preserve-3d' }}
         >
           {/* Magic UI Animated Gradient Beams Connecting Input Sheets -> Active Center Studio */}
           <svg
@@ -460,7 +470,7 @@ export default function HeroDocumentStage() {
                 ? undefined
                 : { x: backLeftMouseX, y: backLeftMouseY, z: 32 }
             }
-            className={`text-left absolute left-0 sm:left-2 top-2 w-[56%] sm:w-[53%] rounded-2xl bg-white/95 dark:bg-slate-900/95 border p-3 shadow-lg origin-bottom-left transition-colors cursor-pointer ${
+            className={`text-left absolute left-0.5 sm:left-2 top-1.5 sm:top-2 w-[52%] sm:w-[53%] rounded-2xl bg-white dark:bg-slate-900 border p-2.5 sm:p-3 shadow-lg origin-bottom-left transition-colors cursor-pointer ${
               activeMode === 'docx' || activeMode === 'xlsx'
                 ? 'border-sky-300 dark:border-sky-600/80 ring-2 ring-sky-400/20'
                 : 'border-[#E7E3F1] dark:border-slate-700 hover:border-sky-200'
@@ -506,7 +516,7 @@ export default function HeroDocumentStage() {
                 ? undefined
                 : { x: backRightMouseX, y: backRightMouseY, z: 44 }
             }
-            className={`hidden sm:block text-left absolute right-1 top-3 w-[45%] rounded-2xl bg-white/95 dark:bg-slate-900/95 border p-3 shadow-lg origin-bottom-right transition-colors cursor-pointer ${
+            className={`block text-left absolute right-0.5 sm:right-1 top-2 sm:top-3 w-[45%] rounded-2xl bg-white dark:bg-slate-900 border p-2.5 sm:p-3 shadow-lg origin-bottom-right transition-colors cursor-pointer ${
               activeMode === 'img'
                 ? 'border-violet-300 dark:border-violet-600/80 ring-2 ring-violet-400/20'
                 : 'border-[#E7E3F1] dark:border-slate-700 hover:border-violet-200'
@@ -522,33 +532,35 @@ export default function HeroDocumentStage() {
               </div>
               <span className="text-[9px] font-bold text-emerald-600 dark:text-emerald-400">Cutout</span>
             </div>
-            <div className="h-14 rounded-xl pms-checkerboard border border-[#E7E3F1] dark:border-slate-700 flex items-center justify-center relative overflow-hidden">
-              <div className="w-9 h-10 rounded-lg bg-gradient-to-br from-rose-400 via-violet-500 to-sky-500 shadow-md flex items-center justify-center text-white text-[10px] font-black">
+            <div className="h-12 sm:h-14 rounded-xl pms-checkerboard border border-[#E7E3F1] dark:border-slate-700 flex items-center justify-center relative overflow-hidden">
+              <div className="w-8 h-9 sm:w-9 sm:h-10 rounded-lg bg-gradient-to-br from-rose-400 via-violet-500 to-sky-500 shadow-md flex items-center justify-center text-white text-[10px] font-black">
                 4K
               </div>
             </div>
             <div className="mt-1.5 flex items-center gap-1 text-[9.5px] font-semibold text-slate-500 dark:text-slate-400">
-              <ScanText className="w-3 h-3 text-violet-500" />
-              <span>Hindi + Eng OCR</span>
+              <ScanText className="w-3 h-3 text-violet-500 shrink-0" />
+              <span className="truncate">Hindi + Eng OCR</span>
             </div>
           </motion.button>
 
           {/* LAYER 3 (Foreground Hero Interactive Product Card, z=84) */}
           <motion.div
-            initial={prefersReduced ? false : { opacity: 0, y: 20, scale: 0.94 }}
+            initial={prefersReduced ? false : { opacity: 0, y: 16, scale: 0.96 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            transition={{ duration: 0.55, delay: 0.14, ease: [0.22, 1, 0.36, 1] }}
+            transition={{ duration: 0.45, delay: 0.08, ease: [0.22, 1, 0.36, 1] }}
             style={
               prefersReduced
-                ? undefined
+                ? {
+                    boxShadow:
+                      '0 22px 44px -14px rgba(23,23,47,0.2), 0 10px 20px -10px rgba(124,58,237,0.16)',
+                  }
                 : {
-                    y: frontScrollY,
                     z: 84,
                     boxShadow:
                       '0 28px 54px -16px rgba(23,23,47,0.22), 0 12px 24px -10px rgba(124,58,237,0.18)',
                   }
             }
-            className="relative z-20 mt-10 sm:mt-11 w-[94%] sm:w-[82%] rounded-2xl bg-white/98 dark:bg-[#13132B]/98 border border-[#D4CDE8] dark:border-slate-700 p-4 shadow-2xl backdrop-blur-md"
+            className="relative z-20 mt-11 w-[94%] sm:w-[82%] rounded-2xl bg-white dark:bg-[#13132B] border border-[#D4CDE8] dark:border-slate-700 p-3.5 sm:p-4 shadow-2xl"
           >
             {/* Active Document Sheet Header */}
             <div className="flex items-center justify-between gap-2 mb-3">
@@ -878,7 +890,7 @@ export default function HeroDocumentStage() {
             </div>
           </motion.div>
 
-          {/* Pop-Out Bottom-Left 3D Floating Telemetry Pill (z=116) */}
+          {/* Pop-Out Bottom-Left 3D Floating Telemetry Pill (visible & gently floating on Desktop + Mobile) */}
           <motion.div
             style={
               prefersReduced
@@ -886,24 +898,26 @@ export default function HeroDocumentStage() {
                 : {
                     x: badgeFloatX,
                     y: badgeFloatY,
-                    z: 116,
+                    z: 114,
                   }
             }
-            className="hidden sm:flex items-center gap-1.5 absolute -bottom-3 -left-2 z-30 px-3 py-1.5 rounded-full border backdrop-blur-md shadow-xl bg-white/95 dark:bg-[#171732]/95 border-[#D4CDE8] dark:border-slate-700"
+            className="flex items-center gap-1.5 absolute -bottom-3 left-2 sm:-left-2 z-30"
           >
-            <Sparkles className="w-3 h-3 text-[#7C3AED]" />
-            <span className="text-[10px] font-extrabold text-[#17172F] dark:text-slate-100">
-              {currentMode.popBadge}
-            </span>
+            <div className="pms-float-b pms-gpu-layer flex items-center gap-1.5 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-full border shadow-xl bg-white dark:bg-[#171732] border-[#D4CDE8] dark:border-slate-700">
+              <Sparkles className="w-3 h-3 text-[#7C3AED]" />
+              <span className="text-[9.5px] sm:text-[10px] font-extrabold text-[#17172F] dark:text-slate-100 whitespace-nowrap">
+                {currentMode.popBadge}
+              </span>
+            </div>
           </motion.div>
         </div>
 
-        {/* Subtle Auto-Cycle Indicator & Floor Reflection */}
-        <div className="mt-2.5 flex items-center justify-between px-1 text-[9.5px] font-medium text-slate-400 dark:text-slate-500">
+        {/* Subtle Auto-Cycle Indicator & Pure-Radial Floor Reflection */}
+        <div className="mt-3.5 sm:mt-2.5 flex items-center justify-between px-1 text-[9.5px] font-medium text-slate-400 dark:text-slate-500">
           <span>
             {userLockedMode || isHovered ? 'Interactive mode active' : 'Auto-previewing studio modes'}
           </span>
-          {userLockedMode && !prefersReduced && (
+          {userLockedMode && (
             <button
               type="button"
               onClick={() => setUserLockedMode(false)}
@@ -916,10 +930,10 @@ export default function HeroDocumentStage() {
 
         <div
           aria-hidden="true"
-          className="mt-1.5 mx-auto w-[84%] h-3.5 rounded-full blur-md opacity-70 dark:opacity-35"
+          className="mt-1.5 mx-auto w-[84%] h-4 rounded-full opacity-75 dark:opacity-40 pointer-events-none"
           style={{
             background:
-              'linear-gradient(90deg, rgba(225,29,72,0.2) 0%, rgba(124,58,237,0.25) 50%, rgba(2,132,199,0.2) 100%)',
+              'radial-gradient(ellipse at center, rgba(124,58,237,0.22) 0%, rgba(225,29,72,0.12) 48%, transparent 74%)',
           }}
         />
       </motion.div>

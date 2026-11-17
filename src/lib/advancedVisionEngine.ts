@@ -1,21 +1,99 @@
+import { getApiBaseUrl } from './api';
+
 const USER_VISION_KEY_STORAGE = 'pms_user_gemini_key';
+const USER_VISION_PROVIDER_STORAGE = 'pms_user_vision_provider';
+
+export type VisionProvider = 'auto' | 'gemini' | 'claude' | 'openai';
+export type DocumentLayerMode = 'clean_real' | 'layered_replica';
+
+export interface ServerVisionStatus {
+  enhanced_available?: boolean;
+  server_ai_configured: boolean;
+  allow_server_ai: boolean;
+}
+
+let cachedServerStatus: ServerVisionStatus | null = null;
+let serverStatusPromise: Promise<ServerVisionStatus> | null = null;
 
 /**
  * Security & Zero-Leak Rule:
- * NEVER read VITE_GEMINI_API_KEY from build env (that leaks keys into public JS bundles
- * and silently uploads client documents to Google servers without consent).
- * Vision AI only runs if the user explicitly provides a session-only BYOK key in their browser.
+ * NEVER read provider API keys in frontend JS and NEVER call third-party endpoints
+ * directly from the browser. All document intelligence runs silently on the server.
  */
 export const getVisionApiKey = (): string => {
   try {
     if (typeof window !== 'undefined' && window.sessionStorage) {
       return (window.sessionStorage.getItem(USER_VISION_KEY_STORAGE) || '').trim();
     }
-  } catch {}
+  } catch {
+    // ignore storage errors
+  }
   return '';
 };
 
-export const isVisionAiEnabled = (): boolean => getVisionApiKey().length > 10;
+export const getVisionProvider = (): VisionProvider => {
+  try {
+    if (typeof window !== 'undefined' && window.sessionStorage) {
+      const p = (window.sessionStorage.getItem(USER_VISION_PROVIDER_STORAGE) || 'auto').trim().toLowerCase();
+      if (p === 'gemini' || p === 'claude' || p === 'openai') return p;
+    }
+  } catch {
+    // ignore storage errors
+  }
+  return 'auto';
+};
+
+export const setVisionProvider = (provider: VisionProvider): void => {
+  try {
+    if (typeof window !== 'undefined' && window.sessionStorage) {
+      window.sessionStorage.setItem(USER_VISION_PROVIDER_STORAGE, provider);
+    }
+  } catch {
+    // ignore storage errors
+  }
+};
+
+export async function fetchServerVisionStatus(forceRefresh = false): Promise<ServerVisionStatus> {
+  if (!forceRefresh && cachedServerStatus) {
+    return cachedServerStatus;
+  }
+  if (!forceRefresh && serverStatusPromise) {
+    return serverStatusPromise;
+  }
+  const fallback: ServerVisionStatus = {
+    enhanced_available: false,
+    server_ai_configured: false,
+    allow_server_ai: true,
+  };
+  serverStatusPromise = (async () => {
+    try {
+      const resp = await fetch(`${getApiBaseUrl()}/vision/status`, {
+        method: 'GET',
+        headers: { Accept: 'application/json' },
+      });
+      if (resp.ok) {
+        const data = (await resp.json()) as Partial<ServerVisionStatus>;
+        const configured = Boolean(data.enhanced_available ?? data.server_ai_configured);
+        cachedServerStatus = {
+          enhanced_available: configured,
+          server_ai_configured: configured,
+          allow_server_ai: data.allow_server_ai !== false,
+        };
+        return cachedServerStatus;
+      }
+    } catch {
+      // Backend offline or unreachable; fall back quietly to offline local mode
+    } finally {
+      serverStatusPromise = null;
+    }
+    return cachedServerStatus || fallback;
+  })();
+  return serverStatusPromise;
+}
+
+export const isVisionAiEnabled = (): boolean =>
+  Boolean(cachedServerStatus?.enhanced_available ?? cachedServerStatus?.server_ai_configured) ||
+  getVisionApiKey().length > 10;
 
 export const setUserVisionApiKey = (key: string): void => {
   try {
@@ -24,7 +102,9 @@ export const setUserVisionApiKey = (key: string): void => {
       if (clean) window.sessionStorage.setItem(USER_VISION_KEY_STORAGE, clean);
       else window.sessionStorage.removeItem(USER_VISION_KEY_STORAGE);
     }
-  } catch {}
+  } catch {
+    // ignore storage errors
+  }
 };
 
 export const clearUserVisionApiKey = (): void => {
@@ -32,52 +112,92 @@ export const clearUserVisionApiKey = (): void => {
     if (typeof window !== 'undefined' && window.sessionStorage) {
       window.sessionStorage.removeItem(USER_VISION_KEY_STORAGE);
     }
-  } catch {}
+  } catch {
+    // ignore storage errors
+  }
 };
 
-const GEMINI_MODELS = [
-  'gemini-2.5-flash',
-  'gemini-2.5-pro',
-  'gemini-2.0-flash',
-  'gemini-2.0-flash-lite',
-  'gemini-3.5-flash'
-];
-
-export async function fetchGeminiWithFallback(apiKey: string, requestBody: any): Promise<Response> {
-  if (!apiKey) throw new Error('Vision API key is not configured.');
-  let lastStatus = 0;
-  for (const model of GEMINI_MODELS) {
-    try {
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-goog-api-key': apiKey,
-          },
-          body: JSON.stringify(requestBody)
-        }
-      );
-      if (response.ok) return response;
-      
-      lastStatus = response.status;
-      // 429 = Rate Limit, 503 = Service Unavailable, 500 = Internal Error
-      if (response.status === 429 || response.status >= 500) {
-        console.warn(`Gemini model ${model} hit limit/error (${response.status}). Waiting 1.5s before fallback...`);
-        await new Promise(r => setTimeout(r, 1500));
-        continue;
-      }
-      // For other errors (like 400 bad request, 403 invalid key) we might not want to loop all 5 models,
-      // but to be safe and handle API quirks, we'll try the next model without delay.
-      console.warn(`Gemini model ${model} returned ${response.status}. Trying next...`);
-    } catch (e) {
-      console.warn(`Gemini fetch error on ${model}:`, e);
+export function appendVisionLayerParams(
+  formData: FormData,
+  opts: {
+    layerMode?: DocumentLayerMode;
+    strictLocal?: boolean;
+    aiProvider?: VisionProvider;
+    lang?: string;
+  }
+): void {
+  const strict = Boolean(opts.strictLocal);
+  formData.append('strict_local', strict ? 'true' : 'false');
+  if (opts.layerMode) {
+    formData.append('layer_mode', opts.layerMode);
+  }
+  if (opts.lang) {
+    formData.append('lang', opts.lang);
+  }
+  const prov = opts.aiProvider || getVisionProvider();
+  formData.append('ai_provider', strict ? 'offline' : prov);
+  // Only include optional session BYOK key when user explicitly typed one;
+  // when key lives in backend/.env, NO API key ever enters browser FormData.
+  if (!strict) {
+    const key = getVisionApiKey();
+    if (key) {
+      formData.append('ai_api_key', key);
     }
   }
-  throw new Error(`All Gemini models failed. Last status: ${lastStatus}`);
 }
 
+export async function sourceUrlToBase64(imageUrlOrDataUrl: string): Promise<string> {
+  if (!imageUrlOrDataUrl) return '';
+  if (imageUrlOrDataUrl.startsWith('data:')) return imageUrlOrDataUrl;
+  const resp = await fetch(imageUrlOrDataUrl);
+  const blob = await resp.blob();
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(reader.error || new Error('Failed to encode image'));
+    reader.readAsDataURL(blob);
+  });
+}
+
+type VisionAssistTask =
+  | 'document_layout'
+  | 'text_regions'
+  | 'table_data'
+  | 'enhance_text'
+  | 'polish_paragraphs'
+  | 'universal_layout'
+  | 'fix_text'
+  | 'translate_hi_en'
+  | 'shorten_text';
+
+async function postServerVisionAssist<T>(
+  task: VisionAssistTask,
+  body: Record<string, unknown>
+): Promise<T> {
+  const sessionKey = getVisionApiKey();
+  const payload: Record<string, unknown> = {
+    task,
+    ai_provider: getVisionProvider(),
+    strict_local: false,
+    ...body,
+  };
+  if (sessionKey) {
+    payload.ai_api_key = sessionKey;
+  }
+  const response = await fetch(`${getApiBaseUrl()}/vision/assist`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    throw new Error('Document intelligence service unavailable.');
+  }
+  const data = await response.json();
+  if (!data?.ok) {
+    throw new Error('Document intelligence processing returned no result.');
+  }
+  return data.result as T;
+}
 
 export interface DocumentLayoutResponse {
   title_lines?: string[];
@@ -96,211 +216,38 @@ export interface DocumentLayoutResponse {
 }
 
 export async function extractDocumentLayout(base64Image: string): Promise<DocumentLayoutResponse> {
-  const apiKey = getVisionApiKey();
-  if (!apiKey) throw new Error('Vision API key is not configured.');
-
-  const prompt = `You are an expert document formatter. Your job is to analyze a document image and recreate it as a perfectly formatted Word document.
-
-RULES:
-1. Extract ALL text exactly as it appears — preserve capitalization, bold, spacing
-2. Identify layout: centered titles, left-aligned labels, right-aligned content
-3. Return ONLY valid JSON — no markdown, no explanation, no backticks
-
-Return this exact JSON structure:
-{
-  "title_lines": ["LINE1", "LINE2"],
-  "diary_no": "value",
-  "notes": ["(a) full text", "(b) full text"],
-  "fields": [
-    { "label": "TRAIN NO: -", "value": "12941", "bold_value": true }
-  ],
-  "passengers": ["1) NAME (F-25 Years)", "2) NAME (M-50 Years)"],
-  "mobile": "value",
-  "relation": "value", 
-  "purpose": "value",
-  "reference": "value",
-  "signature_line": "SIGNATURE & STAMP OF GAZETTED OFFICER: -",
-  "stamp_lines": ["stamp line 1", "line 2"],
-  "note_label": "NOTE: -",
-  "note_items": ["1. text", "2. text"]
-}`;
-
-  const base64Data = base64Image.split(',')[1] || base64Image;
-
-  const requestBody = {
-    contents: [{
-      parts: [
-        { text: prompt },
-        { inline_data: { mime_type: "image/jpeg", data: base64Data } }
-      ]
-    }],
-    generationConfig: {
-      temperature: 0.1,
-      response_mime_type: "application/json",
-    }
-  };
-
-  const response = await fetchGeminiWithFallback(apiKey, requestBody);
-
-  if (!response.ok) {
-    const errData = await response.json().catch(() => ({}));
-    throw new Error(errData.error?.message || 'Vision Engine call failed');
-  }
-
-  const data = await response.json();
-  const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
-
-  try {
-    return JSON.parse(rawText.replace(/\`\`\`json|\`\`\`/g, '').trim());
-  } catch (e) {
-    throw new Error('Failed to parse Vision JSON response');
-  }
+  return postServerVisionAssist<DocumentLayoutResponse>('document_layout', { image_b64: base64Image });
 }
 
 export async function extractTextRegions(base64Image: string): Promise<any> {
-  const apiKey = getVisionApiKey();
-  if (!apiKey) throw new Error('Vision API key is not configured.');
-
-  const prompt = `Perform highly accurate OCR on this document fragment.
-If it contains Hindi/Devanagari, ensure proper Unicode rendering.
-Return ONLY a valid JSON array of objects, where each object represents a logical line or block of text with its bounding box:
-[
-  { 
-    "text": "Extracted text here",
-    "box_2d": [ymin, xmin, ymax, xmax] // normalized to 0-1000
-  }
-]
-No markdown or explanations.`;
-
-  const base64Data = base64Image.split(',')[1] || base64Image;
-
-  const requestBody = {
-    contents: [{
-      parts: [
-        { text: prompt },
-        { inline_data: { mime_type: "image/jpeg", data: base64Data } }
-      ]
-    }],
-    generationConfig: {
-      temperature: 0.1,
-      response_mime_type: "application/json",
-    }
-  };
-
-  const response = await fetchGeminiWithFallback(apiKey, requestBody);
-  const data = await response.json();
-  const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || '[]';
-
-  try {
-    return JSON.parse(rawText.replace(/\`\`\`json|\`\`\`/g, '').trim());
-  } catch (e) {
-    throw new Error('Failed to parse Vision JSON response');
-  }
+  return postServerVisionAssist<any[]>('text_regions', { image_b64: base64Image });
 }
 
 export async function extractTableData(base64Image: string): Promise<string[][]> {
-  const apiKey = getVisionApiKey();
-  if (!apiKey) throw new Error('Vision API key is not configured.');
-
-  const prompt = `Extract all tabular data from this document.
-Return ONLY a valid JSON array of arrays representing the rows and columns.
-Example: [["Header 1", "Header 2"], ["Value 1", "Value 2"]]
-No markdown or explanations.`;
-
-  const base64Data = base64Image.split(',')[1] || base64Image;
-
-  const requestBody = {
-    contents: [{
-      parts: [
-        { text: prompt },
-        { inline_data: { mime_type: "image/jpeg", data: base64Data } }
-      ]
-    }],
-    generationConfig: {
-      temperature: 0.1,
-      response_mime_type: "application/json",
-    }
-  };
-
-  const response = await fetchGeminiWithFallback(apiKey, requestBody);
-
-  if (!response.ok) throw new Error('Vision Engine call failed');
-
-  const data = await response.json();
-  const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || '[]';
-
-  try {
-    return JSON.parse(rawText.replace(/\`\`\`json|\`\`\`/g, '').trim());
-  } catch (e) {
-    throw new Error('Failed to parse Vision JSON response');
-  }
+  return postServerVisionAssist<string[][]>('table_data', { image_b64: base64Image });
 }
 
-/**
- * enhanceTextWithAI — Takes raw extracted text (from DOCX, etc.) and asks
- * Gemini to clean it up, fix encoding, and structure it into clean paragraphs.
- * Returns array of clean paragraph strings. Falls back to splitting by newlines.
- */
 export async function enhanceTextWithAI(rawText: string): Promise<string[]> {
-  const apiKey = getVisionApiKey();
-  if (!apiKey || !rawText.trim()) return rawText.split('\n').filter(Boolean);
-
-  const prompt = `You are a document text cleaner. I extracted the following raw text from a document.
-Please clean it up: fix encoding issues, remove duplicate spaces, properly separate paragraphs.
-Return ONLY a valid JSON array of clean paragraph strings. No markdown, no explanation.
-Example: ["Paragraph 1 text.", "Paragraph 2 text."]
-
-Raw text:
-${rawText.slice(0, 8000)}`;
-
-  const requestBody = {
-    contents: [{ parts: [{ text: prompt }] }],
-    generationConfig: { temperature: 0.1 }
-  };
-
+  if (!rawText.trim()) return [];
   try {
-    const response = await fetchGeminiWithFallback(apiKey, requestBody);
-    const data = await response.json();
-    const raw = data.candidates?.[0]?.content?.parts?.[0]?.text || '[]';
-    const cleaned = raw.replace(/```json|```/g, '').trim();
-    const parsed = JSON.parse(cleaned);
-    if (Array.isArray(parsed) && parsed.length > 0) return parsed.map(String);
-  } catch { /* fallback */ }
-
+    const res = await postServerVisionAssist<string[]>('enhance_text', { text: rawText });
+    if (Array.isArray(res) && res.length > 0) return res.map(String);
+  } catch {
+    // Graceful local fallback
+  }
   return rawText.split('\n').filter(Boolean);
 }
 
-/**
- * polishExtractedParagraphs — Takes an array of extracted strings and asks
- * Gemini to fix OCR typos without changing the meaning or array length.
- */
 export async function polishExtractedParagraphs(paras: string[]): Promise<string[]> {
-  const apiKey = getVisionApiKey();
-  if (!apiKey || !paras.length) return paras;
-
-  const prompt = `You are an OCR corrector. Below is a JSON array of strings extracted from a document.
-Fix any obvious spelling or OCR mistakes, but DO NOT change the meaning, structure, or number of items.
-Return ONLY a valid JSON array of strings of the exact same length. No markdown.
-
-Input:
-${JSON.stringify(paras)}`;
-
-  const requestBody = {
-    contents: [{ parts: [{ text: prompt }] }],
-    generationConfig: { temperature: 0.1 }
-  };
-
+  if (!paras.length) return paras;
   try {
-    const response = await fetchGeminiWithFallback(apiKey, requestBody);
-    const data = await response.json();
-    const raw = data.candidates?.[0]?.content?.parts?.[0]?.text || '[]';
-    const cleaned = raw.replace(/```json|```/g, '').trim();
-    const parsed = JSON.parse(cleaned);
-    if (Array.isArray(parsed) && parsed.length === paras.length) {
-      return parsed.map(String);
+    const res = await postServerVisionAssist<string[]>('polish_paragraphs', { paras });
+    if (Array.isArray(res) && res.length === paras.length) {
+      return res.map(String);
     }
-  } catch { /* fallback */ }
-
+  } catch {
+    // Graceful local fallback
+  }
   return paras;
 }
 
@@ -312,7 +259,7 @@ export interface UniversalLayoutElement {
   italic?: boolean;
   alignment?: 'left' | 'center' | 'right' | 'justify';
   description?: string;
-  bbox: [number, number, number, number]; // REQUIRED: [ymin, xmin, ymax, xmax] 0-1000
+  bbox: [number, number, number, number];
   rows?: any[][];
   has_borders?: boolean;
 }
@@ -324,95 +271,55 @@ export interface UniversalLayoutResponse {
 }
 
 export async function extractUniversalLayout(base64Image: string): Promise<UniversalLayoutResponse> {
-  const apiKey = getVisionApiKey();
-  if (!apiKey) throw new Error('Vision API key is not configured.');
-
-  const prompt = `You are a PIXEL-PERFECT Document Layout Analyzer. Analyze this document image and output EVERY element with PRECISE spatial coordinates.
-
-The coordinate system uses a 0-1000 normalized scale where (0,0) is top-left and (1000,1000) is bottom-right.
-"bbox" format is always [ymin, xmin, ymax, xmax].
-
-Return ONLY valid JSON matching this schema:
-{
-  "page_width": 800,
-  "page_height": 1100,
-  "elements": [
-    {
-      "type": "text",
-      "text": "Full text string on this line",
-      "font_size": 14,
-      "bold": true,
-      "italic": false,
-      "alignment": "center",
-      "bbox": [ymin, xmin, ymax, xmax]
-    },
-    {
-      "type": "image",
-      "description": "What the image depicts",
-      "alignment": "right",
-      "bbox": [ymin, xmin, ymax, xmax]
-    },
-    {
-      "type": "table",
-      "has_borders": true,
-      "bbox": [ymin, xmin, ymax, xmax],
-      "rows": [[ { "text": "Cell", "bold": true } ]]
-    }
-  ]
+  return postServerVisionAssist<UniversalLayoutResponse>('universal_layout', { image_b64: base64Image });
 }
 
-CRITICAL RULES:
+export interface TextMicroActionResult {
+  text: string;
+  changed: boolean;
+}
 
-1. BOUNDING BOX ACCURACY IS THE #1 PRIORITY.
-   - Every "bbox" MUST tightly and accurately wrap ONLY the content it describes.
-   - ymin = top edge of the text/image, ymax = bottom edge, xmin = left edge, xmax = right edge.
-   - Pay special attention to the VERTICAL GAPS between lines. If two lines have a large visible gap between them, their ymin/ymax values must reflect that gap accurately. Do NOT place consecutive lines with overlapping or touching bboxes when there is visible whitespace between them.
-
-2. ALIGNMENT DETECTION.
-   - "left": text starts near the left margin.
-   - "center": text is visually centered on the page.
-   - "right": text is pushed to the right side of the page.
-   - Do NOT default everything to "left". Look carefully at where the text sits on the page.
-
-3. SIDE-BY-SIDE TEXT.
-   - If two text phrases sit on the SAME horizontal line but are separated by a large gap (e.g., "FROM: BVC" on the left and "BOARDING AT: BVC" on the right), output them as TWO SEPARATE "text" elements, each with their own bbox. The first one will have a smaller xmax and the second will have a larger xmin.
-
-4. IMAGES, SIGNATURES, QR CODES, STAMPS.
-   - Output each as type "image" with a tight bbox that wraps ONLY the visual graphic.
-   - CRITICAL: The bbox MUST NOT include any surrounding printed text. Crop tightly around the image boundary only.
-
-5. TABLES.
-   - Only use type "table" for actual bordered grid/tabular data. NOT for layout positioning.
-
-6. Output valid JSON only. No markdown fences, no explanation text.`;
-
-  const base64Data = base64Image.split(',')[1] || base64Image;
-
-  const requestBody = {
-    contents: [{
-      parts: [
-        { text: prompt },
-        { inline_data: { mime_type: "image/jpeg", data: base64Data } }
-      ]
-    }],
-    generationConfig: {
-      temperature: 0.1,
-      response_mime_type: "application/json",
-    }
-  };
-
-  const response = await fetchGeminiWithFallback(apiKey, requestBody);
-  if (!response.ok) {
-    const errData = await response.json().catch(() => ({}));
-    throw new Error(errData.error?.message || 'Vision Layout extraction failed');
-  }
-
-  const data = await response.json();
-  const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
-
+export async function fixTextWithAI(rawText: string, imageB64 = ''): Promise<TextMicroActionResult> {
+  if (!rawText.trim()) return { text: rawText, changed: false };
   try {
-    return JSON.parse(rawText.replace(/\`\`\`json|\`\`\`/g, '').trim());
-  } catch (e) {
-    throw new Error('Failed to parse Vision Layout JSON response');
+    const res = await postServerVisionAssist<TextMicroActionResult>('fix_text', {
+      text: rawText,
+      ...(imageB64 ? { image_b64: imageB64 } : {}),
+    });
+    if (res && typeof res.text === 'string' && res.text.trim()) {
+      return { text: res.text, changed: Boolean(res.changed) };
+    }
+  } catch {
+    // Graceful local fallback
   }
+  return { text: rawText.replace(/\s+/g, ' ').trim(), changed: false };
+}
+
+export async function translateTextWithAI(rawText: string): Promise<TextMicroActionResult> {
+  if (!rawText.trim()) return { text: rawText, changed: false };
+  try {
+    const res = await postServerVisionAssist<TextMicroActionResult>('translate_hi_en', { text: rawText });
+    if (res && typeof res.text === 'string' && res.text.trim()) {
+      return { text: res.text, changed: Boolean(res.changed) };
+    }
+  } catch {
+    // Graceful unchanged fallback
+  }
+  return { text: rawText, changed: false };
+}
+
+export async function shortenTextWithAI(rawText: string, maxChars = 0): Promise<TextMicroActionResult> {
+  if (!rawText.trim()) return { text: rawText, changed: false };
+  try {
+    const res = await postServerVisionAssist<TextMicroActionResult>('shorten_text', {
+      text: rawText,
+      max_chars: maxChars,
+    });
+    if (res && typeof res.text === 'string' && res.text.trim()) {
+      return { text: res.text, changed: Boolean(res.changed) };
+    }
+  } catch {
+    // Graceful unchanged fallback
+  }
+  return { text: rawText, changed: false };
 }

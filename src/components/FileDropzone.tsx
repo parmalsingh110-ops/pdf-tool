@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react';
 import { useDropzone, FileRejection } from 'react-dropzone';
 import { motion, useReducedMotion } from 'motion/react';
-import { UploadCloud, AlertTriangle, AlertCircle, X } from 'lucide-react';
+import { UploadCloud, ShieldCheck, AlertCircle, X, FileText, Sparkles } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 const MAX_WARN_MB = 50;
@@ -25,8 +25,8 @@ interface FileDropzoneProps {
 function getFileTypeHint(accept: Record<string, string[]>): string {
   const exts = Object.values(accept).flat();
   if (exts.length === 0) return '';
-  if (exts.includes('.pdf')) return 'PDF files supported';
-  const formatted = exts.map((e) => e.replace('.', '').toUpperCase()).join(', ');
+  if (exts.includes('.pdf') && exts.length === 1) return 'PDF files supported';
+  const formatted = [...new Set(exts.map((e) => e.replace('.', '').toUpperCase()))].join(', ');
   return `${formatted} files supported`;
 }
 
@@ -110,14 +110,14 @@ export default function FileDropzone({
             }
       }
       className={cn(
-        'w-full max-w-3xl mx-auto p-8 sm:p-10 border-2 border-dashed rounded-[1.75rem] cursor-pointer transition-all duration-200 flex flex-col items-center justify-center text-center',
+        'group relative overflow-hidden w-full max-w-3xl mx-auto p-8 sm:p-10 border-2 border-dashed rounded-[1.75rem] cursor-pointer transition-all duration-200 flex flex-col items-center justify-center text-center',
         isDark
           ? cn(
               'max-w-none mx-0 bg-slate-900/80 border-slate-600',
               isDragActive ? 'border-sky-500 bg-slate-800' : 'hover:border-sky-500 hover:bg-slate-800/90',
             )
           : cn(
-              'hover:border-rose-400/80',
+              'hover:border-rose-400/80 dark:hover:border-rose-500/70',
               isDragActive && 'scale-[1.01]',
             ),
         className,
@@ -125,35 +125,74 @@ export default function FileDropzone({
     >
       <input {...getInputProps()} />
 
-      {/* Icon */}
-      <motion.div
-        animate={
-          prefersReduced
-            ? undefined
-            : isDragActive
-              ? { y: -6, scale: 1.08 }
-              : { y: [0, -3, 0] }
-        }
-        transition={
-          isDragActive
-            ? { type: 'spring', stiffness: 360, damping: 18 }
-            : { duration: 3.2, repeat: Infinity, ease: 'easeInOut' }
-        }
-        style={
-          isDark
-            ? undefined
-            : {
-                backgroundColor: isDragActive ? 'var(--pms-soft-rose)' : 'var(--pms-soft-lavender)',
-                color: isDragActive ? 'var(--pms-rose)' : 'var(--pms-violet)',
-              }
-        }
-        className={cn(
-          'w-16 h-16 sm:w-20 sm:h-20 rounded-2xl flex items-center justify-center mb-4 sm:mb-5 transition-colors',
-          isDark && (isDragActive ? 'bg-sky-500/20 text-sky-400' : 'bg-sky-900/80 text-sky-400'),
-        )}
-      >
-        <UploadCloud className="w-8 h-8 sm:w-10 sm:h-10" />
-      </motion.div>
+      {/* Pure-CSS GPU radial ambient spotlight on hover/drag (zero JS layout cost) */}
+      {!isDark && (
+        <>
+          <span
+            aria-hidden="true"
+            className="pointer-events-none absolute -top-20 -left-20 w-64 h-64 rounded-full opacity-0 group-hover:opacity-85 transition-opacity duration-300"
+            style={{ background: 'radial-gradient(circle, var(--pms-soft-rose) 0%, transparent 70%)' }}
+          />
+          <span
+            aria-hidden="true"
+            className="pointer-events-none absolute -bottom-20 -right-20 w-64 h-64 rounded-full opacity-0 group-hover:opacity-85 transition-opacity duration-300"
+            style={{ background: 'radial-gradient(circle, var(--pms-soft-lavender) 0%, transparent 70%)' }}
+          />
+        </>
+      )}
+
+      {/* 2.5D Layered Document Emblem + GPU Composited Float (no idle JS rAF loop) */}
+      <div className="relative mb-5 sm:mb-6 flex items-center justify-center">
+        {/* Left fanned micro-sheet */}
+        <span
+          aria-hidden="true"
+          className={cn(
+            'pointer-events-none absolute w-12 h-14 rounded-xl border flex items-center justify-center -translate-x-6 translate-y-1 -rotate-12 opacity-70 transition-transform duration-300 group-hover:-translate-x-8 group-hover:-rotate-[16deg]',
+            isDragActive && '-translate-x-9 -rotate-[20deg] scale-105',
+            isDark ? 'bg-slate-800 border-slate-700 text-sky-400/70' : 'bg-[var(--pms-pearl)] border-[var(--pms-border-strong)] text-[var(--pms-rose)]',
+          )}
+        >
+          <FileText className="w-5 h-5 opacity-75" />
+        </span>
+
+        {/* Right fanned micro-sheet */}
+        <span
+          aria-hidden="true"
+          className={cn(
+            'pointer-events-none absolute w-12 h-14 rounded-xl border flex items-center justify-center translate-x-6 translate-y-1 rotate-12 opacity-70 transition-transform duration-300 group-hover:translate-x-8 group-hover:rotate-[16deg]',
+            isDragActive && 'translate-x-9 rotate-[20deg] scale-105',
+            isDark ? 'bg-slate-800 border-slate-700 text-indigo-400/70' : 'bg-[var(--pms-pearl)] border-[var(--pms-border-strong)] text-[var(--pms-blue)]',
+          )}
+        />
+
+        {/* Center primary UploadCloud tile */}
+        <motion.div
+          animate={
+            prefersReduced
+              ? undefined
+              : isDragActive
+                ? { y: -6, scale: 1.08 }
+                : { y: 0, scale: 1 }
+          }
+          transition={{ type: 'spring', stiffness: 360, damping: 20 }}
+          style={
+            isDark
+              ? undefined
+              : {
+                  backgroundColor: isDragActive ? 'var(--pms-soft-rose)' : 'var(--pms-soft-lavender)',
+                  color: isDragActive ? 'var(--pms-rose)' : 'var(--pms-violet)',
+                  borderColor: 'var(--pms-border)',
+                }
+          }
+          className={cn(
+            'relative z-10 w-16 h-16 sm:w-20 sm:h-20 rounded-2xl border flex items-center justify-center shadow-sm transition-transform duration-200 group-hover:scale-105',
+            !prefersReduced && !isDragActive && 'pms-float-a',
+            isDark && (isDragActive ? 'bg-sky-500/20 text-sky-400 border-sky-500/40' : 'bg-sky-900/80 text-sky-400 border-slate-700'),
+          )}
+        >
+          <UploadCloud className="w-8 h-8 sm:w-10 sm:h-10" />
+        </motion.div>
+      </div>
 
       {/* Title */}
       <h3
@@ -207,19 +246,35 @@ export default function FileDropzone({
         </div>
       )}
 
-      {/* Max size warning */}
+      {/* Trust & capacity micro-pills */}
       <div
         style={isDark ? undefined : { color: 'var(--pms-subtle-text)' }}
-        className={cn('flex items-center gap-1.5 mt-2 text-xs', isDark && 'text-slate-500')}
+        className={cn('relative z-10 flex flex-wrap items-center justify-center gap-2 mt-3 text-xs', isDark && 'text-slate-400')}
       >
-        <AlertTriangle className="w-3 h-3 text-amber-500" />
-        <span>Max size: {maxAllowedMB} MB (Safe browser processing limit)</span>
+        <span
+          className={cn(
+            'inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full border font-medium',
+            isDark ? 'bg-slate-800/90 border-slate-700 text-emerald-400' : 'bg-[var(--pms-pearl)] border-[var(--pms-border)]',
+          )}
+        >
+          <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
+          <span>Up to {maxAllowedMB} MB</span>
+        </span>
+        <span
+          className={cn(
+            'inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full border font-medium',
+            isDark ? 'bg-slate-800/90 border-slate-700 text-sky-400' : 'bg-[var(--pms-pearl)] border-[var(--pms-border)]',
+          )}
+        >
+          <Sparkles className="w-3 h-3 text-[var(--pms-violet)]" />
+          <span>Zero watermark · Private</span>
+        </span>
       </div>
 
       {/* CTA Button */}
       <span
         className={cn(
-          'mt-6 sm:mt-7 inline-flex items-center justify-center px-6 sm:px-8 py-3 sm:py-3.5 text-sm sm:text-base font-bold rounded-full transition-all select-none',
+          'relative z-10 mt-5 sm:mt-6 inline-flex items-center justify-center px-6 sm:px-8 py-3 sm:py-3.5 text-sm sm:text-base font-bold rounded-full transition-all select-none',
           isDark
             ? 'bg-sky-600 text-white hover:bg-sky-500 shadow-md'
             : 'pms-btn-primary',

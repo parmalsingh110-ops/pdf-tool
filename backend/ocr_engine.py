@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Optional
 
 import cv2
-import fitz
+import pymupdf as fitz
 import numpy as np
 
 logger = logging.getLogger("mediasuite.ocr")
@@ -35,9 +35,125 @@ logger = logging.getLogger("mediasuite.ocr")
 _RAPIDOCR_LOCK = threading.Lock()
 _RAPIDOCR_INSTANCE = None
 _RAPIDOCR_INIT_FAILED = False
+_TESS_LANGS_LOCK = threading.Lock()
+_TESS_LANGS_CACHE: Optional[set[str]] = None
 
 _DEVANAGARI_RE = re.compile(r"[\u0900-\u097F]")
 _LATIN_SAFE_RE = re.compile(r"[^\x20-\x7E\xA0-\xFF]")
+_NON_ASCII_WORD_RE = re.compile(r"[^\x00-\x7F]")
+_CJK_RE = re.compile(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af]")
+
+_LANG_ALIASES: dict[str, str] = {
+    "auto": "auto",
+    "all": "auto",
+    "en": "eng",
+    "eng": "eng",
+    "english": "eng",
+    "hi": "hin",
+    "hin": "hin",
+    "hindi": "hin",
+    "fr": "fra",
+    "fra": "fra",
+    "fre": "fra",
+    "french": "fra",
+    "de": "deu",
+    "deu": "deu",
+    "ger": "deu",
+    "german": "deu",
+    "es": "spa",
+    "spa": "spa",
+    "spanish": "spa",
+    "pt": "por",
+    "por": "por",
+    "portuguese": "por",
+    "it": "ita",
+    "ita": "ita",
+    "italian": "ita",
+    "nl": "nld",
+    "nld": "nld",
+    "dutch": "nld",
+    "pl": "pol",
+    "pol": "pol",
+    "ru": "rus",
+    "rus": "rus",
+    "russian": "rus",
+    "uk": "ukr",
+    "ukr": "ukr",
+    "tr": "tur",
+    "tur": "tur",
+    "ar": "ara",
+    "ara": "ara",
+    "arabic": "ara",
+    "ur": "urd",
+    "urd": "urd",
+    "urdu": "urd",
+    "fa": "fas",
+    "fas": "fas",
+    "persian": "fas",
+    "bn": "ben",
+    "ben": "ben",
+    "bengali": "ben",
+    "ta": "tam",
+    "tam": "tam",
+    "tamil": "tam",
+    "te": "tel",
+    "tel": "tel",
+    "telugu": "tel",
+    "mr": "mar",
+    "mar": "mar",
+    "marathi": "mar",
+    "gu": "guj",
+    "guj": "guj",
+    "gujarati": "guj",
+    "pa": "pan",
+    "pan": "pan",
+    "punjabi": "pan",
+    "kn": "kan",
+    "kan": "kan",
+    "kannada": "kan",
+    "ml": "mal",
+    "mal": "mal",
+    "malayalam": "mal",
+    "ne": "nep",
+    "nep": "nep",
+    "zh": "chi_sim",
+    "zh-cn": "chi_sim",
+    "chi_sim": "chi_sim",
+    "zh-tw": "chi_tra",
+    "chi_tra": "chi_tra",
+    "ja": "jpn",
+    "jpn": "jpn",
+    "japanese": "jpn",
+    "ko": "kor",
+    "kor": "kor",
+    "korean": "kor",
+    "th": "tha",
+    "tha": "tha",
+    "thai": "tha",
+    "vi": "vie",
+    "vie": "vie",
+    "vietnamese": "vie",
+    "id": "ind",
+    "ind": "ind",
+}
+
+_OSD_SCRIPT_MAP: dict[str, tuple[str, str]] = {
+    "devanagari": ("hin+eng", "script/Devanagari+eng"),
+    "arabic": ("ara+eng", "script/Arabic+eng"),
+    "cyrillic": ("rus+eng", "script/Cyrillic+eng"),
+    "bengali": ("ben+eng", "script/Bengali+eng"),
+    "tamil": ("tam+eng", "script/Tamil+eng"),
+    "telugu": ("tel+eng", "script/Telugu+eng"),
+    "gujarati": ("guj+eng", "script/Gujarati+eng"),
+    "gurmukhi": ("pan+eng", "script/Gurmukhi+eng"),
+    "kannada": ("kan+eng", "script/Kannada+eng"),
+    "malayalam": ("mal+eng", "script/Malayalam+eng"),
+    "han": ("chi_sim+eng", "script/HanS+eng"),
+    "japanese": ("jpn+eng", "script/Japanese+eng"),
+    "hangul": ("kor+eng", "script/Hangul+eng"),
+    "thai": ("tha+eng", "script/Thai+eng"),
+    "latin": ("eng", "script/Latin"),
+}
 
 
 @dataclass
@@ -63,6 +179,246 @@ def find_devanagari_font() -> Optional[Path]:
         if c.exists() and c.is_file():
             return c
     return None
+
+
+def find_unicode_font() -> Optional[Path]:
+    """Locate a broad Unicode TrueType font for global multi-script PDF text layers."""
+    here = Path(__file__).resolve().parent
+    candidates = [
+        here / "fonts" / "NotoSans-Regular.ttf",
+        Path("/System/Library/Fonts/Supplemental/Arial Unicode.ttf"),
+        Path("/Library/Fonts/Arial Unicode.ttf"),
+        Path("/System/Library/Fonts/Supplemental/NISC18030.ttf"),
+        Path("/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf"),
+        Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
+    ]
+    for c in candidates:
+        if c.exists() and c.is_file():
+            return c
+    return None
+
+
+def get_installed_tesseract_langs() -> set[str]:
+    """Query `tesseract --list-langs` once per process and return installed pack IDs."""
+    global _TESS_LANGS_CACHE
+    if _TESS_LANGS_CACHE is not None:
+        return _TESS_LANGS_CACHE
+    with _TESS_LANGS_LOCK:
+        if _TESS_LANGS_CACHE is not None:
+            return _TESS_LANGS_CACHE
+        tess_bin = shutil.which("tesseract")
+        langs: set[str] = set()
+        if tess_bin:
+            try:
+                proc = subprocess.run(
+                    [tess_bin, "--list-langs"],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL,
+                    timeout=5,
+                    check=False,
+                )
+                if proc.returncode == 0 and proc.stdout:
+                    for raw in proc.stdout.decode("utf-8", errors="replace").splitlines():
+                        item = raw.strip()
+                        if item and not item.lower().startswith("list of available"):
+                            langs.add(item)
+            except Exception:
+                pass
+        _TESS_LANGS_CACHE = langs
+        return _TESS_LANGS_CACHE
+
+
+def resolve_ocr_lang(requested: str = "auto") -> str:
+    """
+    Normalize any global OCR language/script string (`auto`, `fra`, `ara+eng`, `hin+eng`, etc.)
+    against actually installed Tesseract language packs so invalid packs never crash subprocesses.
+    """
+    raw = (requested or "auto").strip().replace(",", "+").replace(" ", "+")
+    if not raw:
+        return "auto"
+    lowered = raw.lower()
+    if lowered in ("auto", "all", "detect"):
+        return "auto"
+
+    parts = [p.strip() for p in raw.split("+") if p.strip()]
+    normalized: list[str] = []
+    for p in parts:
+        if p.lower().startswith("script/"):
+            tok = "script/" + p.split("/", 1)[1]
+        else:
+            tok = _LANG_ALIASES.get(p.lower(), p.lower())
+        if tok == "auto":
+            return "auto"
+        if re.fullmatch(r"[A-Za-z0-9_/-]{2,32}", tok) and tok not in normalized:
+            normalized.append(tok)
+
+    if not normalized:
+        return "auto"
+
+    installed = get_installed_tesseract_langs()
+    if installed:
+        valid = [t for t in normalized if t in installed]
+        if not valid:
+            if "eng" in installed:
+                return "eng"
+            return next(iter(installed), "eng")
+        return "+".join(valid[:3])
+    return "+".join(normalized[:3])
+
+
+def _detect_script_via_osd_with_conf(img_bgr: np.ndarray) -> tuple[Optional[str], float]:
+    """Detect dominant page script and confidence via Tesseract OSD (`--psm 0 -l osd`)."""
+    tess_bin = shutil.which("tesseract")
+    installed = get_installed_tesseract_langs()
+    if not tess_bin or (installed and "osd" not in installed):
+        return None, 0.0
+
+    work = img_bgr
+    h, w = img_bgr.shape[:2]
+    scale = min(1.0, 1400.0 / float(max(h, w, 1)))
+    if scale < 0.99:
+        work = cv2.resize(img_bgr, (max(64, int(w * scale)), max(64, int(h * scale))), interpolation=cv2.INTER_AREA)
+
+    ok, buf = cv2.imencode(".png", work)
+    if not ok:
+        return None, 0.0
+    try:
+        proc = subprocess.run(
+            [tess_bin, "stdin", "stdout", "--psm", "0", "-l", "osd"],
+            input=buf.tobytes(),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            timeout=6,
+            check=False,
+        )
+        out = (proc.stdout or b"").decode("utf-8", errors="replace")
+        m = re.search(r"Script:\s*([A-Za-z_]+)", out)
+        if not m:
+            return None, 0.0
+        conf_m = re.search(r"Script confidence:\s*([0-9]+(?:\.[0-9]+)?)", out)
+        osd_conf = float(conf_m.group(1)) if conf_m else 0.0
+        script_key = m.group(1).strip().lower()
+        pair = _OSD_SCRIPT_MAP.get(script_key)
+        if not pair:
+            return None, osd_conf
+        primary, fallback = pair
+        for candidate in (primary, fallback):
+            toks = [t for t in candidate.split("+") if (not installed or t in installed)]
+            if toks:
+                return "+".join(toks[:2]), osd_conf
+    except Exception:
+        return None, 0.0
+    return None, 0.0
+
+
+def detect_script_via_osd(img_bgr: np.ndarray) -> Optional[str]:
+    """Detect dominant page script using fast Tesseract OSD (`--psm 0 -l osd`)."""
+    script, _ = _detect_script_via_osd_with_conf(img_bgr)
+    return script
+
+
+_VOWEL_RE = re.compile(r"[aeiouyAEIOUY]")
+_PURE_CODE_OR_NUM_RE = re.compile(
+    r"^(?:[+\-]?\d+(?:[.,:/\-]\d+)*(?:%|pt|px|cm|mm|kg)?|"
+    r"[A-Z0-9]{2,}(?:[/\-][A-Z0-9]+)+|"
+    r"https?://\S+|www\.\S+|\S+@\S+\.\S+)$"
+)
+
+
+def is_clean_ascii_token(tok: str) -> bool:
+    """Return True if an ASCII token is a genuine English word, code/ID, URL, date, or number (not foreign-script mojibake)."""
+    s = (tok or "").strip()
+    if not s or _NON_ASCII_WORD_RE.search(s):
+        return False
+    if _PURE_CODE_OR_NUM_RE.fullmatch(s):
+        return True
+
+    core = re.sub(r"^[(\[\"'`]+|[)\]}\"',.;:!?]+$", "", s)
+    if not core:
+        return False
+    if _PURE_CODE_OR_NUM_RE.fullmatch(core):
+        return True
+    if not re.search(r"[A-Za-z]", core):
+        return bool(re.fullmatch(r"[\d.,:/\-+%*()]+", core))
+
+    # Reject internal bangs/brackets/Unicode fullwidth punctuation like `DK!hIRIOL!ph` or `haDgnne/2/(`
+    if any(ch in core for ch in "!()[]{}<>~`^*|\\\"'"):
+        return False
+    # Mixed digits and lowercase letters inside the same token (`9g`, `3ea`, `fafe:01`, `y4.21`) -> mojibake
+    if re.search(r"[a-z]", core) and re.search(r"\d", core):
+        return False
+    # Reject bizarre mid-word uppercase jumps inside mixed-case tokens (`IbhEIlth`, `PDIPiRtl`, `HfaT`)
+    if re.search(r"[a-z][A-Z]", core):
+        return False
+    # Reject standalone colon-attached lowercase words from Hindi serial/date labels like `fafe:01-06-2018`, `seat:`
+    if ":" in core and not core.endswith(":"):
+        return False
+
+    letters_only = re.sub(r"[^A-Za-z]", "", core)
+    if len(letters_only) >= 2:
+        if letters_only.isupper() and len(letters_only) <= 18:
+            return True
+        vowels = len(_VOWEL_RE.findall(letters_only))
+        # Real Latin/European words almost always have vowels when len >= 3 (except known acronyms)
+        if len(letters_only) >= 3 and vowels == 0:
+            return False
+        if len(letters_only) >= 5 and (vowels / len(letters_only)) < 0.17:
+            return False
+    return bool(re.fullmatch(r"[A-Za-z]+(?:[.\-/&'][A-Za-z]+)*:?", core))
+
+
+def latin_plausibility_score(words: list[OCRWord]) -> tuple[float, int]:
+    """
+    Estimate fraction of non-trivial Latin-alpha OCR words that resemble genuine Latin/European text
+    versus forced English decoding of Devanagari/Indic/Arabic glyphs (mojibake).
+    Returns `(plausible_fraction, alpha_token_count)`.
+    """
+    alpha_tokens = [
+        (w.text or "").strip()
+        for w in words
+        if w.text and re.search(r"[A-Za-z]", w.text) and not _PURE_CODE_OR_NUM_RE.fullmatch(w.text.strip())
+    ]
+    if not alpha_tokens:
+        return 1.0, 0
+    ok = sum(1 for t in alpha_tokens if is_clean_ascii_token(t))
+    return float(ok) / float(len(alpha_tokens)), len(alpha_tokens)
+
+
+def _detect_shirorekha_score(img_bgr: np.ndarray) -> float:
+    """Fast CV signal detecting Devanagari/Bengali/Gurmukhi horizontal top bars (shirorekha) above vertical stems."""
+    if img_bgr is None or img_bgr.size == 0:
+        return 0.0
+    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY) if img_bgr.ndim == 3 else img_bgr
+    h, w = gray.shape[:2]
+    if h < 40 or w < 40:
+        return 0.0
+    if max(h, w) > 1400:
+        sc = 1200.0 / float(max(h, w))
+        gray = cv2.resize(gray, (max(32, int(w * sc)), max(32, int(h * sc))), interpolation=cv2.INTER_AREA)
+        h, w = gray.shape[:2]
+
+    ink = (gray < 165).astype(np.uint8)
+    total_ink = int(np.sum(ink))
+    if total_ink < 80:
+        return 0.0
+    h_open = cv2.morphologyEx(ink * 255, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (14, 1)))
+    ys, xs = np.where(h_open > 0)
+    if len(ys) < 40:
+        return 0.0
+
+    step = max(1, len(ys) // 600)
+    valid_top = 0
+    sampled = 0
+    for y, x in zip(ys[::step], xs[::step]):
+        if y < 4 or y + 8 >= h:
+            continue
+        above = float(np.mean(ink[max(0, y - 4):y - 1, x]))
+        below = float(np.mean(ink[y + 2:min(h, y + 9), x]))
+        sampled += 1
+        if above < 0.25 and below > 0.25:
+            valid_top += 1
+    bar_ink_ratio = float(len(ys)) / float(max(1, total_ink))
+    return bar_ink_ratio * (valid_top / float(max(1, sampled)))
 
 
 def get_rapidocr():
@@ -98,32 +454,133 @@ def clean_image_for_ocr(img_bgr: np.ndarray) -> np.ndarray:
 
     h, w = img_bgr.shape[:2]
     hsv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
+    lab = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2LAB).astype(np.float32)
+    l_ch, b_ch = lab[:, :, 0], lab[:, :, 2]
+    r_ch = img_bgr[:, :, 2].astype(np.float32)
     gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY).astype(np.float32)
 
-    # Fast downscaled illumination normalization (removes uneven scanner shading & smooth stamps)
+    # Neutralize vivid yellow/amber watermarks (e.g. e-Mitra center map) and bright green stamp checkmarks
+    # so dark black text strokes printed over them separate cleanly on white background.
+    yellow_w = np.clip((b_ch - 132.0) / 24.0, 0.0, 1.0) * np.clip((l_ch - 80.0) / 40.0, 0.0, 1.0)
+    lum = gray * (1.0 - yellow_w) + r_ch * yellow_w
+
+    # Fast downscaled illumination normalization (removes uneven scanner shading, flash glare & smooth stamps)
     scale_ds = 0.25 if max(h, w) > 900 else 0.5
     ds_w = max(32, int(w * scale_ds))
     ds_h = max(32, int(h * scale_ds))
-    small = cv2.resize(gray.astype(np.uint8), (ds_w, ds_h), interpolation=cv2.INTER_AREA)
-    k = max(11, (min(ds_w, ds_h) // 24) | 1)
-    k = min(k, 25)
+    small = cv2.resize(np.clip(lum, 0, 255).astype(np.uint8), (ds_w, ds_h), interpolation=cv2.INTER_AREA)
+    k = max(11, (min(ds_w, ds_h) // 20) | 1)
+    k = min(k, 31)
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))
     bg_small = cv2.morphologyEx(small, cv2.MORPH_CLOSE, kernel)
     bg_small = cv2.GaussianBlur(bg_small, (k, k), 0)
     bg_full = cv2.resize(bg_small, (w, h), interpolation=cv2.INTER_LINEAR).astype(np.float32)
 
-    # Ratio relative to local paper illumination: dark/faded ink stays < 0.87 even under yellow wash
-    ratio = np.clip(gray / np.maximum(bg_full, 24.0), 0.0, 1.0)
+    # Ratio relative to local paper illumination: dark/faded ink stays cleanly separated under colored wash
+    ratio = np.clip(lum / np.maximum(bg_full, 24.0), 0.0, 1.0)
 
-    # Only erase bright saturated watermarks that are very close to background illumination
-    pale_wm = ((hsv[:, :, 1] > 28) & (hsv[:, :, 2] > 155) & (ratio > 0.87)) | (
-        (hsv[:, :, 2] > 220) & (ratio > 0.92)
+    # Suppress bright/pastel cyan, green checkmarks, yellow, and pink watermarks while keeping dark ink sharp
+    b_raw = img_bgr[:, :, 0].astype(np.float32)
+    g_raw = img_bgr[:, :, 1].astype(np.float32)
+    green_wm = (
+        (hsv[:, :, 0] >= 35)
+        & (hsv[:, :, 0] <= 94)
+        & (hsv[:, :, 1] >= 60)
+        & (g_raw >= 68.0)
+        & ((g_raw - np.maximum(r_ch, b_raw)) >= 20.0)
+    )
+    pale_wm = (
+        ((hsv[:, :, 1] > 20) & (hsv[:, :, 2] > 125) & (ratio > 0.87))
+        | ((hsv[:, :, 2] > 218) & (ratio > 0.92))
+        | green_wm
     )
     norm = np.where(pale_wm, 1.0, ratio)
 
-    # Gentle gamma 1.45 contrast boost darkens faded ink-saver gray text without eroding thin serifs
-    enhanced = ((np.clip((norm - 0.15) / 0.80, 0.0, 1.0) ** 1.45) * 255.0).astype(np.uint8)
+    # Gamma 1.15 contrast preserves crisp Devanagari matras/loops while keeping green/yellow background white
+    enhanced = ((np.clip((norm - 0.12) / 0.80, 0.0, 1.0) ** 1.15) * 255.0).astype(np.uint8)
     return cv2.cvtColor(enhanced, cv2.COLOR_GRAY2BGR)
+
+
+def estimate_skew_angle(img_bgr_or_gray: np.ndarray, max_angle: float = 8.0) -> float:
+    """
+    Estimate dominant near-horizontal document skew angle (clockwise degrees, positive = rotate CCW).
+    Combines long morphological horizontal line segments and edge Hough lines so tilted phone scans
+    (e.g. CamScanner marksheets) snap cleanly to horizontal/vertical axes.
+    """
+    if img_bgr_or_gray is None or img_bgr_or_gray.size == 0:
+        return 0.0
+    gray = (
+        cv2.cvtColor(img_bgr_or_gray, cv2.COLOR_BGR2GRAY)
+        if img_bgr_or_gray.ndim == 3
+        else img_bgr_or_gray
+    )
+    h, w = gray.shape[:2]
+    if h < 40 or w < 40:
+        return 0.0
+
+    # Downscale large images to speed up Hough line voting
+    scale = min(1.0, 1200.0 / float(max(h, w)))
+    if scale < 0.95:
+        work = cv2.resize(gray, (max(32, int(w * scale)), max(32, int(h * scale))), interpolation=cv2.INTER_AREA)
+    else:
+        work = gray
+
+    wh, ww = work.shape[:2]
+    edges = cv2.Canny(cv2.GaussianBlur(work, (3, 3), 0), 45, 140)
+    min_len = max(40, int(ww * 0.12))
+    lines = cv2.HoughLinesP(edges, 1, math.pi / 720.0, threshold=max(40, int(ww * 0.08)), minLineLength=min_len, maxLineGap=15)
+    angles: list[tuple[float, float]] = []
+    if lines is not None:
+        for ln in lines.reshape(-1, 4):
+            x1, y1, x2, y2 = int(ln[0]), int(ln[1]), int(ln[2]), int(ln[3])
+            dx = float(x2 - x1)
+            dy = float(y2 - y1)
+            length = math.hypot(dx, dy)
+            if length < min_len:
+                continue
+            ang = math.degrees(math.atan2(dy, dx))
+            if abs(ang) <= max_angle:
+                angles.append((ang, length))
+            elif abs(abs(ang) - 90.0) <= max_angle:
+                # Near-vertical lines give independent skew confirmation
+                v_ang = (ang - 90.0) if ang > 0 else (ang + 90.0)
+                angles.append((v_ang, length * 0.9))
+
+    if len(angles) < 2:
+        return 0.0
+
+    # Weighted median around the tightest 1.5-deg modal bin to reject outliers
+    hist_bins: dict[int, list[tuple[float, float]]] = {}
+    for ang, wt in angles:
+        b = int(round(ang * 2.0))  # 0.5 deg bins
+        hist_bins.setdefault(b, []).append((ang, wt))
+    best_bin = max(hist_bins.keys(), key=lambda b: sum(wt for k in (b - 1, b, b + 1) for _, wt in hist_bins.get(k, [])))
+    near = [item for k in (best_bin - 2, best_bin - 1, best_bin, best_bin + 1, best_bin + 2) for item in hist_bins.get(k, [])]
+    if not near:
+        return 0.0
+    total_w = sum(wt for _, wt in near)
+    avg_ang = sum(a * wt for a, wt in near) / max(1e-6, total_w)
+    if abs(avg_ang) < 0.45 or total_w < min_len * 2.0:
+        return 0.0
+    return float(avg_ang)
+
+
+def deskew_image_bgr(img_bgr: np.ndarray, max_angle: float = 8.0) -> tuple[np.ndarray, float]:
+    """Rotate image around center with white paper border padding to level skewed scans."""
+    ang = estimate_skew_angle(img_bgr, max_angle=max_angle)
+    if abs(ang) < 0.45:
+        return img_bgr, 0.0
+    h, w = img_bgr.shape[:2]
+    mat = cv2.getRotationMatrix2D((w * 0.5, h * 0.5), ang, 1.0)
+    rotated = cv2.warpAffine(
+        img_bgr,
+        mat,
+        (w, h),
+        flags=cv2.INTER_CUBIC,
+        borderMode=cv2.BORDER_CONSTANT,
+        borderValue=(255, 255, 255),
+    )
+    return rotated, ang
 
 
 def _rect_iou(a: tuple[float, float, float, float], b: tuple[float, float, float, float]) -> float:
@@ -275,7 +732,7 @@ def extract_rapidocr_words(
     gray_clean = cv2.cvtColor(img_clean_bgr, cv2.COLOR_BGR2GRAY)
 
     def _run_one(img_in: np.ndarray) -> list[OCRWord]:
-        res, _ = engine(img_in)
+        res, _ = engine(img_in, use_cls=False)
         if not res:
             return []
         collected: list[OCRWord] = []
@@ -283,6 +740,8 @@ def extract_rapidocr_words(
             if not item or len(item) < 3:
                 continue
             quad, text, score = item[0], str(item[1] or "").strip(), float(item[2] or 0.0)
+            # Strip spurious CJK ideograph hallucinations from ONNX multilingual dictionary on non-CJK documents
+            text = re.sub(r"[\u3400-\u9FFF\uF900-\uFAFF\u3000-\u303F]+", "", text).strip()
             if not text or score < 0.25 or len(quad) != 4:
                 continue
             pts = [(float(p[0]), float(p[1])) for p in quad]
@@ -334,20 +793,16 @@ def extract_rapidocr_words(
     return clean_words
 
 
-def extract_tesseract_words(img_bgr: np.ndarray, lang: str = "hin+eng") -> list[OCRWord]:
-    """Run system Tesseract TSV on a cleaned image for Devanagari/multilingual word boxes."""
+def _run_tesseract_tsv_raw(work_img: np.ndarray, tess_lang: str, psm: int, scale_factor: float) -> list[OCRWord]:
+    """Invoke Tesseract TSV binary on an image buffer and scale coordinates back by `1 / scale_factor`."""
     tess_bin = shutil.which("tesseract")
     if not tess_bin:
         return []
-
-    ok, buf = cv2.imencode(".png", img_bgr)
+    ok, buf = cv2.imencode(".png", work_img)
     if not ok:
         return []
 
-    tess_lang = "hin+eng" if ("hin" in lang.lower() and "eng" in lang.lower()) else (
-        "hin" if "hin" in lang.lower() else "eng"
-    )
-    cmd = [tess_bin, "stdin", "stdout", "--oem", "1", "--psm", "3", "-l", tess_lang, "tsv"]
+    cmd = [tess_bin, "stdin", "stdout", "--oem", "1", "--psm", str(int(psm)), "-l", tess_lang, "tsv"]
     try:
         proc = subprocess.run(
             cmd,
@@ -364,6 +819,7 @@ def extract_tesseract_words(img_bgr: np.ndarray, lang: str = "hin+eng") -> list[
         logger.warning(f"[ProOCR] Tesseract TSV failed: {type(e).__name__}")
         return []
 
+    inv_scale = 1.0 / max(1e-5, scale_factor)
     words: list[OCRWord] = []
     reader = csv.DictReader(io.StringIO(text_tsv), delimiter="\t")
     for row in reader:
@@ -376,10 +832,10 @@ def extract_tesseract_words(img_bgr: np.ndarray, lang: str = "hin+eng") -> list[
             conf = float(row.get("conf") or -1)
             if conf < 15:
                 continue
-            left = float(row.get("left") or 0)
-            top = float(row.get("top") or 0)
-            width = float(row.get("width") or 0)
-            height = float(row.get("height") or 0)
+            left = float(row.get("left") or 0) * inv_scale
+            top = float(row.get("top") or 0) * inv_scale
+            width = float(row.get("width") or 0) * inv_scale
+            height = float(row.get("height") or 0) * inv_scale
             if width < 2 or height < 2:
                 continue
             words.append(
@@ -398,47 +854,299 @@ def extract_tesseract_words(img_bgr: np.ndarray, lang: str = "hin+eng") -> list[
     return words
 
 
-def _ocr_page_words(
-    img_raw_bgr: np.ndarray,
-    lang: str,
-    clean_watermarks: bool,
-    latin_font: fitz.Font,
-    dev_font: Optional[fitz.Font],
+def _filter_tesseract_glitch_boxes(words: list[OCRWord]) -> tuple[list[OCRWord], list[tuple[int, int, int, int]]]:
+    """
+    Drop multi-line Tesseract segmentation glitch blobs (e.g. 254x254 `'i)'` or 280x279 `'af'`)
+    that otherwise swallow entire blocks and bridge separate lines.
+    Returns `(clean_words, glitch_rois_px)`.
+    """
+    if len(words) < 6:
+        return words, []
+    heights = sorted((w.y1 - w.y0) for w in words if len(w.text.strip()) >= 2)
+    med_h = heights[len(heights) // 2] if heights else 24.0
+    max_normal_h = max(64.0, med_h * 2.55)
+
+    kept: list[OCRWord] = []
+    glitches: list[tuple[int, int, int, int]] = []
+    for w in words:
+        bw = max(1.0, w.x1 - w.x0)
+        bh = max(1.0, w.y1 - w.y0)
+        if bh > max_normal_h and (w.conf < 0.78 or bh > bw * 0.68 or len(w.text.strip()) <= 6):
+            glitches.append((int(w.x0), int(w.y0), int(w.x1), int(w.y1)))
+            continue
+        kept.append(w)
+    return kept, glitches
+
+
+def _find_uncovered_text_rois(
+    img_bgr: np.ndarray, words: list[OCRWord], seed_rois: list[tuple[int, int, int, int]]
+) -> list[tuple[int, int, int, int]]:
+    """Find up to 5 horizontal prose strips missed by full-page PSM-3 (or swallowed by glitch blobs)."""
+    ih, iw = img_bgr.shape[:2]
+    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+    ink = (gray < 142).astype(np.uint8) * 255
+
+    # Ignore outer 8% decorative side margins (`e-Mitra` ribbons) and already-recognized words
+    ink[:, : int(iw * 0.08)] = 0
+    ink[:, int(iw * 0.91) :] = 0
+    for w in words:
+        x0 = max(0, int(w.x0) - 6)
+        y0 = max(0, int(w.y0) - 4)
+        x1 = min(iw, int(w.x1) + 6)
+        y1 = min(ih, int(w.y1) + 4)
+        ink[y0:y1, x0:x1] = 0
+
+    horiz = cv2.dilate(ink, np.ones((5, 28), dtype=np.uint8), iterations=1)
+    n_labels, _, stats, _ = cv2.connectedComponentsWithStats(horiz, connectivity=8)
+    candidates: list[tuple[int, int, int, int, int]] = []
+    for lbl in range(1, n_labels):
+        bx, by, bw, bh, area = [int(v) for v in stats[lbl]]
+        if bw < 75 or bh < 14 or bh > 125 or bw > iw * 0.85:
+            continue
+        # Skip dense square graphics / photos / QR codes (aspect ~1 and very high solid fill)
+        fill = area / float(max(1, bw * bh))
+        if bh > 80 and bw < bh * 1.45 and fill > 0.55:
+            continue
+        if fill < 0.08:
+            continue
+        candidates.append((area, max(0, bx - 10), max(0, by - 8), min(iw, bx + bw + 10), min(ih, by + bh + 8)))
+
+    for gx0, gy0, gx1, gy1 in seed_rois:
+        gw, gh = gx1 - gx0, gy1 - gy0
+        if gw >= 70 and 35 <= gh <= 320 and gx0 > iw * 0.08 and gx1 < iw * 0.91:
+            candidates.append((gw * gh, max(0, gx0 - 12), max(0, gy0 - 8), min(iw, gx1 + 12), min(ih, gy1 + 8)))
+
+    # Deduplicate overlapping ROIs, prioritizing largest area, cap at 5 fast crops
+    candidates.sort(key=lambda t: -t[0])
+    chosen: list[tuple[int, int, int, int]] = []
+    for _, rx0, ry0, rx1, ry1 in candidates:
+        if len(chosen) >= 5:
+            break
+        if any(
+            max(0, min(rx1, cx1) - max(rx0, cx0)) * max(0, min(ry1, cy1) - max(ry0, cy0))
+            > 0.45 * max(1, (rx1 - rx0) * (ry1 - ry0))
+            for cx0, cy0, cx1, cy1 in chosen
+        ):
+            continue
+        chosen.append((rx0, ry0, rx1, ry1))
+    return chosen
+
+
+def extract_tesseract_words(img_bgr: np.ndarray, lang: str = "auto", psm: int = 3) -> list[OCRWord]:
+    """
+    Extract word-level bounding boxes via Tesseract TSV (supports all 100+ scripts).
+    Gently upscales complex/non-Latin low-res inputs, removes multi-line segmentation glitch blobs,
+    and performs fast targeted PSM-6 rescue on missed horizontal prose strips.
+    """
+    if not shutil.which("tesseract"):
+        return []
+    resolved = resolve_ocr_lang(lang)
+    if resolved == "auto":
+        detected = detect_script_via_osd(img_bgr)
+        tess_lang = detected or ("hin+eng" if {"hin", "eng"}.issubset(get_installed_tesseract_langs()) else "eng")
+    else:
+        tess_lang = resolved
+    ih, iw = img_bgr.shape[:2]
+    scale_factor = 1.0
+    is_complex_script = tess_lang != "eng"
+    if is_complex_script and max(ih, iw) < 1750:
+        # Gently upscale non-Latin scans so thin vowel matras & diacritics reach optimal ~30px height
+        scale_factor = min(2.0, 1950.0 / float(max(1, ih, iw)))
+        work_img = cv2.resize(
+            img_bgr,
+            (max(32, int(round(iw * scale_factor))), max(32, int(round(ih * scale_factor)))),
+            interpolation=cv2.INTER_CUBIC,
+        )
+    else:
+        work_img = img_bgr
+
+    raw_words = _run_tesseract_tsv_raw(work_img, tess_lang, psm, scale_factor)
+    kept, glitch_rois = _filter_tesseract_glitch_boxes(raw_words)
+
+    base_lang = tess_lang.split("+")[0].strip() if "+" in tess_lang else ""
+    if is_complex_script and int(psm) == 3 and len(kept) >= 8:
+        rescue_rois = _find_uncovered_text_rois(img_bgr, kept, glitch_rois)
+        for rx0, ry0, rx1, ry1 in rescue_rois:
+            crop = img_bgr[ry0:ry1, rx0:rx1]
+            if crop.size == 0:
+                continue
+            r_sc = 1.6 if (ry1 - ry0) < 160 else 1.35
+            crop_up = cv2.resize(
+                crop,
+                (max(16, int(round(crop.shape[1] * r_sc))), max(16, int(round(crop.shape[0] * r_sc)))),
+                interpolation=cv2.INTER_CUBIC,
+            )
+            sub_words = _run_tesseract_tsv_raw(crop_up, tess_lang, 6, r_sc)
+            sub_kept, _ = _filter_tesseract_glitch_boxes(sub_words)
+            for sw in sub_kept:
+                has_non_ascii = bool(_NON_ASCII_WORD_RE.search(sw.text))
+                if not has_non_ascii and sw.conf < 0.78 and not _PURE_CODE_OR_NUM_RE.fullmatch(sw.text.strip()):
+                    continue
+                if has_non_ascii and sw.conf < 0.25:
+                    continue
+                gx0, gy0, gx1, gy1 = sw.x0 + rx0, sw.y0 + ry0, sw.x1 + rx0, sw.y1 + ry0
+                # Skip words already covered cleanly by full-page pass
+                if any(
+                    max(0.0, min(gx1, kw.x1) - max(gx0, kw.x0)) * max(0.0, min(gy1, kw.y1) - max(gy0, kw.y0))
+                    > 0.35 * max(1.0, (gx1 - gx0) * (gy1 - gy0))
+                    for kw in kept
+                ):
+                    continue
+                kept.append(
+                    OCRWord(
+                        text=sw.text,
+                        x0=gx0,
+                        y0=gy0,
+                        x1=gx1,
+                        y1=gy1,
+                        conf=sw.conf,
+                        angle_deg=0.0,
+                    )
+                )
+
+    # Dual-script hallucination repair: when `X+eng` (e.g. `hin+eng`) hallucinates low-confidence Latin words
+    # (like 'TTS', 'Fran', 'qt', 'oft', 'mia', 'fatrre', 'er', 'seat:') inside non-Latin sentences over watermarks,
+    # run the pure base script (`hin`) on a tight crop of each suspicious Latin word to recover the true Indic word!
+    if (
+        is_complex_script
+        and int(psm) == 3
+        and base_lang
+        and base_lang != "eng"
+        and base_lang in get_installed_tesseract_langs()
+    ):
+        non_ascii_words = [w for w in kept if _NON_ASCII_WORD_RE.search(w.text)]
+        if len(non_ascii_words) >= 5:
+            suspicious_indices: set[int] = set()
+            for idx, w in enumerate(kept):
+                txt = (w.text or "").strip()
+                if _NON_ASCII_WORD_RE.search(txt) or not re.search(r"[A-Za-z]", txt):
+                    continue
+                low_t = txt.lower()
+                is_code_or_acro = (
+                    bool(_PURE_CODE_OR_NUM_RE.fullmatch(txt))
+                    or ("." in txt and len(txt) >= 4)
+                    or (txt.isupper() and (len(txt) >= 6 or (len(txt) >= 4 and w.conf >= 0.78)))
+                    or any(
+                        u in low_t
+                        for u in (
+                            "www",
+                            "http",
+                            "gov",
+                            "emitra",
+                            "rajasthan",
+                            "online",
+                            "section",
+                            "verification",
+                            "signature",
+                            "digitally",
+                            "camscanner",
+                        )
+                    )
+                )
+                if is_code_or_acro or (w.conf >= 0.85 and not txt.endswith("-")):
+                    continue
+                wh = max(4.0, w.y1 - w.y0)
+                on_non_ascii_line = any(
+                    min(w.y1, nw.y1) - max(w.y0, nw.y0) >= 0.30 * min(wh, max(4.0, nw.y1 - nw.y0))
+                    for nw in non_ascii_words
+                )
+                is_short_low_conf_noise = (
+                    len(non_ascii_words) >= 15 and bool(re.fullmatch(r"[a-z]{1,3}", low_t)) and w.conf < 0.72
+                )
+                if on_non_ascii_line or is_short_low_conf_noise:
+                    suspicious_indices.add(idx)
+
+            if suspicious_indices:
+                base_raw = _run_tesseract_tsv_raw(work_img, base_lang, psm, scale_factor)
+                base_kept, _ = _filter_tesseract_glitch_boxes(base_raw)
+                repaired: list[OCRWord] = []
+                used_base: set[int] = set()
+                for idx, w in enumerate(kept):
+                    if idx in suspicious_indices:
+                        ov_base = [
+                            (bi, bw)
+                            for bi, bw in enumerate(base_kept)
+                            if bi not in used_base
+                            and _NON_ASCII_WORD_RE.search(bw.text)
+                            and not re.fullmatch(r"[\u0966-\u096F0-9./:\-()#]+", bw.text.strip())
+                            and max(0.0, min(w.x1, bw.x1) - max(w.x0, bw.x0))
+                            > 0.20 * min(max(1.0, w.x1 - w.x0), max(1.0, bw.x1 - bw.x0))
+                            and max(0.0, min(w.y1, bw.y1) - max(w.y0, bw.y0))
+                            > 0.25 * min(max(1.0, w.y1 - w.y0), max(1.0, bw.y1 - bw.y0))
+                        ]
+                        for bi, bw in ov_base:
+                            used_base.add(bi)
+                            repaired.append(bw)
+                        continue
+                    repaired.append(w)
+                kept = repaired
+
+    return kept
+
+
+def _merge_tesseract_and_rapid_words(
+    tess_words: list[OCRWord], rapid_words: list[OCRWord], allow_cjk: bool = False
 ) -> list[OCRWord]:
-    """Run optimal hybrid local OCR pipeline on one rendered page."""
-    img_clean = clean_image_for_ocr(img_raw_bgr) if clean_watermarks else img_raw_bgr
-    wants_hindi = "hin" in lang.lower()
-
-    if not wants_hindi:
-        words = extract_rapidocr_words(img_clean, img_raw_bgr if clean_watermarks else None, latin_font, dev_font)
-        if len(words) >= 3:
-            return words
-        # Fallback to Tesseract if RapidOCR failed or returned almost nothing
-        tess_words = extract_tesseract_words(img_clean, "eng")
-        return tess_words if len(tess_words) > len(words) else words
-
-    # Hindi or Hindi+English bilingual documents:
-    # 1. Tesseract TSV excels at Devanagari ligatures/matras cleanly once yellow watermark is stripped
-    tess_words = extract_tesseract_words(img_clean, lang)
-    # 2. RapidOCR recovers crisp English headers, serial numbers, tables, or tilted text missed by Tesseract
-    rapid_words = extract_rapidocr_words(img_clean, img_raw_bgr if clean_watermarks else None, latin_font, dev_font)
-
+    """Fuse multi-script Tesseract TSV boxes with RapidOCR crisp ASCII/Latin boxes without mojibake overwrites."""
     if not tess_words:
         return rapid_words
 
-    # Keep all Tesseract words initially; selectively merge/upgrade uncovered or truncated Latin spans with RapidOCR
-    merged = list(tess_words)
-    for rw in rapid_words:
-        # RapidOCR bundled model outputs Latin/ASCII & CJK; ignore hallucinated CJK when English+Hindi requested
-        if any("\u4e00" <= ch <= "\u9fff" for ch in rw.text):
-            continue
-        rbox = (rw.x0, rw.y0, rw.x1, rw.y1)
-        r_area = max(1e-6, (rw.x1 - rw.x0) * (rw.y1 - rw.y0))
+    non_ascii_tess = [tw for tw in tess_words if _NON_ASCII_WORD_RE.search(tw.text)]
+    is_non_latin_doc = len(non_ascii_tess) >= 3
 
-        # Calculate intersection against every existing word in `merged`
-        overlapped_indices: list[tuple[int, float, float]] = []  # (idx, inter/r_area, inter/t_area)
-        has_devanagari_overlap = False
-        for idx, tw in enumerate(merged):
+    # Compare RapidOCR candidates strictly against Tesseract words (never colliding vertically adjacent RapidOCR boxes!)
+    tess_keep = [True] * len(tess_words)
+    rapid_add: list[OCRWord] = []
+
+    for rw in rapid_words:
+        if not allow_cjk and _CJK_RE.search(rw.text):
+            continue
+        rw_txt = (rw.text or "").strip()
+        if not rw_txt:
+            continue
+
+        rw_h = max(4.0, rw.y1 - rw.y0)
+        dev_on_line = 0
+        if is_non_latin_doc:
+            for nw in non_ascii_tess:
+                ov_y = min(rw.y1, nw.y1) - max(rw.y0, nw.y0)
+                if ov_y >= 0.30 * min(rw_h, max(4.0, nw.y1 - nw.y0)):
+                    dev_on_line += 1
+
+        rw_clean_ascii = is_clean_ascii_token(rw_txt)
+        is_pure_code = bool(_PURE_CODE_OR_NUM_RE.fullmatch(rw_txt))
+        is_upper_code = bool(re.fullmatch(r"[A-Z0-9][A-Z0-9.\-/:]{1,24}", rw_txt)) and any(c.isupper() for c in rw_txt)
+        _colon_ok = (":" not in rw_txt) or rw_txt.endswith(":") or bool(
+            re.match(r"^(?:Date|Time|Reason|Location|Name|No|ID|\d{1,2}:)", rw_txt, re.IGNORECASE)
+        )
+        is_eng_sig_tok = (
+            not _NON_ASCII_WORD_RE.search(rw_txt)
+            and bool(re.search(r"[A-Za-z0-9]", rw_txt))
+            and not any(ch in rw_txt for ch in "!|~`^*")
+            and _colon_ok
+            and (not re.search(r"[a-z]\d|\d[a-z]", rw_txt) or rw_txt.lower().startswith(("date", "time", "id")))
+        )
+
+        # On non-Latin documents:
+        # - On non-Latin prose rows (`dev_on_line >= 1`), ONLY accept pure codes/URLs/numbers or crisp ALL-CAPS IDs
+        #   so false-positive lowercase English/colon guesses (`fier`, `Fafe:01-06-2018`, `nan`) never corrupt Hindi.
+        # - On pure Latin/signature rows (`dev_on_line == 0`), accept crisp ASCII signature tokens (`LALJAT`, `Location:...`).
+        if is_non_latin_doc:
+            if dev_on_line >= 1:
+                if not (
+                    is_pure_code
+                    or (is_upper_code and rw.conf >= 0.72)
+                    or (rw_clean_ascii and len(rw_txt) >= 6 and rw_txt[0].isupper() and rw.conf >= 0.86)
+                ):
+                    continue
+            else:
+                if not (rw_clean_ascii or (is_eng_sig_tok and rw.conf >= 0.70)):
+                    continue
+
+        r_area = max(1e-6, (rw.x1 - rw.x0) * (rw.y1 - rw.y0))
+        overlapped_indices: list[tuple[int, float, float]] = []
+        protect_non_ascii = False
+        for idx, tw in enumerate(tess_words):
             ix0 = max(rw.x0, tw.x0)
             iy0 = max(rw.y0, tw.y0)
             ix1 = min(rw.x1, tw.x1)
@@ -449,31 +1157,203 @@ def _ocr_page_words(
             t_area = max(1e-6, (tw.x1 - tw.x0) * (tw.y1 - tw.y0))
             frac_r = inter / r_area
             frac_t = inter / t_area
-            if frac_r > 0.12 or frac_t > 0.30:
-                if _DEVANAGARI_RE.search(tw.text):
-                    has_devanagari_overlap = True
-                    break
+            if frac_r > 0.12 or frac_t > 0.25:
+                if _NON_ASCII_WORD_RE.search(tw.text):
+                    if not (is_pure_code and rw.conf >= 0.88):
+                        protect_non_ascii = True
+                        break
                 overlapped_indices.append((idx, frac_r, frac_t))
 
-        if has_devanagari_overlap:
+        if protect_non_ascii:
             continue
-
         if not overlapped_indices:
-            merged.append(rw)
+            if not is_non_latin_doc or rw.conf >= 0.70:
+                rapid_add.append(rw)
             continue
 
         total_covered_r = sum(fr for _, fr, _ in overlapped_indices)
-        existing_chars = sum(len(merged[idx].text.strip()) for idx, _, _ in overlapped_indices)
-        rw_chars = len(rw.text.strip())
+        existing_chars = sum(len(tess_words[idx].text.strip()) for idx, _, _ in overlapped_indices)
+        rw_chars = len(rw_txt)
+        avg_t_conf = sum(tess_words[idx].conf for idx, _, _ in overlapped_indices) / len(overlapped_indices)
 
-        # If RapidOCR captured significantly richer/longer Latin text (e.g. 'S.N.:RJ/2017/REVENUE' vs truncated 'S.N.'),
-        # upgrade those partial Latin fragments to the crisp RapidOCR word box!
-        if rw_chars >= existing_chars + 3 or total_covered_r < 0.35:
-            to_drop = {idx for idx, _, ft in overlapped_indices if ft > 0.35}
-            if to_drop:
-                merged = [w for i, w in enumerate(merged) if i not in to_drop]
-            merged.append(rw)
-    return merged
+        if len(overlapped_indices) >= 2 and avg_t_conf >= 0.55 and existing_chars >= int(rw_chars * 0.78):
+            continue
+        can_replace = (
+            not is_non_latin_doc
+            or is_pure_code
+            or is_upper_code
+            or (dev_on_line < 2 and is_eng_sig_tok and rw.conf >= 0.75)
+        )
+        if can_replace and (
+            rw_chars >= existing_chars + 3 or total_covered_r < 0.35 or (avg_t_conf < 0.52 and rw.conf >= 0.82)
+        ):
+            for idx, _, ft in overlapped_indices:
+                if ft > 0.35:
+                    tess_keep[idx] = False
+            rapid_add.append(rw)
+
+    merged = [w for w, keep in zip(tess_words, tess_keep) if keep] + rapid_add
+    deduped: list[OCRWord] = []
+    for w in sorted(merged, key=lambda x: (-x.conf, x.y0, x.x0)):
+        dup = False
+        w_cy = (w.y0 + w.y1) * 0.5
+        w_h = max(4.0, w.y1 - w.y0)
+        for kept in deduped:
+            k_cy = (kept.y0 + kept.y1) * 0.5
+            if abs(w_cy - k_cy) <= w_h * 0.55 and w.text.strip().lower() == kept.text.strip().lower():
+                if (w.x0 <= kept.x1 + 10.0 and w.x1 >= kept.x0 - 10.0) or _rect_iou((w.x0, w.y0, w.x1, w.y1), (kept.x0, kept.y0, kept.x1, kept.y1)) > 0.25:
+                    dup = True
+                    break
+        if not dup:
+            deduped.append(w)
+    deduped.sort(key=lambda x: (x.y0, x.x0))
+    return deduped
+
+
+def _has_significant_uncovered_ink(img_clean: np.ndarray, words: list[OCRWord]) -> bool:
+    """Fast sub-millisecond check for dark ink missed by RapidOCR (e.g., mixed non-Latin words)."""
+    if img_clean is None or img_clean.size == 0:
+        return False
+    h, w = img_clean.shape[:2]
+    sh, sw = max(32, h // 4), max(32, w // 4)
+    small = cv2.resize(img_clean, (sw, sh), interpolation=cv2.INTER_AREA)
+    gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY) if len(small.shape) == 3 else small
+    covered = np.zeros((sh, sw), dtype=np.uint8)
+    for wrd in words:
+        x0 = max(0, int(wrd.x0 * 0.25) - 2)
+        y0 = max(0, int(wrd.y0 * 0.25) - 2)
+        x1 = min(sw, int(math.ceil(wrd.x1 * 0.25)) + 2)
+        y1 = min(sh, int(math.ceil(wrd.y1 * 0.25)) + 2)
+        if x1 > x0 and y1 > y0:
+            covered[y0:y1, x0:x1] = 255
+    uncovered = (gray < 175) & (covered == 0)
+    return float(np.mean(uncovered)) > 0.012
+
+
+def ocr_page_words_with_meta(
+    img_raw_bgr: np.ndarray,
+    lang: str,
+    clean_watermarks: bool,
+    latin_font: fitz.Font,
+    dev_font: Optional[fitz.Font],
+) -> tuple[list[OCRWord], list[OCRWord], str]:
+    """
+    Run optimal hybrid global OCR on one page and return
+    `(fused_words, rapid_words, resolved_lang)` so callers never re-run RapidOCR twice.
+    """
+    img_clean = clean_image_for_ocr(img_raw_bgr) if clean_watermarks else img_raw_bgr
+    resolved = resolve_ocr_lang(lang)
+    raw_arg = img_raw_bgr if clean_watermarks else None
+
+    if resolved == "auto":
+        rapid_words = extract_rapidocr_words(img_clean, raw_arg, latin_font, dev_font)
+        low_conf_cnt = sum(1 for w in rapid_words if w.conf < 0.70)
+        low_conf_frac = low_conf_cnt / float(max(1, len(rapid_words)))
+        plausibility, n_alpha = latin_plausibility_score(rapid_words)
+        has_cjk = any(_CJK_RE.search(w.text) for w in rapid_words)
+        uncovered = _has_significant_uncovered_ink(img_clean, rapid_words)
+        # Fast exit ONLY on genuinely high-plausibility crisp Latin pages
+        if (
+            len(rapid_words) >= 8
+            and low_conf_frac <= 0.14
+            and (plausibility >= 0.80 or n_alpha < 3)
+            and not has_cjk
+            and not uncovered
+        ):
+            return rapid_words, rapid_words, "eng"
+
+        installed = get_installed_tesseract_langs()
+        detected, osd_conf = _detect_script_via_osd_with_conf(img_clean)
+        shiro_score = _detect_shirorekha_score(img_clean)
+        hin_pack = "hin+eng" if {"hin", "eng"}.issubset(installed) else ("hin" if "hin" in installed else "")
+
+        # Override wrong OSD Arabic/Latin guesses whenever Devanagari Shirorekha top-bars or Latin mojibake appear
+        should_probe_devanagari = bool(hin_pack) and (
+            (shiro_score >= 0.028 and (detected in (None, "eng", "ara+eng", "script/Arabic+eng") or osd_conf < 4.5))
+            or (detected in (None, "eng") and (plausibility < 0.72 or low_conf_frac > 0.22 or uncovered))
+        )
+        if should_probe_devanagari:
+            tess_hin = extract_tesseract_words(img_clean, hin_pack)
+            if has_genuine_devanagari(tess_hin) or sum(1 for w in tess_hin if _DEVANAGARI_RE.search(w.text)) >= 5:
+                fused_hin = _merge_tesseract_and_rapid_words(tess_hin, rapid_words, allow_cjk=False)
+                return fused_hin, rapid_words, hin_pack
+
+        if not detected:
+            if len(rapid_words) >= 3 and plausibility >= 0.72:
+                return rapid_words, rapid_words, "chi_sim+eng" if has_cjk else "eng"
+            tess_eng = extract_tesseract_words(img_clean, "eng")
+            words = tess_eng if len(tess_eng) > len(rapid_words) else rapid_words
+            return words, rapid_words, "eng"
+
+        if detected == "eng":
+            if len(rapid_words) >= 3:
+                return rapid_words, rapid_words, "eng"
+            tess_eng = extract_tesseract_words(img_clean, "eng")
+            return _merge_tesseract_and_rapid_words(tess_eng, rapid_words, allow_cjk=False), rapid_words, "eng"
+
+        allow_cjk = any(k in detected.lower() for k in ("chi", "jpn", "kor", "han", "japanese", "hangul"))
+        tess_words = extract_tesseract_words(img_clean, detected)
+        fused = _merge_tesseract_and_rapid_words(tess_words, rapid_words, allow_cjk=allow_cjk)
+        return fused, rapid_words, detected
+
+    if resolved == "eng":
+        rapid_words = extract_rapidocr_words(img_clean, raw_arg, latin_font, dev_font)
+        if len(rapid_words) >= 3:
+            return rapid_words, rapid_words, "eng"
+        tess_words = extract_tesseract_words(img_clean, "eng")
+        best = tess_words if len(tess_words) > len(rapid_words) else rapid_words
+        return best, rapid_words, "eng"
+
+    allow_cjk = any(k in resolved.lower() for k in ("chi", "jpn", "kor", "han", "japanese", "hangul"))
+    tess_words = extract_tesseract_words(img_clean, resolved)
+    rapid_words = extract_rapidocr_words(img_clean, raw_arg, latin_font, dev_font)
+    fused = _merge_tesseract_and_rapid_words(tess_words, rapid_words, allow_cjk=allow_cjk)
+    return fused, rapid_words, resolved
+
+
+def _ocr_page_words(
+    img_raw_bgr: np.ndarray,
+    lang: str,
+    clean_watermarks: bool,
+    latin_font: fitz.Font,
+    dev_font: Optional[fitz.Font],
+) -> list[OCRWord]:
+    """Run optimal hybrid local OCR pipeline on one rendered page."""
+    words, _, _ = ocr_page_words_with_meta(img_raw_bgr, lang, clean_watermarks, latin_font, dev_font)
+    return words
+
+
+_DEV_LETTER_RE = re.compile(r"[\u0904-\u0939\u093E-\u094D\u0958-\u0963\u0972-\u097F]")
+
+
+def has_genuine_devanagari(words: list[OCRWord]) -> bool:
+    """
+    Determine whether an OCR'd page genuinely contains Hindi/Devanagari script
+    rather than isolated 1-char Latin/noise artifacts or digits ('७.७') misclassified by `hin+eng`.
+    """
+    genuine_tokens = 0
+    total_dev_letters = 0
+    english_tokens = 0
+
+    for w in words:
+        tok = (w.text or "").strip()
+        if not tok:
+            continue
+        if re.search(r"[A-Za-z]{2,}", tok) and w.conf >= 0.45:
+            english_tokens += 1
+        # Exclude Devanagari digits (०-९) & Vedic marks when scoring script identity
+        dev_letters = _DEV_LETTER_RE.findall(tok)
+        if len(dev_letters) >= 3 and not re.search(r"[A-Za-z0-9]", tok) and w.conf >= 0.58:
+            genuine_tokens += 1
+            total_dev_letters += len(dev_letters)
+
+    if genuine_tokens >= 5 and total_dev_letters >= 18:
+        return True
+    if genuine_tokens >= 3 and total_dev_letters >= 12 and (
+        english_tokens == 0 or genuine_tokens >= max(3, int(english_tokens * 0.025))
+    ):
+        return True
+    return False
 
 
 def make_searchable_pdf_pro(
@@ -497,6 +1377,13 @@ def make_searchable_pdf_pro(
     latin_font = fitz.Font("helv")
     dev_font_path = find_devanagari_font()
     dev_font = fitz.Font(fontfile=str(dev_font_path)) if dev_font_path else None
+    uni_font_path = find_unicode_font()
+    uni_font = fitz.Font(fontfile=str(uni_font_path)) if uni_font_path else None
+    cjk_font: Optional[fitz.Font] = None
+    try:
+        cjk_font = fitz.Font("china-s")
+    except Exception:
+        cjk_font = None
 
     pages_ocred = 0
     total_words = 0
@@ -554,6 +1441,21 @@ def make_searchable_pdf_pro(
                     active_font = dev_font
                     fontname = "pro_ocr_dev"
                     fontfile = str(dev_font_path)
+                    draw_txt = txt
+                elif not _LATIN_SAFE_RE.search(txt):
+                    active_font = latin_font
+                    fontname = "helv"
+                    fontfile = None
+                    draw_txt = txt
+                elif uni_font is not None and uni_font_path is not None:
+                    active_font = uni_font
+                    fontname = "pro_ocr_uni"
+                    fontfile = str(uni_font_path)
+                    draw_txt = txt
+                elif _CJK_RE.search(txt) and cjk_font is not None:
+                    active_font = cjk_font
+                    fontname = "china-s"
+                    fontfile = None
                     draw_txt = txt
                 else:
                     active_font = latin_font
