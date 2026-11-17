@@ -42,6 +42,7 @@ import {
   Maximize2,
   FileWarning,
   WifiOff,
+  Sparkles,
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 import { formatRelativeVisit, readRecentTools, recordToolVisit, type RecentEntry } from '../lib/recentFiles';
@@ -54,6 +55,8 @@ import { TONE_MAP } from './pearl/PearlToolCard';
 import ToolFeedback from './ToolFeedback';
 import BrandLogo from './BrandLogo';
 import { PearlRouteSkeleton } from './pearl/PearlMotion';
+import { ReleaseAnnouncementBar, WhatsNewModal } from './ReleaseAnnouncementBar';
+import { hasSeenCurrentRelease, markCurrentReleaseSeen, RELEASE_NOTES } from '../config/releaseNotes';
 
 const ROUTE_TITLES: Record<string, string> = {
   '/': 'Home',
@@ -192,7 +195,7 @@ function NavDropdown({
     >
       <button
         type="button"
-        className={`inline-flex items-center gap-1.5 py-1.5 px-3 rounded-lg font-semibold text-sm transition-all duration-150 select-none ${
+        className={`inline-flex items-center gap-1 py-1.5 px-2.5 xl:px-3 rounded-lg font-semibold text-sm whitespace-nowrap transition-all duration-150 select-none ${
           isOpen
             ? 'text-[var(--pms-rose)] bg-[var(--pms-soft-rose)]'
             : 'text-[var(--pms-ink)] hover:text-[var(--pms-rose)] hover:bg-[var(--pms-lavender-surface)]'
@@ -391,11 +394,18 @@ export default function Layout() {
   const [favorites, setFavorites] = useState<FavoriteItem[]>([]);
   const [tracesWiped, setTracesWiped] = useState(false);
   const [scrolled, setScrolled] = useState(false);
+  const [releaseBannerVisible, setReleaseBannerVisible] = useState<boolean>(() => !hasSeenCurrentRelease());
+  const [whatsNewOpen, setWhatsNewOpen] = useState(false);
   const recentRef = useRef<HTMLDivElement>(null);
   const favRef = useRef<HTMLDivElement>(null);
   const scrolledRef = useRef(false);
   const prefersReduced = useReducedMotion();
   const { scrollYProgress } = useScroll();
+
+  const dismissReleaseBanner = useCallback(() => {
+    markCurrentReleaseSeen();
+    setReleaseBannerVisible(false);
+  }, []);
 
   useEffect(() => {
     let rafId = 0;
@@ -424,6 +434,7 @@ export default function Layout() {
     await wipeAllBrowserTraces();
     setRecent([]);
     setFavorites([]);
+    setReleaseBannerVisible(true);
     setTracesWiped(true);
     setTimeout(() => setTracesWiped(false), 3000);
   }, []);
@@ -484,6 +495,17 @@ export default function Layout() {
       style={{ backgroundColor: 'var(--pms-pearl)', color: 'var(--pms-ink)' }}
     >
       <KeyboardShortcutsModal open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
+      <WhatsNewModal
+        open={whatsNewOpen}
+        onClose={() => {
+          setWhatsNewOpen(false);
+          dismissReleaseBanner();
+        }}
+        onSelectFeature={() => {
+          setWhatsNewOpen(false);
+          dismissReleaseBanner();
+        }}
+      />
       <GlobalSearch open={searchOpen} onClose={() => setSearchOpen(false)} />
 
       {/* ── HEADER ── */}
@@ -537,7 +559,7 @@ export default function Layout() {
                 <Link
                   key={navLink.to}
                   to={navLink.to}
-                  className={`relative inline-flex items-center py-1.5 px-3 rounded-lg font-semibold text-sm transition-all ${
+                  className={`relative inline-flex items-center py-1.5 px-2.5 xl:px-3 rounded-lg font-semibold text-sm whitespace-nowrap transition-all ${
                     isActive
                       ? 'text-[var(--pms-rose)]'
                       : 'text-[var(--pms-ink)] hover:text-[var(--pms-rose)] hover:bg-[var(--pms-lavender-surface)]'
@@ -702,6 +724,22 @@ export default function Layout() {
 
             <button
               type="button"
+              onClick={() => setWhatsNewOpen(true)}
+              title={`What's new in ${RELEASE_NOTES.version}`}
+              data-testid="navbar-v2-pill"
+              className="inline-flex items-center gap-1 px-2 py-1 rounded-full border text-[11px] font-extrabold transition-colors hover:border-rose-300 dark:hover:border-rose-700 cursor-pointer"
+              style={{
+                backgroundColor: 'var(--pms-soft-rose)',
+                borderColor: 'var(--pms-border)',
+                color: 'var(--pms-rose)',
+              }}
+            >
+              <Sparkles className="w-3 h-3" />
+              <span>{RELEASE_NOTES.badgeLabel}</span>
+            </button>
+
+            <button
+              type="button"
               onClick={() => setShortcutsOpen(true)}
               title="Keyboard shortcuts (?)"
               className="p-2 rounded-full text-[var(--pms-muted)] hover:text-[var(--pms-ink)] hover:bg-[var(--pms-lavender-surface)] transition-colors"
@@ -739,7 +777,7 @@ export default function Layout() {
               }}
             >
               <Search className="w-3.5 h-3.5 text-[var(--pms-rose)]" />
-              <span className="hidden lg:inline">Search</span>
+              <span className="hidden xl:inline">Search</span>
               <kbd
                 className="hidden sm:inline-flex items-center px-1.5 py-[1px] rounded text-[10px] font-extrabold"
                 style={{
@@ -833,6 +871,12 @@ export default function Layout() {
       </header>
 
       <main className="flex-1 flex flex-col pt-16">
+        <ReleaseAnnouncementBar
+          visible={releaseBannerVisible}
+          onDismiss={dismissReleaseBanner}
+          onOpenDetails={() => setWhatsNewOpen(true)}
+          onTryFeature={dismissReleaseBanner}
+        />
         <ErrorBoundary locationKey={location.pathname}>
           <Suspense fallback={<PearlRouteSkeleton />}>
             <Outlet />

@@ -27,7 +27,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # ── Create non-root application user ────────────────────────────
 # Running as non-root limits blast radius if a processing library is exploited.
 RUN groupadd --gid 1000 appuser \
-    && useradd --uid 1000 --gid 1000 --no-create-home --shell /bin/false appuser
+    && useradd --uid 1000 --gid 1000 --create-home --home-dir /home/appuser --shell /bin/false appuser
 
 # ── Python deps (cached layer — only rebuild if requirements.txt changes) ──
 WORKDIR /app

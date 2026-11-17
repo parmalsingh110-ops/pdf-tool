@@ -24,6 +24,7 @@ import { VERIFIED_TOOL_COUNT } from '../components/GlobalSearch';
 import PearlAuroraBackground from '../components/pearl/PearlAuroraBackground';
 import ToolMicroPreview, { inferToolMicroVariant } from '../components/pearl/ToolMicroPreview';
 import { PearlStageSwitch } from '../components/pearl/PearlMotion';
+import { V2_UPDATED_TOOL_PATHS } from '../config/releaseNotes';
 
 function categoryAnchor(title: string): string {
   if (title.includes('Deep-Tech')) return 'cat-deep-tech';
@@ -904,6 +905,19 @@ export default function AllTools() {
                                 <tool.icon className="w-5 h-5" />
                               </div>
                               <div className="flex items-center gap-1.5">
+                                {isAvailable && tool.path && V2_UPDATED_TOOL_PATHS.has(tool.path) && (
+                                  <span
+                                    className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[9px] font-extrabold uppercase tracking-wider"
+                                    style={{
+                                      backgroundColor: 'var(--pms-soft-rose)',
+                                      color: 'var(--pms-rose)',
+                                    }}
+                                    title="Upgraded in PDF Media Suite 2.0"
+                                  >
+                                    <Sparkles className="w-2.5 h-2.5" />
+                                    v2.0
+                                  </span>
+                                )}
                                 {isAvailable && (
                                   <ToolMicroPreview variant={inferToolMicroVariant(tool.path)} />
                                 )}

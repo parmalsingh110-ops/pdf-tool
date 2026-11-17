@@ -579,8 +579,10 @@ def has_non_latin(text: str) -> bool:
 
 # ─── Root & Health ─────────────────────────────────────────────
 
-@app.get("/")
-def read_root():
+@app.api_route("/", methods=["GET", "HEAD"])
+def read_root(request: Request):
+    if request.method == "HEAD":
+        return Response(status_code=200)
     # Minimal root response — avoids large JSON payload draining bandwidth
     return {"status": "ok", "version": "2.1.0"}
 
