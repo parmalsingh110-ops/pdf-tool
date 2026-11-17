@@ -1844,6 +1844,7 @@ async def pdf_to_word(
 
         # ── Path detection ────────────────────────────────────────────────────
         was_scanned = was_image or force_ocr or is_pdf_scanned(inp)
+        used_vision_builder = False
 
         if was_scanned:
             # ══════════════════════════════════════════════════════════════════
@@ -1862,6 +1863,7 @@ async def pdf_to_word(
                 eff_provider,
                 eff_strict,
             )
+            used_vision_builder = True
 
         else:
             # ══════════════════════════════════════════════════════════════════
@@ -1982,6 +1984,9 @@ async def pdf_to_word(
             if not pdf2docx_ok:
                 # ── AUTO-UPGRADE PATH: Transparent Native Assets + Exact Styles + Local/AI Vision ──
                 logger.info("[PDF2Word] Running Digital Vision + Native Asset & Layout Reconstructor")
+                eff_strict_digital = eff_strict or (
+                    not need_image_ocr_upgrade and not bool(raw_ai_key and raw_ai_key.strip())
+                )
                 try:
                     await run_in_threadpool(
                         build_exact_docx_from_scans,
@@ -1992,49 +1997,49 @@ async def pdf_to_word(
                         eff_layer_mode,
                         eff_ai_key,
                         eff_provider,
-                        eff_strict,
+                        eff_strict_digital,
                         digital_layout_fallback=True,
                     )
+                    used_vision_builder = True
                 except Exception as vis_err:
                     logger.warning(f"[PDF2Word] Vision builder fallback error ({vis_err}), using rich span builder")
                     await run_in_threadpool(_build_rich_span_docx, inp, out)
 
-        # ── Optimize & sanitize output for Apple Pages & Word ─────────────────
-        if out.exists() and out.stat().st_size > 0:
-            await run_in_threadpool(_clean_and_optimize_docx, out)
-
-        # ── Validate output ───────────────────────────────────────────────────
+        # ── Validate & finalize output ────────────────────────────────────────
         if not out.exists() or out.stat().st_size == 0:
             raise HTTPException(
                 status_code=422,
                 detail="Conversion produced an empty document. Please try a different file."
             )
 
-        try:
-            from docx import Document as _DocxDoc
-            _check_doc = _DocxDoc(str(out))
-            _W_T = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t"
-            _total_chars = sum(
-                len(elem.text or "")
-                for elem in _check_doc.element.iter(_W_T)
-            )
-            _docx_size_kb = out.stat().st_size / 1024
-            _has_content_by_size = _docx_size_kb > 8
-            logger.info(f"[PDF2Word] DOCX chars={_total_chars}, size={_docx_size_kb:.1f}KB")
+        if not used_vision_builder:
+            await run_in_threadpool(_clean_and_optimize_docx, out)
 
-            if _total_chars < 5 and not _has_content_by_size:
-                raise HTTPException(
-                    status_code=422,
-                    detail=(
-                        "Conversion produced a document with no readable text. "
-                        "If this is a scanned PDF, please ensure it is a clear scan."
-                    )
+            try:
+                from docx import Document as _DocxDoc
+                _check_doc = _DocxDoc(str(out))
+                _W_T = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t"
+                _total_chars = sum(
+                    len(elem.text or "")
+                    for elem in _check_doc.element.iter(_W_T)
                 )
-            logger.info(f"[PDF2Word] Output validated: {_total_chars} chars, {_docx_size_kb:.1f}KB")
-        except HTTPException:
-            raise
-        except Exception as docx_val_err:
-            logger.warning(f"[PDF2Word] DOCX validation skipped: {type(docx_val_err).__name__}")
+                _docx_size_kb = out.stat().st_size / 1024
+                _has_content_by_size = _docx_size_kb > 8
+                logger.info(f"[PDF2Word] DOCX chars={_total_chars}, size={_docx_size_kb:.1f}KB")
+
+                if _total_chars < 5 and not _has_content_by_size:
+                    raise HTTPException(
+                        status_code=422,
+                        detail=(
+                            "Conversion produced a document with no readable text. "
+                            "If this is a scanned PDF, please ensure it is a clear scan."
+                        )
+                    )
+                logger.info(f"[PDF2Word] Output validated: {_total_chars} chars, {_docx_size_kb:.1f}KB")
+            except HTTPException:
+                raise
+            except Exception as docx_val_err:
+                logger.warning(f"[PDF2Word] DOCX validation skipped: {type(docx_val_err).__name__}")
 
         stem = safe_filename(file.filename, "document")
         out_name = Path(stem).stem + "_converted.docx"
@@ -2546,7 +2551,11 @@ async def pdf_to_excel(
             logger.info(f"[PDF2Excel] Vision builder wrote {tables_cnt} reconstructed table(s)")
         else:
             digital_stats = await run_in_threadpool(_inspect_digital_pdf_complexity, inp)
-            if digital_stats.get("raster_text_boxes", 0) >= 1 and digital_stats.get("src_tbl_rows", 0) == 0:
+            need_image_ocr_upgrade = digital_stats.get("raster_text_boxes", 0) >= 1
+            eff_strict_digital = eff_strict or (
+                not need_image_ocr_upgrade and not bool(raw_ai_key and raw_ai_key.strip())
+            )
+            if need_image_ocr_upgrade and digital_stats.get("src_tbl_rows", 0) == 0:
                 logger.info(
                     f"[PDF2Excel] Digital PDF has {digital_stats['raster_text_boxes']} embedded raster image box(es) and 0 vector tables "
                     "→ routing to Digital Vision XLSX builder"
@@ -2559,7 +2568,7 @@ async def pdf_to_excel(
                     200,
                     eff_ai_key,
                     eff_provider,
-                    eff_strict,
+                    eff_strict_digital,
                     digital_layout_fallback=True,
                 )
                 logger.info(f"[PDF2Excel] Digital Vision builder wrote {tables_cnt} table(s)")
@@ -2576,7 +2585,7 @@ async def pdf_to_excel(
                         200,
                         eff_ai_key,
                         eff_provider,
-                        eff_strict,
+                        eff_strict_digital,
                         digital_layout_fallback=True,
                     )
 
@@ -2971,8 +2980,12 @@ async def pdf_to_ppt(
             )
         else:
             digital_stats = await run_in_threadpool(_inspect_digital_pdf_complexity, inp)
+            need_image_ocr_upgrade = digital_stats.get("raster_text_boxes", 0) >= 1
+            eff_strict_digital = eff_strict or (
+                not need_image_ocr_upgrade and not bool(raw_ai_key and raw_ai_key.strip())
+            )
             use_digital_vision = (
-                digital_stats.get("raster_text_boxes", 0) >= 1
+                need_image_ocr_upgrade
                 or (digital_stats.get("vector_clusters", 0) >= 1 and digital_stats.get("raster_assets", 0) == 0)
             )
             if use_digital_vision:
@@ -2990,7 +3003,7 @@ async def pdf_to_ppt(
                     eff_layer_mode,
                     eff_ai_key,
                     eff_provider,
-                    eff_strict,
+                    eff_strict_digital,
                     digital_layout_fallback=True,
                 )
             else:
@@ -3007,7 +3020,7 @@ async def pdf_to_ppt(
                             eff_layer_mode,
                             eff_ai_key,
                             eff_provider,
-                            eff_strict,
+                            eff_strict_digital,
                             digital_layout_fallback=True,
                         )
                 except Exception as ppt_err:
@@ -3022,7 +3035,7 @@ async def pdf_to_ppt(
                         eff_layer_mode,
                         eff_ai_key,
                         eff_provider,
-                        eff_strict,
+                        eff_strict_digital,
                         digital_layout_fallback=True,
                     )
 

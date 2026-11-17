@@ -348,7 +348,9 @@ def _detect_script_via_osd_with_conf(img_bgr: np.ndarray) -> tuple[Optional[str]
     if scale < 0.99:
         work = cv2.resize(img_bgr, (max(64, int(w * scale)), max(64, int(h * scale))), interpolation=cv2.INTER_AREA)
 
-    ok, buf = cv2.imencode(".png", work)
+    ok, buf = cv2.imencode(".bmp", work)
+    if not ok:
+        ok, buf = cv2.imencode(".png", work)
     if not ok:
         return None, 0.0
     try:
@@ -930,11 +932,13 @@ def _run_tesseract_tsv_raw(work_img: np.ndarray, tess_lang: str, psm: int, scale
     if not tess_bin:
         return []
     gray_img = cv2.cvtColor(work_img, cv2.COLOR_BGR2GRAY) if work_img.ndim == 3 else work_img
-    ok, buf = cv2.imencode(".png", gray_img)
+    ok, buf = cv2.imencode(".bmp", gray_img)
+    if not ok:
+        ok, buf = cv2.imencode(".png", gray_img)
     del gray_img
     if not ok:
         return []
-    png_bytes = buf.tobytes()
+    img_bytes = buf.tobytes()
     del buf
 
     cmd = [tess_bin, "stdin", "stdout", "--oem", "1", "--psm", str(int(psm)), "-l", tess_lang, "tsv"]
@@ -945,14 +949,14 @@ def _run_tesseract_tsv_raw(work_img: np.ndarray, tess_lang: str, psm: int, scale
     try:
         proc = subprocess.run(
             cmd,
-            input=png_bytes,
+            input=img_bytes,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             timeout=60,
             check=False,
             env=sub_env,
         )
-        del png_bytes
+        del img_bytes
         if proc.returncode != 0 or not proc.stdout:
             return []
         text_tsv = proc.stdout.decode("utf-8", errors="replace")

@@ -396,6 +396,7 @@ export default function PdfToWord() {
   }, [resultUrl]);
 
   useEffect(() => {
+    apiFetch('/health', { method: 'GET', timeoutMs: 8000, maxRetries: 0 }).catch(() => {});
     return () => {
       if (resultUrlRef.current) URL.revokeObjectURL(resultUrlRef.current);
     };
@@ -416,34 +417,35 @@ export default function PdfToWord() {
     const t0 = Date.now();
 
     try {
-      // Step 1: Rapid client-side pre-analysis (raster image uploads skip pdf.js cleanly)
-      setStage('analyzing');
-      setProgress('Analyzing document geometry & structure...');
-
       const isImage = isRasterImageFile(f);
-      let numPages = 1;
-      let isScanned = isImage;
-      if (!isImage) {
-        const buf = await f.arrayBuffer();
-        const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buf) }).promise;
-        numPages = pdf.numPages;
-        isScanned = await detectIfScanned(pdf);
-        try {
-          await pdf.cleanup?.();
-          await pdf.loadingTask?.destroy?.();
-        } catch {}
-      }
+      const forceOcrReq = isImage || engineMode === 'ocr';
+      const useBackendImmediate = isImage || engineMode === 'precision' || engineMode === 'ocr';
 
-      // Determine actual path based on user choice and scan status
-      const needsOcr = isImage || engineMode === 'ocr' || isScanned;
-      const useBackend = isImage || engineMode === 'precision' || engineMode === 'ocr' || isScanned;
-
-      if (useBackend) {
+      if (useBackendImmediate) {
+        // Start upload immediately at t0 in parallel with quick client page-count read (no scan-check blocking)
         setStage('backend');
-        setProgress(needsOcr ? 'Running Deep Bilingual OCR & Layout Reconstruction...' : 'Reconstructing Word Document via AI Layout Engine...');
+        setProgress(forceOcrReq ? 'Running Deep Bilingual OCR & Layout Reconstruction...' : 'Reconstructing Word Document via AI Layout Engine...');
+
+        const pageCountPromise: Promise<number> = isImage
+          ? Promise.resolve(1)
+          : (async () => {
+              try {
+                const buf = await f.arrayBuffer();
+                const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buf) }).promise;
+                const pages = pdf.numPages;
+                await pdf.cleanup?.();
+                await pdf.loadingTask?.destroy?.();
+                return pages;
+              } catch {
+                return 1;
+              }
+            })();
 
         try {
-          const blob = await convertBackend(f, needsOcr, layerMode, strictLocal, ocrLang);
+          const [blob, numPages] = await Promise.all([
+            convertBackend(f, forceOcrReq, layerMode, strictLocal, ocrLang),
+            pageCountPromise,
+          ]);
           const url = URL.createObjectURL(blob);
           setResultUrl(url);
           setStats({
@@ -451,7 +453,7 @@ export default function PdfToWord() {
             paragraphs: 0,
             tables: 0,
             images: 0,
-            method: needsOcr ? 'backend_ocr' : 'backend_precision',
+            method: forceOcrReq ? 'backend_ocr' : 'backend_precision',
             timeMs: Date.now() - t0,
             fileSizeBytes: blob.size,
           });
@@ -470,6 +472,41 @@ export default function PdfToWord() {
               : 'Server is currently offline or waking up. Automatically converted using Client-Side Precision Engine!'
           );
           // Cascade down to frontend conversion!
+        }
+      } else {
+        setStage('analyzing');
+        setProgress('Analyzing document geometry & structure...');
+        const buf = await f.arrayBuffer();
+        const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buf) }).promise;
+        const numPages = pdf.numPages;
+        const isScanned = await detectIfScanned(pdf);
+        try {
+          await pdf.cleanup?.();
+          await pdf.loadingTask?.destroy?.();
+        } catch {}
+
+        if (isScanned) {
+          setStage('backend');
+          setProgress('Running Deep Bilingual OCR & Layout Reconstruction...');
+          try {
+            const blob = await convertBackend(f, true, layerMode, strictLocal, ocrLang);
+            const url = URL.createObjectURL(blob);
+            setResultUrl(url);
+            setStats({
+              pages: numPages,
+              paragraphs: 0,
+              tables: 0,
+              images: 0,
+              method: 'backend_ocr',
+              timeMs: Date.now() - t0,
+              fileSizeBytes: blob.size,
+            });
+            setStage('done');
+            return;
+          } catch (backendErr: any) {
+            console.warn('[PdfToWord] Backend error, gracefully falling back to high-fidelity frontend:', backendErr);
+            setFallbackNotice('Server is currently offline or waking up. Automatically converted using Client-Side Precision Engine!');
+          }
         }
       }
 

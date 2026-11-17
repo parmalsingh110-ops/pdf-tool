@@ -225,6 +225,7 @@ export default function PdfToPpt() {
   }, [resultUrl]);
 
   useEffect(() => {
+    apiFetch('/health', { method: 'GET', timeoutMs: 8000, maxRetries: 0 }).catch(() => {});
     return () => {
       if (resultUrlRef.current) URL.revokeObjectURL(resultUrlRef.current);
     };
