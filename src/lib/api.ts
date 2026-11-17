@@ -198,7 +198,9 @@ export async function apiFetch(endpoint: string, options: ApiFetchOptions = {}):
         : `${chosenBase}${endpoint.startsWith('/') ? '' : '/'}${endpoint}`;
 
       const controller = new AbortController();
+      let timedOut = false;
       const timeoutId = setTimeout(() => {
+        timedOut = true;
         controller.abort(new DOMException('Request timeout', 'AbortError'));
       }, timeoutMs);
 
@@ -214,8 +216,13 @@ export async function apiFetch(endpoint: string, options: ApiFetchOptions = {}):
         });
         const elapsedMs = Math.round(performance.now() - startMs);
 
-        // Handle Virtual Waiting Room backpressure (503) or temporary gateway warmup (502/504)
-        if ((response.status === 503 || response.status === 502 || response.status === 504) && attempt < maxRetries) {
+        // Handle Virtual Waiting Room backpressure (503) or quick cold-start warmup (502/504).
+        // Never retry long-running timed-out/crashed heavy POST uploads that already ran >15s on server.
+        const canRetryGateway =
+          (response.status === 503 || response.status === 502 || response.status === 504) &&
+          attempt < maxRetries &&
+          (method === 'GET' || elapsedMs < 15000);
+        if (canRetryGateway) {
           recordNodeOutcome(chosenBase, false, elapsedMs);
           const retryAfterHdr = Number(response.headers.get('Retry-After'));
           const baseDelayMs = Number.isFinite(retryAfterHdr) && retryAfterHdr > 0
@@ -234,12 +241,13 @@ export async function apiFetch(endpoint: string, options: ApiFetchOptions = {}):
         recordNodeOutcome(chosenBase, false, elapsedMs);
 
         const callerAborted = Boolean(fetchOptions.signal?.aborted);
-        if (callerAborted) {
+        // Never re-send an already timed-out heavy request onto an active backend (prevents duplicate OOM spikes)
+        if (callerAborted || timedOut || err?.name === 'AbortError') {
           throw err;
         }
 
-        // Retry transient network drops across alternate pool nodes or brief wait
-        if (attempt < maxRetries) {
+        // Retry only fast transient network drops (e.g. cold connection wakeup <12s)
+        if (attempt < maxRetries && (method === 'GET' || elapsedMs < 12000)) {
           const backoffMs = 900 * (attempt + 1) + Math.floor(Math.random() * 350);
           try {
             await sleepWithSignal(backoffMs, fetchOptions.signal);

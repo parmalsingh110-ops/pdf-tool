@@ -37,6 +37,75 @@ _RAPIDOCR_INSTANCE = None
 _RAPIDOCR_INIT_FAILED = False
 _TESS_LANGS_LOCK = threading.Lock()
 _TESS_LANGS_CACHE: Optional[set[str]] = None
+_HOST_LOW_MEM_CACHE: Optional[bool] = None
+_CV2_LOW_MEM_TUNED = False
+
+
+def _tune_cv2_low_mem() -> None:
+    global _CV2_LOW_MEM_TUNED
+    if not _CV2_LOW_MEM_TUNED:
+        _CV2_LOW_MEM_TUNED = True
+        try:
+            cv2.setNumThreads(1)
+        except Exception:
+            pass
+
+
+def is_low_memory_runtime() -> bool:
+    """
+    Detect memory-constrained containers (e.g. Render 512MB / <=1GB instances).
+    On <=1.2GB instances, heavy ONNX models and multi-thread full-page pixmaps trigger
+    instant OOM kills (HTTP 502), so engines automatically switch to low-RAM sequential paths.
+    """
+    env_ov = os.environ.get("LOW_MEMORY_MODE", "").strip().lower()
+    if env_ov in ("1", "true", "yes", "on"):
+        _tune_cv2_low_mem()
+        return True
+    if env_ov in ("0", "false", "no", "off"):
+        return False
+
+    global _HOST_LOW_MEM_CACHE
+    if _HOST_LOW_MEM_CACHE is not None:
+        return _HOST_LOW_MEM_CACHE
+
+    limit_bytes: Optional[int] = None
+    for cg_path in ("/sys/fs/cgroup/memory.max", "/sys/fs/cgroup/memory/memory.limit_in_bytes"):
+        try:
+            raw = Path(cg_path).read_text(encoding="utf-8", errors="ignore").strip()
+            if raw and raw.lower() != "max":
+                val = int(raw)
+                if 32 * 1024 * 1024 <= val < (1 << 50):
+                    limit_bytes = val if limit_bytes is None else min(limit_bytes, val)
+        except Exception:
+            continue
+
+    def _enable_low_mem() -> bool:
+        global _HOST_LOW_MEM_CACHE
+        _HOST_LOW_MEM_CACHE = True
+        _tune_cv2_low_mem()
+        return True
+
+    if limit_bytes is not None:
+        if limit_bytes <= 1_200_000_000:
+            return _enable_low_mem()
+        _HOST_LOW_MEM_CACHE = False
+        return False
+
+    # Fallback heuristic for Render containers when cgroup memory file is restricted
+    is_render = os.environ.get("RENDER", "").strip().lower() in ("1", "true", "yes")
+    if is_render:
+        try:
+            meminfo = Path("/proc/meminfo").read_text(encoding="utf-8", errors="ignore")
+            m = re.search(r"MemTotal:\s+(\d+)\s+kB", meminfo)
+            if m and int(m.group(1)) <= 1_200_000:
+                return _enable_low_mem()
+        except Exception:
+            pass
+        if int(os.environ.get("WEB_CONCURRENCY", "1") or "1") <= 1:
+            return _enable_low_mem()
+
+    _HOST_LOW_MEM_CACHE = False
+    return False
 
 _DEVANAGARI_RE = re.compile(r"[\u0900-\u097F]")
 _LATIN_SAFE_RE = re.compile(r"[^\x20-\x7E\xA0-\xFF]")
@@ -424,6 +493,13 @@ def _detect_shirorekha_score(img_bgr: np.ndarray) -> float:
 def get_rapidocr():
     """Thread-safe lazy singleton for RapidOCR (PaddleOCR PP-OCRv4 ONNX)."""
     global _RAPIDOCR_INSTANCE, _RAPIDOCR_INIT_FAILED
+    if (
+        is_low_memory_runtime()
+        and os.environ.get("ALLOW_RAPIDOCR_ON_LOW_MEM", "").strip().lower() not in ("1", "true", "yes")
+    ):
+        # PP-OCRv4 ONNX runtime allocates ~550-650 MB per process, causing OOM 502 crashes on 512 MB containers;
+        # gracefully rely on low-memory Tesseract subprocess OCR + optional AI Vision instead.
+        return None
     if _RAPIDOCR_INIT_FAILED:
         return None
     if _RAPIDOCR_INSTANCE is not None:
@@ -448,57 +524,112 @@ def clean_image_for_ocr(img_bgr: np.ndarray) -> np.ndarray:
     Suppress yellow/orange/pastel diagonal watermarks (e.g. e-Mitra stamps),
     scanner shadows, and textured backgrounds while enhancing faded ink-saver
     thin strokes with gentle gamma contrast (preserving smooth glyph edges).
+    Processes in 256-row strips using float32/uint8 to avoid 150MB+ peak allocations.
     """
     if img_bgr is None or img_bgr.size == 0:
         return img_bgr
 
     h, w = img_bgr.shape[:2]
-    hsv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
-    lab = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2LAB).astype(np.float32)
-    l_ch, b_ch = lab[:, :, 0], lab[:, :, 2]
-    r_ch = img_bgr[:, :, 2].astype(np.float32)
-    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY).astype(np.float32)
+    strip_h = 256
+    lum_u8 = np.empty((h, w), dtype=np.uint8)
+    f_132 = np.float32(132.0)
+    f_inv24 = np.float32(1.0 / 24.0)
+    f_80 = np.float32(80.0)
+    f_inv40 = np.float32(1.0 / 40.0)
+    f_0 = np.float32(0.0)
+    f_1 = np.float32(1.0)
+    f_255 = np.float32(255.0)
 
-    # Neutralize vivid yellow/amber watermarks (e.g. e-Mitra center map) and bright green stamp checkmarks
-    # so dark black text strokes printed over them separate cleanly on white background.
-    yellow_w = np.clip((b_ch - 132.0) / 24.0, 0.0, 1.0) * np.clip((l_ch - 80.0) / 40.0, 0.0, 1.0)
-    lum = gray * (1.0 - yellow_w) + r_ch * yellow_w
+    for y0 in range(0, h, strip_h):
+        y1 = min(h, y0 + strip_h)
+        strip = img_bgr[y0:y1]
+        lab_s = cv2.cvtColor(strip, cv2.COLOR_BGR2LAB)
+        b_f = lab_s[:, :, 2].astype(np.float32)
+        l_f = lab_s[:, :, 0].astype(np.float32)
+        del lab_s
+        b_f -= f_132
+        b_f *= f_inv24
+        np.clip(b_f, f_0, f_1, out=b_f)
+        l_f -= f_80
+        l_f *= f_inv40
+        np.clip(l_f, f_0, f_1, out=l_f)
+        b_f *= l_f
+        del l_f
+
+        gray_s = cv2.cvtColor(strip, cv2.COLOR_BGR2GRAY).astype(np.float32)
+        r_s = strip[:, :, 2].astype(np.float32)
+        r_s -= gray_s
+        r_s *= b_f
+        gray_s += r_s
+        np.clip(gray_s, f_0, f_255, out=gray_s)
+        lum_u8[y0:y1] = gray_s.astype(np.uint8)
+        del b_f, gray_s, r_s
 
     # Fast downscaled illumination normalization (removes uneven scanner shading, flash glare & smooth stamps)
     scale_ds = 0.25 if max(h, w) > 900 else 0.5
     ds_w = max(32, int(w * scale_ds))
     ds_h = max(32, int(h * scale_ds))
-    small = cv2.resize(np.clip(lum, 0, 255).astype(np.uint8), (ds_w, ds_h), interpolation=cv2.INTER_AREA)
+    small = cv2.resize(lum_u8, (ds_w, ds_h), interpolation=cv2.INTER_AREA)
     k = max(11, (min(ds_w, ds_h) // 20) | 1)
     k = min(k, 31)
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))
     bg_small = cv2.morphologyEx(small, cv2.MORPH_CLOSE, kernel)
+    del small
     bg_small = cv2.GaussianBlur(bg_small, (k, k), 0)
-    bg_full = cv2.resize(bg_small, (w, h), interpolation=cv2.INTER_LINEAR).astype(np.float32)
+    bg_full_u8 = cv2.resize(bg_small, (w, h), interpolation=cv2.INTER_LINEAR)
+    del bg_small
 
-    # Ratio relative to local paper illumination: dark/faded ink stays cleanly separated under colored wash
-    ratio = np.clip(lum / np.maximum(bg_full, 24.0), 0.0, 1.0)
+    out = np.empty((h, w, 3), dtype=np.uint8)
+    f_24 = np.float32(24.0)
+    f_087 = np.float32(0.87)
+    f_092 = np.float32(0.92)
+    f_012 = np.float32(0.12)
+    f_inv080 = np.float32(1.0 / 0.80)
+    f_115 = np.float32(1.15)
 
-    # Suppress bright/pastel cyan, green checkmarks, yellow, and pink watermarks while keeping dark ink sharp
-    b_raw = img_bgr[:, :, 0].astype(np.float32)
-    g_raw = img_bgr[:, :, 1].astype(np.float32)
-    green_wm = (
-        (hsv[:, :, 0] >= 35)
-        & (hsv[:, :, 0] <= 94)
-        & (hsv[:, :, 1] >= 60)
-        & (g_raw >= 68.0)
-        & ((g_raw - np.maximum(r_ch, b_raw)) >= 20.0)
-    )
-    pale_wm = (
-        ((hsv[:, :, 1] > 20) & (hsv[:, :, 2] > 125) & (ratio > 0.87))
-        | ((hsv[:, :, 2] > 218) & (ratio > 0.92))
-        | green_wm
-    )
-    norm = np.where(pale_wm, 1.0, ratio)
+    for y0 in range(0, h, strip_h):
+        y1 = min(h, y0 + strip_h)
+        strip = img_bgr[y0:y1]
+        hsv_s = cv2.cvtColor(strip, cv2.COLOR_BGR2HSV)
+        bg_s = np.maximum(bg_full_u8[y0:y1].astype(np.float32), f_24)
+        ratio_s = lum_u8[y0:y1].astype(np.float32)
+        ratio_s /= bg_s
+        del bg_s
+        np.clip(ratio_s, f_0, f_1, out=ratio_s)
 
-    # Gamma 1.15 contrast preserves crisp Devanagari matras/loops while keeping green/yellow background white
-    enhanced = ((np.clip((norm - 0.12) / 0.80, 0.0, 1.0) ** 1.15) * 255.0).astype(np.uint8)
-    return cv2.cvtColor(enhanced, cv2.COLOR_GRAY2BGR)
+        b_s = strip[:, :, 0].astype(np.int16)
+        g_s = strip[:, :, 1].astype(np.int16)
+        r_i = strip[:, :, 2].astype(np.int16)
+        green_wm = (
+            (hsv_s[:, :, 0] >= 35)
+            & (hsv_s[:, :, 0] <= 94)
+            & (hsv_s[:, :, 1] >= 60)
+            & (g_s >= 68)
+            & ((g_s - np.maximum(r_i, b_s)) >= 20)
+        )
+        del b_s, g_s, r_i
+        pale_wm = (
+            ((hsv_s[:, :, 1] > 20) & (hsv_s[:, :, 2] > 125) & (ratio_s > f_087))
+            | ((hsv_s[:, :, 2] > 218) & (ratio_s > f_092))
+            | green_wm
+        )
+        del hsv_s, green_wm
+        ratio_s[pale_wm] = f_1
+        del pale_wm
+        ratio_s -= f_012
+        ratio_s *= f_inv080
+        np.clip(ratio_s, f_0, f_1, out=ratio_s)
+        np.power(ratio_s, f_115, out=ratio_s)
+        ratio_s *= f_255
+        enh_s = ratio_s.astype(np.uint8)
+        del ratio_s
+        out[y0:y1, :, 0] = enh_s
+        out[y0:y1, :, 1] = enh_s
+        out[y0:y1, :, 2] = enh_s
+        del enh_s
+
+    del lum_u8, bg_full_u8
+    return out
 
 
 def estimate_skew_angle(img_bgr_or_gray: np.ndarray, max_angle: float = 8.0) -> float:
@@ -798,20 +929,30 @@ def _run_tesseract_tsv_raw(work_img: np.ndarray, tess_lang: str, psm: int, scale
     tess_bin = shutil.which("tesseract")
     if not tess_bin:
         return []
-    ok, buf = cv2.imencode(".png", work_img)
+    gray_img = cv2.cvtColor(work_img, cv2.COLOR_BGR2GRAY) if work_img.ndim == 3 else work_img
+    ok, buf = cv2.imencode(".png", gray_img)
+    del gray_img
     if not ok:
         return []
+    png_bytes = buf.tobytes()
+    del buf
 
     cmd = [tess_bin, "stdin", "stdout", "--oem", "1", "--psm", str(int(psm)), "-l", tess_lang, "tsv"]
+    sub_env = None
+    if is_low_memory_runtime():
+        sub_env = os.environ.copy()
+        sub_env["OMP_THREAD_LIMIT"] = "1"
     try:
         proc = subprocess.run(
             cmd,
-            input=buf.tobytes(),
+            input=png_bytes,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             timeout=60,
             check=False,
+            env=sub_env,
         )
+        del png_bytes
         if proc.returncode != 0 or not proc.stdout:
             return []
         text_tsv = proc.stdout.decode("utf-8", errors="replace")
@@ -1270,11 +1411,16 @@ def ocr_page_words_with_meta(
         # Override wrong OSD Arabic/Latin guesses whenever Devanagari Shirorekha top-bars or Latin mojibake appear
         should_probe_devanagari = bool(hin_pack) and (
             (shiro_score >= 0.028 and (detected in (None, "eng", "ara+eng", "script/Arabic+eng") or osd_conf < 4.5))
-            or (detected in (None, "eng") and (plausibility < 0.72 or low_conf_frac > 0.22 or uncovered))
+            or (
+                bool(rapid_words)
+                and detected in (None, "eng")
+                and (plausibility < 0.72 or low_conf_frac > 0.22 or uncovered)
+            )
+            or (not rapid_words and detected is None and shiro_score >= 0.014)
         )
         if should_probe_devanagari:
             tess_hin = extract_tesseract_words(img_clean, hin_pack)
-            if has_genuine_devanagari(tess_hin) or sum(1 for w in tess_hin if _DEVANAGARI_RE.search(w.text)) >= 5:
+            if has_genuine_devanagari(tess_hin):
                 fused_hin = _merge_tesseract_and_rapid_words(tess_hin, rapid_words, allow_cjk=False)
                 return fused_hin, rapid_words, hin_pack
 
@@ -1282,6 +1428,17 @@ def ocr_page_words_with_meta(
             if len(rapid_words) >= 3 and plausibility >= 0.72:
                 return rapid_words, rapid_words, "chi_sim+eng" if has_cjk else "eng"
             tess_eng = extract_tesseract_words(img_clean, "eng")
+            if (
+                hin_pack
+                and not rapid_words
+                and (
+                    (tess_eng and latin_plausibility_score(tess_eng)[0] < 0.62)
+                    or shiro_score >= 0.012
+                )
+            ):
+                tess_hin = extract_tesseract_words(img_clean, hin_pack)
+                if has_genuine_devanagari(tess_hin):
+                    return tess_hin, rapid_words, hin_pack
             words = tess_eng if len(tess_eng) > len(rapid_words) else rapid_words
             return words, rapid_words, "eng"
 

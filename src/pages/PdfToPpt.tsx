@@ -183,7 +183,12 @@ async function convertBackend(
   const effSlideMode = layerMode === 'layered_replica' ? 'hybrid' : (slideMode === 'text' ? 'structural' : 'structural');
   formData.append('slide_mode', effSlideMode);
   appendVisionLayerParams(formData, { layerMode, strictLocal, lang });
-  const res = await apiFetch('/convert/pdf-to-ppt', { method: 'POST', body: formData });
+  const res = await apiFetch('/convert/pdf-to-ppt', {
+    method: 'POST',
+    body: formData,
+    timeoutMs: 180000,
+    maxRetries: 1,
+  });
   if (!res.ok) throw new Error(await res.text() || 'Backend conversion failed.');
   return res.blob();
 }

@@ -259,7 +259,8 @@ export default function SearchablePdf() {
       const res = await apiFetch('/convert/make-searchable', {
         method: 'POST',
         body: formData,
-        timeoutMs: 120000, // 2 minutes timeout for cold start / heavy OCR
+        timeoutMs: 180000,
+        maxRetries: 1,
       });
 
       if (!res.ok) {

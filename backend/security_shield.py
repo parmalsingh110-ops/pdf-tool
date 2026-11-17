@@ -43,12 +43,15 @@ from fastapi import HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from ocr_engine import is_low_memory_runtime
+
 logger = logging.getLogger("pdf_tool.security_shield")
 
 # ─── Configuration (tunable via Render Environment Variables) ─────────────────
 LANE_FAST_CONCURRENCY: int = max(2, int(os.environ.get("LANE_FAST_CONCURRENCY", "12")))
 LANE_MEDIUM_CONCURRENCY: int = max(1, int(os.environ.get("LANE_MEDIUM_CONCURRENCY", "4")))
-LANE_HEAVY_CONCURRENCY: int = max(1, int(os.environ.get("LANE_HEAVY_CONCURRENCY", "2")))
+_default_heavy_conc = "1" if is_low_memory_runtime() else "2"
+LANE_HEAVY_CONCURRENCY: int = max(1, int(os.environ.get("LANE_HEAVY_CONCURRENCY", _default_heavy_conc)))
 
 MAX_VIRTUAL_QUEUE_DEPTH: int = max(8, int(os.environ.get("MAX_VIRTUAL_QUEUE_DEPTH", "45")))
 MAX_PER_IP_ACTIVE_JOBS: int = max(2, int(os.environ.get("MAX_PER_IP_ACTIVE_JOBS", "6")))

@@ -1834,7 +1834,12 @@ export default function UniversalConverter() {
         if (extraFields) {
           for (const [k, v] of Object.entries(extraFields)) form.append(k, v);
         }
-        const res = await apiFetch(endpoint, { method: 'POST', body: form });
+        const res = await apiFetch(endpoint, {
+          method: 'POST',
+          body: form,
+          timeoutMs: 180000,
+          maxRetries: 1,
+        });
         if (!res.ok) return null;
         return await res.blob();
       } catch {

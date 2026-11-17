@@ -23,6 +23,7 @@ import io
 import logging
 import math
 import re
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
@@ -42,6 +43,7 @@ from ocr_engine import (
     find_devanagari_font,
     has_genuine_devanagari,
     is_clean_ascii_token,
+    is_low_memory_runtime,
     latin_plausibility_score,
     ocr_page_words_with_meta,
     resolve_ocr_lang,
@@ -479,51 +481,74 @@ def _extract_table_line_masks(img_bgr: np.ndarray) -> tuple[np.ndarray, np.ndarr
     # so adaptiveThreshold halos & bright white letters inside dark bands never spawn fake interior borders.
     dark_raw = (gray < 145).astype(np.uint8) * 255
     dark_fill = cv2.morphologyEx(dark_raw, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (14, 14)))
-    dark_interior = cv2.erode(dark_fill, cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5)))
+    del dark_raw
+    has_dark_fill = bool(np.any(dark_fill))
 
     # Local adaptive binary captures faint and dark gridlines on light backgrounds
     block = max(15, (min(h, w) // 48) | 1)
     block = min(block, 31)
-    bin_inv = cv2.adaptiveThreshold(
+    thin_net = cv2.adaptiveThreshold(
         gray, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY_INV, blockSize=block, C=6
     )
-    thin_net = cv2.bitwise_and(bin_inv, cv2.bitwise_not(dark_interior))
+    if has_dark_fill:
+        dark_interior = cv2.erode(dark_fill, cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5)))
+        cv2.bitwise_not(dark_interior, dst=dark_interior)
+        cv2.bitwise_and(thin_net, dark_interior, dst=thin_net)
+        del dark_interior
 
     # Suppress Devanagari shirorekhas (~40-65px) and short white glyphs while keeping genuine table gridlines
     hk_len = max(68, int(w * 0.052))
     vk_len = max(46, int(h * 0.028))
-    bright_in_dark = cv2.bitwise_and((gray > 155).astype(np.uint8) * 255, dark_fill)
-    bright_h_line = cv2.morphologyEx(bright_in_dark, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (hk_len, 1)))
-    bright_v_line = cv2.morphologyEx(bright_in_dark, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (1, vk_len)))
-    bright_text = cv2.subtract(bright_in_dark, cv2.bitwise_or(bright_h_line, bright_v_line))
-    bright_text_mask = cv2.dilate(bright_text, cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5)))
 
-    # Morphological horizontal line isolation: long enough to skip digits/words ('0698890', '260')
-    # while capturing narrow-column horizontal dividers seamlessly across intersections.
-    h_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (hk_len, 1))
-    h_lines = cv2.morphologyEx(thin_net, cv2.MORPH_OPEN, h_kernel, iterations=1)
+    # Morphological horizontal & vertical line isolation from thin_net
+    h_lines = cv2.morphologyEx(thin_net, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (hk_len, 1)), iterations=1)
     h_lines = cv2.dilate(h_lines, cv2.getStructuringElement(cv2.MORPH_RECT, (5, 3)), iterations=1)
 
-    # Restore horizontal & vertical border transitions of dark-filled header cells (sensitive even on subtle dark-to-darker edges)
-    grad_y = np.abs(cv2.Sobel(gray, cv2.CV_16S, 0, 1, ksize=3))
-    gy_raw = np.where(dark_fill > 0, (grad_y > 18), (grad_y > 38)).astype(np.uint8) * 255
-    gy_bin = cv2.bitwise_and(gy_raw, cv2.bitwise_not(bright_text_mask))
-    gy_lines = cv2.morphologyEx(gy_bin, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (hk_len, 1)), iterations=1)
-    gy_lines = cv2.dilate(gy_lines, cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)), iterations=1)
-    h_lines = cv2.bitwise_or(h_lines, gy_lines)
-
-    # Morphological vertical line isolation (taller than tall text characters/QR squares)
-    v_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, vk_len))
-    v_lines = cv2.morphologyEx(thin_net, cv2.MORPH_OPEN, v_kernel, iterations=1)
+    v_lines = cv2.morphologyEx(thin_net, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (1, vk_len)), iterations=1)
     v_lines = cv2.dilate(v_lines, cv2.getStructuringElement(cv2.MORPH_RECT, (3, 5)), iterations=1)
+    del thin_net
+
+    bright_text_mask: Optional[np.ndarray] = None
+    if has_dark_fill:
+        bright_in_dark = cv2.bitwise_and((gray > 155).astype(np.uint8) * 255, dark_fill)
+        bright_h_line = cv2.morphologyEx(bright_in_dark, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (hk_len, 1)))
+        bright_v_line = cv2.morphologyEx(bright_in_dark, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (1, vk_len)))
+        bright_border = cv2.bitwise_or(bright_h_line, bright_v_line)
+        del bright_h_line, bright_v_line
+        bright_text = cv2.subtract(bright_in_dark, bright_border)
+        del bright_in_dark, bright_border
+        bright_text_mask = cv2.dilate(bright_text, cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5)))
+        cv2.bitwise_not(bright_text_mask, dst=bright_text_mask)
+        del bright_text
+
+    # Restore horizontal border transitions of dark-filled header cells (thresholds <= 38 fit in uint8 convertScaleAbs)
+    grad_y_16 = cv2.Sobel(gray, cv2.CV_16S, 0, 1, ksize=3)
+    abs_gy = cv2.convertScaleAbs(grad_y_16)
+    del grad_y_16
+    gy_raw = (np.where(dark_fill > 0, (abs_gy > 18), (abs_gy > 38))).astype(np.uint8) * 255
+    del abs_gy
+    if bright_text_mask is not None:
+        cv2.bitwise_and(gy_raw, bright_text_mask, dst=gy_raw)
+    gy_lines = cv2.morphologyEx(gy_raw, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (hk_len, 1)), iterations=1)
+    del gy_raw
+    gy_lines = cv2.dilate(gy_lines, cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)), iterations=1)
+    cv2.bitwise_or(h_lines, gy_lines, dst=h_lines)
+    del gy_lines
 
     # Also keep strong vertical border transitions separating adjacent dark filled cells (masked against white text)
-    grad_x = np.abs(cv2.Sobel(gray, cv2.CV_16S, 1, 0, ksize=3))
-    gx_raw = np.where(dark_fill > 0, (grad_x > 18), (grad_x > 38)).astype(np.uint8) * 255
-    gx_bin = cv2.bitwise_and(gx_raw, cv2.bitwise_not(bright_text_mask))
-    gx_lines = cv2.morphologyEx(gx_bin, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (1, vk_len)), iterations=1)
+    grad_x_16 = cv2.Sobel(gray, cv2.CV_16S, 1, 0, ksize=3)
+    abs_gx = cv2.convertScaleAbs(grad_x_16)
+    del grad_x_16, gray
+    gx_raw = (np.where(dark_fill > 0, (abs_gx > 18), (abs_gx > 38))).astype(np.uint8) * 255
+    del abs_gx, dark_fill
+    if bright_text_mask is not None:
+        cv2.bitwise_and(gx_raw, bright_text_mask, dst=gx_raw)
+        del bright_text_mask
+    gx_lines = cv2.morphologyEx(gx_raw, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (1, vk_len)), iterations=1)
+    del gx_raw
     gx_lines = cv2.dilate(gx_lines, cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)), iterations=1)
-    v_lines = cv2.bitwise_or(v_lines, gx_lines)
+    cv2.bitwise_or(v_lines, gx_lines, dst=v_lines)
+    del gx_lines
 
     return h_lines, v_lines
 
@@ -857,12 +882,14 @@ def _detect_raw_table_rois(
         except Exception:
             pass
         vec_h, vec_v = _extract_vector_table_masks(pdf_page, iw, ih, inv_pt_to_px)
-        h_lines = cv2.bitwise_or(h_lines, vec_h)
-        v_lines = cv2.bitwise_or(v_lines, vec_v)
+        cv2.bitwise_or(h_lines, vec_h, dst=h_lines)
+        del vec_h
+        cv2.bitwise_or(v_lines, vec_v, dst=v_lines)
     combined = cv2.bitwise_or(h_lines, v_lines)
     combined = cv2.dilate(combined, cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)), iterations=1)
 
-    num_labels, _, stats, _ = cv2.connectedComponentsWithStats(combined, connectivity=8)
+    num_labels, _lbl, stats, _ = cv2.connectedComponentsWithStats(combined, connectivity=8)
+    del combined, _lbl
     candidate_boxes: list[tuple[int, int, int, int]] = []
     for lbl in range(1, num_labels):
         bx = int(stats[lbl, cv2.CC_STAT_LEFT])
@@ -1017,6 +1044,7 @@ def _detect_raw_table_rois(
             continue
         solved_grids.append(grid)
 
+    del h_lines, v_lines, vec_v
     return solved_grids
 
 
@@ -1820,19 +1848,24 @@ def _extract_visual_assets(
     whose noisy internal OCR fragments (QR/emblem artifacts) should be discarded.
     """
     ih, iw = img_deskewed_bgr.shape[:2]
-    gray = cv2.cvtColor(img_deskewed_bgr, cv2.COLOR_BGR2GRAY)
-    hsv = cv2.cvtColor(img_deskewed_bgr, cv2.COLOR_BGR2HSV)
 
     # Start from dark ink + colored ink/photo pixels, excluding pale pastel watermarks
     clean_bgr = clean_image_for_ocr(img_deskewed_bgr)
     clean_gray = cv2.cvtColor(clean_bgr, cv2.COLOR_BGR2GRAY)
+    del clean_bgr
     ink_mask = (clean_gray < 210).astype(np.uint8) * 255
+    del clean_gray
+
+    gray = cv2.cvtColor(img_deskewed_bgr, cv2.COLOR_BGR2GRAY)
+    hsv = cv2.cvtColor(img_deskewed_bgr, cv2.COLOR_BGR2HSV)
 
     # Also keep vivid medium-dark color regions (passport photos, green checkmark stamps, red/blue logos)
     # while excluding yellow/orange map watermarks & edge border ribbons
     non_yellow = (hsv[:, :, 0] < 11) | (hsv[:, :, 0] > 42) | (hsv[:, :, 2] < 165)
     color_fg = ((hsv[:, :, 1] > 42) & (hsv[:, :, 2] < 215) & (gray < 225) & non_yellow).astype(np.uint8) * 255
+    del hsv, gray, non_yellow
     mask = cv2.bitwise_or(ink_mask, color_fg)
+    del ink_mask, color_fg
 
     # Zero out outer 1.5% scan border noise & detected tables
     margin = max(2, int(min(ih, iw) * 0.006))
@@ -1858,9 +1891,11 @@ def _extract_visual_assets(
     # Dilate moderately to merge strokes inside a signature, stamp circle, crest, or QR modules
     k_dil = cv2.getStructuringElement(cv2.MORPH_RECT, (9, 9))
     merged = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, k_dil, iterations=1)
+    del mask
     merged = cv2.dilate(merged, cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5)), iterations=1)
 
-    num_labels, _, stats, _ = cv2.connectedComponentsWithStats(merged, connectivity=8)
+    num_labels, _lbl, stats, _ = cv2.connectedComponentsWithStats(merged, connectivity=8)
+    del merged, _lbl
     raw_candidates: list[tuple[int, int, int, int, float]] = []
 
     min_w = max(46, int(iw * 0.044))
@@ -1944,7 +1979,7 @@ def _extract_visual_assets(
             by > ih * 0.28 and aspect_cand >= 1.8 and dark_frac < 0.24 and bw >= max(72, int(iw * 0.06)) and bh >= 18
         ):
             continue
-        hsv_crop = hsv[by:by + bh, bx:bx + bw]
+        hsv_crop = cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2HSV)
         if hsv_crop.size == 0:
             continue
         mean_h = float(np.mean(hsv_crop[:, :, 0]))
@@ -2333,26 +2368,12 @@ def _repair_corrupted_indic_runs(
     if not runs:
         return tokens
 
-    # Render page once at 360 DPI so even small 6-7pt Devanagari conjuncts stay razor sharp
-    ocr_dpi = 360
-    pix = page.get_pixmap(dpi=ocr_dpi, alpha=False)
-    arr = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, pix.n).copy()
-    if pix.n == 1:
-        arr = cv2.cvtColor(arr, cv2.COLOR_GRAY2BGR)
-    elif pix.n == 3:
-        arr = cv2.cvtColor(arr, cv2.COLOR_RGB2BGR)
-    else:
-        arr = cv2.cvtColor(arr[:, :, :3], cv2.COLOR_RGB2BGR)
-
-    gray = cv2.cvtColor(arr, cv2.COLOR_BGR2GRAY)
-    arr[gray > 224] = 255
-    bin_inv = (gray < 145).astype(np.uint8) * 255
-    h_lines = cv2.morphologyEx(bin_inv, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (90, 1)))
-    v_lines = cv2.morphologyEx(bin_inv, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (1, 65)))
-    border_mask = cv2.dilate(cv2.bitwise_or(h_lines, v_lines), np.ones((3, 3), np.uint8))
-    arr[border_mask > 0] = 255
-
-    sc = float(pix.width) / max(1.0, float(page.rect.width))
+    # Render only tight clipped run strips at 320 DPI instead of full-page 360 DPI bitmaps
+    # so 6-7pt Devanagari conjuncts stay sharp while saving ~350 MB of MuPDF/OpenCV peak RAM.
+    ocr_dpi = 320
+    sc = float(ocr_dpi) / 72.0
+    pw_pt = max(1.0, float(page.rect.width))
+    ph_pt = max(1.0, float(page.rect.height))
     crop_entries: list[tuple[list[int], np.ndarray, list[tuple[float, float]]]] = []
     orig_run_keys: dict[tuple[int, ...], tuple[str, ...]] = {}
     for run in runs:
@@ -2361,20 +2382,53 @@ def _repair_corrupted_indic_runs(
         ry0 = min(tokens[i]["y0_pt"] for i in run)
         rx1 = max(tokens[i]["x1_pt"] for i in run)
         ry1 = max(tokens[i]["y1_pt"] for i in run)
-        lh_px = max(14.0, (ry1 - ry0) * sc)
-        py = max(6, int(round(lh_px * 0.34)))
-        # Keep horizontal crop tight inside adjacent ASCII/slash dividers, then add clean white margin
-        px_pad = max(2, int(round(lh_px * 0.10)))
-        cx0 = max(0, int(math.floor(rx0 * sc)) - px_pad)
-        cy0 = max(0, int(math.floor(ry0 * sc)) - py)
-        cx1 = min(pix.width, int(math.ceil(rx1 * sc)) + px_pad)
-        cy1 = min(pix.height, int(math.ceil(ry1 * sc)) + py)
-        if cx1 - cx0 < 4 or cy1 - cy0 < 4:
+        lh_pt = max(4.0, ry1 - ry0)
+        pad_x_pt = max(1.5, lh_pt * 0.10)
+        pad_y_pt = max(2.2, lh_pt * 0.34)
+        cx0_pt = max(0.0, rx0 - pad_x_pt)
+        cy0_pt = max(0.0, ry0 - pad_y_pt)
+        cx1_pt = min(pw_pt, rx1 + pad_x_pt)
+        cy1_pt = min(ph_pt, ry1 + pad_y_pt)
+        if cx1_pt - cx0_pt < 2.0 or cy1_pt - cy0_pt < 2.0:
             continue
-        cr_raw = arr[cy0:cy1, cx0:cx1]
-        cr = cv2.copyMakeBorder(cr_raw, 8, 8, 16, 16, cv2.BORDER_CONSTANT, value=(255, 255, 255))
-        rel_spans = [((tokens[i]["x0_pt"] - rx0) * sc + px_pad + 16.0, (tokens[i]["x1_pt"] - rx0) * sc + px_pad + 16.0) for i in run]
+        clip_pix = page.get_pixmap(dpi=ocr_dpi, clip=fitz.Rect(cx0_pt, cy0_pt, cx1_pt, cy1_pt), alpha=False)
+        try:
+            cr_arr = np.frombuffer(clip_pix.samples, dtype=np.uint8).reshape(clip_pix.height, clip_pix.width, clip_pix.n).copy()
+            if clip_pix.n == 1:
+                cr_arr = cv2.cvtColor(cr_arr, cv2.COLOR_GRAY2BGR)
+            elif clip_pix.n == 3:
+                cr_arr = cv2.cvtColor(cr_arr, cv2.COLOR_RGB2BGR)
+            else:
+                cr_arr = cv2.cvtColor(cr_arr[:, :, :3], cv2.COLOR_RGB2BGR)
+        finally:
+            del clip_pix
+
+        gray_c = cv2.cvtColor(cr_arr, cv2.COLOR_BGR2GRAY)
+        cr_arr[gray_c > 224] = 255
+        ch_c, cw_c = gray_c.shape[:2]
+        if cw_c >= 110 or ch_c >= 85:
+            bin_c = (gray_c < 145).astype(np.uint8) * 255
+            border_c = np.zeros_like(bin_c)
+            if cw_c >= 110:
+                border_c = cv2.bitwise_or(
+                    border_c, cv2.morphologyEx(bin_c, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (90, 1)))
+                )
+            if ch_c >= 85:
+                border_c = cv2.bitwise_or(
+                    border_c, cv2.morphologyEx(bin_c, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (1, 65)))
+                )
+            if np.any(border_c):
+                border_c = cv2.dilate(border_c, np.ones((3, 3), np.uint8))
+                cr_arr[border_c > 0] = 255
+
+        cr = cv2.copyMakeBorder(cr_arr, 8, 8, 16, 16, cv2.BORDER_CONSTANT, value=(255, 255, 255))
+        rel_spans = [((tokens[i]["x0_pt"] - cx0_pt) * sc + 16.0, (tokens[i]["x1_pt"] - cx0_pt) * sc + 16.0) for i in run]
         crop_entries.append((run, cr, rel_spans))
+
+    try:
+        fitz.TOOLS.store_shrink(100)
+    except Exception:
+        pass
 
     if not crop_entries:
         return tokens
@@ -4347,18 +4401,28 @@ def analyze_page_blueprint(
 
     if img_raw_bgr is None:
         max_dim_pt = max(page_w_pt, page_h_pt, 1.0)
-        eff_dpi = min(max(dpi, 200), 220, max(150, int((2250.0 * 72.0) / max_dim_pt)))
+        min_dpi = 165 if is_low_memory_runtime() else 200
+        eff_dpi = min(max(dpi, min_dpi), 220, max(145, int((2250.0 * 72.0) / max_dim_pt)))
         pix = page.get_pixmap(dpi=eff_dpi, alpha=False)
-        img_rgb = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, pix.n)
-        if pix.n == 3:
-            img_raw_bgr = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
-        elif pix.n == 1:
-            img_raw_bgr = cv2.cvtColor(img_rgb, cv2.COLOR_GRAY2BGR)
-        else:
-            img_raw_bgr = cv2.cvtColor(img_rgb[:, :, :3], cv2.COLOR_RGB2BGR)
+        try:
+            img_rgb = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, pix.n)
+            if pix.n == 3:
+                img_raw_bgr = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
+            elif pix.n == 1:
+                img_raw_bgr = cv2.cvtColor(img_rgb, cv2.COLOR_GRAY2BGR)
+            else:
+                img_raw_bgr = cv2.cvtColor(img_rgb[:, :, :3], cv2.COLOR_RGB2BGR)
+        finally:
+            del pix
+            try:
+                fitz.TOOLS.store_shrink(100)
+            except Exception:
+                pass
 
     # 1. Auto-deskew camera/scanner tilt BEFORE table grid & row detection
     img_deskewed_bgr, skew_deg = deskew_image_bgr(img_raw_bgr, max_angle=8.0) if is_raster_scan else (img_raw_bgr, 0.0)
+    if img_deskewed_bgr is not img_raw_bgr:
+        img_raw_bgr = None
     ih, iw = img_deskewed_bgr.shape[:2]
     px_to_pt = page_w_pt / float(max(1, iw))
     inv_pt_to_px = 1.0 / max(1e-6, px_to_pt)
@@ -4396,6 +4460,7 @@ def analyze_page_blueprint(
         if wants_hindi and not genuine_hindi:
             all_words_px = rapid_words or all_words_px
             effective_hindi = False
+            resolved_lang = "eng"
         else:
             effective_hindi = genuine_hindi
 
@@ -4426,14 +4491,16 @@ def analyze_page_blueprint(
             logger.debug(f"[Blueprint] Digital native asset pre-pass skip: {dig_err}")
             native_assets_pre = []
 
-    # 4. Sample dominant page paper tint & run Table Grid Topology Solver
-    gray_page = cv2.cvtColor(img_deskewed_bgr, cv2.COLOR_BGR2GRAY)
-    bright_page = gray_page >= np.percentile(gray_page, 72)
-    if np.any(bright_page):
-        med_p_bgr = np.median(img_deskewed_bgr[bright_page], axis=0)
+    # 4. Sample dominant page paper tint & run Table Grid Topology Solver (1/16th strided view saves ~20MB)
+    sub_bgr = img_deskewed_bgr[::4, ::4]
+    gray_sub = cv2.cvtColor(sub_bgr, cv2.COLOR_BGR2GRAY)
+    bright_sub = gray_sub >= np.percentile(gray_sub, 72)
+    if np.any(bright_sub):
+        med_p_bgr = np.median(sub_bgr[bright_sub], axis=0)
         paper_rgb = (int(med_p_bgr[2]), int(med_p_bgr[1]), int(med_p_bgr[0]))
     else:
         paper_rgb = (255, 255, 255)
+    del sub_bgr, gray_sub, bright_sub
 
     raw_grids = _detect_raw_table_rois(
         img_deskewed_bgr,
@@ -4475,18 +4542,28 @@ def analyze_page_blueprint(
         if w.x0 > iw * 0.915 and (w.y1 - w.y0) > (w.x1 - w.x0) * 1.45 and len(w.text.strip()) >= 2
     )
 
-    # Detect saturated vertical side ribbons (e.g., e-Mitra red strip even when single-sided)
-    hsv_page = cv2.cvtColor(img_deskewed_bgr, cv2.COLOR_BGR2HSV)
-    sat_band = (hsv_page[:, :, 1] >= 65) & (hsv_page[:, :, 2] >= 45) & (hsv_page[:, :, 2] <= 235)
-    col_sat_frac = np.mean(sat_band, axis=0)
+    # Detect saturated vertical side ribbons on outer 11% margin strips (avoiding full-page HSV copy)
+    left_lim = min(iw - 1, int(iw * 0.11))
     left_ribbon_x = -1
-    for cx in range(min(iw - 1, int(iw * 0.11))):
-        if col_sat_frac[cx] >= 0.22:
-            left_ribbon_x = cx + 4
+    if left_lim > 0:
+        hsv_left = cv2.cvtColor(img_deskewed_bgr[:, :left_lim], cv2.COLOR_BGR2HSV)
+        sat_left = (hsv_left[:, :, 1] >= 65) & (hsv_left[:, :, 2] >= 45) & (hsv_left[:, :, 2] <= 235)
+        col_left_frac = np.mean(sat_left, axis=0)
+        for cx in range(left_lim):
+            if col_left_frac[cx] >= 0.22:
+                left_ribbon_x = cx + 4
+        del hsv_left, sat_left, col_left_frac
+
+    right_start = max(0, int(iw * 0.89))
     right_ribbon_x = iw + 1
-    for cx in range(iw - 1, max(0, int(iw * 0.89)) - 1, -1):
-        if col_sat_frac[cx] >= 0.22:
-            right_ribbon_x = cx - 4
+    if right_start < iw:
+        hsv_right = cv2.cvtColor(img_deskewed_bgr[:, right_start:], cv2.COLOR_BGR2HSV)
+        sat_right = (hsv_right[:, :, 1] >= 65) & (hsv_right[:, :, 2] >= 45) & (hsv_right[:, :, 2] <= 235)
+        col_right_frac = np.mean(sat_right, axis=0)
+        for cx in range(iw - 1, right_start - 1, -1):
+            if col_right_frac[cx - right_start] >= 0.22:
+                right_ribbon_x = cx - 4
+        del hsv_right, sat_right, col_right_frac
 
     non_table_words_px: list[OCRWord] = []
     for w in all_words_px:
@@ -4856,6 +4933,7 @@ def analyze_page_blueprint(
                         eff_provider,
                         eff_key,
                         lang_hint=resolved_lang,
+                        max_total_s=(12.0 if is_low_memory_runtime() else 28.0),
                         is_digital_page=is_digital_page,
                     )
                     if ai_res:
@@ -4897,7 +4975,7 @@ def analyze_page_blueprint(
         ai_enhanced=ai_enhanced,
     )
 
-    del pix, img_raw_bgr, img_deskewed_bgr
+    del img_raw_bgr, img_deskewed_bgr
     gc.collect()
     return bp
 
@@ -5226,6 +5304,14 @@ def _analyze_pdf_pages_parallel(
     if total_pages <= 0:
         return []
 
+    low_mem = is_low_memory_runtime()
+    if low_mem:
+        try:
+            fitz.TOOLS.set_low_memory(True)
+        except Exception:
+            pass
+    eff_scan_dpi = min(dpi, 175) if low_mem else dpi
+
     def _run_single(p_idx: int, skip_ai_flag: bool) -> PageBlueprint:
         sub_doc = fitz.open(str(pdf_path))
         try:
@@ -5233,7 +5319,7 @@ def _analyze_pdf_pages_parallel(
                 sub_doc[p_idx],
                 p_idx,
                 lang=lang,
-                dpi=dpi,
+                dpi=eff_scan_dpi,
                 include_clean_bg=include_clean_bg,
                 layer_mode=layer_mode,
                 ai_api_key=ai_api_key,
@@ -5246,8 +5332,14 @@ def _analyze_pdf_pages_parallel(
             )
         finally:
             sub_doc.close()
+            try:
+                fitz.TOOLS.store_shrink(100)
+            except Exception:
+                pass
+            gc.collect()
 
     # Run page 0 first so provider circuit breaker / credentials status settles before workers spawn
+    ai_doc_deadline = time.monotonic() + (22.0 if low_mem else 48.0)
     bp0 = _run_single(0, False)
     if total_pages == 1:
         return [bp0]
@@ -5265,11 +5357,20 @@ def _analyze_pdf_pages_parallel(
 
     results: list[Optional[PageBlueprint]] = [None] * total_pages
     results[0] = bp0
-    worker_cnt = min(4, max(2, total_pages - 1))
-    with ThreadPoolExecutor(max_workers=worker_cnt) as pool:
-        fut_map = {pool.submit(_run_single, idx, skip_rest_ai): idx for idx in range(1, total_pages)}
-        for fut, idx in fut_map.items():
-            results[idx] = fut.result()
+    if low_mem:
+        # Strict sequential page-by-page execution on 512MB/1GB cloud containers prevents parallel RSS spikes
+        for idx in range(1, total_pages):
+            ai_budget_exhausted = time.monotonic() >= ai_doc_deadline
+            results[idx] = _run_single(idx, skip_rest_ai or ai_budget_exhausted)
+    else:
+        worker_cnt = min(4, max(2, total_pages - 1))
+        with ThreadPoolExecutor(max_workers=worker_cnt) as pool:
+            fut_map = {
+                pool.submit(_run_single, idx, skip_rest_ai or (time.monotonic() >= ai_doc_deadline)): idx
+                for idx in range(1, total_pages)
+            }
+            for fut, idx in fut_map.items():
+                results[idx] = fut.result()
 
     return [bp for bp in results if bp is not None]
 
@@ -7094,6 +7195,7 @@ def extract_page_layers_for_editor(
         if wants_hindi and not genuine_hindi:
             all_words_px = rapid_words or all_words_px
             effective_hindi = False
+            resolved_lang = "eng"
         else:
             effective_hindi = genuine_hindi
 

@@ -358,7 +358,9 @@ async function convertBackend(
   appendVisionLayerParams(formData, { layerMode, strictLocal, lang });
   const res = await apiFetch('/convert/pdf-to-word', {
     method: 'POST',
-    body: formData
+    body: formData,
+    timeoutMs: 180000,
+    maxRetries: 1,
   });
   if (!res.ok) {
     const errorText = await res.text();
@@ -460,7 +462,13 @@ export default function PdfToWord() {
             throw new Error('Image-to-Word AI reconstruction requires the backend server. Please wait a few seconds and retry.');
           }
           console.warn('[PdfToWord] Backend error, gracefully falling back to high-fidelity frontend:', backendErr);
-          setFallbackNotice('Server is currently offline. Automatically converted using Client-Side Precision Engine!');
+          const errMsg = String(backendErr?.message || '').toLowerCase();
+          const isTimeoutOrBusy = errMsg.includes('timed out') || errMsg.includes('busy') || errMsg.includes('502') || errMsg.includes('503');
+          setFallbackNotice(
+            isTimeoutOrBusy
+              ? 'Server was busy or took too long on this document. Automatically converted using Client-Side Precision Engine!'
+              : 'Server is currently offline or waking up. Automatically converted using Client-Side Precision Engine!'
+          );
           // Cascade down to frontend conversion!
         }
       }

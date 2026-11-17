@@ -215,7 +215,12 @@ async function convertBackend(
   formData.append('method', method);
   formData.append('force_ocr', forceOcr ? 'true' : 'false');
   appendVisionLayerParams(formData, { strictLocal, lang });
-  const res = await apiFetch('/convert/pdf-to-excel', { method: 'POST', body: formData });
+  const res = await apiFetch('/convert/pdf-to-excel', {
+    method: 'POST',
+    body: formData,
+    timeoutMs: 180000,
+    maxRetries: 1,
+  });
   if (!res.ok) throw new Error(await res.text() || 'Backend conversion failed.');
   return res.blob();
 }
