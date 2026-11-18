@@ -1092,11 +1092,14 @@ def extract_tesseract_words(img_bgr: np.ndarray, lang: str = "auto", psm: int = 
     else:
         tess_lang = resolved
     ih, iw = img_bgr.shape[:2]
+    low_mem = is_low_memory_runtime()
     scale_factor = 1.0
     is_complex_script = tess_lang != "eng"
-    if is_complex_script and max(ih, iw) < 1750:
+    up_thresh = 1550 if low_mem else 1750
+    up_target = 1750.0 if low_mem else 1950.0
+    if is_complex_script and max(ih, iw) < up_thresh:
         # Gently upscale non-Latin scans so thin vowel matras & diacritics reach optimal ~30px height
-        scale_factor = min(2.0, 1950.0 / float(max(1, ih, iw)))
+        scale_factor = min(2.0, up_target / float(max(1, ih, iw)))
         work_img = cv2.resize(
             img_bgr,
             (max(32, int(round(iw * scale_factor))), max(32, int(round(ih * scale_factor)))),
@@ -1110,7 +1113,8 @@ def extract_tesseract_words(img_bgr: np.ndarray, lang: str = "auto", psm: int = 
 
     base_lang = tess_lang.split("+")[0].strip() if "+" in tess_lang else ""
     if is_complex_script and int(psm) == 3 and len(kept) >= 8:
-        rescue_rois = _find_uncovered_text_rois(img_bgr, kept, glitch_rois)
+        rescue_limit = 2 if low_mem else 5
+        rescue_rois = _find_uncovered_text_rois(img_bgr, kept, glitch_rois)[:rescue_limit]
         for rx0, ry0, rx1, ry1 in rescue_rois:
             crop = img_bgr[ry0:ry1, rx0:rx1]
             if crop.size == 0:
@@ -1408,9 +1412,17 @@ def ocr_page_words_with_meta(
             return rapid_words, rapid_words, "eng"
 
         installed = get_installed_tesseract_langs()
-        detected, osd_conf = _detect_script_via_osd_with_conf(img_clean)
         shiro_score = _detect_shirorekha_score(img_clean)
         hin_pack = "hin+eng" if {"hin", "eng"}.issubset(installed) else ("hin" if "hin" in installed else "")
+
+        # Fast-path Devanagari whenever strong Shirorekha top-bars are present (skips redundant OSD spawn!)
+        if hin_pack and (shiro_score >= 0.028 or (not rapid_words and shiro_score >= 0.015)):
+            tess_hin = extract_tesseract_words(img_clean, hin_pack)
+            if has_genuine_devanagari(tess_hin):
+                fused_hin = _merge_tesseract_and_rapid_words(tess_hin, rapid_words, allow_cjk=False)
+                return fused_hin, rapid_words, hin_pack
+
+        detected, osd_conf = _detect_script_via_osd_with_conf(img_clean)
 
         # Override wrong OSD Arabic/Latin guesses whenever Devanagari Shirorekha top-bars or Latin mojibake appear
         should_probe_devanagari = bool(hin_pack) and (
@@ -1482,6 +1494,54 @@ def _ocr_page_words(
     """Run optimal hybrid local OCR pipeline on one rendered page."""
     words, _, _ = ocr_page_words_with_meta(img_raw_bgr, lang, clean_watermarks, latin_font, dev_font)
     return words
+
+
+def extract_signature_panel_text(
+    img_bgr: np.ndarray, box_px: tuple[int, int, int, int]
+) -> list[OCRWord]:
+    """
+    Fast targeted OCR on a digital-signature panel (`Signature valid / Digitally signed by...`):
+    whitening green checkmark ink reveals razor-sharp dark text for single-pass `eng --psm 6`.
+    """
+    if not shutil.which("tesseract") or img_bgr is None or img_bgr.size == 0:
+        return []
+    ih, iw = img_bgr.shape[:2]
+    x0 = max(0, int(box_px[0]) - 6)
+    y0 = max(0, int(box_px[1]) - 6)
+    x1 = min(iw, int(box_px[2]) + 6)
+    y1 = min(ih, int(box_px[3]) + 6)
+    crop = img_bgr[y0:y1, x0:x1]
+    if crop.size == 0:
+        return []
+    hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+    # Whiten green tick / colored stamp ink while leaving black text sharp
+    colored_mask = (hsv[:, :, 0] >= 35) & (hsv[:, :, 0] <= 95) & (hsv[:, :, 1] >= 42)
+    clean_crop = crop.copy()
+    clean_crop[colored_mask] = (255, 255, 255)
+    sc = 1.6 if clean_crop.shape[0] < 320 else 1.25
+    up = cv2.resize(
+        clean_crop,
+        (max(16, int(round(clean_crop.shape[1] * sc))), max(16, int(round(clean_crop.shape[0] * sc)))),
+        interpolation=cv2.INTER_CUBIC,
+    )
+    raw = _run_tesseract_tsv_raw(up, "eng", 6, sc)
+    out: list[OCRWord] = []
+    for w in raw:
+        txt = (w.text or "").strip()
+        if not txt or (len(txt) <= 1 and w.conf < 0.70):
+            continue
+        out.append(
+            OCRWord(
+                text=txt,
+                x0=w.x0 + x0,
+                y0=w.y0 + y0,
+                x1=w.x1 + x0,
+                y1=w.y1 + y0,
+                conf=w.conf,
+                angle_deg=0.0,
+            )
+        )
+    return out
 
 
 _DEV_LETTER_RE = re.compile(r"[\u0904-\u0939\u093E-\u094D\u0958-\u0963\u0972-\u097F]")

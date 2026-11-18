@@ -44,6 +44,7 @@ logger = logging.getLogger("mediasuite.ai_vision")
 # Each entry pairs a model ID with its verified thinkingConfig (or None if unsupported/unneeded).
 _GEMINI_MODEL_SPECS: tuple[tuple[str, Optional[dict[str, Any]]], ...] = (
     ("gemini-3-flash-preview", {"thinkingLevel": "MINIMAL"}),
+    ("gemini-2.5-flash", {"thinkingBudget": 0}),
     ("gemini-3.6-flash", {"thinkingBudget": 0}),
     ("gemini-3.5-flash-lite", None),
     ("gemini-3.1-flash-lite", None),
@@ -51,16 +52,17 @@ _GEMINI_MODEL_SPECS: tuple[tuple[str, Optional[dict[str, Any]]], ...] = (
     ("gemini-3.5-flash", {"thinkingLevel": "LOW"}),
     ("gemini-3.8-flash", {"thinkingLevel": "LOW"}),
     ("gemini-3.7-flash", {"thinkingLevel": "LOW"}),
-    ("gemini-flash-latest", None),
+    ("gemini-flash-latest", {"thinkingBudget": 0}),
     ("gemini-4-hydrogen", None),
 )
 _GEMINI_MODELS = tuple(name for name, _ in _GEMINI_MODEL_SPECS)
 _GEMINI_SPEC_MAP: dict[str, Optional[dict[str, Any]]] = dict(_GEMINI_MODEL_SPECS)
-_GEMINI_VERTEX_FALLBACK_MODELS: tuple[str, ...] = (
-    "gemini-2.5-flash",
-    "gemini-2.5-pro",
-    "gemini-2.0-flash",
+_GEMINI_VERTEX_SPECS: tuple[tuple[str, Optional[dict[str, Any]]], ...] = (
+    ("gemini-2.5-flash", {"thinkingBudget": 0}),
+    ("gemini-2.0-flash", None),
+    ("gemini-2.5-pro", None),
 )
+_GEMINI_VERTEX_FALLBACK_MODELS: tuple[str, ...] = tuple(m for m, _ in _GEMINI_VERTEX_SPECS)
 _GEMINI_DISCOVERY_EXCLUDED = (
     "embedding",
     "-tts",
@@ -79,6 +81,9 @@ _GEMINI_DISCOVERY_EXCLUDED = (
 )
 
 _CACHE_LOCK = threading.Lock()
+_HTTP_SESSION: Optional[requests.Session] = None
+_ORIG_REQUESTS_GET = requests.get
+_ORIG_REQUESTS_POST = requests.post
 _DISCOVERED_MODELS_CACHE: dict[str, tuple[float, set[str]]] = {}
 _DISCOVER_FAIL_UNTIL: dict[str, float] = {}
 _MODEL_COOLDOWN_UNTIL: dict[tuple[str, str, str], float] = {}
@@ -168,13 +173,40 @@ def resolve_vision_credentials(
     return None, None
 
 
-def _encode_image_b64_jpeg(img_bgr: np.ndarray, max_dim: int = 1350) -> str:
+def _get_http_session() -> requests.Session:
+    """Reuse pooled HTTPS keep-alive connections across Vision API calls (saves TLS handshake latency)."""
+    global _HTTP_SESSION
+    with _CACHE_LOCK:
+        if _HTTP_SESSION is None:
+            from requests.adapters import HTTPAdapter
+
+            sess = requests.Session()
+            adapter = HTTPAdapter(pool_connections=8, pool_maxsize=16)
+            sess.mount("https://", adapter)
+            sess.mount("http://", adapter)
+            _HTTP_SESSION = sess
+        return _HTTP_SESSION
+
+
+def _http_get(url: str, **kwargs: Any) -> requests.Response:
+    if requests.get is not _ORIG_REQUESTS_GET:
+        return requests.get(url, **kwargs)
+    return _get_http_session().get(url, **kwargs)
+
+
+def _http_post(url: str, **kwargs: Any) -> requests.Response:
+    if requests.post is not _ORIG_REQUESTS_POST:
+        return requests.post(url, **kwargs)
+    return _get_http_session().post(url, **kwargs)
+
+
+def _encode_image_b64_jpeg(img_bgr: np.ndarray, max_dim: int = 1240) -> str:
     h, w = img_bgr.shape[:2]
     scale = min(1.0, max_dim / float(max(h, w)))
     work = img_bgr
     if scale < 0.99:
         work = cv2.resize(img_bgr, (max(64, int(w * scale)), max(64, int(h * scale))), interpolation=cv2.INTER_AREA)
-    ok, buf = cv2.imencode(".jpg", work, [int(cv2.IMWRITE_JPEG_QUALITY), 86])
+    ok, buf = cv2.imencode(".jpg", work, [int(cv2.IMWRITE_JPEG_QUALITY), 82])
     if not ok:
         raise ValueError("Failed to encode page image for Vision AI.")
     return base64.b64encode(buf.tobytes()).decode("ascii")
@@ -189,11 +221,14 @@ def _extract_json_object(raw: str) -> dict[str, Any]:
         start = cleaned.find("{")
         end = cleaned.rfind("}")
         if start >= 0 and end > start:
-            try:
-                obj = json.loads(cleaned[start : end + 1])
-                return obj if isinstance(obj, dict) else {}
-            except Exception:
-                return {}
+            snippet = cleaned[start : end + 1]
+            for candidate in (snippet, re.sub(r",\s*([}\]])", r"\1", snippet)):
+                try:
+                    obj = json.loads(candidate)
+                    if isinstance(obj, dict):
+                        return obj
+                except Exception:
+                    continue
         return {}
 
 
@@ -651,7 +686,7 @@ def _discover_aistudio_models(api_key: str, key_id: str) -> tuple[Optional[set[s
             return None, False
 
     try:
-        resp = requests.get(
+        resp = _http_get(
             "https://generativelanguage.googleapis.com/v1beta/models",
             headers={"x-goog-api-key": api_key},
             timeout=(3.0, 4.5),
@@ -711,10 +746,10 @@ def _candidate_gemini_specs(
     else:
         seen: set[str] = set()
         specs = []
-        for m in (*_GEMINI_VERTEX_FALLBACK_MODELS, *_GEMINI_MODELS):
+        for m, tc in (*_GEMINI_VERTEX_SPECS, *_GEMINI_MODEL_SPECS):
             if m not in seen:
                 seen.add(m)
-                specs.append((m, None))
+                specs.append((m, tc))
 
     active = [
         (m, tc)
@@ -777,7 +812,8 @@ def _call_gemini_text(
     with _CACHE_LOCK:
         pref_ep = _ENDPOINT_PREF.get(key_id)
     if api_key.startswith("AQ."):
-        endpoints = (vertex_ep, aistudio_ep) if pref_ep == "VertexExpress" else (aistudio_ep, vertex_ep)
+        # AQ.* keys are Google Cloud Vertex Express keys; hit VertexExpress first to skip AIStudio discovery GET + 403 roundtrip
+        endpoints = (aistudio_ep, vertex_ep) if pref_ep == "AIStudio" else (vertex_ep, aistudio_ep)
     else:
         endpoints = (aistudio_ep,)
 
@@ -807,14 +843,14 @@ def _call_gemini_text(
             url = url_tmpl.format(m=model)
             try:
                 payload = _build_gemini_payload(parts, json_mode, thinking_cfg)
-                resp = requests.post(url, headers=headers, json=payload, timeout=req_timeout)
+                resp = _http_post(url, headers=headers, json=payload, timeout=req_timeout)
 
                 if resp.status_code == 400 and thinking_cfg is not None:
                     rem2 = deadline - time.monotonic()
                     if rem2 >= 1.5:
                         t2 = (min(3.0, max(1.0, rem2 * 0.4)), min(float(timeout_s), max(1.5, rem2)))
                         payload = _build_gemini_payload(parts, json_mode, None)
-                        resp = requests.post(url, headers=headers, json=payload, timeout=t2)
+                        resp = _http_post(url, headers=headers, json=payload, timeout=t2)
 
                 if resp.ok:
                     txt = _extract_gemini_candidate_text(resp.json())
@@ -882,7 +918,9 @@ def _call_claude_text(
             "messages": [{"role": "user", "content": content}],
         }
         try:
-            resp = requests.post("https://api.anthropic.com/v1/messages", headers=headers, json=payload, timeout=req_timeout)
+            resp = _http_post(
+                "https://api.anthropic.com/v1/messages", headers=headers, json=payload, timeout=req_timeout
+            )
             if resp.ok:
                 data = resp.json()
                 blocks = data.get("content", [])
@@ -937,7 +975,9 @@ def _call_openai_text(
         if json_object_mode:
             payload["response_format"] = {"type": "json_object"}
         try:
-            resp = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload, timeout=req_timeout)
+            resp = _http_post(
+                "https://api.openai.com/v1/chat/completions", headers=headers, json=payload, timeout=req_timeout
+            )
             if resp.ok:
                 data = resp.json()
                 txt = data.get("choices", [{}])[0].get("message", {}).get("content", "")

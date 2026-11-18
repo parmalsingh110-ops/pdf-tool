@@ -25,6 +25,7 @@ import logging
 import math
 import os
 import re
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -41,6 +42,7 @@ from ocr_engine import (
     clean_image_for_ocr,
     deskew_image_bgr,
     extract_rapidocr_words,
+    extract_signature_panel_text,
     extract_tesseract_words,
     find_devanagari_font,
     has_genuine_devanagari,
@@ -53,6 +55,8 @@ from ocr_engine import (
 )
 
 logger = logging.getLogger("mediasuite.vision")
+
+_LOW_MEM_CPU_OCR_SEM = threading.Semaphore(1)
 
 _DEVANAGARI_RE = re.compile(r"[\u0900-\u097F]")
 _DEV_LETTER_RE = re.compile(r"[\u0904-\u0939\u093E-\u094D\u0958-\u0963\u0972-\u097F]")
@@ -1366,9 +1370,13 @@ def _ocr_table_cells_batch(
         return {}
 
     med_rh = float(np.median([max(4, rows_px[r + 1] - rows_px[r]) for r in range(n_rows)]))
-    scale = min(1.6, 36.0 / max(10.0, med_rh)) if med_rh < 34.0 else 1.0
     pad_x = 28
     pad_y = 16
+    raw_tbl_w = max(1, cols_px[-1] - cols_px[0])
+    raw_tbl_h = max(1, rows_px[-1] - rows_px[0])
+    max_fit_w = max(1.0, (4500.0 - pad_x * (n_cols + 1)) / float(raw_tbl_w))
+    max_fit_h = max(1.0, (4500.0 - pad_y * (n_rows + 1)) / float(raw_tbl_h))
+    scale = min(2.3, 36.0 / max(10.0, med_rh), max_fit_w, max_fit_h) if med_rh < 34.0 else 1.0
 
     row_offsets = [pad_y]
     for r in range(n_rows):
@@ -1521,6 +1529,7 @@ def _populate_tables(
     ocr_lang: str = "auto",
     is_digital_page: bool = False,
     native_style_by_id: Optional[dict[int, tuple[float, bool, tuple[int, int, int]]]] = None,
+    skip_cell_ocr: bool = False,
 ) -> list[DetectedTable]:
     """Convert raw table pixel grids into structured DetectedTable objects with exact text & styles."""
     tables: list[DetectedTable] = []
@@ -1549,7 +1558,7 @@ def _populate_tables(
 
         # For multi-cell scanned tables, run batch Grid-Expanded Table Canvas OCR once
         batch_cell_map: dict[tuple[int, int, int, int], list[OCRWord]] = {}
-        if not is_native_words and len(spans) >= 6:
+        if not is_native_words and not skip_cell_ocr and len(spans) >= 6:
             batch_cell_map = _ocr_table_cells_batch(
                 img_deskewed_bgr, rows_px, cols_px, spans, wants_hindi, latin_font, dev_font, ocr_lang=ocr_lang
             )
@@ -1565,6 +1574,8 @@ def _populate_tables(
         ]
 
         cells: list[TableCell] = []
+        inked_cell_rows: set[int] = set()
+        inked_cell_cnt = 0
         focused_ocr_calls = 0
         for r0, c0, r1, c1 in spans:
             sp_key = (r0, c0, r1, c1)
@@ -1640,11 +1651,14 @@ def _populate_tables(
                     if interior.size > 0
                     else False
                 )
+                if has_content_ink or is_dark_bg:
+                    inked_cell_cnt += 1
+                    inked_cell_rows.add(r0)
             focused_dark = is_dark_bg
             focused_bg = bg_rgb or (255, 255, 255)
 
             uncovered_cell_ink = False
-            if not is_native_words:
+            if not is_native_words and not skip_cell_ocr:
                 cell_clean_tokens = bool(existing_local) and min(w.conf for w in existing_local) >= 0.78
                 has_edge_junk = any(re.search(r"[\[\]|»«]", w.text) for w in existing_local)
                 if cell_clean_tokens and not has_edge_junk and not is_dark_bg and not batch_words and interior.size > 0:
@@ -1760,8 +1774,8 @@ def _populate_tables(
                 )
             )
 
-        # Sequential integer rank/serial column repair (e.g. repairing `'§'` -> `'5'`, `'&'`, `'>'` -> `'6'`, `'7'`)
-        if n_rows >= 4:
+        # Sequential integer rank/serial column repair (e.g. `'§'`->'5', or `'8'`,`'1'`,`'33'` in S.No. 1..28)
+        if n_rows >= 4 and not skip_cell_ocr:
             for col_i in range(n_cols):
                 col_cells = {
                     c.r0: c for c in cells if c.c0 == col_i and c.c1 == col_i + 1 and c.r1 == c.r0 + 1
@@ -1774,16 +1788,29 @@ def _populate_tables(
                 if len(int_rows) >= max(3, (n_rows - 1) // 2):
                     offsets = [val - r_k for r_k, val in int_rows.items() if r_k >= 1]
                     modal_offset: Optional[int] = None
+                    strict_seq_consensus = False
                     if offsets:
                         best_off = max(set(offsets), key=offsets.count)
                         if offsets.count(best_off) >= max(3, int(len(offsets) * 0.70)):
                             modal_offset = best_off
+                            strict_seq_consensus = len(offsets) >= max(4, (n_rows - 1) // 2) and (
+                                offsets.count(best_off) >= max(4, int(len(offsets) * 0.70))
+                            )
                     for r_k, c_obj in sorted(col_cells.items()):
-                        if r_k == 0 or r_k in int_rows or len(c_obj.text.strip()) > 2:
+                        if r_k == 0 or len(c_obj.text.strip()) > 3:
                             continue
                         prev_v = int_rows.get(r_k - 1)
                         next_v = int_rows.get(r_k + 1)
-                        if prev_v is not None and next_v is not None and (next_v - prev_v) == 2:
+                        if r_k in int_rows:
+                            if not (not is_native_words and strict_seq_consensus and modal_offset is not None):
+                                continue
+                            expected = r_k + modal_offset
+                            if expected <= 0 or int_rows[r_k] == expected:
+                                continue
+                            if prev_v != expected - 1 and next_v != expected + 1:
+                                continue
+                            fixed_val = str(expected)
+                        elif prev_v is not None and next_v is not None and (next_v - prev_v) == 2:
                             fixed_val = str(prev_v + 1)
                         elif modal_offset is not None and (r_k + modal_offset) > 0:
                             fixed_val = str(r_k + modal_offset)
@@ -1811,16 +1838,21 @@ def _populate_tables(
 
         # Reject sparse/hallucinated fake tables (e.g., QR code checkerboard, photo frame, yellow footer bars)
         # while keeping authentic bordered signature/acknowledgement forms with >= 3 populated multi-char cells.
-        non_empty_cells = [c for c in cells if len(re.findall(r"[A-Za-z0-9\u0900-\u097F]", c.text)) >= 1]
-        multi_char_cells = [c for c in cells if len(re.findall(r"[A-Za-z0-9\u0900-\u097F]", c.text)) >= 2]
-        populated_rows = len({c.r0 for c in non_empty_cells})
-        min_req_cells = 3 if (n_cols <= 4 and len(multi_char_cells) >= 3) else 4
-        if (
-            len(non_empty_cells) < max(min_req_cells, int(len(cells) * 0.25))
-            or len(multi_char_cells) < 3
-            or populated_rows < 2
-        ):
-            continue
+        if skip_cell_ocr and not is_native_words:
+            min_req_ink = 3 if n_cols <= 4 else 4
+            if inked_cell_cnt < max(min_req_ink, int(len(cells) * 0.22)) or len(inked_cell_rows) < 2:
+                continue
+        else:
+            non_empty_cells = [c for c in cells if len(re.findall(r"[A-Za-z0-9\u0900-\u097F]", c.text)) >= 1]
+            multi_char_cells = [c for c in cells if len(re.findall(r"[A-Za-z0-9\u0900-\u097F]", c.text)) >= 2]
+            populated_rows = len({c.r0 for c in non_empty_cells})
+            min_req_cells = 3 if (n_cols <= 4 and len(multi_char_cells) >= 3) else 4
+            if (
+                len(non_empty_cells) < max(min_req_cells, int(len(cells) * 0.25))
+                or len(multi_char_cells) < 3
+                or populated_rows < 2
+            ):
+                continue
 
         # Reject small fake boxes (< 8 cells) whose vertical dividers slice straight through clean prose words
         if n_rows < 3 or n_cols < 3 or len(spans) < 8:
@@ -1869,11 +1901,67 @@ def _populate_tables(
 # ---------------------------------------------------------------------------
 
 
+def _is_digital_signature_or_text_panel(
+    crop_gray: np.ndarray,
+    hsv_crop: np.ndarray,
+    bw: int,
+    bh: int,
+    by: int,
+    ih: int,
+) -> bool:
+    """
+    Detect digital-signature panels (`Signature valid / Digitally signed by...` over green tick)
+    and dense multi-line text blocks sitting on bright paper so they NEVER get cropped as `'photo'`.
+    """
+    if bw < 85 or bh < 68 or crop_gray.size == 0:
+        return False
+    bright_frac = float(np.mean(crop_gray > 195))
+    if bright_frac < 0.44:
+        return False
+
+    edges = cv2.Canny(crop_gray, 60, 160)
+    edge_frac = float(np.mean(edges > 0))
+    if edge_frac >= 0.165:
+        return False  # Preserve square checkerboard QR codes / dense seals
+
+    neutral_dark = (hsv_crop[:, :, 1] < 58) & (crop_gray < 145)
+    row_dens = np.mean(neutral_dark, axis=1)
+    text_bands = 0
+    in_band = False
+    run_len = 0
+    for val in row_dens > 0.03:
+        if val:
+            run_len += 1
+            if not in_band and run_len >= 3:
+                text_bands += 1
+                in_band = True
+        else:
+            in_band = False
+            run_len = 0
+
+    if text_bands < 3:
+        return False
+
+    green_frac = float(
+        np.mean(
+            (hsv_crop[:, :, 0] >= 35)
+            & (hsv_crop[:, :, 0] <= 92)
+            & (hsv_crop[:, :, 1] >= 45)
+            & (hsv_crop[:, :, 2] >= 40)
+        )
+    )
+    if 0.015 <= green_frac <= 0.36:
+        return True
+    dark_frac = float(np.mean(crop_gray < 195))
+    return by > ih * 0.45 and dark_frac < 0.56
+
+
 def _extract_visual_assets(
     img_deskewed_bgr: np.ndarray,
     table_boxes_px: list[tuple[int, int, int, int]],
     keep_words_px: list[OCRWord],
     px_to_pt: float,
+    out_sig_boxes: Optional[list[tuple[int, int, int, int]]] = None,
 ) -> tuple[list[VisualAsset], list[tuple[int, int, int, int]]]:
     """
     Isolate crisp non-text visual graphics (university crests, passport photos,
@@ -2052,6 +2140,12 @@ def _extract_visual_assets(
         if (words_inside >= 2 or clean_word_overlap) and (bw * bh < iw * ih * 0.025):
             continue
 
+        # Reject digital-signature panels (`Signature valid` over green checkmark) & multi-row printed text panels
+        if _is_digital_signature_or_text_panel(crop_gray, hsv_crop, bw, bh, by, ih):
+            if out_sig_boxes is not None:
+                out_sig_boxes.append((bx, by, bx + bw, by + bh))
+            continue
+
         # Ensure crop is not merely a thin rectangular border box with empty white interior
         if bw > iw * 0.25 and bh > ih * 0.15:
             inner = crop_gray[bh // 6:(5 * bh) // 6, bw // 6:(5 * bw) // 6]
@@ -2177,9 +2271,20 @@ def _classify_crop_kind(
     color_std = float(np.std(hsv_crop[:, :, 0]))
     med_sat = float(np.mean(hsv_crop[:, :, 1]))
 
-    if 0.80 <= aspect <= 1.24 and dark_frac > 0.22 and med_sat < 32 and gray_std > 52:
+    if 0.78 <= aspect <= 1.28 and dark_frac > 0.22 and gray_std > 48:
+        green_frac = float(
+            np.mean(
+                (hsv_crop[:, :, 0] >= 35)
+                & (hsv_crop[:, :, 0] <= 92)
+                & (hsv_crop[:, :, 1] >= 45)
+                & (hsv_crop[:, :, 2] >= 40)
+            )
+        )
         edges = cv2.Canny(crop_gray, 60, 160)
-        return "qr" if float(np.mean(edges > 0)) > 0.16 else "stamp"
+        if med_sat < 54 and green_frac < 0.05 and float(np.mean(edges > 0)) > 0.16:
+            return "qr"
+        if med_sat < 32 and gray_std > 52:
+            return "stamp"
     if 0.58 <= aspect <= 1.25 and (med_sat > 18 or color_std > 15) and dark_frac > 0.28 and bw_px >= 42 and bh_px >= 48:
         return "photo"
     max_sig_h = int(ih * 0.14) if ih > 0 else int(iw * 0.18)
@@ -4379,6 +4484,8 @@ def _apply_ai_refinement(
     assets: list[VisualAsset],
     page_w_pt: float,
     page_h_pt: float,
+    img_deskewed_bgr: Optional[np.ndarray] = None,
+    px_to_pt: float = 0.0,
 ) -> tuple[list[TextLine], list[VisualAsset], bool, bool]:
     """
     Deterministically fuse AI Vision semantic transcription and 2D bounding boxes (`box_2d`)
@@ -4500,7 +4607,17 @@ def _apply_ai_refinement(
                 )
             explicit_rgb = _parse_hex_rgb(h.get("color_hex"))
             near_colors = [ln.color_rgb for ln in text_lines if abs(ln.y0 - y0) < 28.0]
-            color = explicit_rgb or (near_colors[0] if near_colors else (17, 24, 39))
+            if explicit_rgb is not None:
+                color = explicit_rgb
+            elif near_colors:
+                color = near_colors[0]
+            elif img_deskewed_bgr is not None and px_to_pt > 0.0:
+                inv_p = 1.0 / px_to_pt
+                color, _ = _sample_ink_color_and_bold(
+                    img_deskewed_bgr, int(lx0 * inv_p), int(y0 * inv_p), int(lx1 * inv_p), int(y1 * inv_p)
+                )
+            else:
+                color = (17, 24, 39)
             new_header_items.append(
                 (
                     TextLine(
@@ -4546,10 +4663,18 @@ def _apply_ai_refinement(
 
     orig_header = [ln for ln in text_lines if (ln.y0 + ln.y1) * 0.5 < header_cutoff_y]
     if new_header_items:
+        ai_hdr_y0 = min(nl.y0 for nl, _ in new_header_items)
+        ai_hdr_y1 = max(nl.y1 for nl, _ in new_header_items)
         kept_header = [nl for nl, _ in new_header_items]
         for ol in orig_header:
-            if not _is_line_covered_by_ai(ol, new_header_items, min_x_ov=8.0):
-                kept_header.append(ol)
+            if _is_line_covered_by_ai(ol, new_header_items, min_x_ov=8.0):
+                continue
+            # Purge curved-arch or watermarked center-column OCR scraps inside the AI header envelope
+            in_center_banner = ol.x0 >= left_edge - 16.0 and ol.x1 <= right_edge + 16.0
+            in_hdr_band = ol.y1 >= ai_hdr_y0 - 18.0 and ol.y0 <= ai_hdr_y1 + 14.0
+            if in_center_banner and in_hdr_band and (has_curved or len(new_header_items) >= 2):
+                continue
+            kept_header.append(ol)
         kept_header.sort(key=lambda l: (l.y0, l.x0))
     else:
         kept_header = orig_header
@@ -4579,7 +4704,17 @@ def _apply_ai_refinement(
                 al = "left"
             explicit_rgb = _parse_hex_rgb(blk.get("color_hex"))
             near_colors = [ln.color_rgb for ln in text_lines if abs(ln.y0 - y0) < 24.0]
-            color = explicit_rgb or (near_colors[0] if near_colors else (17, 24, 39))
+            if explicit_rgb is not None:
+                color = explicit_rgb
+            elif near_colors:
+                color = near_colors[0]
+            elif img_deskewed_bgr is not None and box_pt is not None and px_to_pt > 0.0:
+                inv_p = 1.0 / px_to_pt
+                color, _ = _sample_ink_color_and_bold(
+                    img_deskewed_bgr, int(bx0 * inv_p), int(by0 * inv_p), int(bx1 * inv_p), int(max(by1, y0 + fs) * inv_p)
+                )
+            else:
+                color = (17, 24, 39)
             kind = str(blk.get("kind", "paragraph")).lower()
 
             if kind == "kv_pair":
@@ -4624,10 +4759,146 @@ def _apply_ai_refinement(
             if not _is_line_covered_by_ai(ol, new_body_items, min_x_ov=12.0):
                 final_body_footer.append(ol)
         final_body_footer.sort(key=lambda l: (l.y0, l.x0))
+        # Prune false bottom-half `'photo'`/`'stamp'` crops (such as green-checkmark signature text)
+        # that overlap multiple AI text lines (`Signature valid`, `Digitally signed by...`).
+        pruned_assets: list[VisualAsset] = []
+        for a in new_assets:
+            if a.kind == "qr" or a.y0 < page_h_pt * 0.45:
+                pruned_assets.append(a)
+                continue
+            a_box = (a.x0, a.y0, a.x1, a.y1)
+            a_area = max(1.0, (a.x1 - a.x0) * (a.y1 - a.y0))
+            overlapping_items = 0
+            covered_area = 0.0
+            has_sig_txt = False
+            for nb, _ in new_body_items:
+                ix0, iy0 = max(a.x0, nb.x0), max(a.y0, nb.y0)
+                ix1, iy1 = min(a.x1, nb.x1), min(a.y1, nb.y1)
+                if ix1 > ix0 and iy1 > iy0:
+                    overlapping_items += 1
+                    covered_area += (ix1 - ix0) * (iy1 - iy0)
+                    if re.search(r"signature\s*valid|digitally\s*signed|reason\s*:|location\s*:", nb.text, re.I):
+                        has_sig_txt = True
+            if has_sig_txt or (overlapping_items >= 2 and covered_area >= a_area * 0.22):
+                continue
+            pruned_assets.append(a)
+        new_assets = pruned_assets
     else:
         final_body_footer = orig_body_footer
     combined_lines = sorted(kept_header + final_body_footer, key=lambda l: (l.y0, l.x0))
     return combined_lines, new_assets, has_curved, ai_enhanced
+
+
+def _assemble_page_blueprint(
+    page_index: int,
+    page_w_pt: float,
+    page_h_pt: float,
+    skew_deg: float,
+    tables: list[DetectedTable],
+    assets: list[VisualAsset],
+    text_lines: list[TextLine],
+    has_curved_arch: bool,
+    ai_enhanced: bool,
+    orig_ocr_lines: list[TextLine],
+    clean_non_table_words_px: list[OCRWord],
+    table_boxes_px: list[tuple[int, int, int, int]],
+    img_deskewed_bgr: np.ndarray,
+    px_to_pt: float,
+    include_clean_bg: bool,
+    layer_mode: str,
+) -> PageBlueprint:
+    """Assemble final hierarchy bands, optional clean Layer-1 backdrop, and free page bitmaps."""
+    page_border_rgb = _detect_page_border_rgb(img_deskewed_bgr)
+    bands = _build_layout_bands(page_w_pt, tables, text_lines, assets)
+
+    bg_clean_png: Optional[bytes] = None
+    want_clean_bg = include_clean_bg or (str(layer_mode or "").strip().lower() == "layered_replica")
+    if want_clean_bg:
+        erase_lines = (orig_ocr_lines + text_lines) if ai_enhanced else text_lines
+        bg_clean_png = _build_ink_free_background(
+            img_deskewed_bgr,
+            table_boxes_px,
+            clean_non_table_words_px,
+            assets,
+            px_to_pt,
+            text_lines=erase_lines,
+        )
+
+    bp = PageBlueprint(
+        page_index=page_index,
+        width_pt=page_w_pt,
+        height_pt=page_h_pt,
+        skew_deg=skew_deg,
+        tables=tables,
+        assets=assets,
+        lines=text_lines,
+        bands=bands,
+        bg_clean_png=bg_clean_png,
+        page_border_rgb=page_border_rgb,
+        has_curved_arch_header=has_curved_arch,
+        ai_enhanced=ai_enhanced,
+    )
+    gc.collect()
+    return bp
+
+
+def _build_ai_skeleton(
+    assets: list[VisualAsset],
+    tables: list[DetectedTable],
+    text_lines: list[TextLine],
+    page_w_pt: float,
+    page_h_pt: float,
+    is_digital: bool,
+) -> dict[str, Any]:
+    """Serialize compact OpenCV layout & table geometry (0..1000 coords) for Vision AI."""
+    skeleton: dict[str, Any] = {
+        "assets": [
+            {
+                "kind": a.kind,
+                "box_2d": [
+                    int(round(a.y0 / max(1.0, page_h_pt) * 1000.0)),
+                    int(round(a.x0 / max(1.0, page_w_pt) * 1000.0)),
+                    int(round(a.y1 / max(1.0, page_h_pt) * 1000.0)),
+                    int(round(a.x1 / max(1.0, page_w_pt) * 1000.0)),
+                ],
+            }
+            for a in assets
+        ],
+        "tables": [
+            {
+                "table_index": t_idx,
+                "n_rows": t.n_rows,
+                "n_cols": t.n_cols,
+                "y_range_pct": [round(t.y0 / max(1.0, page_h_pt), 3), round(t.y1 / max(1.0, page_h_pt), 3)],
+                "cells": [
+                    {
+                        "cell_id": c_idx,
+                        "r0": c.r0,
+                        "c0": c.c0,
+                        "r1": c.r1,
+                        "c1": c.c1,
+                        "ocr_draft": c.text,
+                    }
+                    for c_idx, c in enumerate(t.cells)
+                ],
+            }
+            for t_idx, t in enumerate(tables)
+        ],
+    }
+    if is_digital and text_lines:
+        skeleton["digital_native_lines"] = [
+            {
+                "box_2d": [
+                    int(round(ln.y0 / max(1.0, page_h_pt) * 1000.0)),
+                    int(round(ln.x0 / max(1.0, page_w_pt) * 1000.0)),
+                    int(round(ln.y1 / max(1.0, page_h_pt) * 1000.0)),
+                    int(round(ln.x1 / max(1.0, page_w_pt) * 1000.0)),
+                ],
+                "text": ln.text[:160],
+            }
+            for ln in text_lines[:45]
+        ]
+    return skeleton
 
 
 def analyze_page_blueprint(
@@ -4716,8 +4987,10 @@ def analyze_page_blueprint(
     dev_font_path = find_devanagari_font()
     dev_font = fitz.Font(fontfile=str(dev_font_path)) if dev_font_path else None
 
-    # 3. Extract native digital PDF words + exact font styles when page is born-digital;
-    #    otherwise run Global Hybrid OCR
+    # 3. Sample dominant page paper tint & detect native digital vector text first (~35ms total)
+    low_mem = is_low_memory_runtime()
+    inv_scale = (1.0 / px_to_pt) if px_to_pt > 0 else 1.0
+
     native_words_px: list[OCRWord] = []
     digital_styles_by_idx: dict[int, tuple[float, bool, tuple[int, int, int]]] = {}
     is_digital_page = False
@@ -4727,6 +5000,13 @@ def analyze_page_blueprint(
         except Exception:
             native_words_px, digital_styles_by_idx = [], {}
 
+    all_words_px: list[OCRWord] = []
+    rapid_words: list[OCRWord] = []
+    resolved_lang = lang
+    effective_hindi = False
+    native_assets_pre: list[VisualAsset] = []
+    embedded_ocr_uncertain = False
+
     if len(native_words_px) >= 6 and (
         latin_plausibility_score(native_words_px)[0] >= 0.70 or has_genuine_devanagari(native_words_px)
     ):
@@ -4735,47 +5015,7 @@ def analyze_page_blueprint(
         rapid_words = list(native_words_px)
         resolved_lang = "hin+eng" if has_genuine_devanagari(native_words_px) else "eng"
         effective_hindi = has_genuine_devanagari(native_words_px)
-    else:
-        all_words_px, rapid_words, resolved_lang = ocr_page_words_with_meta(
-            img_deskewed_bgr, lang=lang, clean_watermarks=True, latin_font=latin_font, dev_font=dev_font
-        )
-        wants_hindi = "hin" in resolved_lang.lower()
-        genuine_hindi = wants_hindi and has_genuine_devanagari(all_words_px)
-        if wants_hindi and not genuine_hindi:
-            all_words_px = rapid_words or all_words_px
-            effective_hindi = False
-            resolved_lang = "eng"
-        else:
-            effective_hindi = genuine_hindi
 
-    # 3b. Extract native embedded graphics cleanly and run targeted local RapidOCR
-    #     on large text-free raster screenshots/tables inside born-digital pages.
-    native_assets_pre: list[VisualAsset] = []
-    embedded_ocr_uncertain = False
-    if is_digital_page:
-        try:
-            native_assets_pre = _extract_digital_native_assets(page, img_deskewed_bgr, px_to_pt)
-            if native_assets_pre:
-                extra_img_words, native_assets_pre, embedded_ocr_uncertain = _ocr_embedded_raster_boxes(
-                    img_deskewed_bgr,
-                    native_words_px,
-                    native_assets_pre,
-                    px_to_pt,
-                    latin_font=latin_font,
-                    dev_font=dev_font,
-                    lang=lang,
-                )
-                if extra_img_words:
-                    all_words_px.extend(extra_img_words)
-                    rapid_words.extend(extra_img_words)
-                    if has_genuine_devanagari(extra_img_words):
-                        effective_hindi = True
-                        resolved_lang = "hin+eng"
-        except Exception as dig_err:
-            logger.debug(f"[Blueprint] Digital native asset pre-pass skip: {dig_err}")
-            native_assets_pre = []
-
-    # 4. Sample dominant page paper tint & run Table Grid Topology Solver (1/16th strided view saves ~20MB)
     sub_bgr = img_deskewed_bgr[::4, ::4]
     gray_sub = cv2.cvtColor(sub_bgr, cv2.COLOR_BGR2GRAY)
     bright_sub = gray_sub >= np.percentile(gray_sub, 72)
@@ -4784,45 +5024,218 @@ def analyze_page_blueprint(
         paper_rgb = (int(med_p_bgr[2]), int(med_p_bgr[1]), int(med_p_bgr[0]))
     else:
         paper_rgb = (255, 255, 255)
+    sub_ink = float(np.mean(gray_sub < 185))
     del sub_bgr, gray_sub, bright_sub
-
-    native_style_by_id: dict[int, tuple[float, bool, tuple[int, int, int]]] = {}
-    if is_digital_page and digital_styles_by_idx:
-        for orig_idx, nw in enumerate(native_words_px):
-            st = digital_styles_by_idx.get(orig_idx)
-            if st is not None:
-                native_style_by_id[id(nw)] = st
 
     raw_grids = _detect_raw_table_rois(
         img_deskewed_bgr,
         pdf_page=(page if is_digital_page else None),
         inv_pt_to_px=inv_pt_to_px,
     )
-    if not raw_grids and detect_borderless:
-        raw_grids = _detect_borderless_table_grids(all_words_px, ih, iw)
-    tables = _populate_tables(
-        img_deskewed_bgr,
-        raw_grids,
-        all_words_px,
-        px_to_pt,
-        effective_hindi,
-        latin_font,
-        dev_font,
-        paper_rgb=paper_rgb,
-        ocr_lang=resolved_lang,
-        is_digital_page=is_digital_page,
-        native_style_by_id=(native_style_by_id or None),
-    )
-    inv_scale = (1.0 / px_to_pt) if px_to_pt > 0 else 1.0
-    table_boxes_px = [
-        (
-            int(math.floor(t.x0 * inv_scale)),
-            int(math.floor(t.y0 * inv_scale)),
-            int(math.ceil(t.x1 * inv_scale)),
-            int(math.ceil(t.y1 * inv_scale)),
+
+    tables: list[DetectedTable] = []
+    table_boxes_px: list[tuple[int, int, int, int]] = []
+    clean_non_table_words_px: list[OCRWord] = []
+    assets: list[VisualAsset] = []
+    text_lines: list[TextLine] = []
+    has_curved_arch = False
+    ai_enhanced = False
+    orig_ocr_lines: list[TextLine] = []
+
+    eff_provider: Optional[str] = None
+    eff_key: Optional[str] = None
+    if not skip_ai and not strict_local:
+        try:
+            from ai_vision_refiner import is_provider_blocked, resolve_vision_credentials
+
+            ep, ek = resolve_vision_credentials(
+                user_api_key=ai_api_key,
+                provider=ai_provider,
+                strict_local=strict_local,
+            )
+            if ep and ek and not is_provider_blocked(ep, ek):
+                eff_provider, eff_key = ep, ek
+        except Exception:
+            pass
+
+    # 3a. AI-First Zero-Tesseract-Wait Path for Scanned Pages:
+    #     Skip 6-20s of CPU Tesseract subprocesses on non-table or <=48-cell scanned pages when Vision AI
+    #     is active; fall back cleanly to full local CPU OCR only if AI returns empty/unavailable.
+    total_raw_cells = sum(len(s) for _, _, s in raw_grids)
+    is_blank_scan = sub_ink < 0.0022
+    ai_first_attempted = False
+    ai_first_succeeded = False
+    if (
+        not is_digital_page
+        and not skip_ai
+        and eff_provider
+        and eff_key
+        and not detect_borderless
+        and not is_blank_scan
+        and (len(raw_grids) == 0 or total_raw_cells <= 48)
+    ):
+        ai_first_attempted = True
+        try:
+            from ai_vision_refiner import request_grid_guided_refinement
+
+            ai_tables: list[DetectedTable] = []
+            if raw_grids:
+                ai_tables = _populate_tables(
+                    img_deskewed_bgr,
+                    raw_grids,
+                    [],
+                    px_to_pt,
+                    False,
+                    latin_font,
+                    dev_font,
+                    paper_rgb=paper_rgb,
+                    ocr_lang=lang,
+                    is_digital_page=False,
+                    skip_cell_ocr=True,
+                )
+            ai_table_boxes_px = [
+                (
+                    int(math.floor(t.x0 * inv_scale)),
+                    int(math.floor(t.y0 * inv_scale)),
+                    int(math.ceil(t.x1 * inv_scale)),
+                    int(math.ceil(t.y1 * inv_scale)),
+                )
+                for t in ai_tables
+            ]
+            ai_assets, _ = _extract_visual_assets(img_deskewed_bgr, ai_table_boxes_px, [], px_to_pt)
+            ai_skel = _build_ai_skeleton(ai_assets, ai_tables, [], page_w_pt, page_h_pt, is_digital=False)
+            ai_res = request_grid_guided_refinement(
+                img_deskewed_bgr,
+                page_w_pt,
+                page_h_pt,
+                ai_skel,
+                eff_provider,
+                eff_key,
+                lang_hint=lang,
+                max_total_s=(24.0 if low_mem else 28.0),
+                is_digital_page=False,
+            )
+            if isinstance(ai_res, dict) and ai_res:
+                n_hdr = len(ai_res.get("header_lines") or [])
+                n_blk = len(ai_res.get("non_table_blocks") or [])
+                n_tbl_cells = sum(
+                    len(t.get("cells") or [])
+                    for t in (ai_res.get("tables") or [])
+                    if isinstance(t, dict)
+                )
+                min_needed = 1 if (ai_tables or sub_ink < 0.015) else 2
+                if (n_hdr + n_blk + n_tbl_cells) >= min_needed and (
+                    not ai_tables or n_tbl_cells >= 1 or n_blk >= 1
+                ):
+                    fused_lines, fused_assets, has_curved_arch, ai_enhanced = _apply_ai_refinement(
+                        ai_res,
+                        ai_tables,
+                        [],
+                        ai_assets,
+                        page_w_pt,
+                        page_h_pt,
+                        img_deskewed_bgr=img_deskewed_bgr,
+                        px_to_pt=px_to_pt,
+                    )
+                    if fused_lines or any(c.text for t in ai_tables for c in t.cells):
+                        bp = _assemble_page_blueprint(
+                            page_index,
+                            page_w_pt,
+                            page_h_pt,
+                            skew_deg,
+                            ai_tables,
+                            fused_assets,
+                            fused_lines,
+                            has_curved_arch,
+                            ai_enhanced,
+                            [],
+                            [],
+                            ai_table_boxes_px,
+                            img_deskewed_bgr,
+                            px_to_pt,
+                            include_clean_bg,
+                            layer_mode,
+                        )
+                        del img_raw_bgr, img_deskewed_bgr
+                        return bp
+        except Exception as ai_fast_exc:
+            logger.warning(f"[Blueprint] AI-First fast path fallback to local OCR: {type(ai_fast_exc).__name__}")
+
+    if not ai_first_succeeded:
+        if not is_digital_page:
+            if low_mem:
+                with _LOW_MEM_CPU_OCR_SEM:
+                    all_words_px, rapid_words, resolved_lang = ocr_page_words_with_meta(
+                        img_deskewed_bgr, lang=lang, clean_watermarks=True, latin_font=latin_font, dev_font=dev_font
+                    )
+            else:
+                all_words_px, rapid_words, resolved_lang = ocr_page_words_with_meta(
+                    img_deskewed_bgr, lang=lang, clean_watermarks=True, latin_font=latin_font, dev_font=dev_font
+                )
+            wants_hindi = "hin" in resolved_lang.lower()
+            genuine_hindi = wants_hindi and has_genuine_devanagari(all_words_px)
+            if wants_hindi and not genuine_hindi:
+                all_words_px = rapid_words or all_words_px
+                effective_hindi = False
+                resolved_lang = "eng"
+            else:
+                effective_hindi = genuine_hindi
+        else:
+            # 3b. Extract native embedded graphics cleanly and run targeted local RapidOCR
+            #     on large text-free raster screenshots/tables inside born-digital pages.
+            try:
+                native_assets_pre = _extract_digital_native_assets(page, img_deskewed_bgr, px_to_pt)
+                if native_assets_pre:
+                    extra_img_words, native_assets_pre, embedded_ocr_uncertain = _ocr_embedded_raster_boxes(
+                        img_deskewed_bgr,
+                        native_words_px,
+                        native_assets_pre,
+                        px_to_pt,
+                        latin_font=latin_font,
+                        dev_font=dev_font,
+                        lang=lang,
+                    )
+                    if extra_img_words:
+                        all_words_px.extend(extra_img_words)
+                        rapid_words.extend(extra_img_words)
+                        if has_genuine_devanagari(extra_img_words):
+                            effective_hindi = True
+                            resolved_lang = "hin+eng"
+            except Exception as dig_err:
+                logger.debug(f"[Blueprint] Digital native asset pre-pass skip: {dig_err}")
+                native_assets_pre = []
+
+        native_style_by_id: dict[int, tuple[float, bool, tuple[int, int, int]]] = {}
+        if is_digital_page and digital_styles_by_idx:
+            for orig_idx, nw in enumerate(native_words_px):
+                st = digital_styles_by_idx.get(orig_idx)
+                if st is not None:
+                    native_style_by_id[id(nw)] = st
+
+        if not raw_grids and detect_borderless:
+            raw_grids = _detect_borderless_table_grids(all_words_px, ih, iw)
+        tables = _populate_tables(
+            img_deskewed_bgr,
+            raw_grids,
+            all_words_px,
+            px_to_pt,
+            effective_hindi,
+            latin_font,
+            dev_font,
+            paper_rgb=paper_rgb,
+            ocr_lang=resolved_lang,
+            is_digital_page=is_digital_page,
+            native_style_by_id=(native_style_by_id or None),
         )
-        for t in tables
-    ]
+        table_boxes_px = [
+            (
+                int(math.floor(t.x0 * inv_scale)),
+                int(math.floor(t.y0 * inv_scale)),
+                int(math.ceil(t.x1 * inv_scale)),
+                int(math.ceil(t.y1 * inv_scale)),
+            )
+            for t in tables
+        ]
 
     # 5. Non-table words (exclude detected tables, decorative color side ribbons & margin specks)
     left_rot_cnt = sum(
@@ -4935,12 +5348,35 @@ def analyze_page_blueprint(
             except Exception:
                 skip_cv_assets = False
 
+    sig_panel_boxes: list[tuple[int, int, int, int]] = []
     if skip_cv_assets:
         cv_assets, suppress_ocr_boxes = [], []
     else:
         cv_assets, suppress_ocr_boxes = _extract_visual_assets(
-            img_deskewed_bgr, table_boxes_px, non_table_words_px, px_to_pt
+            img_deskewed_bgr,
+            table_boxes_px,
+            non_table_words_px,
+            px_to_pt,
+            out_sig_boxes=(None if is_digital_page else sig_panel_boxes),
         )
+    if not is_digital_page and sig_panel_boxes:
+        for sb in sig_panel_boxes:
+            inside_cnt = sum(
+                1
+                for w in non_table_words_px
+                if w.conf >= 0.50
+                and len(w.text.strip()) >= 2
+                and _point_in_box((w.x0 + w.x1) * 0.5, (w.y0 + w.y1) * 0.5, sb, pad=2.0)
+            )
+            if inside_cnt < 5:
+                recovered_sig = extract_signature_panel_text(img_deskewed_bgr, sb)
+                if len(recovered_sig) >= 3:
+                    non_table_words_px = [
+                        w
+                        for w in non_table_words_px
+                        if not _point_in_box((w.x0 + w.x1) * 0.5, (w.y0 + w.y1) * 0.5, sb, pad=4.0)
+                    ]
+                    non_table_words_px.extend(recovered_sig)
     if is_digital_page and native_assets_pre:
         # Clean table slivers, merge barcode/wide-asset spans, split left-text|right-signature cells,
         # attach in-table native photos/signatures/barcodes to TableCell.assets, and keep outside
@@ -5183,7 +5619,7 @@ def analyze_page_blueprint(
                 digital_side_layout_risk = True
                 break
 
-    if not skip_ai:
+    if not skip_ai and not ai_first_attempted:
         try:
             from ai_vision_refiner import (
                 assess_page_ai_need,
@@ -5192,11 +5628,12 @@ def analyze_page_blueprint(
                 resolve_vision_credentials,
             )
 
-            eff_provider, eff_key = resolve_vision_credentials(
-                user_api_key=ai_api_key,
-                provider=ai_provider,
-                strict_local=strict_local,
-            )
+            if not (eff_provider and eff_key):
+                eff_provider, eff_key = resolve_vision_credentials(
+                    user_api_key=ai_api_key,
+                    provider=ai_provider,
+                    strict_local=strict_local,
+                )
             if eff_provider and eff_key and not is_provider_blocked(eff_provider, eff_key):
                 gate = assess_page_ai_need(
                     all_words_px,
@@ -5216,53 +5653,9 @@ def analyze_page_blueprint(
                     f"(score={gate['score']}, tbl={gate['table_score']}, reasons={gate['reasons']})"
                 )
                 if gate["should_call"]:
-                    skeleton: dict[str, Any] = {
-                        "assets": [
-                            {
-                                "kind": a.kind,
-                                "box_2d": [
-                                    int(round(a.y0 / max(1.0, page_h_pt) * 1000.0)),
-                                    int(round(a.x0 / max(1.0, page_w_pt) * 1000.0)),
-                                    int(round(a.y1 / max(1.0, page_h_pt) * 1000.0)),
-                                    int(round(a.x1 / max(1.0, page_w_pt) * 1000.0)),
-                                ],
-                            }
-                            for a in assets
-                        ],
-                        "tables": [
-                            {
-                                "table_index": t_idx,
-                                "n_rows": t.n_rows,
-                                "n_cols": t.n_cols,
-                                "y_range_pct": [round(t.y0 / max(1.0, page_h_pt), 3), round(t.y1 / max(1.0, page_h_pt), 3)],
-                                "cells": [
-                                    {
-                                        "cell_id": c_idx,
-                                        "r0": c.r0,
-                                        "c0": c.c0,
-                                        "r1": c.r1,
-                                        "c1": c.c1,
-                                        "ocr_draft": c.text,
-                                    }
-                                    for c_idx, c in enumerate(t.cells)
-                                ],
-                            }
-                            for t_idx, t in enumerate(tables)
-                        ],
-                    }
-                    if is_digital_page and text_lines:
-                        skeleton["digital_native_lines"] = [
-                            {
-                                "box_2d": [
-                                    int(round(ln.y0 / max(1.0, page_h_pt) * 1000.0)),
-                                    int(round(ln.x0 / max(1.0, page_w_pt) * 1000.0)),
-                                    int(round(ln.y1 / max(1.0, page_h_pt) * 1000.0)),
-                                    int(round(ln.x1 / max(1.0, page_w_pt) * 1000.0)),
-                                ],
-                                "text": ln.text[:160],
-                            }
-                            for ln in text_lines[:45]
-                        ]
+                    skeleton = _build_ai_skeleton(
+                        assets, tables, text_lines, page_w_pt, page_h_pt, is_digital=is_digital_page
+                    )
                     ai_res = request_grid_guided_refinement(
                         img_deskewed_bgr,
                         page_w_pt,
@@ -5271,50 +5664,43 @@ def analyze_page_blueprint(
                         eff_provider,
                         eff_key,
                         lang_hint=resolved_lang,
-                        max_total_s=(12.0 if is_low_memory_runtime() else 28.0),
+                        max_total_s=(24.0 if low_mem else 28.0),
                         is_digital_page=is_digital_page,
                     )
                     if ai_res:
                         text_lines, assets, has_curved_arch, ai_enhanced = _apply_ai_refinement(
-                            ai_res, tables, text_lines, assets, page_w_pt, page_h_pt
+                            ai_res,
+                            tables,
+                            text_lines,
+                            assets,
+                            page_w_pt,
+                            page_h_pt,
+                            img_deskewed_bgr=img_deskewed_bgr,
+                            px_to_pt=px_to_pt,
                         )
         except Exception as exc:
             logger.warning(f"[Blueprint] AI Vision refinement skipped cleanly: {type(exc).__name__}: {exc}")
 
     # 9. Detect outer decorative certificate border + build hierarchical layout bands
-    page_border_rgb = _detect_page_border_rgb(img_deskewed_bgr)
-    bands = _build_layout_bands(page_w_pt, tables, text_lines, assets)
-
-    bg_clean_png: Optional[bytes] = None
-    want_clean_bg = include_clean_bg or (str(layer_mode or "").strip().lower() == "layered_replica")
-    if want_clean_bg:
-        erase_lines = (orig_ocr_lines + text_lines) if ai_enhanced else text_lines
-        bg_clean_png = _build_ink_free_background(
-            img_deskewed_bgr,
-            table_boxes_px,
-            clean_non_table_words_px,
-            assets,
-            px_to_pt,
-            text_lines=erase_lines,
-        )
-
-    bp = PageBlueprint(
-        page_index=page_index,
-        width_pt=page_w_pt,
-        height_pt=page_h_pt,
-        skew_deg=skew_deg,
-        tables=tables,
-        assets=assets,
-        lines=text_lines,
-        bands=bands,
-        bg_clean_png=bg_clean_png,
-        page_border_rgb=page_border_rgb,
-        has_curved_arch_header=has_curved_arch,
-        ai_enhanced=ai_enhanced,
+    bp = _assemble_page_blueprint(
+        page_index,
+        page_w_pt,
+        page_h_pt,
+        skew_deg,
+        tables,
+        assets,
+        text_lines,
+        has_curved_arch,
+        ai_enhanced,
+        orig_ocr_lines,
+        clean_non_table_words_px,
+        table_boxes_px,
+        img_deskewed_bgr,
+        px_to_pt,
+        include_clean_bg,
+        layer_mode,
     )
-
     del img_raw_bgr, img_deskewed_bgr
-    gc.collect()
     return bp
 
 
@@ -5718,52 +6104,40 @@ def _analyze_pdf_pages_parallel(
             sub_doc.close()
 
     # Run page 0 first so provider circuit breaker / credentials status settles before workers spawn
-    ai_doc_deadline = time.monotonic() + (22.0 if low_mem else 48.0)
-    if low_mem or total_pages == 1:
-        shared_doc = fitz.open(str(pdf_path))
-        try:
-            bp0 = _run_on_page(shared_doc[0], 0, False)
-            if total_pages == 1:
-                return [bp0]
+    ai_doc_deadline = time.monotonic() + (75.0 if low_mem else 110.0)
+    shared_doc = fitz.open(str(pdf_path))
+    try:
+        bp0 = _run_on_page(shared_doc[0], 0, False)
+        if total_pages == 1:
+            return [bp0]
 
-            skip_rest_ai = False
-            if not strict_local:
-                try:
-                    from ai_vision_refiner import is_provider_blocked, resolve_vision_credentials
+        skip_rest_ai = False
+        if not strict_local:
+            try:
+                from ai_vision_refiner import is_provider_blocked, resolve_vision_credentials
 
-                    ep, ek = resolve_vision_credentials(user_api_key=ai_api_key, provider=ai_provider, strict_local=strict_local)
-                    if not ep or not ek or is_provider_blocked(ep, ek):
-                        skip_rest_ai = True
-                except Exception:
+                ep, ek = resolve_vision_credentials(
+                    user_api_key=ai_api_key, provider=ai_provider, strict_local=strict_local
+                )
+                if not ep or not ek or is_provider_blocked(ep, ek):
                     skip_rest_ai = True
+            except Exception:
+                skip_rest_ai = True
 
-            results: list[Optional[PageBlueprint]] = [None] * total_pages
-            results[0] = bp0
+        results: list[Optional[PageBlueprint]] = [None] * total_pages
+        results[0] = bp0
+
+        # When Vision AI is active cleanly, allow bounded concurrent IO threads even under 512MB RAM
+        # (any heavy CPU OCR fallback remains strictly serialized by `_LOW_MEM_CPU_OCR_SEM`).
+        if low_mem and (strict_local or skip_rest_ai):
             for idx in range(1, total_pages):
                 ai_budget_exhausted = time.monotonic() >= ai_doc_deadline
                 results[idx] = _run_on_page(shared_doc[idx], idx, skip_rest_ai or ai_budget_exhausted)
             return [bp for bp in results if bp is not None]
-        finally:
-            shared_doc.close()
+    finally:
+        shared_doc.close()
 
-    bp0 = _run_single(0, False)
-    if total_pages == 1:
-        return [bp0]
-
-    skip_rest_ai = False
-    if not strict_local:
-        try:
-            from ai_vision_refiner import is_provider_blocked, resolve_vision_credentials
-
-            ep, ek = resolve_vision_credentials(user_api_key=ai_api_key, provider=ai_provider, strict_local=strict_local)
-            if not ep or not ek or is_provider_blocked(ep, ek):
-                skip_rest_ai = True
-        except Exception:
-            skip_rest_ai = True
-
-    results = [None] * total_pages
-    results[0] = bp0
-    worker_cnt = min(4, max(2, total_pages - 1))
+    worker_cnt = min(3 if low_mem else 4, max(2, total_pages - 1))
     with ThreadPoolExecutor(max_workers=worker_cnt) as pool:
         fut_map = {
             pool.submit(_run_single, idx, skip_rest_ai or (time.monotonic() >= ai_doc_deadline)): idx
@@ -5827,10 +6201,16 @@ def build_exact_docx_from_scans(
             digital_layout_fallback=digital_layout_fallback,
         )
         for p_idx, bp in enumerate(blueprints):
+            max_elem_y1 = max(
+                [ln.y1 for ln in bp.lines] + [a.y1 for a in bp.assets] + [t.y1 for t in bp.tables],
+                default=0.0,
+            )
+            dense_single_page = bp.height_pt <= 900.0 and max_elem_y1 > bp.height_pt * 0.84 and len(bp.bands) >= 12
+            font_scale = 0.87 if dense_single_page else 0.90
 
             # Configure section dimensions on page 0 (or add page break for subsequent pages)
-            margin_in = 0.38
-            margin_tb_in = 0.32
+            margin_in = 0.36 if dense_single_page else 0.38
+            margin_tb_in = 0.25 if dense_single_page else 0.32
             margin_pt = margin_in * 72.0
             if p_idx == 0:
                 sec = docx_doc.sections[0]
@@ -5860,13 +6240,16 @@ def build_exact_docx_from_scans(
             page_right_pt = bp.width_pt - margin_pt
             prev_band_y1: Optional[float] = None
             prev_was_paragraph = False
+            gap_cap = 10.0 if dense_single_page else 16.0
+            gap_slope = 0.30 if dense_single_page else 0.42
+            spacer_thresh = 8.5 if dense_single_page else 6.0
 
             for band in bp.bands:
                 band_gap_pt = 0.0
                 if prev_band_y1 is not None:
                     raw_gap = max(0.0, band.y0 - prev_band_y1)
                     if raw_gap > 8.0:
-                        band_gap_pt = min(16.0, (raw_gap - 5.0) * 0.42)
+                        band_gap_pt = min(gap_cap, (raw_gap - 5.0) * gap_slope)
 
                 if band.kind == "table" and band.table is not None:
                     # Anchor side-by-side photos/signatures/QRs sitting beside this table at exact coordinates
@@ -5889,13 +6272,13 @@ def build_exact_docx_from_scans(
                         if fa.x0 >= band.table.x1 - 2.0:
                             right_side_x0s.append(fa.x0)
 
-                    if not prev_was_paragraph and band_gap_pt > 6.0:
+                    if not prev_was_paragraph and band_gap_pt > spacer_thresh:
                         sp = docx_doc.add_paragraph()
                         sp.paragraph_format.space_before = Pt(0)
                         sp.paragraph_format.space_after = Pt(0)
                         sp.paragraph_format.line_spacing = 1.0
                         sp_run = sp.add_run(" ")
-                        sp_run.font.size = Pt(max(4.0, min(11.0, band_gap_pt)))
+                        sp_run.font.size = Pt(max(4.0, min(8.0 if dense_single_page else 11.0, band_gap_pt)))
                     tbl_meta = band.table
                     is_dense_tbl = tbl_meta.n_cols >= 8 or tbl_meta.n_rows >= 20
                     min_col_w_pt = 14.0 if is_dense_tbl else 16.0
@@ -5996,13 +6379,13 @@ def build_exact_docx_from_scans(
                     prev_band_y1 = band.y1
 
                 elif band.kind == "columns" and (band.zones or band.column_rows):
-                    if not prev_was_paragraph and band_gap_pt > 6.0:
+                    if not prev_was_paragraph and band_gap_pt > spacer_thresh:
                         sp = docx_doc.add_paragraph()
                         sp.paragraph_format.space_before = Pt(0)
                         sp.paragraph_format.space_after = Pt(0)
                         sp.paragraph_format.line_spacing = 1.0
                         sp_run = sp.add_run(" ")
-                        sp_run.font.size = Pt(max(4.0, min(11.0, band_gap_pt)))
+                        sp_run.font.size = Pt(max(4.0, min(8.0 if dense_single_page else 11.0, band_gap_pt)))
                     # Single flat borderless layout table (NO nested tables -> Apple Pages & Word safe)
                     # Partition [margin_pt .. page_right_pt] by exact horizontal midpoints between zones
                     ref_zones = band.column_rows[0] if band.column_rows else band.zones
@@ -6053,8 +6436,8 @@ def build_exact_docx_from_scans(
                                 first_p = False
                                 pf = p.paragraph_format
                                 pf.space_before = Pt(0)
-                                pf.space_after = Pt(2.0 if band.column_rows else 1.5)
-                                pf.line_spacing = 1.06
+                                pf.space_after = Pt(1.5 if band.column_rows else (0.8 if dense_single_page else 1.5))
+                                pf.line_spacing = 1.03 if dense_single_page else 1.06
 
                                 if kind == "asset":
                                     asset: VisualAsset = obj  # type: ignore[assignment]
@@ -6074,7 +6457,7 @@ def build_exact_docx_from_scans(
                                 else:
                                     ln: TextLine = obj  # type: ignore[assignment]
                                     p.alignment = align_map.get(ln.align if (n_zones == 1 or band.column_rows) else zone.align, WD_ALIGN_PARAGRAPH.LEFT)
-                                    fs = max(7.0, min(16.0, ln.font_size_pt * 0.90))
+                                    fs = max(7.0, min(16.0, ln.font_size_pt * font_scale))
                                     _add_bilingual_runs_docx(
                                         p, ln.text, font_size_pt=fs, bold=ln.is_bold, color_rgb=ln.color_rgb
                                     )
@@ -6088,7 +6471,7 @@ def build_exact_docx_from_scans(
                         p = docx_doc.add_paragraph()
                         p.alignment = align_map.get(ln.align, WD_ALIGN_PARAGRAPH.LEFT)
                         pf = p.paragraph_format
-                        fs = max(7.0, min(18.0, ln.font_size_pt * 0.90))
+                        fs = max(7.0, min(18.0, ln.font_size_pt * font_scale))
                         if l_idx == 0:
                             pf.space_before = Pt(band_gap_pt)
                         elif prev_ln_y1 is not None:
@@ -6100,8 +6483,8 @@ def build_exact_docx_from_scans(
                             )
                         else:
                             pf.space_before = Pt(0)
-                        pf.space_after = Pt(1.0)
-                        pf.line_spacing = 1.06
+                        pf.space_after = Pt(0.5 if dense_single_page else 1.0)
+                        pf.line_spacing = 1.03 if dense_single_page else 1.06
                         if ln.align in ("left", "justify") and ln.x0 > bp.width_pt * 0.08:
                             indent_pt = min(usable_w_pt * 0.38, max(0.0, ln.x0 - margin_pt))
                             if indent_pt > 6.0:
