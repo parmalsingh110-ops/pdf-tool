@@ -56,6 +56,7 @@ import {
   computeKeyFingerprint,
   encryptJsonWithKey,
   decryptJsonWithKey,
+  clearCryptoKeyCache,
 } from '../lib/privacy';
 import {
   getSharedFilesFromCache,
@@ -155,14 +156,14 @@ const getDeviceLabel = (): string => {
 };
 
 // ─── Constants ─────────────────────────────────────────────────────────────
-// Adaptive chunk sizes — browsers support up to 256 KB on modern WebRTC SCTP
-// Start at 64 KB, can grow to 256 KB depending on network speed
-const CHUNK_SIZE_SMALL  = 64  * 1024;  // 64 KB  — for first few chunks (safe warm-up)
-const CHUNK_SIZE_MEDIUM = 128 * 1024;  // 128 KB — after stable connection detected
-const CHUNK_SIZE_LARGE  = 256 * 1024;  // 256 KB — for fast WiFi / high-throughput links
-const BUFFER_THRESHOLD  = 1   * 1024 * 1024; // 1 MB — pause sending if buffer exceeds 1 MB
-const BUFFER_LOW_MARK   = 256 * 1024;  // 256 KB — resume sending once buffer drains here
-const WINDOW_SIZE       = 8;           // Send 8 chunks ahead without waiting for each ACK
+// High-throughput WebRTC SCTP chunk sizes (192 KB stays safely below 256 KB SCTP limit with framing)
+const CHUNK_SIZE_SMALL  = 64  * 1024;  // 64 KB  — warm-up chunks
+const CHUNK_SIZE_MEDIUM = 128 * 1024;  // 128 KB — moderate links
+const CHUNK_SIZE_LARGE  = 192 * 1024;  // 192 KB — fast WiFi / hotspot links
+const BUFFER_THRESHOLD  = 4   * 1024 * 1024; // 4 MB — keep SCTP pipe saturated
+const BUFFER_LOW_MARK   = 1   * 1024 * 1024; // 1 MB — resume sending once buffer drains here
+const WINDOW_SIZE       = 16;          // Stream 16 chunks per batch before checking progress
+const RELAY_PARALLEL_UPLOADS = 3;      // Parallel E2EE cloud relay streams for multi-file sends
 
 // STUN + Free TURN for NAT traversal (most enterprise / CGNAT networks need TURN)
 const ICE_SERVERS = [
@@ -502,6 +503,7 @@ export default function ScanToPrint() {
     setBurningServerCache(true);
     try {
       await purgeServerRoom(sessionCode, roomReadToken);
+      clearCryptoKeyCache();
       setServerBurnDone(true);
       setTimeout(() => setServerBurnDone(false), 2600);
     } finally {
@@ -1227,9 +1229,10 @@ export default function ScanToPrint() {
                   transfer.receivedBytes = (transfer.receivedBytes || 0) + chunkLen;
                 }
                 const pct = Math.min(99, Math.round((transfer.receivedBytes / Math.max(1, transfer.size)) * 100));
+                const progressLabel = transfer.encMeta ? 'Encrypted Document...' : transfer.name;
                 setIncomingProgress((prev) => {
-                  if (prev && prev.name === transfer.name && prev.progress === pct) return prev;
-                  return { name: transfer.name, progress: pct };
+                  if (prev && prev.name === progressLabel && prev.progress === pct) return prev;
+                  return { name: progressLabel, progress: pct };
                 });
               }
             }
@@ -1246,10 +1249,15 @@ export default function ScanToPrint() {
                 let wasEncrypted = false;
                 try {
                   const validChunks = (transfer.chunks as any[]).filter((c) => c !== undefined && c !== null);
+                  // Adaptive chunking switches 64KB -> 192KB mid-stream, so JOB_FINISH carries exact totalChunks
+                  const expectedChunks =
+                    typeof data.totalChunks === 'number' && data.totalChunks > 0
+                      ? data.totalChunks
+                      : transfer.totalChunks || 1;
                   if (
                     validChunks.length > 0 &&
-                    validChunks.length >= (transfer.totalChunks || 1) &&
-                    (!transfer.size || transfer.receivedBytes >= transfer.size * 0.95)
+                    validChunks.length >= expectedChunks &&
+                    (!transfer.size || transfer.receivedBytes >= transfer.size)
                   ) {
                     const rawBlob = new Blob(validChunks, { type: transfer.type });
                     const rawBuf = await rawBlob.arrayBuffer();
@@ -1268,7 +1276,7 @@ export default function ScanToPrint() {
                     blobUrl = URL.createObjectURL(assembledBlob);
                   } else {
                     console.warn(
-                      `[ScanToPrint] Incomplete WebRTC transfer for ${transfer.name}: chunks=${validChunks.length}/${transfer.totalChunks}, bytes=${transfer.receivedBytes}/${transfer.size}`
+                      `[ScanToPrint] Incomplete WebRTC transfer for ${transfer.name}: chunks=${validChunks.length}/${expectedChunks}, bytes=${transfer.receivedBytes}/${transfer.size}`
                     );
                   }
                 } catch {
@@ -1447,11 +1455,20 @@ export default function ScanToPrint() {
     };
   }, [sessionCode, targetCounterPin, isSenderMode, addIncomingJob, peerReconnectKey, counterE2eeKey]);
 
-  // ─── Backend API Polling (Local + Cloud Relay Fallback) ─────────────────
+  // ─── Mobile Sender Connection Pre-Warm (opens TLS socket while customer picks files) ──
+  useEffect(() => {
+    if (!isSenderMode || !targetCounterPin) return;
+    const ctrl = new AbortController();
+    fetch(`${API_BASE}/health`, { method: 'HEAD', signal: ctrl.signal }).catch(() => {});
+    return () => ctrl.abort();
+  }, [isSenderMode, targetCounterPin]);
+
+  // ─── Backend Instant Event-Driven Long-Poll Relay (0-50ms push delivery) ──
   useEffect(() => {
     if (isSenderMode || !sessionCode || !roomReadToken) return;
 
     let cancelled = false;
+    let activeAbortCtrl: AbortController | null = null;
     const registeredBases = new Set<string>();
 
     const registerRoomWithBase = async (baseUrl: string): Promise<boolean> => {
@@ -1476,132 +1493,142 @@ export default function ScanToPrint() {
       }
     };
 
-    const fetchRelayJobsFromBase = async (baseUrl: string): Promise<boolean> => {
+    const fetchRelayJobsFromBase = async (baseUrl: string, waitSec: number): Promise<'jobs' | 'empty' | 'error'> => {
       try {
         if (!registeredBases.has(baseUrl)) {
-          await registerRoomWithBase(baseUrl);
+          const ok = await registerRoomWithBase(baseUrl);
+          if (!ok) return 'error';
         }
         const ctrl = new AbortController();
-        const tid = setTimeout(() => ctrl.abort(), 4500);
-        let res = await fetch(`${baseUrl}/api/print-drop/jobs/${sessionCode}`, {
+        activeAbortCtrl = ctrl;
+        const timeoutMs = waitSec > 0 ? (waitSec + 6) * 1000 : 4500;
+        const tid = setTimeout(() => ctrl.abort(), timeoutMs);
+        const url =
+          waitSec > 0
+            ? `${baseUrl}/api/print-drop/jobs/${sessionCode}?wait=${waitSec}`
+            : `${baseUrl}/api/print-drop/jobs/${sessionCode}`;
+        let res = await fetch(url, {
           headers: { 'X-Room-Token': roomReadToken },
           signal: ctrl.signal,
         });
         clearTimeout(tid);
         if (res.status === 412) {
+          registeredBases.delete(baseUrl);
           const okReg = await registerRoomWithBase(baseUrl);
-          if (!okReg) return false;
+          if (!okReg) return 'error';
           res = await fetch(`${baseUrl}/api/print-drop/jobs/${sessionCode}`, {
             headers: { 'X-Room-Token': roomReadToken },
           });
         }
-        if (!res.ok) return false;
+        if (!res.ok) return 'error';
         // Mark station online via cloud relay as soon as any relay endpoint responds
         setPeerStatus((curr) => (curr === 'online' ? 'online' : 'cloud'));
         const data = await res.json();
         if (data.jobs?.length) {
-          for (const j of data.jobs) {
-            if (j.tokenNum) tokenCounterRef.current = Math.max(tokenCounterRef.current, j.tokenNum + 1);
+          // Download & AES-256-GCM decrypt all arrived jobs concurrently for instant multi-file display
+          await Promise.all(
+            data.jobs.map(async (j: any) => {
+              if (j.tokenNum) tokenCounterRef.current = Math.max(tokenCounterRef.current, j.tokenNum + 1);
 
-            let fileBlobUrl = j.dataUrl || '';
-            let downloadedBlob: Blob | null = null;
-            let resolvedName: string = j.name;
-            let resolvedType: string = j.type || 'application/pdf';
-            let resolvedSize: number = j.size;
-            let wasEncrypted = false;
-            if (j.fileUrl && !fileBlobUrl) {
-              try {
-                const fileUrlFull = j.fileUrl.startsWith('http') ? j.fileUrl : `${baseUrl}${j.fileUrl}`;
-                const fileRes = await fetch(fileUrlFull, {
-                  headers: { 'X-Room-Token': roomReadToken },
-                });
-                if (fileRes.ok) {
-                  const rawArrayBuf = await fileRes.arrayBuffer();
-                  const decResult = await decryptBytesWithKey(rawArrayBuf, counterE2eeKey);
-                  wasEncrypted = decResult.wasEncrypted;
-                  if (j.encMeta && counterE2eeKey) {
-                    const meta = await decryptJsonWithKey<{ name?: string; type?: string; size?: number }>(
-                      j.encMeta,
-                      counterE2eeKey
-                    );
+              let fileBlobUrl = j.dataUrl || '';
+              let downloadedBlob: Blob | null = null;
+              let resolvedName: string = j.name;
+              let resolvedType: string = j.type || 'application/pdf';
+              let resolvedSize: number = j.size;
+              let wasEncrypted = false;
+              if (j.fileUrl && !fileBlobUrl) {
+                try {
+                  const fileUrlFull = j.fileUrl.startsWith('http') ? j.fileUrl : `${baseUrl}${j.fileUrl}`;
+                  const fileRes = await fetch(fileUrlFull, {
+                    headers: { 'X-Room-Token': roomReadToken },
+                  });
+                  if (fileRes.ok) {
+                    const rawArrayBuf = await fileRes.arrayBuffer();
+                    const [decResult, meta] = await Promise.all([
+                      decryptBytesWithKey(rawArrayBuf, counterE2eeKey),
+                      j.encMeta && counterE2eeKey
+                        ? decryptJsonWithKey<{ name?: string; type?: string; size?: number }>(j.encMeta, counterE2eeKey)
+                        : Promise.resolve(null),
+                    ]);
+                    wasEncrypted = decResult.wasEncrypted;
                     if (meta?.name) resolvedName = meta.name;
                     if (meta?.type) resolvedType = meta.type;
                     if (typeof meta?.size === 'number' && meta.size > 0) resolvedSize = meta.size;
+                    downloadedBlob = new Blob([decResult.buffer], { type: resolvedType });
+                    fileBlobUrl = URL.createObjectURL(downloadedBlob);
                   }
-                  downloadedBlob = new Blob([decResult.buffer], { type: resolvedType });
-                  fileBlobUrl = URL.createObjectURL(downloadedBlob);
-                }
-              } catch {}
-            }
-
-            if (fileBlobUrl) {
-              const incoming: PrintJob = {
-                ...j,
-                name: resolvedName,
-                type: resolvedType,
-                size: resolvedSize,
-                dataUrl: fileBlobUrl,
-                e2eeVerified: wasEncrypted,
-                status: 'pending' as const,
-              };
-              addIncomingJob(incoming);
-              if (downloadedBlob) {
-                try {
-                  channelRef.current?.postMessage({
-                    action: 'SYNC_JOB_TO_SIBLINGS',
-                    job: incoming,
-                    fileBlob: downloadedBlob,
-                  });
                 } catch {}
               }
-            }
-          }
-          return true;
+
+              if (fileBlobUrl) {
+                const incoming: PrintJob = {
+                  ...j,
+                  name: resolvedName,
+                  type: resolvedType,
+                  size: resolvedSize,
+                  dataUrl: fileBlobUrl,
+                  e2eeVerified: wasEncrypted,
+                  status: 'pending' as const,
+                };
+                addIncomingJob(incoming);
+                if (downloadedBlob) {
+                  try {
+                    channelRef.current?.postMessage({
+                      action: 'SYNC_JOB_TO_SIBLINGS',
+                      job: incoming,
+                      fileBlob: downloadedBlob,
+                    });
+                  } catch {}
+                }
+              }
+            })
+          );
+          return 'jobs';
         }
-        return false;
+        return 'empty';
       } catch {
-        return false;
+        return 'error';
+      } finally {
+        activeAbortCtrl = null;
       }
     };
 
     const poll = async () => {
       if (cancelled) return;
+      let nextDelayMs = 60;
       try {
-        // 1. Poll configured API_BASE (or same-origin Vite dev/preview server if localhost:8000 is not running)
-        const gotPrimary = await fetchRelayJobsFromBase(API_BASE);
-        let gotSecondary = false;
-
-        if (typeof window !== 'undefined') {
-          const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-          if (isLocal) {
-            // Check same-origin Vite relay
-            gotSecondary = await fetchRelayJobsFromBase('');
-          }
-        }
-        if (gotPrimary || gotSecondary) {
-          pollBackoffRef.current = 2500;
+        // Primary event-driven long-poll (?wait=20) wakes in <30ms on upload with 0% idle CPU
+        const primaryStatus = await fetchRelayJobsFromBase(API_BASE, 20);
+        if (primaryStatus === 'jobs' || primaryStatus === 'empty') {
+          pollBackoffRef.current = 1200;
+          nextDelayMs = 60;
         } else {
-          pollBackoffRef.current = Math.min(pollBackoffRef.current + 500, 8000);
+          // On localhost dev if port 8000 is down, check same-origin Vite relay cleanly
+          let secondaryOk = false;
+          if (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
+            const secStatus = await fetchRelayJobsFromBase('', 0);
+            secondaryOk = secStatus !== 'error';
+          }
+          pollBackoffRef.current = secondaryOk ? 1200 : Math.min(pollBackoffRef.current + 800, 4000);
+          nextDelayMs = pollBackoffRef.current;
         }
       } catch {
-        pollBackoffRef.current = Math.min(pollBackoffRef.current + 1000, 8000);
+        pollBackoffRef.current = Math.min(pollBackoffRef.current + 800, 4000);
+        nextDelayMs = pollBackoffRef.current;
       }
 
       if (!cancelled) {
-        pollTimerRef.current = setTimeout(poll, pollBackoffRef.current);
+        pollTimerRef.current = setTimeout(poll, nextDelayMs);
       }
     };
 
-    // Immediately register counter station room before the first poll cycle
-    void registerRoomWithBase(API_BASE);
-    if (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
-      void registerRoomWithBase('');
-    }
-
-    pollTimerRef.current = setTimeout(poll, 200);
+    pollTimerRef.current = setTimeout(poll, 80);
 
     return () => {
       cancelled = true;
+      try {
+        activeAbortCtrl?.abort();
+      } catch {}
       if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
     };
   }, [isSenderMode, sessionCode, roomReadToken, counterE2eeKey, addIncomingJob]);
@@ -1741,33 +1768,49 @@ export default function ScanToPrint() {
     win.document.close();
   };
 
-  // ─── Relay Upload (Fallback / secondary guarantee with E2EE & localhost auto-fallback) ───
-  const uploadViaRelay = async (file: File, copies: number, colorMode: 'bw' | 'color', jobId: string): Promise<boolean> => {
-    let payloadFile: File | Blob = file;
-    let uploadFileName = file.name;
-    let encMeta = '';
-    if (senderE2eeKey) {
-      try {
-        const plainBuf = await file.arrayBuffer();
-        const encBuf = await encryptBytesWithKey(plainBuf, senderE2eeKey);
-        if (!isEncryptedEnvelope(encBuf)) {
-          throw new Error('AES-256-GCM encryption unavailable in this browser context.');
-        }
-        payloadFile = new Blob([encBuf], { type: 'application/octet-stream' });
-        encMeta = await encryptJsonWithKey(
+  // ─── Single-Pass Zero-Knowledge Payload Seal Helper (encrypts ONCE for both P2P & Relay) ───
+  const prepareTransferPayload = async (
+    file: File
+  ): Promise<{ wireBuf: ArrayBuffer; encMeta: string; uploadFileName: string } | null> => {
+    const plainBuf = await file.arrayBuffer();
+    if (!senderE2eeKey) {
+      return { wireBuf: plainBuf, encMeta: '', uploadFileName: file.name };
+    }
+    try {
+      const [encBuf, encMeta] = await Promise.all([
+        encryptBytesWithKey(plainBuf, senderE2eeKey),
+        encryptJsonWithKey(
           { name: file.name, type: file.type || 'application/pdf', size: file.size },
           senderE2eeKey
-        );
-        if (!encMeta) {
-          throw new Error('Metadata encryption failed in browser.');
-        }
-        uploadFileName = 'sealed_doc.bin';
-      } catch (cryptoErr) {
-        console.error('[ScanToPrint] E2EE encryption failed, upload blocked to protect privacy:', cryptoErr);
-        setSenderStatusText('Browser encryption failed — blocked plaintext upload.');
-        return false;
+        ),
+      ]);
+      if (!isEncryptedEnvelope(encBuf) || !encMeta) {
+        throw new Error('AES-256-GCM encryption unavailable in this browser context.');
       }
+      return { wireBuf: encBuf, encMeta, uploadFileName: 'sealed_doc.bin' };
+    } catch (cryptoErr) {
+      console.error('[ScanToPrint] E2EE encryption failed, upload blocked to protect privacy:', cryptoErr);
+      setSenderStatusText('Browser encryption failed — blocked plaintext upload.');
+      return null;
     }
+  };
+
+  // ─── Relay Upload (Zero-RAM 512KB stream + pre-sealed E2EE reuse) ───
+  const uploadViaRelay = async (
+    file: File,
+    copies: number,
+    colorMode: 'bw' | 'color',
+    jobId: string,
+    preSealed?: { wireBuf: ArrayBuffer; encMeta: string; uploadFileName: string } | null,
+    onProgress?: (loaded: number, total: number) => void
+  ): Promise<boolean> => {
+    const sealed = preSealed ?? (await prepareTransferPayload(file));
+    if (!sealed) return false;
+    const payloadFile: File | Blob = senderE2eeKey
+      ? new Blob([sealed.wireBuf], { type: 'application/octet-stream' })
+      : file;
+    const uploadFileName = sealed.uploadFileName;
+    const encMeta = sealed.encMeta;
 
     const attemptUploadToBase = (baseUrl: string): Promise<boolean> =>
       new Promise((resolve) => {
@@ -1787,11 +1830,15 @@ export default function ScanToPrint() {
 
         xhr.upload.onprogress = (e) => {
           if (e.lengthComputable) {
-            const pct = Math.round((e.loaded / e.total) * 95);
-            setSenderProgress(pct);
-            setSenderStatusText(
-              `${senderE2eeKey ? 'Encrypted upload' : 'Uploading'} ${file.name} (${(e.loaded / 1048576).toFixed(1)} / ${(e.total / 1048576).toFixed(1)} MB)...`
-            );
+            if (onProgress) {
+              onProgress(e.loaded, e.total);
+            } else {
+              const pct = Math.round((e.loaded / e.total) * 95);
+              setSenderProgress(pct);
+              setSenderStatusText(
+                `${senderE2eeKey ? 'Encrypted upload' : 'Uploading'} ${file.name} (${(e.loaded / 1048576).toFixed(1)} / ${(e.total / 1048576).toFixed(1)} MB)...`
+              );
+            }
           }
         };
 
@@ -1823,24 +1870,13 @@ export default function ScanToPrint() {
     })();
   };
 
-  // ─── Customer Mobile Upload (Multi-channel, Sliding Window) ─────────────
-  //
-  // HOW THE SPEED UPGRADE WORKS:
-  //  Old:  Send chunk 0 → wait → send chunk 1 → wait → ...  (sequential)
-  //  New:  Send chunks 0-7 together (window=8) → as buffer drains, fill ahead
-  //        → 4-8x throughput on same network link
-  //
-  // Additionally uses ADAPTIVE chunk sizes:
-  //   First 10 chunks: 64 KB (safe warm-up for SCTP negotiation)
-  //   After stable:    256 KB (maximum WebRTC SCTP payload on modern browsers)
-  //   Throttles via:   bufferedamountlow event (zero busy-polling)
-  //
+  // ─── Customer Mobile Upload (Fixed Adaptive WebRTC + Parallel E2EE Cloud Relay) ───
   const handleCustomerUpload = async () => {
     if (!senderFiles.length) return;
     senderAbortRef.current = false;
     setSenderUploading(true);
     setSenderProgress(2);
-    setSenderStatusText('Reading document...');
+    setSenderStatusText(senderE2eeKey ? 'Sealing with AES-256-GCM...' : 'Reading document...');
 
     // ── Helper: wait for DC buffer to drain below BUFFER_LOW_MARK with timeout & safety
     const waitForDrain = (dc: RTCDataChannel): Promise<void> =>
@@ -1865,7 +1901,7 @@ export default function ScanToPrint() {
         timer = setTimeout(() => {
           cleanup();
           resolve();
-        }, 8000);
+        }, 6000);
         dc.bufferedAmountLowThreshold = BUFFER_LOW_MARK;
         dc.addEventListener('bufferedamountlow', onDrain);
         dc.addEventListener('close', cleanup);
@@ -1873,190 +1909,215 @@ export default function ScanToPrint() {
       });
 
     try {
-      for (let i = 0; i < senderFiles.length; i++) {
-        if (senderAbortRef.current) break;
-        const file = senderFiles[i];
-        const jobId = `job_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-        const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-        let beamedViaWebRtc = false;
+      // Fast Path: When WebRTC isn't open and multiple files are queued, upload up to 3 in parallel over E2EE Cloud Relay
+      if (!mobileConnRef.current?.open && senderFiles.length > 1) {
+        const totalBatchBytes = Math.max(1, senderFiles.reduce((acc, f) => acc + f.size, 0));
+        const loadedByIdx = new Array<number>(senderFiles.length).fill(0);
+        const tBatchStart = Date.now();
+        let nextFileIdx = 0;
 
-        // ── Channel A: WebRTC Sliding-Window High-Speed Stream (with E2EE when QR key active) ──
-        if (mobileConnRef.current?.open) {
-          try {
-            const dc: RTCDataChannel | null = mobileConnRef.current.dataChannel ?? null;
-            const plainBuf = await file.arrayBuffer();
-            const wireBuf = senderE2eeKey ? await encryptBytesWithKey(plainBuf, senderE2eeKey) : plainBuf;
-            if (senderE2eeKey && !isEncryptedEnvelope(wireBuf)) {
-              throw new Error('AES-256-GCM encryption unavailable for WebRTC transfer.');
+        const worker = async () => {
+          while (!senderAbortRef.current) {
+            const idx = nextFileIdx++;
+            if (idx >= senderFiles.length) break;
+            const file = senderFiles[idx];
+            const jobId = `job_${Date.now()}_${idx}_${Math.random().toString(36).substring(2, 6)}`;
+            const sealed = await prepareTransferPayload(file);
+            if (!sealed) {
+              throw new Error(`Encryption blocked upload for ${file.name}`);
             }
-            const encMeta = senderE2eeKey
-              ? await encryptJsonWithKey(
-                  { name: file.name, type: file.type || 'application/pdf', size: file.size },
-                  senderE2eeKey
-                )
-              : '';
-            const wireSize = wireBuf.byteLength;
-
-            // Determine adaptive chunk size based on connection quality
-            let chunkSize = CHUNK_SIZE_SMALL;
-            const totalChunksSmall = Math.ceil(wireSize / chunkSize);
-
-            mobileConnRef.current.send({
-              action: 'JOB_START',
+            const ok = await uploadViaRelay(
+              file,
+              senderCopies,
+              senderColorMode,
               jobId,
-              senderDeviceId: getSenderDeviceId(),
-              deviceLabel: getDeviceLabel(),
-              name: encMeta ? 'sealed_doc.bin' : file.name,
-              encMeta: encMeta || undefined,
-              size: wireSize,
-              type: encMeta ? 'application/octet-stream' : (file.type || 'application/pdf'),
-              timestamp,
-              totalChunks: totalChunksSmall,
-              copies: senderCopies,
-              colorMode: senderColorMode,
-            });
-
-            let nextChunkIdx = 0;
-            let sentBytes = 0;
-            const tStart = Date.now();
-
-            // Phase 1: Warm-up with small chunks (first WINDOW_SIZE chunks)
-            while (nextChunkIdx < Math.min(WINDOW_SIZE, Math.ceil(wireSize / CHUNK_SIZE_SMALL))) {
-              if (senderAbortRef.current) break;
-              const start = nextChunkIdx * CHUNK_SIZE_SMALL;
-              const end = Math.min(start + CHUNK_SIZE_SMALL, wireSize);
-              const buf = wireBuf.slice(start, end);
-
-              mobileConnRef.current.send({ action: 'JOB_CHUNK', jobId, index: nextChunkIdx, chunk: buf });
-              sentBytes += (end - start);
-              nextChunkIdx++;
-
-              // Update UI every 2 chunks during warmup
-              if (nextChunkIdx % 2 === 0) {
-                setSenderProgress(Math.round((sentBytes / wireSize) * 85));
-                setSenderStatusText(`Streaming ${file.name} (${(sentBytes / 1048576).toFixed(1)} / ${(wireSize / 1048576).toFixed(1)} MB)...`);
+              sealed,
+              (loaded, total) => {
+                loadedByIdx[idx] = Math.min(file.size, Math.round((loaded / Math.max(1, total)) * file.size));
+                const sumLoaded = loadedByIdx.reduce((a, b) => a + b, 0);
+                const pct = Math.min(96, Math.round((sumLoaded / totalBatchBytes) * 96));
+                const mbps = ((sumLoaded / 1048576) / Math.max(0.1, (Date.now() - tBatchStart) / 1000)).toFixed(1);
+                setSenderProgress(pct);
+                setSenderStatusText(
+                  `${senderE2eeKey ? 'E2EE Fast-Send' : 'Uploading'} ${senderFiles.length} files · ${(sumLoaded / 1048576).toFixed(1)} / ${(totalBatchBytes / 1048576).toFixed(1)} MB · ${mbps} MB/s`
+                );
               }
+            );
+            if (!ok) {
+              throw new Error(`Failed to transmit ${file.name}`);
             }
+            loadedByIdx[idx] = file.size;
+          }
+        };
 
-            // After warm-up: switch to larger chunks for maximum throughput
-            const elapsed = Date.now() - tStart;
-            chunkSize = elapsed < 500 ? CHUNK_SIZE_LARGE : CHUNK_SIZE_MEDIUM;
+        const concurrency = Math.min(RELAY_PARALLEL_UPLOADS, senderFiles.length);
+        await Promise.all(Array.from({ length: concurrency }, () => worker()));
+      } else {
+        for (let i = 0; i < senderFiles.length; i++) {
+          if (senderAbortRef.current) break;
+          const file = senderFiles[i];
+          const jobId = `job_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+          const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+          let beamedViaWebRtc = false;
 
-            // ── Sliding window for remaining file ──────────────────────────
-            let offset = sentBytes;
+          // Seal file ONCE (reused across WebRTC and Relay fallback — zero double encryption)
+          const sealed = await prepareTransferPayload(file);
+          if (!sealed) {
+            throw new Error(`Encryption blocked upload for ${file.name}`);
+          }
+          const { wireBuf, encMeta } = sealed;
 
-            while (offset < wireSize) {
-              if (senderAbortRef.current) break;
+          // ── Channel A: WebRTC Direct P2P Sliding-Window Stream (with exact JOB_FINISH chunk count) ──
+          if (mobileConnRef.current?.open) {
+            try {
+              const dc: RTCDataChannel | null = mobileConnRef.current.dataChannel ?? null;
+              const wireSize = wireBuf.byteLength;
+              const totalChunksEst = Math.ceil(wireSize / CHUNK_SIZE_SMALL);
 
-              const windowChunks: { buf: ArrayBuffer; idx: number }[] = [];
+              mobileConnRef.current.send({
+                action: 'JOB_START',
+                jobId,
+                senderDeviceId: getSenderDeviceId(),
+                deviceLabel: getDeviceLabel(),
+                name: encMeta ? 'sealed_doc.bin' : file.name,
+                encMeta: encMeta || undefined,
+                size: wireSize,
+                type: encMeta ? 'application/octet-stream' : (file.type || 'application/pdf'),
+                timestamp,
+                totalChunks: totalChunksEst,
+                copies: senderCopies,
+                colorMode: senderColorMode,
+              });
 
-              for (let w = 0; w < WINDOW_SIZE && offset + w * chunkSize < wireSize; w++) {
-                const chunkStart = offset + w * chunkSize;
-                const chunkEnd = Math.min(chunkStart + chunkSize, wireSize);
-                const currentIdx = nextChunkIdx + w;
-                windowChunks.push({
-                  buf: wireBuf.slice(chunkStart, chunkEnd),
-                  idx: currentIdx,
+              let nextChunkIdx = 0;
+              let sentBytes = 0;
+              const tStart = Date.now();
+
+              // Phase 1: Warm-up with 64 KB chunks (first 6 chunks)
+              const warmupChunks = Math.min(6, Math.ceil(wireSize / CHUNK_SIZE_SMALL));
+              while (nextChunkIdx < warmupChunks) {
+                if (senderAbortRef.current) break;
+                const start = nextChunkIdx * CHUNK_SIZE_SMALL;
+                const end = Math.min(start + CHUNK_SIZE_SMALL, wireSize);
+                mobileConnRef.current.send({
+                  action: 'JOB_CHUNK',
+                  jobId,
+                  index: nextChunkIdx,
+                  chunk: wireBuf.slice(start, end),
                 });
+                sentBytes += end - start;
+                nextChunkIdx++;
               }
 
-              if (senderAbortRef.current) break;
+              // Switch to 192 KB chunks for fast links (128 KB for slower links)
+              const elapsed = Date.now() - tStart;
+              const chunkSize = elapsed < 450 ? CHUNK_SIZE_LARGE : CHUNK_SIZE_MEDIUM;
+              let offset = sentBytes;
 
-              // Send all window chunks back-to-back
-              for (const { buf, idx } of windowChunks) {
-                if (dc && dc.bufferedAmount > BUFFER_THRESHOLD) {
-                  await waitForDrain(dc);
-                }
+              while (offset < wireSize) {
                 if (senderAbortRef.current) break;
 
-                mobileConnRef.current.send({ action: 'JOB_CHUNK', jobId, index: idx, chunk: buf });
-                sentBytes += buf.byteLength;
+                for (let w = 0; w < WINDOW_SIZE && offset < wireSize; w++) {
+                  if (dc && dc.bufferedAmount > BUFFER_THRESHOLD) {
+                    await waitForDrain(dc);
+                  }
+                  if (senderAbortRef.current || !mobileConnRef.current?.open) break;
+                  const end = Math.min(offset + chunkSize, wireSize);
+                  mobileConnRef.current.send({
+                    action: 'JOB_CHUNK',
+                    jobId,
+                    index: nextChunkIdx,
+                    chunk: wireBuf.slice(offset, end),
+                  });
+                  sentBytes += end - offset;
+                  offset = end;
+                  nextChunkIdx++;
+                }
+
+                const pct = Math.min(92, Math.round((sentBytes / Math.max(1, wireSize)) * 92));
+                setSenderProgress(pct);
+                const speedMbps = ((sentBytes / 1048576) / Math.max(0.08, (Date.now() - tStart) / 1000)).toFixed(1);
+                setSenderStatusText(
+                  `Direct P2P ${file.name} · ${(sentBytes / 1048576).toFixed(1)} / ${(wireSize / 1048576).toFixed(1)} MB · ${speedMbps} MB/s`
+                );
+
+                // Yield occasionally (every 32 chunks) to keep mobile UI smooth without 4ms/window timer drag
+                if (nextChunkIdx % 32 === 0) {
+                  await new Promise((r) => setTimeout(r, 0));
+                }
               }
 
-              nextChunkIdx += windowChunks.length;
+              if (senderAbortRef.current) {
+                setSenderStatusText('Transfer cancelled.');
+                break;
+              }
 
-              // Update progress once per window
-              const pct = Math.round((sentBytes / wireSize) * 90);
-              setSenderProgress(pct);
-              const speedMbps = ((sentBytes / 1048576) / Math.max(0.1, (Date.now() - tStart) / 1000)).toFixed(1);
-              setSenderStatusText(
-                `Streaming ${file.name} · ${(sentBytes / 1048576).toFixed(1)} / ${(wireSize / 1048576).toFixed(1)} MB · ${speedMbps} MB/s`
-              );
-
-              // Advance offset by window
-              offset += windowChunks.length * chunkSize;
-
-              // Yield once per window to keep UI thread responsive
-              await new Promise((r) => setTimeout(r, 0));
+              // Send exact chunk count so Counter PC validates adaptive chunks cleanly without silent drop!
+              mobileConnRef.current.send({ action: 'JOB_FINISH', jobId, totalChunks: nextChunkIdx });
+              beamedViaWebRtc = true;
+            } catch (e) {
+              console.warn('WebRTC stream notice, using relay fallback', e);
             }
-
-            if (senderAbortRef.current) {
-              setSenderStatusText('Transfer cancelled.');
-              break;
-            }
-
-            // Send finish signal — receiver will assemble and ACK
-            mobileConnRef.current.send({ action: 'JOB_FINISH', jobId });
-            beamedViaWebRtc = true;
-          } catch (e) {
-            console.warn('WebRTC stream notice, using relay fallback', e);
           }
-        }
 
-        // Wait for Counter PC acknowledgment if beamed via WebRTC (timeout after 4s)
-        let ackReceived = false;
-        if (beamedViaWebRtc) {
-          ackReceived = await new Promise<boolean>((resolve) => {
-            const timeout = setTimeout(() => resolve(false), 4000);
-            ackResolversRef.current[jobId] = (token) => {
-              clearTimeout(timeout);
-              if (token) setCustomerToken(token);
-              resolve(true);
-            };
-          });
-        }
-
-        // ── Channel B: Instant Same-Browser / PWA-to-Counter BroadcastChannel ──
-        if (channelRef.current && !ackReceived) {
-          try {
-            const bcAckPromise = new Promise<boolean>((resolve) => {
-              const timeout = setTimeout(() => resolve(false), 400);
+          // Wait for Counter PC acknowledgment if beamed via WebRTC (fast 2.2s fail-over)
+          let ackReceived = false;
+          if (beamedViaWebRtc) {
+            ackReceived = await new Promise<boolean>((resolve) => {
+              const timeout = setTimeout(() => {
+                delete ackResolversRef.current[jobId];
+                resolve(false);
+              }, 2200);
               ackResolversRef.current[jobId] = (token) => {
                 clearTimeout(timeout);
                 if (token) setCustomerToken(token);
                 resolve(true);
               };
             });
+          }
 
-            channelRef.current.postMessage({
-              action: 'NEW_PRINT_JOB',
-              fileBlob: file,
-              job: {
-                id: jobId,
-                tokenNum: 0,
-                senderDeviceId: getSenderDeviceId(),
-                deviceLabel: getDeviceLabel(),
-                name: file.name,
-                size: file.size,
-                type: file.type || 'application/pdf',
-                dataUrl: '',
-                timestamp,
-                copies: senderCopies,
-                colorMode: senderColorMode,
-                status: 'pending',
-              },
-            });
+          // ── Channel B: Instant Same-Browser / PWA-to-Counter BroadcastChannel ──
+          if (channelRef.current && !ackReceived) {
+            try {
+              const bcAckPromise = new Promise<boolean>((resolve) => {
+                const timeout = setTimeout(() => resolve(false), 300);
+                ackResolversRef.current[jobId] = (token) => {
+                  clearTimeout(timeout);
+                  if (token) setCustomerToken(token);
+                  resolve(true);
+                };
+              });
 
-            ackReceived = await bcAckPromise;
-          } catch {}
-        }
+              channelRef.current.postMessage({
+                action: 'NEW_PRINT_JOB',
+                fileBlob: file,
+                job: {
+                  id: jobId,
+                  tokenNum: 0,
+                  senderDeviceId: getSenderDeviceId(),
+                  deviceLabel: getDeviceLabel(),
+                  name: file.name,
+                  size: file.size,
+                  type: file.type || 'application/pdf',
+                  dataUrl: '',
+                  timestamp,
+                  copies: senderCopies,
+                  colorMode: senderColorMode,
+                  status: 'pending',
+                },
+              });
 
-        // ── Channel C: Backend Relay (smart fallback ONLY if WebRTC & BroadcastChannel unacknowledged) ──
-        if (!ackReceived) {
-          setSenderStatusText(`Transmitting ${file.name} via cloud relay...`);
-          const relayOk = await uploadViaRelay(file, senderCopies, senderColorMode, jobId);
-          if (!relayOk && !beamedViaWebRtc) {
-            throw new Error(`Failed to transmit ${file.name}`);
+              ackReceived = await bcAckPromise;
+            } catch {}
+          }
+
+          // ── Channel C: E2EE Cloud Relay (reuses already-encrypted `sealed` buffer!) ──
+          if (!ackReceived) {
+            setSenderStatusText(`Fast E2EE Relay: ${file.name}...`);
+            const relayOk = await uploadViaRelay(file, senderCopies, senderColorMode, jobId, sealed);
+            if (!relayOk && !beamedViaWebRtc) {
+              throw new Error(`Failed to transmit ${file.name}`);
+            }
           }
         }
       }

@@ -7,6 +7,12 @@ fastapi>=0.163.1
 starlette>=1.10.0
 uvicorn[standard]>=0.54.0
 gunicorn>=27.0.1
+granian[uvloop]>=2.0.0
+
+# ── High-Speed Native Drop-In Accelerators (Zero Quality Loss) ───
+orjson>=3.10.0
+zlib-ng>=1.0.0
+PyTurboJPEG>=1.7.5,<2.0
 
 # ── File Upload & Auth Security ──────────────────────────────────
 python-multipart>=0.0.34

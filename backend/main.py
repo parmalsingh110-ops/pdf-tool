@@ -40,7 +40,6 @@ from typing import Any, Optional
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form, BackgroundTasks, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from starlette.background import BackgroundTask
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -48,6 +47,14 @@ from dotenv import load_dotenv
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
+
+from fast_codecs import (
+    SmartGZipMiddleware,
+    fast_json_dumps,
+    fast_json_loads,
+    get_accelerator_status,
+    get_default_json_response_class,
+)
 
 from vision_reconstructor import (
     normalize_input_to_pdf,
@@ -250,7 +257,7 @@ async def _app_lifespan(app_instance: FastAPI):
         while True:
             try:
                 await asyncio.sleep(60)
-                _prune_expired_print_rooms()
+                _prune_expired_print_rooms(force=True)
                 _sweep_old_files()
             except asyncio.CancelledError:
                 break
@@ -280,6 +287,7 @@ app = FastAPI(
     redoc_url=redoc_url,
     openapi_url=openapi_url,
     lifespan=_app_lifespan,
+    default_response_class=get_default_json_response_class(),
 )
 
 # Attach rate limiter to app state
@@ -310,8 +318,8 @@ async def _global_crash_shield_handler(request: Request, exc: Exception):
 
 # ─── Middleware Stack ───────────────────────────────────────────
 
-# 1. GZip compression
-app.add_middleware(GZipMiddleware, minimum_size=500)
+# 1. Selective SIMD zlib-ng GZip compression (bypasses PDFs, DOCX/XLSX/PPTX, images & E2EE streams)
+app.add_middleware(SmartGZipMiddleware, minimum_size=500)
 
 # 2. Multi-Lane Priority Load Balancer, Virtual Waiting Room & Edge WAF
 app.add_middleware(LoadBalancerAndFirewallMiddleware, ip_resolver=get_real_client_ip)
@@ -605,8 +613,10 @@ def health(request: Request, response: Response):
 @app.get("/api/system/health")
 @limiter.limit("30/minute")
 def system_load_health(request: Request):
-    """Live multi-lane load balancer, virtual waiting queue, and cache metrics."""
-    return JSONResponse(content=LOAD_BALANCER.snapshot(), status_code=200)
+    """Live multi-lane load balancer, virtual waiting queue, accelerators, and cache metrics."""
+    snap = LOAD_BALANCER.snapshot()
+    snap["accelerators"] = get_accelerator_status()
+    return snap
 
 
 # Web Share Target Fallback: hydrates shared files into client CacheStorage + IndexedDB if SW was bypassed
@@ -3077,19 +3087,31 @@ def _find_libreoffice() -> str:
     raise RuntimeError("LibreOffice not found.")
 
 
+_LO_WARM_TEMPLATE = Path("/opt/lo_profile_template")
+
+
 def libreoffice_convert(inp: Path, out_dir: Path) -> Path:
     """
     Convert a file to PDF using LibreOffice.
-    Uses an isolated UserInstallation profile directory to prevent concurrent worker lockups.
+    Uses an isolated UserInstallation profile directory seeded from the Docker pre-warmed
+    template (when present) to skip 2-5s cold registry rebuilds with 0 idle RAM.
     """
     lo = _find_libreoffice()
     with tempfile.TemporaryDirectory(prefix="lo_prof_") as tmp_prof:
-        profile_url = f"file://{Path(tmp_prof).resolve()}"
+        tmp_prof_path = Path(tmp_prof).resolve()
+        if _LO_WARM_TEMPLATE.is_dir():
+            try:
+                shutil.copytree(_LO_WARM_TEMPLATE, tmp_prof_path, dirs_exist_ok=True)
+            except Exception:
+                pass
+        profile_url = f"file://{tmp_prof_path}"
         r = subprocess.run(
             [
                 lo,
                 f"-env:UserInstallation={profile_url}",
                 "--headless",
+                "--norestore",
+                "--nolockcheck",
                 "--convert-to", "pdf",
                 "--outdir", str(out_dir),
                 str(inp)
@@ -6377,9 +6399,27 @@ PRINT_DROP_ROOM_TIMESTAMPS: dict = {}
 PRINT_DROP_ROOM_TOKENS: dict = {}
 PRINT_DROP_DEVICE_TOKENS: dict = {}
 PRINT_DROP_ROOM_SECRETS: dict = {}
+PRINT_DROP_ROOM_EVENTS: dict[str, asyncio.Event] = {}
+PRINT_DROP_ROOM_WAITERS: dict[str, int] = {}
+_PRINT_DROP_LAST_PRUNE_TS: float = 0.0
 PRINT_DROP_SPOOL_DIR = Path(tempfile.gettempdir()) / "pms_print_spool"
 PRINT_DROP_SPOOL_DIR.mkdir(parents=True, exist_ok=True)
 PIN_CHARS = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"  # 32 unambiguous chars (no 0/O, 1/I/L)
+
+
+def _get_room_event(clean_session: str) -> asyncio.Event:
+    ev = PRINT_DROP_ROOM_EVENTS.get(clean_session)
+    if ev is None:
+        ev = asyncio.Event()
+        PRINT_DROP_ROOM_EVENTS[clean_session] = ev
+    return ev
+
+
+def _notify_print_room(clean_session: str) -> None:
+    """Instantly wake any Counter PC waiting on long-poll for this room (< 1ms)."""
+    ev = PRINT_DROP_ROOM_EVENTS.get(clean_session)
+    if ev is not None:
+        ev.set()
 
 
 def _hash_room_token(token: str) -> str:
@@ -6427,7 +6467,7 @@ def _read_disk_room_queue(clean_session: str) -> list[dict]:
     if not q_file.exists():
         return []
     try:
-        data = json.loads(q_file.read_text(encoding="utf-8"))
+        data = fast_json_loads(q_file.read_bytes())
         return data if isinstance(data, list) else []
     except Exception:
         return []
@@ -6439,16 +6479,21 @@ def _write_disk_room_queue(clean_session: str, jobs: list[dict]) -> None:
     q_file = session_folder / ".jobs.json"
     tmp_file = session_folder / f".jobs_{uuid.uuid4().hex[:8]}.tmp"
     try:
-        tmp_file.write_text(json.dumps(jobs), encoding="utf-8")
+        tmp_file.write_text(fast_json_dumps(jobs), encoding="utf-8")
         tmp_file.replace(q_file)
     except Exception:
         tmp_file.unlink(missing_ok=True)
 
 
-def _prune_expired_print_rooms():
+def _prune_expired_print_rooms(force: bool = False):
     """Background garbage collection: strictly frees RAM and temp files older than 20 minutes."""
+    global _PRINT_DROP_LAST_PRUNE_TS
     try:
         now = time.time()
+        # Throttle disk scans on hot request paths to at most once every 30 seconds
+        if not force and (now - _PRINT_DROP_LAST_PRUNE_TS) < 30.0:
+            return
+        _PRINT_DROP_LAST_PRUNE_TS = now
         expired_sessions = [k for k, v in PRINT_DROP_ROOM_TIMESTAMPS.items() if now - v > 1200]
         for s in expired_sessions:
             PRINT_DROP_ROOMS.pop(s, None)
@@ -6456,6 +6501,9 @@ def _prune_expired_print_rooms():
             PRINT_DROP_ROOM_TOKENS.pop(s, None)
             PRINT_DROP_DEVICE_TOKENS.pop(s, None)
             PRINT_DROP_ROOM_SECRETS.pop(s, None)
+            _notify_print_room(s)
+            PRINT_DROP_ROOM_EVENTS.pop(s, None)
+            PRINT_DROP_ROOM_WAITERS.pop(s, None)
             session_folder = PRINT_DROP_SPOOL_DIR / s
             if session_folder.exists():
                 shutil.rmtree(session_folder, ignore_errors=True)
@@ -6484,6 +6532,9 @@ def _prune_expired_print_rooms():
                 PRINT_DROP_ROOM_TOKENS.pop(s, None)
                 PRINT_DROP_DEVICE_TOKENS.pop(s, None)
                 PRINT_DROP_ROOM_SECRETS.pop(s, None)
+                _notify_print_room(s)
+                PRINT_DROP_ROOM_EVENTS.pop(s, None)
+                PRINT_DROP_ROOM_WAITERS.pop(s, None)
                 session_folder = PRINT_DROP_SPOOL_DIR / s
                 if session_folder.exists():
                     shutil.rmtree(session_folder, ignore_errors=True)
@@ -6597,11 +6648,11 @@ async def print_drop_upload(
     final_job_id = clean_client_job_id if clean_client_job_id else f"job_{int(time.time() * 1000)}_{uuid.uuid4().hex[:6]}"
     file_path = session_folder / f"{final_job_id}.bin"
 
-    # Stream file to disk in 64KB chunks — zero base64 memory allocation
+    # Stream file to disk in 512KB chunks — 8x fewer syscalls, still < 512KB RAM per upload
     total_size = 0
     try:
-        with open(file_path, "wb") as f_out:
-            while chunk := await file.read(64 * 1024):
+        with open(file_path, "wb", buffering=512 * 1024) as f_out:
+            while chunk := await file.read(512 * 1024):
                 total_size += len(chunk)
                 if total_size > 100 * 1024 * 1024:
                     f_out.close()
@@ -6651,13 +6702,18 @@ async def print_drop_upload(
     PRINT_DROP_ROOMS[clean_session] = updated_queue
     _write_disk_room_queue(clean_session, updated_queue)
     PRINT_DROP_ROOM_TIMESTAMPS[clean_session] = time.time()
+    _notify_print_room(clean_session)
 
     return {"success": True, "job_id": final_job_id, "token_num": room_token, "session_id": clean_session}
 
 @app.get("/api/print-drop/jobs/{session_id}")
 @limiter.limit("120/minute")
-async def print_drop_poll(request: Request, session_id: str, peek: bool = False):
-    """Retrieve and clear new jobs for the authenticated counter PC queue."""
+async def print_drop_poll(request: Request, session_id: str, peek: bool = False, wait: float = 0.0):
+    """
+    Retrieve and clear new jobs for the authenticated counter PC queue.
+    When `wait > 0` (up to 22s), performs zero-CPU event-driven long-polling so new uploads
+    deliver to the Counter PC in < 30ms instead of waiting 2.5-8s for the next poll cycle.
+    """
     clean_session = re.sub(r"[^A-Z0-9]", "", session_id.strip().upper())
     expected_hash = _get_room_secret_hash(clean_session)
     if not expected_hash:
@@ -6666,16 +6722,50 @@ async def print_drop_poll(request: Request, session_id: str, peek: bool = False)
     if not provided or not hmac.compare_digest(_hash_room_token(provided), expected_hash):
         raise HTTPException(status_code=403, detail="Unauthorized: Invalid room token")
 
-    ram_jobs = PRINT_DROP_ROOMS.get(clean_session, [])
-    disk_jobs = _read_disk_room_queue(clean_session)
-    merged = disk_jobs if len(disk_jobs) >= len(ram_jobs) else ram_jobs
+    def _collect_jobs() -> list[dict]:
+        ram_jobs = PRINT_DROP_ROOMS.get(clean_session, [])
+        if ram_jobs:
+            return ram_jobs
+        return _read_disk_room_queue(clean_session)
+
+    merged = _collect_jobs()
+    wait_s = min(22.0, max(0.0, float(wait or 0.0)))
+    if not merged and wait_s > 0.0 and not peek:
+        active_waiters = PRINT_DROP_ROOM_WAITERS.get(clean_session, 0)
+        if active_waiters < 4:
+            PRINT_DROP_ROOM_WAITERS[clean_session] = active_waiters + 1
+            ev = _get_room_event(clean_session)
+            ev.clear()
+            # Re-check once after clear to eliminate check-then-wait race
+            merged = _collect_jobs()
+            if not merged:
+                try:
+                    await asyncio.wait_for(ev.wait(), timeout=wait_s)
+                except asyncio.TimeoutError:
+                    pass
+                finally:
+                    rem = PRINT_DROP_ROOM_WAITERS.get(clean_session, 1) - 1
+                    if rem <= 0:
+                        PRINT_DROP_ROOM_WAITERS.pop(clean_session, None)
+                    else:
+                        PRINT_DROP_ROOM_WAITERS[clean_session] = rem
+                if not _get_room_secret_hash(clean_session):
+                    raise HTTPException(status_code=412, detail="Room purged")
+                merged = _collect_jobs()
+            else:
+                rem = PRINT_DROP_ROOM_WAITERS.get(clean_session, 1) - 1
+                if rem <= 0:
+                    PRINT_DROP_ROOM_WAITERS.pop(clean_session, None)
+                else:
+                    PRINT_DROP_ROOM_WAITERS[clean_session] = rem
 
     if peek:
         jobs = list(merged)
     else:
         jobs = list(merged)
-        PRINT_DROP_ROOMS[clean_session] = []
-        _write_disk_room_queue(clean_session, [])
+        if jobs:
+            PRINT_DROP_ROOMS[clean_session] = []
+            _write_disk_room_queue(clean_session, [])
     PRINT_DROP_ROOM_TIMESTAMPS[clean_session] = time.time()
     return {"success": True, "jobs": jobs}
 
@@ -6705,7 +6795,8 @@ async def print_drop_download_file(request: Request, session_id: str, job_id: st
         path=str(file_path),
         media_type=media_type,
         headers={
-            "Cache-Control": "private, no-cache, no-store, must-revalidate",
+            "Cache-Control": "private, no-cache, no-store, must-revalidate, no-transform",
+            "X-Content-Type-Options": "nosniff",
             "Content-Disposition": f'inline; filename="{safe_job_id}.bin"',
         },
         background=None if persist_file else BackgroundTask(lambda: file_path.unlink(missing_ok=True)),
@@ -6729,6 +6820,9 @@ async def print_drop_purge_session(request: Request, session_id: str):
     PRINT_DROP_ROOM_TOKENS.pop(clean_session, None)
     PRINT_DROP_DEVICE_TOKENS.pop(clean_session, None)
     PRINT_DROP_ROOM_SECRETS.pop(clean_session, None)
+    _notify_print_room(clean_session)
+    PRINT_DROP_ROOM_EVENTS.pop(clean_session, None)
+    PRINT_DROP_ROOM_WAITERS.pop(clean_session, None)
     session_folder = PRINT_DROP_SPOOL_DIR / clean_session
     if session_folder.exists():
         shutil.rmtree(session_folder, ignore_errors=True)

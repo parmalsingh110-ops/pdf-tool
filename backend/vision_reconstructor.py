@@ -3624,8 +3624,12 @@ def _build_ink_free_background(
     else:
         cleaned = work
 
-    ok, buf = cv2.imencode(".jpg", cleaned, [int(cv2.IMWRITE_JPEG_QUALITY), 84])
-    return buf.tobytes() if ok else None
+    from fast_codecs import fast_jpeg_encode
+
+    try:
+        return fast_jpeg_encode(cleaned, quality=84)
+    except Exception:
+        return None
 
 
 _PROSE_BREAK_PREFIX_RE = re.compile(

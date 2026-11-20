@@ -5,12 +5,47 @@
 const E2EE_MAGIC = new Uint8Array([0x50, 0x4d, 0x53, 0x45, 0x32, 0x45, 0x31, 0x00]); // "PMSE2EE1\0" (8 bytes)
 const E2EE_IV_LEN = 12;
 
-function toBase64Url(bytes: Uint8Array): string {
-  let binary = '';
-  for (let i = 0; i < bytes.length; i++) {
-    binary += String.fromCharCode(bytes[i]);
+// Bounded non-extractable WebCrypto key cache (eliminates repeated key import on multi-file batches)
+const _CRYPTO_KEY_CACHE = new Map<string, CryptoKey>();
+const _CRYPTO_KEY_CACHE_MAX = 16;
+
+export function clearCryptoKeyCache(): void {
+  _CRYPTO_KEY_CACHE.clear();
+}
+
+async function getImportedAesKey(keyB64Url: string): Promise<CryptoKey | null> {
+  if (!keyB64Url || typeof window === 'undefined' || !window.crypto?.subtle) {
+    return null;
   }
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const cached = _CRYPTO_KEY_CACHE.get(keyB64Url);
+  if (cached) return cached;
+
+  const rawKey = fromBase64Url(keyB64Url);
+  if (rawKey.byteLength !== 32) {
+    return null;
+  }
+  const imported = await window.crypto.subtle.importKey(
+    'raw',
+    rawKey as unknown as BufferSource,
+    { name: 'AES-GCM' },
+    false,
+    ['encrypt', 'decrypt']
+  );
+  if (_CRYPTO_KEY_CACHE.size >= _CRYPTO_KEY_CACHE_MAX) {
+    const oldest = _CRYPTO_KEY_CACHE.keys().next().value;
+    if (oldest !== undefined) _CRYPTO_KEY_CACHE.delete(oldest);
+  }
+  _CRYPTO_KEY_CACHE.set(keyB64Url, imported);
+  return imported;
+}
+
+function toBase64Url(bytes: Uint8Array): string {
+  const CHUNK = 0x8000;
+  const parts: string[] = [];
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    parts.push(String.fromCharCode(...bytes.subarray(i, Math.min(i + CHUNK, bytes.length))));
+  }
+  return btoa(parts.join('')).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
 function fromBase64Url(b64u: string): Uint8Array {
@@ -108,20 +143,10 @@ export function isEncryptedEnvelope(buf: ArrayBuffer): boolean {
  * Envelope layout: PMSE2EE1\0 (8B) || IV (12B) || Ciphertext+Tag
  */
 export async function encryptBytesWithKey(plainBuffer: ArrayBuffer, keyB64Url: string): Promise<ArrayBuffer> {
-  if (!keyB64Url || typeof window === 'undefined' || !window.crypto?.subtle) {
+  const cryptoKey = await getImportedAesKey(keyB64Url);
+  if (!cryptoKey) {
     return plainBuffer;
   }
-  const rawKey = fromBase64Url(keyB64Url);
-  if (rawKey.byteLength !== 32) {
-    return plainBuffer;
-  }
-  const cryptoKey = await window.crypto.subtle.importKey(
-    'raw',
-    rawKey as unknown as BufferSource,
-    { name: 'AES-GCM' },
-    false,
-    ['encrypt']
-  );
   const iv = new Uint8Array(E2EE_IV_LEN);
   window.crypto.getRandomValues(iv);
 
@@ -149,17 +174,10 @@ export async function decryptBytesWithKey(
   if (!isEncryptedEnvelope(payload)) {
     return { buffer: payload, wasEncrypted: false };
   }
-  if (!keyB64Url || typeof window === 'undefined' || !window.crypto?.subtle) {
+  const cryptoKey = await getImportedAesKey(keyB64Url);
+  if (!cryptoKey) {
     throw new Error('Encrypted payload received but decryption key is missing.');
   }
-  const rawKey = fromBase64Url(keyB64Url);
-  const cryptoKey = await window.crypto.subtle.importKey(
-    'raw',
-    rawKey as unknown as BufferSource,
-    { name: 'AES-GCM' },
-    false,
-    ['decrypt']
-  );
   const iv = new Uint8Array(payload, E2EE_MAGIC.length, E2EE_IV_LEN);
   const ciphertext = new Uint8Array(payload, E2EE_MAGIC.length + E2EE_IV_LEN);
   const decrypted = await window.crypto.subtle.decrypt(
@@ -237,6 +255,7 @@ export function sanitizeSensitiveText(input: string, maxLen = 2000): string {
  * Clears all document caches, queues, device IDs, and session tokens on shared / cyber-cafe PCs.
  */
 export async function wipeAllBrowserTraces(): Promise<number> {
+  clearCryptoKeyCache();
   let clearedCount = 0;
   if (typeof window === 'undefined') return 0;
 

@@ -334,7 +334,7 @@ class PriorityLoadBalancer:
             "/api/system/health",
             "/api/feedback",
             "/api/telemetry/error",
-        ) or path.startswith("/api/admin/"):
+        ) or path.startswith("/api/admin/") or path.startswith("/api/print-drop/jobs/"):
             return "bypass"
 
         if (

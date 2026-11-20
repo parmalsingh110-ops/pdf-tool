@@ -31,6 +31,8 @@ import cv2
 import numpy as np
 import requests
 
+from fast_codecs import fast_jpeg_encode, fast_json_loads
+
 try:
     from dotenv import load_dotenv
 
@@ -206,16 +208,14 @@ def _encode_image_b64_jpeg(img_bgr: np.ndarray, max_dim: int = 1240) -> str:
     work = img_bgr
     if scale < 0.99:
         work = cv2.resize(img_bgr, (max(64, int(w * scale)), max(64, int(h * scale))), interpolation=cv2.INTER_AREA)
-    ok, buf = cv2.imencode(".jpg", work, [int(cv2.IMWRITE_JPEG_QUALITY), 82])
-    if not ok:
-        raise ValueError("Failed to encode page image for Vision AI.")
-    return base64.b64encode(buf.tobytes()).decode("ascii")
+    jpg_bytes = fast_jpeg_encode(work, quality=82)
+    return base64.b64encode(jpg_bytes).decode("ascii")
 
 
 def _extract_json_object(raw: str) -> dict[str, Any]:
     cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", (raw or "").strip(), flags=re.IGNORECASE | re.MULTILINE).strip()
     try:
-        obj = json.loads(cleaned)
+        obj = fast_json_loads(cleaned)
         return obj if isinstance(obj, dict) else {}
     except Exception:
         start = cleaned.find("{")
@@ -224,7 +224,7 @@ def _extract_json_object(raw: str) -> dict[str, Any]:
             snippet = cleaned[start : end + 1]
             for candidate in (snippet, re.sub(r",\s*([}\]])", r"\1", snippet)):
                 try:
-                    obj = json.loads(candidate)
+                    obj = fast_json_loads(candidate)
                     if isinstance(obj, dict):
                         return obj
                 except Exception:
@@ -341,7 +341,7 @@ def _extract_json_any(raw: str) -> Any:
     if not cleaned:
         return None
     try:
-        return json.loads(cleaned)
+        return fast_json_loads(cleaned)
     except Exception:
         pass
     for open_c, close_c in (("{", "}"), ("[", "]")):
@@ -349,7 +349,7 @@ def _extract_json_any(raw: str) -> Any:
         e = cleaned.rfind(close_c)
         if s >= 0 and e > s:
             try:
-                return json.loads(cleaned[s : e + 1])
+                return fast_json_loads(cleaned[s : e + 1])
             except Exception:
                 continue
     return None
