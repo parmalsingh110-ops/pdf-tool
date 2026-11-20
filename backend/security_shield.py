@@ -338,7 +338,7 @@ class PriorityLoadBalancer:
             return "bypass"
 
         if (
-            path in ("/analyze/text-layout", "/analyze/page-layers", "/analyze/links", "/vision/assist")
+            path in ("/analyze/text-layout", "/analyze/page-layers", "/analyze/links", "/analyze/cmyk-preflight", "/vision/assist")
             or path.startswith("/api/print-drop/")
         ):
             return "fast"

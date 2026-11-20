@@ -1,13 +1,20 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Upload,
   Download,
   Sliders,
-  Eye,
   Smartphone,
   ChevronLeft,
   ChevronRight,
   Zap,
+  RotateCw,
+  Compass,
+  Printer,
+  Trash2,
+  Plus,
+  Sparkles,
+  Loader2,
+  CheckCircle2,
 } from 'lucide-react';
 import { motion, AnimatePresence, useReducedMotion } from 'motion/react';
 import { PDFDocument } from 'pdf-lib';
@@ -17,308 +24,410 @@ import { useSEO } from '../hooks/useSEO';
 import { usePageSEO } from '../lib/usePageSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
 import ShareQrModal from '../components/ShareQrModal';
+import BeforeAfterSlider from '../components/BeforeAfterSlider';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 import { AnimatedNumber, PearlScanOverlay } from '../components/pearl/PearlMotion';
-import { toArrayBufferBytes } from '../lib/blobUrl';
+import { toArrayBufferBytes, useAutoRevokeUrl } from '../lib/blobUrl';
 import { dataUrlToBytes, downloadBlob } from '../lib/utils';
+import {
+  type XeroxCleanMode,
+  type InkComparison,
+  processXeroxCanvas,
+  detectCorrectiveSkewAngle,
+  renderDeskewedCanvas,
+} from '../lib/documentCleanerEngine';
 
-type CleanMode = 'crisp_xerox' | 'grayscale' | 'toner_saver' | 'magic_color';
+type ExportPaperSize = 'auto_a4' | 'original' | 'a4_portrait' | 'legal';
 
 interface PageItem {
   id: number;
+  label: string;
   originalCanvas: HTMLCanvasElement;
-  cleanedCanvas: HTMLCanvasElement | null;
-  cleanedDataUrl: string | null;
+  originalDataUrl: string;
+  skewAngle: number;
+  rotation90: number;
 }
+
+const MODE_PRESETS: Array<{
+  id: XeroxCleanMode;
+  label: string;
+  desc: string;
+  defaults: { shadowRemoval: number; bleachThreshold: number; textDarkness: number; sharpen: number; despeckle: boolean };
+}> = [
+  {
+    id: 'pro_xerox',
+    label: 'Auto-Shadow Xerox (B&W)',
+    desc: 'Adaptive shadow removal + crisp black text',
+    defaults: { shadowRemoval: 92, bleachThreshold: 192, textDarkness: 48, sharpen: 35, despeckle: true },
+  },
+  {
+    id: 'magic_color',
+    label: 'Magic Color + Stamps',
+    desc: 'Pure white paper; keeps blue pens & red seals',
+    defaults: { shadowRemoval: 88, bleachThreshold: 186, textDarkness: 32, sharpen: 30, despeckle: false },
+  },
+  {
+    id: 'toner_saver',
+    label: 'Toner Saver (60% Eco)',
+    desc: 'Hollows solid black fills; sharp readable text',
+    defaults: { shadowRemoval: 90, bleachThreshold: 184, textDarkness: 35, sharpen: 25, despeckle: true },
+  },
+  {
+    id: 'photo_gray',
+    label: 'Smooth Photo Gray',
+    desc: 'Preserves Aadhaar & marksheet photos cleanly',
+    defaults: { shadowRemoval: 78, bleachThreshold: 200, textDarkness: 22, sharpen: 20, despeckle: false },
+  },
+  {
+    id: 'faded_rescue',
+    label: 'Faded Stamp Rescue',
+    desc: 'Restores old, yellowed & faint carbon scans',
+    defaults: { shadowRemoval: 100, bleachThreshold: 175, textDarkness: 70, sharpen: 55, despeckle: true },
+  },
+];
 
 export default function XeroxCleaner() {
   const prefersReduced = useReducedMotion();
 
   useSEO(
-    'Ultra Xerox Eco-Cleaner & Ink Saver — Whiten Document Background Online',
-    'Remove yellow shadows, dark backgrounds, and phone lighting from mobile photos of documents. Turn phone photos into pure white, sharp black photocopy prints. Free & private.'
+    'Ultra Xerox Eco-Cleaner Pro — Remove Shadows & Whiten Document Photos Online',
+    'Remove phone hand shadows, yellow lighting, and gray backgrounds using adaptive illumination normalization. Keep blue pens & red stamps vibrant or save up to 60% toner. Free & private.'
   );
 
   usePageSEO(
-    'Xerox Eco-Cleaner — Mobile Document Photo to Clean Photocopy',
-    'Free online tool for photo state shops, students and offices to turn muddy mobile scans and document photos into pure white crisp photocopies. Saves up to 60% printer toner.',
-    'whiten document background online, photocopy cleaner, mobile photo to xerox pdf, remove yellow background from document photo, save printer toner pdf, camscanner clean effect online',
+    'Ultra Xerox Eco-Cleaner Pro — Mobile Photo to Pure White Photocopy PDF',
+    'Pro document cleaner for Xerox shops, E-Mitra, students, and offices. Adaptive shadow removal, Sauvola photocopy B&W, stamp preservation, auto-deskew, and instant toner savings.',
+    'whiten document background online, photocopy cleaner, remove shadow from document photo, mobile photo to xerox pdf, save printer toner pdf, camscanner clean effect online, stamp paper cleaner',
     '/xerox-cleaner'
   );
 
-  const [files, setFiles] = useState<File[]>([]);
   const [pages, setPages] = useState<PageItem[]>([]);
   const [activePageIndex, setActivePageIndex] = useState<number>(0);
-  const [cleanMode, setCleanMode] = useState<CleanMode>('crisp_xerox');
-  const [whitenessThreshold, setWhitenessThreshold] = useState<number>(180); // 100-240
-  const [textDarkness, setTextDarkness] = useState<number>(35); // 0-100
-  const [contrastBoost] = useState<number>(20); // 0-50
+
+  // Cleaner parameters
+  const [cleanMode, setCleanMode] = useState<XeroxCleanMode>('pro_xerox');
+  const [shadowRemoval, setShadowRemoval] = useState<number>(92);
+  const [bleachThreshold, setBleachThreshold] = useState<number>(192);
+  const [textDarkness, setTextDarkness] = useState<number>(48);
+  const [sharpen, setSharpen] = useState<number>(35);
+  const [despeckle, setDespeckle] = useState<boolean>(true);
+  const [paperSize, setPaperSize] = useState<ExportPaperSize>('auto_a4');
+
+  // Live preview state (only active page is rendered in real time -> 60fps smooth!)
+  const [activeBeforeUrl, setActiveBeforeUrl] = useState<string | null>(null);
+  const [activeAfterUrl, setActiveAfterUrl] = useState<string | null>(null);
+  const [activeInk, setActiveInk] = useState<InkComparison | null>(null);
+
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
+  const [statusLabel, setStatusLabel] = useState<string>('');
+  const [deskewing, setDeskewing] = useState<boolean>(false);
   const [showQrModal, setShowQrModal] = useState<boolean>(false);
+  const [shareBlobUrl, setShareBlobUrl] = useState<string | null>(null);
+  const nextIdRef = useRef<number>(1);
+  const activeCleanedCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  // Pure processing function for a single page canvas
-  const processCleanCanvas = (
-    orig: HTMLCanvasElement,
-    mode: CleanMode,
-    thresh: number,
-    darknessPct: number,
-    _contrast: number
-  ) => {
-    const w = orig.width;
-    const h = orig.height;
-    const out = document.createElement('canvas');
-    out.width = w;
-    out.height = h;
-    const ctx = out.getContext('2d');
-    if (!ctx) return { canvas: orig, dataUrl: orig.toDataURL('image/jpeg', 0.90) };
+  useAutoRevokeUrl(shareBlobUrl);
 
-    ctx.drawImage(orig, 0, 0);
-    const imgData = ctx.getImageData(0, 0, w, h);
-    const data = imgData.data;
-    const darkness = darknessPct / 100;
+  const activePage = pages[activePageIndex] || null;
 
-    for (let i = 0; i < data.length; i += 4) {
-      const r = data[i];
-      const g = data[i + 1];
-      const b = data[i + 2];
-      const gray = 0.299 * r + 0.587 * g + 0.114 * b;
-
-      if (mode === 'crisp_xerox') {
-        if (gray >= thresh) {
-          data[i] = 255;
-          data[i + 1] = 255;
-          data[i + 2] = 255;
-        } else {
-          const darkVal = Math.max(0, Math.floor(gray * (1 - darkness)));
-          data[i] = darkVal;
-          data[i + 1] = darkVal;
-          data[i + 2] = darkVal;
-        }
-      } else if (mode === 'grayscale') {
-        if (gray >= thresh) {
-          data[i] = 255;
-          data[i + 1] = 255;
-          data[i + 2] = 255;
-        } else {
-          const remapped = (gray / thresh) * 220;
-          data[i] = remapped;
-          data[i + 1] = remapped;
-          data[i + 2] = remapped;
-        }
-      } else if (mode === 'toner_saver') {
-        if (gray >= thresh - 20) {
-          data[i] = 255;
-          data[i + 1] = 255;
-          data[i + 2] = 255;
-        } else {
-          const lightened = Math.min(180, Math.max(80, gray));
-          data[i] = lightened;
-          data[i + 1] = lightened;
-          data[i + 2] = lightened;
-        }
-      } else if (mode === 'magic_color') {
-        const maxChannel = Math.max(r, g, b);
-        const minChannel = Math.min(r, g, b);
-        const saturation = maxChannel > 0 ? (maxChannel - minChannel) / maxChannel : 0;
-
-        if (saturation < 0.18 && gray >= thresh - 15) {
-          data[i] = 255;
-          data[i + 1] = 255;
-          data[i + 2] = 255;
-        } else if (saturation >= 0.18) {
-          data[i] = Math.min(255, r + 15);
-          data[i + 1] = Math.min(255, g + 15);
-          data[i + 2] = Math.min(255, b + 15);
-        } else {
-          data[i] = Math.max(0, r - 30);
-          data[i + 1] = Math.max(0, g - 30);
-          data[i + 2] = Math.max(0, b - 30);
-        }
-      }
+  const selectMode = (modeId: XeroxCleanMode) => {
+    setCleanMode(modeId);
+    const preset = MODE_PRESETS.find((m) => m.id === modeId);
+    if (preset) {
+      setShadowRemoval(preset.defaults.shadowRemoval);
+      setBleachThreshold(preset.defaults.bleachThreshold);
+      setTextDarkness(preset.defaults.textDarkness);
+      setSharpen(preset.defaults.sharpen);
+      setDespeckle(preset.defaults.despeckle);
     }
-
-    ctx.putImageData(imgData, 0, 0);
-    return {
-      canvas: out,
-      dataUrl: out.toDataURL('image/jpeg', 0.90),
-    };
   };
 
-  // Load uploaded files (multiple images or multi-page PDF)
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selectedFiles = Array.from(e.target.files || []);
+  // Build oriented + cleaned canvas for a single PageItem
+  const buildCleanedPage = useCallback(
+    (item: PageItem) => {
+      const oriented =
+        item.skewAngle !== 0 || item.rotation90 !== 0
+          ? renderDeskewedCanvas(item.originalCanvas, item.skewAngle, item.rotation90, true, false)
+          : item.originalCanvas;
+      const result = processXeroxCanvas(oriented, {
+        mode: cleanMode,
+        shadowRemoval,
+        bleachThreshold,
+        textDarkness,
+        sharpen,
+        despeckle,
+      });
+      return { oriented, cleaned: result.canvas, ink: result.ink };
+    },
+    [cleanMode, shadowRemoval, bleachThreshold, textDarkness, sharpen, despeckle]
+  );
+
+  // Live preview of ONLY the active page (fast ~25ms, never lags on multi-page PDFs!)
+  useEffect(() => {
+    if (!activePage) {
+      setActiveBeforeUrl(null);
+      setActiveAfterUrl(null);
+      setActiveInk(null);
+      activeCleanedCanvasRef.current = null;
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      const { oriented, cleaned, ink } = buildCleanedPage(activePage);
+      activeCleanedCanvasRef.current = cleaned;
+      setActiveBeforeUrl(
+        activePage.skewAngle !== 0 || activePage.rotation90 !== 0
+          ? oriented.toDataURL('image/jpeg', 0.88)
+          : activePage.originalDataUrl
+      );
+      setActiveAfterUrl(cleaned.toDataURL('image/jpeg', 0.9));
+      setActiveInk(ink);
+    }, 60);
+
+    return () => clearTimeout(timer);
+  }, [activePage, buildCleanedPage]);
+
+  // Load uploaded files (append mode supported so users can add more photos!)
+  const loadFiles = async (selectedFiles: File[], append = false) => {
     if (selectedFiles.length === 0) return;
-    setFiles(selectedFiles);
     setIsProcessing(true);
+    setStatusLabel('Loading pages for adaptive shadow removal...');
 
-    const loadedPages: PageItem[] = [];
-    let pId = 1;
-
+    const loaded: PageItem[] = [];
     try {
       for (const f of selectedFiles) {
         if (f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf')) {
-          const arrayBuffer = await f.arrayBuffer();
-          const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) });
-          const pdf = await loadingTask.promise;
-
+          const ab = await f.arrayBuffer();
+          const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(ab) }).promise;
           for (let p = 1; p <= pdf.numPages; p++) {
+            setStatusLabel(`Reading ${f.name} (Page ${p}/${pdf.numPages})...`);
             const page = await pdf.getPage(p);
-            const viewport = page.getViewport({ scale: 1.8 });
+            const vp = page.getViewport({ scale: 2.0 });
             const canvas = document.createElement('canvas');
-            canvas.width = viewport.width;
-            canvas.height = viewport.height;
-            const ctx = canvas.getContext('2d');
+            canvas.width = vp.width;
+            canvas.height = vp.height;
+            const ctx = canvas.getContext('2d', { willReadFrequently: true });
             if (ctx) {
-              await page.render({ canvasContext: ctx, viewport, canvas } as any).promise;
-              const res = processCleanCanvas(canvas, cleanMode, whitenessThreshold, textDarkness, contrastBoost);
-              loadedPages.push({
-                id: pId++,
+              ctx.fillStyle = '#ffffff';
+              ctx.fillRect(0, 0, canvas.width, canvas.height);
+              await page.render({ canvasContext: ctx, viewport: vp, canvas } as any).promise;
+              loaded.push({
+                id: nextIdRef.current++,
+                label: `${f.name} · P${p}`,
                 originalCanvas: canvas,
-                cleanedCanvas: res.canvas,
-                cleanedDataUrl: res.dataUrl,
+                originalDataUrl: canvas.toDataURL('image/jpeg', 0.88),
+                skewAngle: 0,
+                rotation90: 0,
               });
             }
+            page.cleanup();
           }
         } else {
-          // Image file
           await new Promise<void>((resolve) => {
-            const reader = new FileReader();
-            reader.onload = (ev) => {
-              const img = new Image();
-              img.onload = () => {
-                const canvas = document.createElement('canvas');
-                canvas.width = img.naturalWidth;
-                canvas.height = img.naturalHeight;
-                const ctx = canvas.getContext('2d');
-                if (ctx) {
-                  ctx.drawImage(img, 0, 0);
-                  const res = processCleanCanvas(canvas, cleanMode, whitenessThreshold, textDarkness, contrastBoost);
-                  loadedPages.push({
-                    id: pId++,
-                    originalCanvas: canvas,
-                    cleanedCanvas: res.canvas,
-                    cleanedDataUrl: res.dataUrl,
-                  });
-                }
-                resolve();
-              };
-              img.src = ev.target?.result as string;
+            const url = URL.createObjectURL(f);
+            const img = new Image();
+            img.onload = () => {
+              // Cap ultra-huge 20MP camera photos at 2400px long side (300 DPI A4) to keep browser fast & sharp
+              const maxDim = 2400;
+              const scale = Math.min(1, maxDim / Math.max(img.naturalWidth, img.naturalHeight));
+              const canvas = document.createElement('canvas');
+              canvas.width = Math.round(img.naturalWidth * scale);
+              canvas.height = Math.round(img.naturalHeight * scale);
+              const ctx = canvas.getContext('2d', { willReadFrequently: true });
+              if (ctx) {
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                loaded.push({
+                  id: nextIdRef.current++,
+                  label: f.name,
+                  originalCanvas: canvas,
+                  originalDataUrl: canvas.toDataURL('image/jpeg', 0.88),
+                  skewAngle: 0,
+                  rotation90: 0,
+                });
+              }
+              URL.revokeObjectURL(url);
+              resolve();
             };
-            reader.readAsDataURL(f);
+            img.onerror = () => {
+              URL.revokeObjectURL(url);
+              resolve();
+            };
+            img.src = url;
           });
         }
       }
 
-      setPages(loadedPages);
-      setActivePageIndex(0);
+      if (append) {
+        setPages((prev) => [...prev, ...loaded]);
+      } else {
+        setPages(loaded);
+        setActivePageIndex(0);
+      }
     } catch (err) {
-      console.error('Error loading documents:', err);
+      console.error('[XeroxCleaner] Error loading files:', err);
+      alert('Failed to load one or more files. Please ensure PDFs are not password-protected.');
     } finally {
       setIsProcessing(false);
+      setStatusLabel('');
     }
   };
 
-  // Re-process pages when filter settings or loaded pages change (debounced for smooth 60fps sliders)
-  useEffect(() => {
-    if (pages.length === 0) return;
+  const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>, append = false) => {
+    const list = Array.from(e.target.files || []);
+    void loadFiles(list, append);
+    e.target.value = '';
+  };
 
-    const timer = setTimeout(() => {
-      setPages((prevPages) =>
-        prevPages.map((page) => {
-          const res = processCleanCanvas(
-            page.originalCanvas,
-            cleanMode,
-            whitenessThreshold,
-            textDarkness,
-            contrastBoost
-          );
-          return {
-            ...page,
-            cleanedCanvas: res.canvas,
-            cleanedDataUrl: res.dataUrl,
-          };
-        })
-      );
-    }, 80);
+  const handleRotateCurrent = () => {
+    if (!activePage) return;
+    setPages((prev) =>
+      prev.map((p, i) => (i === activePageIndex ? { ...p, rotation90: (p.rotation90 + 90) % 360 } : p))
+    );
+  };
 
-    return () => clearTimeout(timer);
-  }, [cleanMode, whitenessThreshold, textDarkness, contrastBoost, pages.length]);
+  const handleAutoDeskewCurrent = () => {
+    if (!activePage) return;
+    setDeskewing(true);
+    setTimeout(() => {
+      try {
+        const angle = detectCorrectiveSkewAngle(activePage.originalCanvas);
+        setPages((prev) =>
+          prev.map((p, i) => (i === activePageIndex ? { ...p, skewAngle: angle } : p))
+        );
+      } finally {
+        setDeskewing(false);
+      }
+    }, 30);
+  };
 
-  // Export all cleaned pages to single PDF
-  const handleDownloadPdf = async () => {
-    if (pages.length === 0) return;
+  const handleDeleteCurrent = () => {
+    if (pages.length <= 1) {
+      setPages([]);
+      setActivePageIndex(0);
+      return;
+    }
+    setPages((prev) => prev.filter((_, i) => i !== activePageIndex));
+    setActivePageIndex((prev) => Math.max(0, Math.min(prev, pages.length - 2)));
+  };
+
+  // Assemble full cleaned PDF Blob (reused for Download, Print, and Send to Phone QR!)
+  const assembleCleanPdfBlob = async (): Promise<Blob | null> => {
+    if (pages.length === 0) return null;
     setIsProcessing(true);
-
     try {
       const pdfDoc = await PDFDocument.create();
-
-      for (const p of pages) {
-        const canvas = p.cleanedCanvas || p.originalCanvas;
-        const jpgDataUrl = canvas.toDataURL('image/jpeg', 0.92);
+      for (let i = 0; i < pages.length; i++) {
+        setStatusLabel(`Cleaning & assembling page ${i + 1} of ${pages.length}...`);
+        const { cleaned } = buildCleanedPage(pages[i]);
+        const jpgDataUrl = cleaned.toDataURL('image/jpeg', 0.92);
         const jpgBytes = dataUrlToBytes(jpgDataUrl);
         const jpgImage = await pdfDoc.embedJpg(jpgBytes);
 
-        // Standard A4 point dimensions (595.28 x 841.89)
-        const a4W = 595.28;
-        const a4H = 841.89;
+        let pageW = 595.28;
+        let pageH = 841.89;
+        if (paperSize === 'auto_a4') {
+          if (cleaned.width > cleaned.height) {
+            pageW = 841.89;
+            pageH = 595.28;
+          }
+        } else if (paperSize === 'legal') {
+          pageW = 612;
+          pageH = 1008;
+        } else if (paperSize === 'original') {
+          // Match exact aspect ratio scaled to A4-equivalent width
+          pageW = 595.28;
+          pageH = Math.max(200, (cleaned.height / Math.max(1, cleaned.width)) * pageW);
+        }
 
-        // Scale image into A4 page
-        const scale = Math.min(a4W / canvas.width, a4H / canvas.height);
-        const drawW = canvas.width * scale;
-        const drawH = canvas.height * scale;
-        const x = (a4W - drawW) / 2;
-        const y = (a4H - drawH) / 2;
+        const scale = Math.min(pageW / cleaned.width, pageH / cleaned.height);
+        const drawW = cleaned.width * scale;
+        const drawH = cleaned.height * scale;
+        const page = pdfDoc.addPage([pageW, pageH]);
+        page.drawImage(jpgImage, {
+          x: (pageW - drawW) / 2,
+          y: (pageH - drawH) / 2,
+          width: drawW,
+          height: drawH,
+        });
 
-        const page = pdfDoc.addPage([a4W, a4H]);
-        page.drawImage(jpgImage, { x, y, width: drawW, height: drawH });
+        // Yield between pages to keep UI responsive
+        if (i % 2 === 1) await new Promise((r) => setTimeout(r, 0));
       }
 
       const outBytes = await pdfDoc.save();
-      const blob = new Blob([toArrayBufferBytes(outBytes)], { type: 'application/pdf' });
-      downloadBlob(blob, `clean-xerox-${Date.now()}.pdf`);
+      return new Blob([toArrayBufferBytes(outBytes)], { type: 'application/pdf' });
     } catch (err) {
-      console.error('Error creating clean PDF:', err);
+      console.error('[XeroxCleaner] PDF assembly error:', err);
+      alert('Failed to generate cleaned PDF. Please try again.');
+      return null;
     } finally {
       setIsProcessing(false);
+      setStatusLabel('');
     }
   };
 
-  // Export current page as JPG
-  const handleDownloadCurrentJpg = () => {
-    const cur = pages[activePageIndex];
-    if (!cur?.cleanedCanvas) return;
-    cur.cleanedCanvas.toBlob((blob) => {
-      if (blob) downloadBlob(blob, `clean-page-${activePageIndex + 1}.jpg`);
-    }, 'image/jpeg', 0.95);
+  const handleDownloadPdf = async () => {
+    const blob = await assembleCleanPdfBlob();
+    if (blob) downloadBlob(blob, `clean-xerox-pro-${Date.now()}.pdf`);
   };
 
-  const activePage = pages[activePageIndex];
+  const handleDirectPrint = async () => {
+    const blob = await assembleCleanPdfBlob();
+    if (!blob) return;
+    const url = URL.createObjectURL(blob);
+    const win = window.open(url, '_blank');
+    if (win) {
+      win.addEventListener('load', () => {
+        try { win.print(); } catch {}
+      });
+    }
+  };
+
+  const handleOpenShareQr = async () => {
+    const blob = await assembleCleanPdfBlob();
+    if (!blob) return;
+    setShareBlobUrl(URL.createObjectURL(blob));
+    setShowQrModal(true);
+  };
+
+  const handleDownloadCurrentJpg = () => {
+    const c = activeCleanedCanvasRef.current;
+    if (!c) return;
+    c.toBlob(
+      (blob) => {
+        if (blob) downloadBlob(blob, `clean-page-${activePageIndex + 1}.jpg`);
+      },
+      'image/jpeg',
+      0.95
+    );
+  };
 
   return (
     <ToolWorkspaceShell
-      title="Ultra Xerox Eco-Cleaner & Ink Saver"
-      subtitle="Transform dark, yellow, shadow-filled mobile photos into 100% pure white, sharp black photocopies. Saves up to 60% printer toner and delivers crystal-clear prints."
-      categoryLabel="Eco-Print & Photo State Special"
+      title="Ultra Xerox Eco-Cleaner Pro"
+      subtitle="Adaptive illumination shadow-removal engine. Turn dark, yellow, shadow-covered phone photos into spotless white photocopies — keep blue pens & red stamps crisp, auto-deskew, and cut toner usage by up to 65%."
+      categoryLabel="Eco-Print & Photo State Pro"
       icon={Zap}
       microVariant="ocr"
       tone="emerald"
-      trustNote="100% pure-white background bleach · Browser-only image engine"
+      trustNote="Integral-image shadow normalizer · Sauvola B&W · 100% browser-only privacy"
     >
       <div className="space-y-8">
-        {/* Upload State */}
         {pages.length === 0 ? (
           <motion.div
             initial={prefersReduced ? false : { opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             className="max-w-2xl mx-auto pms-glass-panel rounded-3xl p-4 relative overflow-hidden"
           >
-            <PearlScanOverlay active={isProcessing} label="Loading & bleaching uploaded pages..." />
+            <PearlScanOverlay active={isProcessing} label={statusLabel || 'Loading uploaded pages...'} />
             <label className="flex flex-col items-center justify-center p-12 border-2 border-dashed border-[var(--pms-border-strong)] hover:border-emerald-500 rounded-2xl cursor-pointer bg-[var(--pms-white)] transition-all group">
               <input
                 type="file"
                 multiple
                 accept=".pdf,image/png,image/jpeg,image/webp"
-                onChange={handleFileUpload}
+                onChange={(e) => handleFileInput(e, false)}
                 className="hidden"
               />
               <div
@@ -330,102 +439,226 @@ export default function XeroxCleaner() {
               <span className="text-base font-bold text-[var(--pms-ink)] mb-1">
                 Drop Mobile Photos or Scanned PDF
               </span>
-              <span className="text-xs text-[var(--pms-muted)] text-center max-w-xs">
-                Upload student notes, marksheets, receipts, book pages, or certificates. Supports batch files.
+              <span className="text-xs text-[var(--pms-muted)] text-center max-w-sm">
+                Upload shadowed notes, Aadhaar/marksheets, old stamp papers, receipts, or multi-page scanned PDFs.
               </span>
             </label>
           </motion.div>
         ) : (
-          /* Editor Layout */
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
             {/* Left Controls */}
             <motion.div
               initial={prefersReduced ? false : { opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
-              className="lg:col-span-4 space-y-5 pms-glass-panel p-6 rounded-3xl"
+              className="lg:col-span-4 space-y-4 pms-glass-panel p-5 rounded-3xl"
             >
               <div className="flex items-center justify-between pb-3 border-b border-[var(--pms-border)]">
                 <span className="text-sm font-bold text-[var(--pms-ink)] flex items-center gap-2">
-                  <Sliders className="w-4 h-4 text-emerald-500" /> Cleaner Controls
+                  <Sliders className="w-4 h-4 text-emerald-500" /> Pro Cleaner Controls
                 </span>
                 <div className="flex items-center gap-2">
-                  <span
-                    className="text-[11px] font-bold px-2 py-0.5 rounded-full text-[var(--pms-ink)] border border-[var(--pms-border)]"
-                    style={{ background: 'var(--pms-soft-blue)' }}
-                  >
-                    {files.length} file{files.length === 1 ? '' : 's'}
-                  </span>
+                  <label className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-[var(--pms-soft-blue)] text-[var(--pms-ink)] border border-[var(--pms-border)] cursor-pointer hover:opacity-90 flex items-center gap-1">
+                    <Plus className="w-3 h-3" /> Add
+                    <input
+                      type="file"
+                      multiple
+                      accept=".pdf,image/png,image/jpeg,image/webp"
+                      onChange={(e) => handleFileInput(e, true)}
+                      className="hidden"
+                    />
+                  </label>
                   <button
                     onClick={() => setPages([])}
                     className="text-xs text-rose-500 hover:text-rose-600 font-semibold cursor-pointer"
                   >
-                    Clear Files
+                    Clear
                   </button>
                 </div>
               </div>
 
-              {/* Cleaning Mode Presets */}
+              {/* Real Measured Toner Savings Meter */}
+              {activeInk && (
+                <div
+                  className="p-3.5 rounded-2xl border border-[var(--pms-border)] space-y-2"
+                  style={{ background: 'var(--pms-soft-mint)' }}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-800 dark:text-emerald-300 flex items-center gap-1">
+                      <Sparkles className="w-3.5 h-3.5" /> Real Toner Coverage
+                    </span>
+                    <span className="text-xs font-black px-2 py-0.5 rounded-full bg-emerald-600 text-white">
+                      {activeInk.savedPercent}% Saved
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 text-center text-[11px]">
+                    <div className="bg-white/80 dark:bg-slate-900/70 rounded-xl p-1.5 border border-[var(--pms-border)]">
+                      <div className="text-[10px] text-[var(--pms-muted)]">Before</div>
+                      <div className="font-mono font-bold text-rose-600 dark:text-rose-400">
+                        {activeInk.before.totalCoveragePct}%
+                      </div>
+                    </div>
+                    <div className="bg-white/80 dark:bg-slate-900/70 rounded-xl p-1.5 border border-[var(--pms-border)]">
+                      <div className="text-[10px] text-[var(--pms-muted)]">After</div>
+                      <div className="font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                        {activeInk.after.totalCoveragePct}%
+                      </div>
+                    </div>
+                    <div className="bg-white/80 dark:bg-slate-900/70 rounded-xl p-1.5 border border-[var(--pms-border)]">
+                      <div className="text-[10px] text-[var(--pms-muted)]">Est. / 100p</div>
+                      <div className="font-mono font-bold text-[var(--pms-ink)]">
+                        ₹{activeInk.rupeesSavedPer100Pages}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* 5 Cleaning Mode Presets */}
               <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-[var(--pms-muted)] mb-2">
-                  Cleaning Mode
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-[var(--pms-muted)] mb-2">
+                  Cleaning Engine Mode
                 </label>
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  {[
-                    { id: 'crisp_xerox', label: 'Crisp Xerox (B&W)', desc: '100% white + black ink' },
-                    { id: 'grayscale', label: 'Smooth Grayscale', desc: 'Photos & diagrams' },
-                    { id: 'toner_saver', label: 'Toner Saver (Eco)', desc: 'Saves 50% printer ink' },
-                    { id: 'magic_color', label: 'Magic Color Scan', desc: 'Keeps blue pens & stamps' },
-                  ].map((m) => (
+                <div className="grid grid-cols-1 gap-1.5 text-xs">
+                  {MODE_PRESETS.map((m) => (
                     <button
                       key={m.id}
-                      onClick={() => setCleanMode(m.id as CleanMode)}
-                      className={`p-2.5 rounded-xl border text-left font-medium transition cursor-pointer ${
+                      type="button"
+                      onClick={() => selectMode(m.id)}
+                      className={`p-2.5 rounded-xl border text-left transition cursor-pointer ${
                         cleanMode === m.id
-                          ? 'border-emerald-500 bg-[var(--pms-soft-mint)] text-[var(--pms-ink)] shadow-sm'
+                          ? 'border-emerald-500 bg-[var(--pms-soft-mint)] text-[var(--pms-ink)] shadow-xs'
                           : 'border-[var(--pms-border)] bg-[var(--pms-white)] text-[var(--pms-muted)] hover:text-[var(--pms-ink)]'
                       }`}
                     >
-                      <div className="font-bold">{m.label}</div>
-                      <div className="text-[10px] opacity-75 mt-0.5">{m.desc}</div>
+                      <div className="font-bold flex items-center justify-between">
+                        <span>{m.label}</span>
+                        {cleanMode === m.id && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />}
+                      </div>
+                      <div className="text-[10px] opacity-80 mt-0.5">{m.desc}</div>
                     </button>
                   ))}
                 </div>
               </div>
 
-              {/* Whiteness Threshold Slider */}
-              <div className="space-y-3 p-4 bg-[var(--pms-white)] rounded-2xl border border-[var(--pms-border)] text-xs">
+              {/* Fine-Tune Sliders */}
+              <div className="space-y-3 p-3.5 bg-[var(--pms-white)] rounded-2xl border border-[var(--pms-border)] text-xs">
                 <div>
                   <div className="flex justify-between items-center font-semibold mb-1">
-                    <span className="text-[var(--pms-ink)]">Background Bleach Level</span>
-                    <span className="text-emerald-600 dark:text-emerald-400 font-mono">{whitenessThreshold}</span>
+                    <span className="text-[var(--pms-ink)]">Adaptive Shadow Removal</span>
+                    <span className="text-emerald-600 dark:text-emerald-400 font-mono">{shadowRemoval}%</span>
                   </div>
                   <input
                     type="range"
-                    min="120"
-                    max="230"
-                    value={whitenessThreshold}
-                    onChange={(e) => setWhitenessThreshold(Number(e.target.value))}
+                    min="0"
+                    max="100"
+                    value={shadowRemoval}
+                    onChange={(e) => setShadowRemoval(Number(e.target.value))}
                     className="w-full accent-emerald-600"
                   />
-                  <div className="flex justify-between text-[10px] text-[var(--pms-muted)] mt-1">
-                    <span>Keep light pencils</span>
-                    <span>Aggressive Whiten</span>
+                  <div className="flex justify-between text-[10px] text-[var(--pms-muted)]">
+                    <span>Off (Flat)</span>
+                    <span>Erase Hand/Lamp Shadows</span>
                   </div>
                 </div>
 
                 <div>
                   <div className="flex justify-between items-center font-semibold mb-1">
-                    <span className="text-[var(--pms-ink)]">Text Darkness Boost</span>
+                    <span className="text-[var(--pms-ink)]">Paper Whiteness Cutoff</span>
+                    <span className="text-emerald-600 dark:text-emerald-400 font-mono">{bleachThreshold}</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="130"
+                    max="235"
+                    value={bleachThreshold}
+                    onChange={(e) => setBleachThreshold(Number(e.target.value))}
+                    className="w-full accent-emerald-600"
+                  />
+                </div>
+
+                <div>
+                  <div className="flex justify-between items-center font-semibold mb-1">
+                    <span className="text-[var(--pms-ink)]">Text Ink Darkness</span>
                     <span className="text-emerald-600 dark:text-emerald-400 font-mono">{textDarkness}%</span>
                   </div>
                   <input
                     type="range"
                     min="0"
-                    max="80"
+                    max="90"
                     value={textDarkness}
                     onChange={(e) => setTextDarkness(Number(e.target.value))}
                     className="w-full accent-emerald-600"
                   />
+                </div>
+
+                <div>
+                  <div className="flex justify-between items-center font-semibold mb-1">
+                    <span className="text-[var(--pms-ink)]">Text Crispness (Sharpen)</span>
+                    <span className="text-emerald-600 dark:text-emerald-400 font-mono">{sharpen}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0"
+                    max="100"
+                    value={sharpen}
+                    onChange={(e) => setSharpen(Number(e.target.value))}
+                    className="w-full accent-emerald-600"
+                  />
+                </div>
+
+                <label className="flex items-center justify-between pt-2 border-t border-[var(--pms-border)] cursor-pointer select-none">
+                  <span className="font-semibold text-[var(--pms-ink)]">Despeckle Scanner Dust</span>
+                  <input
+                    type="checkbox"
+                    checked={despeckle}
+                    onChange={(e) => setDespeckle(e.target.checked)}
+                    className="w-4 h-4 accent-emerald-600 rounded"
+                  />
+                </label>
+              </div>
+
+              {/* Page Geometry & Output Size */}
+              <div className="p-3.5 bg-[var(--pms-white)] rounded-2xl border border-[var(--pms-border)] space-y-2.5 text-xs">
+                <div className="grid grid-cols-3 gap-1.5">
+                  <button
+                    type="button"
+                    onClick={handleAutoDeskewCurrent}
+                    disabled={deskewing}
+                    className="py-2 px-2 rounded-xl border border-[var(--pms-border)] hover:border-emerald-500 font-semibold text-[var(--pms-ink)] flex items-center justify-center gap-1 cursor-pointer disabled:opacity-50"
+                  >
+                    {deskewing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Compass className="w-3.5 h-3.5 text-emerald-600" />}
+                    <span>Deskew</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleRotateCurrent}
+                    className="py-2 px-2 rounded-xl border border-[var(--pms-border)] hover:border-emerald-500 font-semibold text-[var(--pms-ink)] flex items-center justify-center gap-1 cursor-pointer"
+                  >
+                    <RotateCw className="w-3.5 h-3.5 text-sky-600" />
+                    <span>Rotate</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleDeleteCurrent}
+                    className="py-2 px-2 rounded-xl border border-[var(--pms-border)] hover:border-rose-500 font-semibold text-rose-600 flex items-center justify-center gap-1 cursor-pointer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Remove</span>
+                  </button>
+                </div>
+
+                <div className="flex items-center justify-between gap-2 pt-1">
+                  <span className="font-semibold text-[var(--pms-muted)]">PDF Page Size</span>
+                  <select
+                    value={paperSize}
+                    onChange={(e) => setPaperSize(e.target.value as ExportPaperSize)}
+                    className="px-2.5 py-1.5 rounded-lg border border-[var(--pms-border)] bg-[var(--pms-white)] text-[var(--pms-ink)] font-semibold text-xs"
+                  >
+                    <option value="auto_a4">A4 (Auto-Orientation)</option>
+                    <option value="a4_portrait">A4 Portrait</option>
+                    <option value="legal">Legal Sheet</option>
+                    <option value="original">Exact Aspect Ratio</option>
+                  </select>
                 </div>
               </div>
 
@@ -436,7 +669,7 @@ export default function XeroxCleaner() {
                     initial={prefersReduced ? false : { opacity: 0, height: 0 }}
                     animate={{ opacity: 1, height: 'auto' }}
                     exit={prefersReduced ? undefined : { opacity: 0, height: 0 }}
-                    className="flex items-center justify-between p-3 bg-[var(--pms-white)] border border-[var(--pms-border)] rounded-xl text-xs font-semibold text-[var(--pms-ink)]"
+                    className="flex items-center justify-between p-2.5 bg-[var(--pms-white)] border border-[var(--pms-border)] rounded-xl text-xs font-semibold text-[var(--pms-ink)]"
                   >
                     <button
                       onClick={() => setActivePageIndex(Math.max(0, activePageIndex - 1))}
@@ -445,8 +678,9 @@ export default function XeroxCleaner() {
                     >
                       <ChevronLeft className="w-4 h-4" />
                     </button>
-                    <span>
-                      Page {activePageIndex + 1} of <AnimatedNumber value={pages.length} />
+                    <span className="truncate px-2">
+                      Page {activePageIndex + 1} / <AnimatedNumber value={pages.length} />
+                      {activePage?.skewAngle ? ` (${activePage.skewAngle > 0 ? '+' : ''}${activePage.skewAngle}°)` : ''}
                     </span>
                     <button
                       onClick={() => setActivePageIndex(Math.min(pages.length - 1, activePageIndex + 1))}
@@ -459,125 +693,126 @@ export default function XeroxCleaner() {
                 )}
               </AnimatePresence>
 
-              {/* Action Buttons */}
-              <div className="pt-3 border-t border-[var(--pms-border)] space-y-2">
+              {/* Export & Print Buttons */}
+              <div className="pt-2 border-t border-[var(--pms-border)] space-y-2">
                 <button
                   onClick={handleDownloadPdf}
                   disabled={isProcessing}
                   className="pms-btn-primary w-full flex items-center justify-center gap-2 py-3.5 px-4 rounded-xl font-bold text-sm transition disabled:opacity-50 cursor-pointer"
                 >
-                  <Download className="w-4 h-4" /> Download Cleaned A4 PDF (<AnimatedNumber value={pages.length} /> pages)
+                  <Download className="w-4 h-4" /> Download Cleaned PDF (<AnimatedNumber value={pages.length} />p)
                 </button>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-3 gap-1.5">
                   <button
-                    onClick={handleDownloadCurrentJpg}
-                    className="flex items-center justify-center gap-1.5 py-2.5 px-3 bg-[var(--pms-white)] border border-[var(--pms-border)] hover:border-[var(--pms-border-strong)] text-[var(--pms-ink)] rounded-xl font-semibold text-xs transition cursor-pointer"
+                    onClick={handleDirectPrint}
+                    disabled={isProcessing}
+                    className="flex items-center justify-center gap-1 py-2.5 px-2 bg-[var(--pms-white)] border border-[var(--pms-border)] hover:border-emerald-500 text-[var(--pms-ink)] rounded-xl font-semibold text-[11px] transition cursor-pointer"
                   >
-                    <Download className="w-3.5 h-3.5" /> Page {activePageIndex + 1} JPG
+                    <Printer className="w-3.5 h-3.5 text-emerald-600" /> Print
                   </button>
                   <button
-                    onClick={() => setShowQrModal(true)}
-                    className="flex items-center justify-center gap-1.5 py-2.5 px-3 border border-[var(--pms-border)] text-[var(--pms-ink)] rounded-xl font-semibold text-xs transition cursor-pointer hover:opacity-90"
+                    onClick={handleDownloadCurrentJpg}
+                    className="flex items-center justify-center gap-1 py-2.5 px-2 bg-[var(--pms-white)] border border-[var(--pms-border)] hover:border-[var(--pms-border-strong)] text-[var(--pms-ink)] rounded-xl font-semibold text-[11px] transition cursor-pointer"
+                  >
+                    <Download className="w-3.5 h-3.5" /> P{activePageIndex + 1} JPG
+                  </button>
+                  <button
+                    onClick={handleOpenShareQr}
+                    disabled={isProcessing}
+                    className="flex items-center justify-center gap-1 py-2.5 px-2 border border-[var(--pms-border)] text-[var(--pms-ink)] rounded-xl font-semibold text-[11px] transition cursor-pointer hover:opacity-90"
                     style={{ background: 'var(--pms-soft-blue)' }}
                   >
-                    <Smartphone className="w-3.5 h-3.5 text-[var(--pms-blue)]" /> Send to Phone
+                    <Smartphone className="w-3.5 h-3.5 text-[var(--pms-blue)]" /> Share
                   </button>
                 </div>
               </div>
             </motion.div>
 
-            {/* Right Live Preview */}
+            {/* Right Interactive Split Preview */}
             <motion.div
               initial={prefersReduced ? false : { opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.06 }}
-              className="lg:col-span-8 pms-glass-panel p-6 rounded-3xl flex flex-col items-center relative overflow-hidden"
+              transition={{ delay: 0.05 }}
+              className="lg:col-span-8 pms-glass-panel p-5 sm:p-6 rounded-3xl flex flex-col items-center relative overflow-hidden"
             >
-              <PearlScanOverlay active={isProcessing} label="Bleaching paper & assembling A4 PDF..." />
+              <PearlScanOverlay active={isProcessing} label={statusLabel || 'Bleaching paper & assembling PDF...'} />
 
-              <div className="w-full flex items-center justify-between mb-4 flex-wrap gap-2">
-                <span className="text-xs font-bold uppercase tracking-wider text-[var(--pms-muted)] flex items-center gap-1.5">
-                  <Eye className="w-4 h-4 text-emerald-500" /> Cleaned Photocopy Preview
-                </span>
-                <span
-                  className="text-xs font-semibold px-2.5 py-1 text-[var(--pms-ink)] rounded-full border border-[var(--pms-border)]"
-                  style={{ background: 'var(--pms-soft-mint)' }}
-                >
-                  100% White Paper Bleached
-                </span>
-              </div>
-
-              {activePage?.cleanedDataUrl ? (
-                <div className="w-full max-h-[640px] overflow-auto flex items-center justify-center p-4 pms-paper-grid rounded-2xl border border-[var(--pms-border)]">
-                  <img
-                    src={activePage.cleanedDataUrl}
-                    alt={`Cleaned Document Page ${activePageIndex + 1}`}
-                    className="max-h-[580px] w-auto object-contain rounded bg-white shadow-lg border border-[var(--pms-border-strong)]"
-                  />
-                </div>
+              {activeBeforeUrl && activeAfterUrl ? (
+                <BeforeAfterSlider
+                  beforeSrc={activeBeforeUrl}
+                  afterSrc={activeAfterUrl}
+                  beforeLabel="Original Photo"
+                  afterLabel="Cleaned Xerox"
+                  maxHeightClass="max-h-[600px]"
+                  badgeText={
+                    activeInk
+                      ? `Toner: ${activeInk.before.totalCoveragePct}% → ${activeInk.after.totalCoveragePct}% (${activeInk.savedPercent}% saved)`
+                      : 'Adaptive Shadow Removal Active'
+                  }
+                />
               ) : (
-                <div className="w-full h-96 flex items-center justify-center text-[var(--pms-muted)] text-xs">
-                  Cleaning document background...
+                <div className="w-full h-96 flex items-center justify-center text-[var(--pms-muted)] text-xs gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin text-emerald-600" />
+                  Normalizing page illumination...
                 </div>
               )}
             </motion.div>
           </div>
         )}
 
-        {/* SEO Section */}
         <ToolSEOSection
-          toolName="Ultra Xerox Eco-Cleaner"
-          headline="Convert Muddy Phone Photos of Documents into Crisp Clean Photocopies"
-          description="Taking photos of documents with a smartphone often results in yellow room lighting, gray table shadows, and wrinkled paper backgrounds. If printed directly, photocopy machines waste excessive black toner resulting in muddy prints. Our Ultra Xerox Eco-Cleaner automatically normalizes paper luminance to 100% pure white (#FFFFFF) while sharpening handwritten or printed text."
+          toolName="Ultra Xerox Eco-Cleaner Pro"
+          headline="Remove Uneven Phone Shadows & Turn Document Photos into Crisp Photocopies"
+          description="Unlike basic threshold filters that turn shadowed corners black, our Integral-Image Illumination Normalizer estimates the local lighting surface across your page, removes yellow bulb tints and hand shadows completely, preserves blue pen signatures and official red stamps, and measures real CMYK toner savings."
           steps={[
             {
               step: '01',
-              title: 'Upload Mobile Photos or PDF',
-              desc: 'Select one or more phone photos of your notes, certificates, bills, or a multi-page PDF.',
+              title: 'Upload Mobile Photos or Scanned PDFs',
+              desc: 'Drop one or many phone photos (notes, certificates, stamp papers, Aadhaar) or multi-page scanned PDFs.',
             },
             {
               step: '02',
-              title: 'Choose Cleaning Preset',
-              desc: 'Select Crisp Xerox for classic photocopy, Toner Saver to reduce printer ink usage, or Magic Color to retain colored stamps and signatures.',
+              title: 'Choose Pro Cleaning Engine & Compare Live',
+              desc: 'Drag the Before/After split slider to verify shadows are gone. Use Auto-Shadow Xerox, Magic Color (keeps stamps), or Toner Saver (hollows thick black fills).',
             },
             {
               step: '03',
-              title: 'Download Clean A4 PDF',
-              desc: 'Get an ultra-sharp, professional PDF ready for printing or instant submission.',
+              title: 'Auto-Deskew & Print or Download PDF',
+              desc: 'Straighten tilted photos in 1 click, pick A4/Legal/Original size, and print directly or download a crisp multi-page PDF.',
             },
           ]}
           features={[
             {
-              title: '100% White Paper Clamp',
-              desc: 'Eliminates gray backgrounds and yellow tungsten lighting shadows completely.',
+              title: 'Local Shadow & Glare Removal',
+              desc: 'Divisive background illumination estimation erases dark hand shadows and yellow tungsten room light evenly across the entire sheet.',
             },
             {
-              title: 'Toner Saver Eco-Mode',
-              desc: 'Specially engineered for students printing 50+ page syllabus notes without running out of ink.',
+              title: 'Edge-Preserving Toner Saver',
+              desc: 'Hollows out thick black boxes and dark headers while keeping thin Hindi/English text strokes razor-sharp — saving up to 65% toner.',
             },
             {
-              title: 'Magic Color Signature Retention',
-              desc: 'Bleaches dirty paper background while keeping blue ink ballpoint signatures and official red seals vibrant.',
+              title: 'Magic Color Stamp & Pen Retention',
+              desc: 'Whitens dirty paper to #FFFFFF while boosting blue ballpoint signatures, red government seals, and purple ink stamps.',
             },
           ]}
           faqs={[
             {
-              q: 'How does this tool save printer toner?',
-              a: 'A standard photocopy machine attempts to print all gray paper shadows as dots of black toner. By converting the entire paper area to pure white (RGB 255, 255, 255), the printer dispenses toner ONLY on the actual text characters, saving up to 60% toner.',
+              q: 'Why does this work on shadowed phone photos when other cleaners turn them black?',
+              a: 'Basic cleaners compare every pixel to a single fixed brightness cutoff, which fails whenever one side of the page is darker. Our engine estimates the local lighting surface across the page first, neutralizing shadows before sharpening the text.',
             },
             {
-              q: 'Can I upload multiple photos at once?',
-              a: 'Yes, you can upload multiple images simultaneously. The tool will process all of them and compile them into a single, clean multi-page A4 PDF.',
+              q: 'Are my Aadhaar, marksheets, or legal stamp papers uploaded to any server?',
+              a: 'No. 100% of the shadow removal, deskewing, and PDF assembly runs locally inside your browser memory.',
             },
           ]}
         />
 
-        {/* Mobile Transfer Modal */}
         <ShareQrModal
           isOpen={showQrModal}
           onClose={() => setShowQrModal(false)}
           title="Cleaned Photocopy PDF"
-          fileName="clean-xerox.pdf"
+          fileBlobUrl={shareBlobUrl}
+          fileName="clean-xerox-pro.pdf"
         />
       </div>
     </ToolWorkspaceShell>

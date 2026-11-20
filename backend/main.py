@@ -55,6 +55,12 @@ from fast_codecs import (
     get_accelerator_status,
     get_default_json_response_class,
 )
+from prepress_engine import (
+    ensure_pdf_input,
+    convert_pdf_to_cmyk_pro,
+    analyze_cmyk_preflight,
+    convert_pdf_to_vector_grayscale,
+)
 
 from vision_reconstructor import (
     normalize_input_to_pdf,
@@ -350,6 +356,13 @@ app.add_middleware(
         "X-Cache",
         "X-Orig-Bytes",
         "X-Compressed-Bytes",
+        "X-CMYK-Profile",
+        "X-CMYK-Pure-K",
+        "X-CMYK-Avg-TAC",
+        "X-CMYK-Max-TAC",
+        "X-CMYK-Crop-Marks",
+        "X-Gray-Avg-K",
+        "X-Gray-Vector",
         "Retry-After",
     ],
     allow_credentials=False,
@@ -4798,42 +4811,80 @@ async def replace_pdf_image(
         raise safe_error(e, "edit-pdf/replace-image")
 
 
-# ─── 9. CMYK Color Converter ───────────────────────────────────
-# Converts RGB PDF to CMYK color space for professional printing.
-# Uses Ghostscript (already required for compress-pdf).
+# ─── 9. Pro CMYK Pre-Press, Separation Preflight & Vector Grayscale ───────────
+# Converts RGB PDF/Images to Press-Ready CMYK (with optional Pure-K black text preservation,
+# press ICC profiles, and 3mm bleed + vector crop marks), inspects real Ghostscript ink_cov
+# & 4-plate separations, and generates true 1-channel DeviceGray vector PDFs.
+
+@app.post("/analyze/cmyk-preflight")
+@limiter.limit("20/minute")
+async def cmyk_preflight(
+    request: Request,
+    file: UploadFile = File(...),
+    preview_page: int = Form(1),
+):
+    """
+    Real Pre-Press Preflight & 4-Plate Separation Inspector:
+    Measures exact per-page C, M, Y, K % via Ghostscript `ink_cov`, audits color spaces,
+    flags <200 DPI images & >280% TAC over-ink areas, and returns Soft-Proof + C/M/Y/K plates.
+    """
+    inp = temp_path(".pdf")
+    try:
+        raw = await safe_read_upload(file)
+        await run_in_threadpool(ensure_pdf_input, raw, file.filename or "document.pdf", inp, 300)
+        check_pdf_page_count(inp, "cmyk-preflight")
+        report = await run_in_threadpool(analyze_cmyk_preflight, inp, preview_page)
+        cleanup(inp)
+        return report
+    except HTTPException:
+        cleanup(inp)
+        raise
+    except ValueError as ve:
+        cleanup(inp)
+        raise HTTPException(400, str(ve))
+    except FileNotFoundError:
+        cleanup(inp)
+        raise HTTPException(500, "Ghostscript is not installed on this server.")
+    except Exception as e:
+        cleanup(inp)
+        raise safe_error(e, "cmyk-preflight")
+
 
 @app.post("/convert/cmyk")
-@limiter.limit("10/minute")
-async def convert_to_cmyk(request: Request, file: UploadFile = File(...)):
+@limiter.limit("12/minute")
+async def convert_to_cmyk(
+    request: Request,
+    file: UploadFile = File(...),
+    profile: str = Form("iso_coated"),
+    preserve_black: bool = Form(True),
+    pdfx_compat: str = Form("pdf14"),
+    add_crop_marks: bool = Form(False),
+    bleed_mm: float = Form(3.0),
+    dpi: int = Form(300),
+):
     """
-    Convert an RGB PDF to CMYK color space using Ghostscript.
-    Required for professional offset printing (ISO Coated v2 compatible).
+    Convert an RGB PDF or high-res Image (JPG/PNG/WebP/TIFF) to press-ready DeviceCMYK PDF
+    with ICC profile selection, 100% Pure K-Only Black text preservation, and optional crop marks.
     """
     inp = temp_path(".pdf")
     out = temp_path("_cmyk.pdf")
     try:
-        inp.write_bytes(await safe_read_upload(file))
+        raw = await safe_read_upload(file)
+        await run_in_threadpool(ensure_pdf_input, raw, file.filename or "document.pdf", inp, dpi)
         check_pdf_page_count(inp, "convert-cmyk")
 
-        gs_cmd = [
-            "gs",
-            "-dBATCH", "-dNOPAUSE", "-dQUIET",
-            "-dSAFER",
-            "-sDEVICE=pdfwrite",
-            "-dCompatibilityLevel=1.4",
-            "-sColorConversionStrategy=CMYK",
-            "-dProcessColorModel=/DeviceCMYK",
-            "-dOverrideICC=true",
-            f"-sOutputFile={out}",
-            str(inp)
-        ]
-
         try:
-            result = subprocess.run(
-                gs_cmd, check=True,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
-                timeout=120
+            meta = await run_in_threadpool(
+                convert_pdf_to_cmyk_pro,
+                inp,
+                out,
+                out.parent,
+                profile,
+                preserve_black,
+                pdfx_compat,
+                add_crop_marks,
+                bleed_mm,
+                dpi,
             )
         except subprocess.CalledProcessError as e:
             logger.error(f"[CMYK] Ghostscript failed: {e.stderr[:300] if e.stderr else 'no stderr'}")
@@ -4841,22 +4892,87 @@ async def convert_to_cmyk(request: Request, file: UploadFile = File(...)):
         except FileNotFoundError:
             raise HTTPException(500, "Ghostscript is not installed on this server. Cannot perform CMYK conversion.")
 
-        if not out.exists() or out.stat().st_size == 0:
-            raise RuntimeError("CMYK output PDF not generated.")
-
         stem = safe_filename(file.filename, "document")
         out_name = Path(stem).stem + "_CMYK.pdf"
+        headers = {
+            "X-CMYK-Profile": str(meta.get("profile", "iso_coated")),
+            "X-CMYK-Pure-K": "true" if meta.get("pure_k_black") else "false",
+            "X-CMYK-Avg-TAC": str(meta.get("avg_tac_pct", 0.0)),
+            "X-CMYK-Max-TAC": str(meta.get("max_tac_pct", 0.0)),
+            "X-CMYK-Crop-Marks": "true" if meta.get("crop_marks") else "false",
+        }
         return FileResponse(
-            str(out), media_type="application/pdf",
+            str(out),
+            media_type="application/pdf",
             filename=out_name,
-            background=BackgroundTask(cleanup, inp, out)
+            headers=headers,
+            background=BackgroundTask(cleanup, inp, out),
         )
     except HTTPException:
         cleanup(inp, out)
         raise
+    except ValueError as ve:
+        cleanup(inp, out)
+        raise HTTPException(400, str(ve))
     except Exception as e:
         cleanup(inp, out)
         raise safe_error(e, "convert-cmyk")
+
+
+@app.post("/convert/grayscale")
+@limiter.limit("15/minute")
+async def convert_to_vector_grayscale(
+    request: Request,
+    file: UploadFile = File(...),
+    eco_lighten_pct: int = Form(0),
+):
+    """
+    Convert any color PDF into a genuine 1-channel DeviceGray vector PDF using Ghostscript.
+    Preserves crisp selectable text, bookmarks, and links while guaranteeing B&W print billing.
+    """
+    inp = temp_path(".pdf")
+    out = temp_path("_gray.pdf")
+    try:
+        raw = await safe_read_upload(file)
+        await run_in_threadpool(ensure_pdf_input, raw, file.filename or "document.pdf", inp, 300)
+        check_pdf_page_count(inp, "convert-grayscale")
+
+        try:
+            meta = await run_in_threadpool(
+                convert_pdf_to_vector_grayscale,
+                inp,
+                out,
+                out.parent,
+                eco_lighten_pct,
+            )
+        except subprocess.CalledProcessError as e:
+            logger.error(f"[Grayscale] Ghostscript failed: {e.stderr[:300] if e.stderr else 'no stderr'}")
+            raise RuntimeError("Ghostscript vector grayscale conversion failed.")
+        except FileNotFoundError:
+            raise HTTPException(500, "Ghostscript is not installed on this server.")
+
+        stem = safe_filename(file.filename, "document")
+        out_name = Path(stem).stem + "_DeviceGray.pdf"
+        headers = {
+            "X-Gray-Avg-K": str(meta.get("avg_black_ink_pct", 0.0)),
+            "X-Gray-Vector": "true",
+        }
+        return FileResponse(
+            str(out),
+            media_type="application/pdf",
+            filename=out_name,
+            headers=headers,
+            background=BackgroundTask(cleanup, inp, out),
+        )
+    except HTTPException:
+        cleanup(inp, out)
+        raise
+    except ValueError as ve:
+        cleanup(inp, out)
+        raise HTTPException(400, str(ve))
+    except Exception as e:
+        cleanup(inp, out)
+        raise safe_error(e, "convert-grayscale")
 
 
 # ─── 10. PDF Repair (Corrupt PDF Recovery) ─────────────────────

@@ -1,234 +1,270 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, useReducedMotion } from 'motion/react';
-import { Droplet, Download, FileText, CheckCircle2, Sliders, ExternalLink, Eye, Loader2, SunMedium, Contrast } from 'lucide-react';
+import {
+  Droplet,
+  Download,
+  FileText,
+  CheckCircle2,
+  Sliders,
+  ExternalLink,
+  Eye,
+  Loader2,
+  SunMedium,
+  Contrast,
+  ChevronLeft,
+  ChevronRight,
+  Zap,
+  Printer,
+} from 'lucide-react';
 import FileDropzone from '../components/FileDropzone';
+import BeforeAfterSlider from '../components/BeforeAfterSlider';
 import { PDFDocument } from 'pdf-lib';
 import * as pdfjsLib from 'pdfjs-dist';
 import '../lib/pdfWorker';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
+import { apiFetch } from '../lib/api';
 import { dataUrlToBytes } from '../lib/utils';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 import { toArrayBufferBytes, useAutoRevokeUrl } from '../lib/blobUrl';
 import { AnimatedNumber, PearlScanOverlay } from '../components/pearl/PearlMotion';
+import {
+  type GrayscaleProMode,
+  type GrayChannelMix,
+  type InkComparison,
+  applyGrayscaleProToImageData,
+  parsePageRange,
+} from '../lib/documentCleanerEngine';
+
+type ConversionEngine = 'vector_gray' | 'studio_raster';
 
 export default function GrayscalePDF() {
   useSEO(
-    'Convert PDF to Grayscale Online Free — Black & White Photocopy Mode | PDF Media Suite',
-    'Free online tool to convert color PDFs into grayscale or high-contrast photocopy black & white. Live preview, contrast & brightness adjustment, ink saver mode.'
+    'Convert PDF to Grayscale Pro — True Vector DeviceGray & Halftone B&W | PDF Media Suite',
+    'Convert color PDFs into genuine 1-channel DeviceGray vector PDFs (keeps selectable text & guarantees B&W print billing) OR adaptive shadow-free photocopy & halftone dither B&W.'
   );
 
   usePageSEO(
-    'Convert PDF to Grayscale & Monochrome',
-    'Convert color PDFs to clean grayscale or high-contrast black & white with real-time preview. Adjust brightness, contrast, and threshold for printing.'
+    'Convert PDF to Grayscale & Monochrome Pro',
+    'True Vector DeviceGray PDF conversion + client-side Sauvola Photocopy, Floyd-Steinberg Halftone Dither, and RGB Channel Mixer (drop red stamps or boost blue ink).',
+    'convert pdf to grayscale vector, devicegray pdf online, black and white photocopy pdf, floyd steinberg halftone pdf, drop red stamp grayscale',
+    '/grayscale-pdf'
   );
 
   const [file, setFile] = useState<File | null>(null);
   const [pageCount, setPageCount] = useState(0);
+  const [previewPageNum, setPreviewPageNum] = useState(1);
   const [isLoadingPage, setIsLoadingPage] = useState(false);
 
-  // Filter Modes: 'smooth' (true grayscale) | 'photocopy' (pure B&W threshold) | 'inkSaver'
-  const [filterMode, setFilterMode] = useState<'smooth' | 'photocopy' | 'inkSaver'>('smooth');
-  const [contrast, setContrast] = useState(0); // -50 to 50
-  const [brightness, setBrightness] = useState(0); // -50 to 50
-  const [threshold, setThreshold] = useState(135); // 50 to 220 (for photocopy mode)
+  // Dual Engine: True Vector DeviceGray vs Local Studio Filters
+  const [engine, setEngine] = useState<ConversionEngine>('vector_gray');
+  const [vectorEcoPct, setVectorEcoPct] = useState<number>(0);
 
-  const [previewTab, setPreviewTab] = useState<'filtered' | 'original'>('filtered');
+  // Studio Filter Controls
+  const [filterMode, setFilterMode] = useState<GrayscaleProMode>('smooth');
+  const [channelMix, setChannelMix] = useState<GrayChannelMix>('rec709');
+  const [contrast, setContrast] = useState(0);
+  const [brightness, setBrightness] = useState(0);
+  const [threshold, setThreshold] = useState(145);
+  const [shadowRemoval, setShadowRemoval] = useState(0);
+  const [pageRangeStr, setPageRangeStr] = useState('');
+  const [exportScale, setExportScale] = useState(2.0);
 
+  // Preview Data URLs
+  const [previewBeforeUrl, setPreviewBeforeUrl] = useState<string | null>(null);
+  const [previewAfterUrl, setPreviewAfterUrl] = useState<string | null>(null);
+  const [inkStats, setInkStats] = useState<InkComparison | null>(null);
+
+  // Processing & Result
   const [isProcessing, setIsProcessing] = useState(false);
   const [progressText, setProgressText] = useState('');
   const [progressPercent, setProgressPercent] = useState(0);
   const [grayscaleUrl, setGrayscaleUrl] = useState<string | null>(null);
+  const [usedVectorOutput, setUsedVectorOutput] = useState(false);
   const [showResultPreview, setShowResultPreview] = useState(true);
 
   useAutoRevokeUrl(grayscaleUrl);
 
-  // Preview canvases
-  const origCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const filteredCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const pdfDocRef = useRef<pdfjsLib.PDFDocumentProxy | null>(null);
   const originalImgDataRef = useRef<ImageData | null>(null);
+  const prefersReduced = useReducedMotion();
+
+  const renderPageForPreview = useCallback(async (pageNum: number) => {
+    const pdf = pdfDocRef.current;
+    if (!pdf) return;
+    setIsLoadingPage(true);
+    try {
+      const page = await pdf.getPage(pageNum);
+      const vp = page.getViewport({ scale: 1.25 });
+      const canvas = document.createElement('canvas');
+      canvas.width = vp.width;
+      canvas.height = vp.height;
+      const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      await page.render({ canvasContext: ctx, viewport: vp, canvas } as any).promise;
+      page.cleanup();
+
+      originalImgDataRef.current = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      setPreviewBeforeUrl(canvas.toDataURL('image/jpeg', 0.88));
+      canvas.width = 0;
+      canvas.height = 0;
+    } catch (err) {
+      console.error('[GrayscalePDF] Preview render error:', err);
+    } finally {
+      setIsLoadingPage(false);
+    }
+  }, []);
+
+  // Live preview filter update (runs in ~15-35ms)
+  useEffect(() => {
+    const src = originalImgDataRef.current;
+    if (!src) return;
+
+    const timer = setTimeout(() => {
+      const effectiveMode: GrayscaleProMode =
+        engine === 'vector_gray'
+          ? vectorEcoPct > 0
+            ? 'eco_draft'
+            : 'smooth'
+          : filterMode;
+
+      const { output, ink } = applyGrayscaleProToImageData(src, {
+        mode: effectiveMode,
+        channelMix: engine === 'vector_gray' ? 'rec709' : channelMix,
+        contrast: engine === 'vector_gray' ? 0 : contrast,
+        brightness: engine === 'vector_gray' ? Math.round(vectorEcoPct * 0.7) : brightness,
+        threshold,
+        shadowRemoval: engine === 'vector_gray' ? 0 : shadowRemoval,
+      });
+
+      const outCanvas = document.createElement('canvas');
+      outCanvas.width = output.width;
+      outCanvas.height = output.height;
+      outCanvas.getContext('2d')!.putImageData(output, 0, 0);
+      setPreviewAfterUrl(outCanvas.toDataURL('image/jpeg', 0.9));
+      setInkStats(ink);
+      outCanvas.width = 0;
+      outCanvas.height = 0;
+    }, 50);
+
+    return () => clearTimeout(timer);
+  }, [
+    previewBeforeUrl,
+    engine,
+    vectorEcoPct,
+    filterMode,
+    channelMix,
+    contrast,
+    brightness,
+    threshold,
+    shadowRemoval,
+  ]);
 
   const handleDrop = async (acceptedFiles: File[]) => {
     if (acceptedFiles.length === 0) return;
     const selectedFile = acceptedFiles[0];
     setFile(selectedFile);
     setGrayscaleUrl(null);
+    setPageRangeStr('');
     setIsLoadingPage(true);
 
     try {
       const arrayBuffer = await selectedFile.arrayBuffer();
       const pdfjsDoc = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
+      pdfDocRef.current = pdfjsDoc;
       setPageCount(pdfjsDoc.numPages);
-
-      // Render page 1 on original canvas
-      const page1 = await pdfjsDoc.getPage(1);
-      const viewport = page1.getViewport({ scale: 0.55 });
-
-      if (origCanvasRef.current && filteredCanvasRef.current) {
-        const origCanvas = origCanvasRef.current;
-        origCanvas.width = viewport.width;
-        origCanvas.height = viewport.height;
-        const ctx = origCanvas.getContext('2d')!;
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, viewport.width, viewport.height);
-
-        await page1.render({ canvasContext: ctx, viewport, canvas: origCanvas } as any).promise;
-        originalImgDataRef.current = ctx.getImageData(0, 0, origCanvas.width, origCanvas.height);
-
-        // Apply initial filter
-        applyFilterToPreview();
-      }
+      setPreviewPageNum(1);
+      await renderPageForPreview(1);
     } catch (err) {
-      console.error('Error loading page preview:', err);
+      console.error('Error loading PDF:', err);
+      alert('Could not open PDF. Make sure it is not password-protected.');
+      setFile(null);
     } finally {
       setIsLoadingPage(false);
     }
   };
 
-  // Re-apply filter onto the preview canvas
-  const applyFilterToPreview = () => {
-    if (!originalImgDataRef.current || !filteredCanvasRef.current) return;
-
-    const sourceData = originalImgDataRef.current;
-    const canvas = filteredCanvasRef.current;
-    canvas.width = sourceData.width;
-    canvas.height = sourceData.height;
-    const ctx = canvas.getContext('2d')!;
-
-    // Create copy of original ImageData
-    const imgData = ctx.createImageData(sourceData.width, sourceData.height);
-    imgData.data.set(sourceData.data);
-    const data = imgData.data;
-
-    const contrastFactor = (259 * (contrast + 255)) / (255 * (259 - contrast));
-
-    for (let j = 0; j < data.length; j += 4) {
-      let r = data[j];
-      let g = data[j + 1];
-      let b = data[j + 2];
-
-      // 1. Brightness
-      if (brightness !== 0) {
-        r = Math.min(255, Math.max(0, r + brightness));
-        g = Math.min(255, Math.max(0, g + brightness));
-        b = Math.min(255, Math.max(0, b + brightness));
-      }
-
-      // 2. Standard Luminance
-      let gray = 0.299 * r + 0.587 * g + 0.114 * b;
-
-      // 3. Contrast adjustment
-      if (contrast !== 0) {
-        gray = Math.min(255, Math.max(0, contrastFactor * (gray - 128) + 128));
-      }
-
-      // 4. Mode specific transform
-      if (filterMode === 'photocopy') {
-        // Strict B&W threshold
-        const finalVal = gray < threshold ? 0 : 255;
-        data[j] = data[j + 1] = data[j + 2] = finalVal;
-      } else if (filterMode === 'inkSaver') {
-        // Lighten dark tones by 25% to save ink
-        const lightened = gray < 200 ? Math.min(245, gray * 1.25 + 20) : gray;
-        data[j] = data[j + 1] = data[j + 2] = lightened;
-      } else {
-        // Smooth Grayscale
-        data[j] = data[j + 1] = data[j + 2] = gray;
-      }
-    }
-
-    ctx.putImageData(imgData, 0, 0);
-  };
-
-  useEffect(() => {
-    applyFilterToPreview();
-  }, [filterMode, contrast, brightness, threshold]);
-
   const processGrayscalePdf = async () => {
     if (!file) return;
-
     setIsProcessing(true);
     setProgressPercent(10);
-    setProgressText('Reading document pages...');
+    setUsedVectorOutput(false);
 
     try {
-      const arrayBuffer = await file.arrayBuffer();
-      const pdfjsDoc = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
-      const total = pdfjsDoc.numPages;
+      // Path 1: True Vector DeviceGray via Ghostscript backend (keeps 100% vector selectable text & 0% CMY ink!)
+      if (engine === 'vector_gray' && !pageRangeStr.trim()) {
+        setProgressText('Converting to 100% True Vector DeviceGray PDF...');
+        setProgressPercent(45);
+        try {
+          const fd = new FormData();
+          fd.append('file', file);
+          fd.append('eco_lighten_pct', String(vectorEcoPct));
+          const res = await apiFetch('/convert/grayscale', { method: 'POST', body: fd, timeoutMs: 75000 });
+          if (res.ok) {
+            const blob = await res.blob();
+            setGrayscaleUrl(URL.createObjectURL(blob));
+            setUsedVectorOutput(true);
+            setProgressPercent(100);
+            setProgressText('True Vector DeviceGray Ready!');
+            return;
+          }
+        } catch (err) {
+          console.warn('[GrayscalePDF] Vector backend unavailable, falling back to high-DPI browser engine:', err);
+        }
+      }
+
+      // Path 2: High-DPI Browser Studio (Adaptive Photocopy / Halftone Dither / Channel Mixer / Fallback)
+      setProgressText('Rendering high-DPI monochrome pages in browser...');
+      const pdfjsDoc =
+        pdfDocRef.current ||
+        (await pdfjsLib.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise);
+      const targetPages = parsePageRange(pageRangeStr, pdfjsDoc.numPages);
       const newPdfDoc = await PDFDocument.create();
 
-      const scale = 1.8; // Crisp resolution for export
-      const contrastFactor = (259 * (contrast + 255)) / (255 * (259 - contrast));
+      const effectiveMode: GrayscaleProMode =
+        engine === 'vector_gray' ? (vectorEcoPct > 0 ? 'eco_draft' : 'smooth') : filterMode;
 
-      for (let pageNum = 1; pageNum <= total; pageNum++) {
-        setProgressText(`Converting page ${pageNum} of ${total} to monochrome...`);
-        setProgressPercent(Math.round(10 + (pageNum / total) * 80));
+      for (let i = 0; i < targetPages.length; i++) {
+        const pNum = targetPages[i];
+        setProgressText(`Processing page ${pNum} (${i + 1}/${targetPages.length})...`);
+        setProgressPercent(Math.round(12 + ((i + 1) / targetPages.length) * 80));
 
-        const page = await pdfjsDoc.getPage(pageNum);
-        const viewport = page.getViewport({ scale });
-
+        const page = await pdfjsDoc.getPage(pNum);
+        const vp = page.getViewport({ scale: exportScale });
         const canvas = document.createElement('canvas');
-        canvas.width = viewport.width;
-        canvas.height = viewport.height;
-        const ctx = canvas.getContext('2d')!;
-
+        canvas.width = vp.width;
+        canvas.height = vp.height;
+        const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
         ctx.fillStyle = '#ffffff';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
+        await page.render({ canvasContext: ctx, viewport: vp, canvas } as any).promise;
 
-        await page.render({ canvasContext: ctx, viewport, canvas } as any).promise;
-
-        const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const data = imgData.data;
-
-        for (let j = 0; j < data.length; j += 4) {
-          let r = data[j];
-          let g = data[j + 1];
-          let b = data[j + 2];
-
-          if (brightness !== 0) {
-            r = Math.min(255, Math.max(0, r + brightness));
-            g = Math.min(255, Math.max(0, g + brightness));
-            b = Math.min(255, Math.max(0, b + brightness));
-          }
-
-          let gray = 0.299 * r + 0.587 * g + 0.114 * b;
-
-          if (contrast !== 0) {
-            gray = Math.min(255, Math.max(0, contrastFactor * (gray - 128) + 128));
-          }
-
-          if (filterMode === 'photocopy') {
-            const finalVal = gray < threshold ? 0 : 255;
-            data[j] = data[j + 1] = data[j + 2] = finalVal;
-          } else if (filterMode === 'inkSaver') {
-            const lightened = gray < 200 ? Math.min(245, gray * 1.25 + 20) : gray;
-            data[j] = data[j + 1] = data[j + 2] = lightened;
-          } else {
-            data[j] = data[j + 1] = data[j + 2] = gray;
-          }
-        }
-
-        ctx.putImageData(imgData, 0, 0);
-
-        const imgDataUrl = canvas.toDataURL('image/jpeg', 0.88);
-        const imgBytes = dataUrlToBytes(imgDataUrl);
-        const embeddedImg = await newPdfDoc.embedJpg(imgBytes);
-
-        const origW = viewport.width / scale;
-        const origH = viewport.height / scale;
-        const newPage = newPdfDoc.addPage([origW, origH]);
-        newPage.drawImage(embeddedImg, {
-          x: 0,
-          y: 0,
-          width: origW,
-          height: origH,
+        const srcData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const { output } = applyGrayscaleProToImageData(srcData, {
+          mode: effectiveMode,
+          channelMix: engine === 'vector_gray' ? 'rec709' : channelMix,
+          contrast: engine === 'vector_gray' ? 0 : contrast,
+          brightness: engine === 'vector_gray' ? Math.round(vectorEcoPct * 0.7) : brightness,
+          threshold,
+          shadowRemoval: engine === 'vector_gray' ? 0 : shadowRemoval,
         });
+        ctx.putImageData(output, 0, 0);
+
+        const imgBytes = dataUrlToBytes(canvas.toDataURL('image/jpeg', 0.9));
+        const embeddedImg = await newPdfDoc.embedJpg(imgBytes);
+        const origW = vp.width / exportScale;
+        const origH = vp.height / exportScale;
+        const newPage = newPdfDoc.addPage([origW, origH]);
+        newPage.drawImage(embeddedImg, { x: 0, y: 0, width: origW, height: origH });
 
         canvas.width = 0;
         canvas.height = 0;
+        page.cleanup();
+        if (i % 2 === 1) await new Promise((r) => setTimeout(r, 0));
       }
 
-      setProgressPercent(95);
+      setProgressPercent(96);
       setProgressText('Finalizing monochrome PDF...');
       const pdfBytes = toArrayBufferBytes(await newPdfDoc.save());
       const blob = new Blob([pdfBytes], { type: 'application/pdf' });
@@ -247,393 +283,396 @@ export default function GrayscalePDF() {
     setFile(null);
     setGrayscaleUrl(null);
     setPageCount(0);
-    setProgressText('');
-    setProgressPercent(0);
+    setPreviewBeforeUrl(null);
+    setPreviewAfterUrl(null);
+    setInkStats(null);
+    pdfDocRef.current = null;
     originalImgDataRef.current = null;
   };
 
-  const prefersReduced = useReducedMotion();
-
   return (
     <ToolWorkspaceShell
-      title="Convert PDF to Grayscale & B&W"
-      subtitle="Transform color documents into smooth grayscale or high-contrast photocopy black & white with live preview and custom tone tuning."
+      title="Grayscale & Monochrome PDF Pro"
+      subtitle="Create genuine 1-channel DeviceGray vector PDFs (100% selectable text, guaranteed B&W print billing) OR use Adaptive Sauvola Photocopy, Floyd-Steinberg Halftone Dither, and RGB Channel Filters."
       categoryLabel="Monochrome & Print Optimizer"
       icon={Droplet}
       microVariant="convert"
       tone="sky"
+      trustNote="True Vector DeviceGray Engine · Adaptive Sauvola B&W · Halftone Dither"
     >
-      <div className="flex flex-col items-center justify-center max-w-6xl mx-auto w-full">
+      <div className="flex flex-col items-center justify-center max-w-7xl mx-auto w-full">
+        {!file ? (
+          <motion.div
+            initial={prefersReduced ? false : { opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="w-full max-w-2xl"
+          >
+            <FileDropzone onDrop={handleDrop} multiple={false} title="Select PDF to Convert to Grayscale / B&W" />
+          </motion.div>
+        ) : (
+          <motion.div
+            initial={prefersReduced ? false : { opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="relative w-full pms-glass-panel rounded-3xl p-5 md:p-7 overflow-hidden"
+          >
+            <PearlScanOverlay
+              active={isProcessing || isLoadingPage}
+              label={isLoadingPage ? 'Rendering page preview…' : progressText || 'Converting to monochrome…'}
+            />
 
-      {!file ? (
-        <motion.div
-          initial={prefersReduced ? false : { opacity: 0, y: 12 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={prefersReduced ? { duration: 0 } : { duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
-          className="w-full max-w-2xl"
-        >
-          <FileDropzone onDrop={handleDrop} multiple={false} title="Select PDF to Convert to Grayscale" />
-        </motion.div>
-      ) : (
-        <motion.div
-          initial={prefersReduced ? false : { opacity: 0, y: 12 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={prefersReduced ? { duration: 0 } : { duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
-          className="relative w-full pms-glass-panel rounded-3xl p-6 md:p-8 overflow-hidden"
-        >
-          <PearlScanOverlay
-            active={isProcessing || isLoadingPage}
-            label={isLoadingPage ? 'Rendering page preview…' : progressText || 'Converting pages to monochrome…'}
-          />
-          {!grayscaleUrl ? (
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-              {/* Left Column: Live Canvas Preview */}
-              <div className="lg:col-span-5 space-y-4">
-                <div className="p-4 bg-white/75 dark:bg-slate-900/75 rounded-2xl border border-[var(--pms-border)] flex items-center gap-4">
-                  <div className="w-12 h-12 bg-[var(--pms-soft-blue)] text-[var(--pms-blue)] rounded-xl flex items-center justify-center shrink-0">
-                    <FileText className="w-6 h-6" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-bold text-slate-900 dark:text-white truncate">{file.name}</p>
-                    <p className="text-xs text-slate-500 dark:text-slate-400">
-                      {(file.size / 1024 / 1024).toFixed(2)} MB • {pageCount} page(s)
-                    </p>
-                  </div>
-                </div>
-
-                {/* Preview View Tabs */}
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
-                    Page 1 Real-Time Preview
-                  </span>
-                  <div className="inline-flex rounded-xl bg-white/75 dark:bg-slate-900/75 border border-[var(--pms-border)] p-1 text-xs font-semibold">
-                    {([
-                      { id: 'filtered', label: 'Grayscale View' },
-                      { id: 'original', label: 'Original Color' },
-                    ] as const).map((tab) => {
-                      const active = previewTab === tab.id;
-                      return (
-                        <button
-                          key={tab.id}
-                          type="button"
-                          onClick={() => setPreviewTab(tab.id)}
-                          className={`relative px-2.5 py-1 rounded-lg transition-colors cursor-pointer ${
-                            active
-                              ? 'text-slate-900 dark:text-white'
-                              : 'text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
-                          }`}
-                        >
-                          {active && (
-                            <motion.span
-                              layoutId="grayscale-preview-tab"
-                              transition={prefersReduced ? { duration: 0 } : { type: 'spring', stiffness: 420, damping: 32 }}
-                              className="absolute inset-0 rounded-lg border"
-                              style={{ backgroundColor: 'var(--pms-soft-blue)', borderColor: 'var(--pms-blue)' }}
-                            />
-                          )}
-                          <span className="relative z-10">{tab.label}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* Canvas Display Container */}
-                <div className="rounded-2xl border border-[var(--pms-border)] overflow-hidden bg-white/75 dark:bg-slate-900/75 flex flex-col items-center justify-center min-h-[320px] p-4 relative shadow-inner">
-                  {isLoadingPage ? (
-                    <div className="flex flex-col items-center gap-2 text-slate-500 dark:text-slate-400">
-                      <Loader2 className="w-6 h-6 animate-spin text-[var(--pms-blue)]" />
-                      <span className="text-xs font-medium">Rendering preview...</span>
-                    </div>
-                  ) : null}
-
-                  {/* Filtered Canvas */}
-                  <canvas
-                    ref={filteredCanvasRef}
-                    className={`max-h-[360px] rounded-lg shadow-md border border-slate-200 bg-white object-contain mx-auto transition-opacity ${
-                      previewTab === 'filtered' && !isLoadingPage ? 'block' : 'hidden'
-                    }`}
-                  />
-
-                  {/* Original Canvas */}
-                  <canvas
-                    ref={origCanvasRef}
-                    className={`max-h-[360px] rounded-lg shadow-md border border-slate-200 bg-white object-contain mx-auto transition-opacity ${
-                      previewTab === 'original' && !isLoadingPage ? 'block' : 'hidden'
-                    }`}
-                  />
-                </div>
-              </div>
-
-              {/* Right Column: Settings & Filter Profiles */}
-              <div className="lg:col-span-7 space-y-6">
-                <div>
-                  <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-1">Select Monochrome Profile</h3>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">Choose the optimal rendering method for your document type.</p>
-                </div>
-
-                {/* Profile Cards */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  {[
-                    {
-                      id: 'smooth',
-                      title: 'True Grayscale',
-                      desc: 'Smooth photographic tones. Retains gradients & subtle shades.',
-                      badge: 'Standard',
-                    },
-                    {
-                      id: 'photocopy',
-                      title: 'Photocopy B&W',
-                      desc: 'Strict black & white threshold. Cleans background, darkens faint text.',
-                      badge: 'Scanned Forms',
-                    },
-                    {
-                      id: 'inkSaver',
-                      title: 'Ink-Saver Draft',
-                      desc: 'Lightens heavy shadows to save up to 35% printer toner/ink.',
-                      badge: 'Eco Print',
-                    },
-                  ].map((p) => {
-                    const isSelected = filterMode === p.id;
-                    return (
-                      <motion.button
-                        key={p.id}
-                        type="button"
-                        whileTap={prefersReduced ? undefined : { scale: 0.985 }}
-                        onClick={() => setFilterMode(p.id as any)}
-                        className={`relative text-left p-4 rounded-2xl border transition-colors flex flex-col justify-between cursor-pointer overflow-hidden ${
-                          isSelected
-                            ? ''
-                            : 'bg-white/75 dark:bg-slate-900/75 hover:bg-white dark:hover:bg-slate-900'
-                        }`}
-                        style={{
-                          borderColor: isSelected ? 'var(--pms-blue)' : 'var(--pms-border)',
-                          backgroundColor: isSelected ? 'var(--pms-soft-blue)' : undefined,
-                        }}
-                      >
-                        {isSelected && (
-                          <motion.div
-                            layoutId="grayscale-profile-pill"
-                            transition={prefersReduced ? { duration: 0 } : { type: 'spring', stiffness: 420, damping: 32 }}
-                            className="absolute inset-0 rounded-2xl ring-2 ring-sky-500/35 pointer-events-none"
-                          />
-                        )}
-                        <div className="relative z-10">
-                          <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-white/80 dark:bg-slate-800/80 text-slate-700 dark:text-slate-200 border border-[var(--pms-border)] mb-2 inline-block">
-                            {p.badge}
-                          </span>
-                          <h4 className="font-bold text-sm text-slate-900 dark:text-white mb-1">{p.title}</h4>
-                          <p className="text-xs text-slate-500 dark:text-slate-400 leading-snug">{p.desc}</p>
-                        </div>
-                      </motion.button>
-                    );
-                  })}
-                </div>
-
-                {/* Fine-Tuning Sliders */}
-                <div className="p-5 bg-white/75 dark:bg-slate-900/75 rounded-2xl border border-[var(--pms-border)] space-y-4">
-                  <h4 className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider flex items-center gap-2">
-                    <Sliders className="w-3.5 h-3.5 text-[var(--pms-blue)]" /> Tone & Contrast Adjustments
-                  </h4>
-
-                  {/* Contrast */}
-                  <div>
-                    <div className="flex items-center justify-between text-xs mb-1.5">
-                      <span className="font-medium text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-                        <Contrast className="w-3.5 h-3.5 text-slate-500" /> Contrast
-                      </span>
-                      <span className="font-mono font-bold text-slate-800 dark:text-slate-200">
-                        {contrast > 0 ? `+${contrast}` : contrast}
-                      </span>
-                    </div>
-                    <input
-                      type="range"
-                      min={-50}
-                      max={50}
-                      value={contrast}
-                      onChange={(e) => setContrast(Number(e.target.value))}
-                      className="w-full h-1.5 bg-slate-200 dark:bg-slate-700 rounded-lg accent-sky-600 cursor-pointer"
-                    />
-                  </div>
-
-                  {/* Brightness */}
-                  <div>
-                    <div className="flex items-center justify-between text-xs mb-1.5">
-                      <span className="font-medium text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-                        <SunMedium className="w-3.5 h-3.5 text-slate-500" /> Brightness
-                      </span>
-                      <span className="font-mono font-bold text-slate-800 dark:text-slate-200">
-                        {brightness > 0 ? `+${brightness}` : brightness}
-                      </span>
-                    </div>
-                    <input
-                      type="range"
-                      min={-50}
-                      max={50}
-                      value={brightness}
-                      onChange={(e) => setBrightness(Number(e.target.value))}
-                      className="w-full h-1.5 bg-slate-200 dark:bg-slate-700 rounded-lg accent-sky-600 cursor-pointer"
-                    />
-                  </div>
-
-                  {/* Photocopy Threshold (only if Photocopy mode) */}
-                  {filterMode === 'photocopy' && (
-                    <div className="pt-2 border-t border-[var(--pms-border)]">
-                      <div className="flex items-center justify-between text-xs mb-1.5">
-                        <span className="font-medium text-slate-800 dark:text-slate-200">
-                          B&W Cutoff Threshold
-                        </span>
-                        <span className="font-mono font-bold text-slate-800 dark:text-slate-200">
-                          {threshold}
-                        </span>
+            {!grayscaleUrl ? (
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+                {/* Left Live Split Preview (6 cols) */}
+                <div className="lg:col-span-6 space-y-4">
+                  <div className="p-3.5 bg-white/80 dark:bg-slate-900/75 rounded-2xl border border-[var(--pms-border)] flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="w-10 h-10 bg-[var(--pms-soft-blue)] text-[var(--pms-blue)] rounded-xl flex items-center justify-center shrink-0">
+                        <FileText className="w-5 h-5" />
                       </div>
-                      <input
-                        type="range"
-                        min={60}
-                        max={210}
-                        value={threshold}
-                        onChange={(e) => setThreshold(Number(e.target.value))}
-                        className="w-full h-1.5 bg-slate-200 dark:bg-slate-700 rounded-lg accent-sky-600 cursor-pointer"
-                      />
-                      <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
-                        Lower = lighter document; Higher = darker lines & text
-                      </p>
+                      <div className="min-w-0">
+                        <p className="text-sm font-bold text-slate-900 dark:text-white truncate">{file.name}</p>
+                        <p className="text-xs text-slate-500 dark:text-slate-400">
+                          {(file.size / 1024 / 1024).toFixed(2)} MB · {pageCount} page(s)
+                        </p>
+                      </div>
+                    </div>
+                    {pageCount > 1 && (
+                      <div className="flex items-center gap-1 text-xs font-mono shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const n = Math.max(1, previewPageNum - 1);
+                            setPreviewPageNum(n);
+                            void renderPageForPreview(n);
+                          }}
+                          disabled={previewPageNum <= 1}
+                          className="p-1.5 rounded-lg border border-[var(--pms-border)] bg-white dark:bg-slate-900 disabled:opacity-35 cursor-pointer"
+                        >
+                          <ChevronLeft className="w-3.5 h-3.5" />
+                        </button>
+                        <span className="px-1.5">
+                          {previewPageNum}/{pageCount}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const n = Math.min(pageCount, previewPageNum + 1);
+                            setPreviewPageNum(n);
+                            void renderPageForPreview(n);
+                          }}
+                          disabled={previewPageNum >= pageCount}
+                          className="p-1.5 rounded-lg border border-[var(--pms-border)] bg-white dark:bg-slate-900 disabled:opacity-35 cursor-pointer"
+                        >
+                          <ChevronRight className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {previewBeforeUrl && previewAfterUrl ? (
+                    <BeforeAfterSlider
+                      beforeSrc={previewBeforeUrl}
+                      afterSrc={previewAfterUrl}
+                      beforeLabel="Original Color"
+                      afterLabel={engine === 'vector_gray' ? 'Vector DeviceGray' : 'Monochrome'}
+                      maxHeightClass="max-h-[520px]"
+                      badgeText={
+                        inkStats
+                          ? `Color Ink: ${inkStats.before.cyanPct + inkStats.before.magentaPct + inkStats.before.yellowPct > 0 ? '→ 0%' : '0%'} · Saved ${inkStats.savedPercent}%`
+                          : undefined
+                      }
+                    />
+                  ) : (
+                    <div className="h-80 rounded-2xl border border-[var(--pms-border)] flex items-center justify-center text-xs text-slate-500">
+                      <Loader2 className="w-5 h-5 animate-spin mr-2 text-sky-600" /> Loading preview...
                     </div>
                   )}
                 </div>
 
-                {/* Progress Bar (when converting) */}
-                {isProcessing && (
-                  <div className="space-y-2 p-4 bg-white/75 dark:bg-slate-900/75 rounded-2xl border border-[var(--pms-border)]">
-                    <div className="flex justify-between text-xs font-semibold text-slate-900 dark:text-slate-100">
-                      <span>{progressText}</span>
-                      <span><AnimatedNumber value={progressPercent} suffix="%" /></span>
-                    </div>
-                    <div className="w-full bg-slate-200/80 dark:bg-slate-800 rounded-full h-2 overflow-hidden">
-                      <motion.div
-                        initial={prefersReduced ? false : { width: '10%' }}
-                        animate={{ width: `${progressPercent}%` }}
-                        transition={prefersReduced ? { duration: 0 } : { duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
-                        className="bg-gradient-to-r from-sky-500 via-violet-500 to-rose-500 h-2 rounded-full"
-                      />
+                {/* Right Controls (6 cols) */}
+                <div className="lg:col-span-6 space-y-5">
+                  {/* Engine Selector: True Vector vs Local Studio */}
+                  <div>
+                    <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 block mb-2">
+                      1. Choose Conversion Engine
+                    </label>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                      <button
+                        type="button"
+                        onClick={() => setEngine('vector_gray')}
+                        className={`p-3.5 rounded-2xl border text-left transition cursor-pointer ${
+                          engine === 'vector_gray'
+                            ? 'border-sky-500 bg-[var(--pms-soft-blue)] shadow-xs'
+                            : 'border-[var(--pms-border)] bg-white/75 dark:bg-slate-900/75'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="font-bold text-xs flex items-center gap-1.5 text-slate-900 dark:text-white">
+                            <Zap className="w-3.5 h-3.5 text-sky-600" /> True Vector DeviceGray ★
+                          </span>
+                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-600 text-white">
+                            Crisp Text
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-snug">
+                          Keeps text 100% vector &amp; searchable, tiny file size, guaranteed 0% CMY color printer billing.
+                        </p>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setEngine('studio_raster')}
+                        className={`p-3.5 rounded-2xl border text-left transition cursor-pointer ${
+                          engine === 'studio_raster'
+                            ? 'border-sky-500 bg-[var(--pms-soft-blue)] shadow-xs'
+                            : 'border-[var(--pms-border)] bg-white/75 dark:bg-slate-900/75'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="font-bold text-xs text-slate-900 dark:text-white">
+                            Pro Monochrome Studio
+                          </span>
+                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-800 text-white">
+                            Browser-Only
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-snug">
+                          Shadow-free Sauvola B&amp;W, Halftone Dither, &amp; RGB Channel Mixer (drop red stamps!).
+                        </p>
+                      </button>
                     </div>
                   </div>
-                )}
 
-                {/* Action Buttons */}
-                <div className="flex flex-col sm:flex-row gap-3 pt-2">
-                  <motion.button
-                    type="button"
-                    whileHover={prefersReduced || isProcessing || isLoadingPage ? undefined : { scale: 1.01 }}
-                    whileTap={prefersReduced || isProcessing || isLoadingPage ? undefined : { scale: 0.985 }}
-                    onClick={processGrayscalePdf}
-                    disabled={isProcessing || isLoadingPage}
-                    className="flex-1 pms-btn-primary py-4 px-6 font-bold rounded-2xl disabled:opacity-50 flex items-center justify-center gap-2 text-base cursor-pointer"
-                  >
-                    {isProcessing ? (
-                      <>
-                        <Loader2 className="w-5 h-5 animate-spin" />
-                        Converting to Monochrome...
-                      </>
-                    ) : (
-                      <>
-                        <Droplet className="w-5 h-5" />
-                        Convert & Download PDF
-                      </>
-                    )}
-                  </motion.button>
-                  <button
-                    type="button"
-                    onClick={resetState}
-                    disabled={isProcessing}
-                    className="px-6 py-4 bg-white/75 dark:bg-slate-900/75 hover:bg-white dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold rounded-2xl border border-[var(--pms-border)] transition-colors text-sm disabled:opacity-50 cursor-pointer"
-                  >
-                    Cancel
-                  </button>
+                  {engine === 'vector_gray' ? (
+                    <div className="p-4 rounded-2xl bg-white/80 dark:bg-slate-900/75 border border-[var(--pms-border)] space-y-3 text-xs">
+                      <div className="flex justify-between font-bold">
+                        <span>Optional Vector Eco-Toner Lighten</span>
+                        <span className="font-mono text-sky-600 dark:text-sky-400">
+                          {vectorEcoPct === 0 ? 'Off (Faithful Gray)' : `${vectorEcoPct}% Lighter`}
+                        </span>
+                      </div>
+                      <input
+                        type="range"
+                        min={0}
+                        max={40}
+                        step={5}
+                        value={vectorEcoPct}
+                        onChange={(e) => setVectorEcoPct(Number(e.target.value))}
+                        className="w-full accent-sky-600"
+                      />
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                        Converts all RGB &amp; CMYK objects directly to 1-channel <code>DeviceGray</code> using Ghostscript without rasterizing fonts.
+                      </p>
+                    </div>
+                  ) : (
+                    <>
+                      {/* 4 Studio Profiles */}
+                      <div className="grid grid-cols-2 gap-2.5 text-xs">
+                        {([
+                          { id: 'smooth', title: 'True Photographic Gray', desc: 'Smooth tonal gradients' },
+                          { id: 'adaptive_photocopy', title: 'Adaptive Photocopy B&W', desc: 'Sauvola shadow-proof crisp ink' },
+                          { id: 'halftone_dither', title: 'Halftone Dither (1-Bit)', desc: 'Best for photos on B&W laser' },
+                          { id: 'eco_draft', title: 'Eco Toner Draft', desc: 'Saves ~35% black toner' },
+                        ] as const).map((p) => (
+                          <button
+                            key={p.id}
+                            type="button"
+                            onClick={() => setFilterMode(p.id)}
+                            className={`p-3 rounded-xl border text-left transition cursor-pointer ${
+                              filterMode === p.id
+                                ? 'border-sky-500 bg-[var(--pms-soft-blue)] shadow-xs'
+                                : 'border-[var(--pms-border)] bg-white/75 dark:bg-slate-900/75'
+                            }`}
+                          >
+                            <div className="font-bold text-slate-900 dark:text-white">{p.title}</div>
+                            <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">{p.desc}</div>
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* RGB Channel Filter + Fine-Tune Sliders */}
+                      <div className="p-4 bg-white/80 dark:bg-slate-900/75 rounded-2xl border border-[var(--pms-border)] space-y-3.5 text-xs">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                            <Sliders className="w-3.5 h-3.5 text-sky-600" /> Color Channel Filter
+                          </span>
+                          <select
+                            value={channelMix}
+                            onChange={(e) => setChannelMix(e.target.value as GrayChannelMix)}
+                            className="px-2.5 py-1 rounded-lg border border-[var(--pms-border)] bg-white dark:bg-slate-900 font-semibold text-xs"
+                          >
+                            <option value="rec709">Standard Luminance (Rec.709)</option>
+                            <option value="drop_red">Drop Red Stamps / Grid Lines</option>
+                            <option value="boost_blue">Darken Blue Pen Writing</option>
+                            <option value="high_green">High-Clarity Green Channel</option>
+                          </select>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <div className="flex justify-between mb-1 font-medium">
+                              <span className="flex items-center gap-1"><Contrast className="w-3 h-3" /> Contrast</span>
+                              <span className="font-mono font-bold">{contrast > 0 ? `+${contrast}` : contrast}</span>
+                            </div>
+                            <input type="range" min={-50} max={50} value={contrast} onChange={(e) => setContrast(Number(e.target.value))} className="w-full accent-sky-600" />
+                          </div>
+                          <div>
+                            <div className="flex justify-between mb-1 font-medium">
+                              <span className="flex items-center gap-1"><SunMedium className="w-3 h-3" /> Brightness</span>
+                              <span className="font-mono font-bold">{brightness > 0 ? `+${brightness}` : brightness}</span>
+                            </div>
+                            <input type="range" min={-50} max={50} value={brightness} onChange={(e) => setBrightness(Number(e.target.value))} className="w-full accent-sky-600" />
+                          </div>
+                        </div>
+
+                        <div>
+                          <div className="flex justify-between mb-1 font-medium">
+                            <span>Shadow Normalization (For Scans)</span>
+                            <span className="font-mono font-bold">{shadowRemoval}%</span>
+                          </div>
+                          <input type="range" min={0} max={100} value={shadowRemoval} onChange={(e) => setShadowRemoval(Number(e.target.value))} className="w-full accent-sky-600" />
+                        </div>
+
+                        {(filterMode === 'adaptive_photocopy' || filterMode === 'halftone_dither') && (
+                          <div>
+                            <div className="flex justify-between mb-1 font-medium">
+                              <span>B&amp;W Threshold</span>
+                              <span className="font-mono font-bold">{threshold}</span>
+                            </div>
+                            <input type="range" min={60} max={220} value={threshold} onChange={(e) => setThreshold(Number(e.target.value))} className="w-full accent-sky-600" />
+                          </div>
+                        )}
+
+                        <div className="grid grid-cols-2 gap-2.5 pt-2 border-t border-[var(--pms-border)]">
+                          <div>
+                            <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">Page Range</label>
+                            <input
+                              type="text"
+                              value={pageRangeStr}
+                              onChange={(e) => setPageRangeStr(e.target.value)}
+                              placeholder={`All (1-${pageCount})`}
+                              className="w-full px-2.5 py-1.5 rounded-lg border border-[var(--pms-border)] bg-white dark:bg-slate-900 text-xs"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">Export DPI</label>
+                            <select
+                              value={exportScale}
+                              onChange={(e) => setExportScale(Number(e.target.value))}
+                              className="w-full px-2.5 py-1.5 rounded-lg border border-[var(--pms-border)] bg-white dark:bg-slate-900 text-xs font-semibold"
+                            >
+                              <option value={1.5}>Fast (110 DPI)</option>
+                              <option value={2.0}>Crisp (150 DPI)</option>
+                              <option value={2.8}>Ultra Sharp (200 DPI)</option>
+                            </select>
+                          </div>
+                        </div>
+                      </div>
+                    </>
+                  )}
+
+                  {isProcessing && (
+                    <div className="space-y-1.5 p-3.5 bg-white/80 dark:bg-slate-900/75 rounded-2xl border border-[var(--pms-border)]">
+                      <div className="flex justify-between text-xs font-semibold">
+                        <span>{progressText}</span>
+                        <span><AnimatedNumber value={progressPercent} suffix="%" /></span>
+                      </div>
+                      <div className="w-full bg-slate-200 dark:bg-slate-800 rounded-full h-2 overflow-hidden">
+                        <div className="bg-sky-600 h-2 rounded-full transition-all" style={{ width: `${progressPercent}%` }} />
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="flex flex-col sm:flex-row gap-3">
+                    <button
+                      type="button"
+                      onClick={processGrayscalePdf}
+                      disabled={isProcessing || isLoadingPage}
+                      className="flex-1 pms-btn-primary py-3.5 px-6 font-bold rounded-2xl disabled:opacity-50 flex items-center justify-center gap-2 text-sm cursor-pointer"
+                    >
+                      {isProcessing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Droplet className="w-4 h-4" />}
+                      {engine === 'vector_gray' ? 'Generate True Vector Grayscale PDF' : 'Convert & Download Monochrome PDF'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={resetState}
+                      disabled={isProcessing}
+                      className="px-5 py-3.5 bg-white/80 dark:bg-slate-900 border border-[var(--pms-border)] font-semibold rounded-2xl text-sm cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                  </div>
                 </div>
               </div>
-            </div>
-          ) : (
-            /* Success Screen with Live Preview */
-            <motion.div
-              initial={prefersReduced ? false : { opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={prefersReduced ? { duration: 0 } : { duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
-              className="space-y-6 text-center py-4"
-            >
-              <div className="p-8 bg-white/75 dark:bg-slate-900/75 rounded-3xl border border-emerald-200/80 dark:border-emerald-800/70">
-                <motion.div
-                  initial={prefersReduced ? false : { scale: 0.45, rotate: -10, opacity: 0 }}
-                  animate={{ scale: 1, rotate: 0, opacity: 1 }}
-                  transition={prefersReduced ? { duration: 0 } : { type: 'spring', stiffness: 360, damping: 18 }}
-                  className="w-16 h-16 bg-[var(--pms-soft-mint)] text-emerald-600 dark:text-emerald-400 rounded-full flex items-center justify-center mx-auto mb-4 shadow-inner border border-[var(--pms-border)]"
+            ) : (
+              <div className="space-y-6 text-center py-4">
+                <div className="p-8 bg-white/80 dark:bg-slate-900/75 rounded-3xl border border-emerald-200/80 dark:border-emerald-800/70">
+                  <div className="w-16 h-16 bg-[var(--pms-soft-mint)] text-emerald-600 dark:text-emerald-400 rounded-full flex items-center justify-center mx-auto mb-4 border border-[var(--pms-border)]">
+                    <CheckCircle2 className="w-8 h-8" />
+                  </div>
+                  <h3 className="text-2xl font-extrabold text-slate-900 dark:text-white mb-2">
+                    {usedVectorOutput ? 'True Vector DeviceGray PDF Ready!' : 'Monochrome PDF Created!'}
+                  </h3>
+                  <p className="text-slate-600 dark:text-slate-300 mb-6 text-sm max-w-md mx-auto">
+                    {usedVectorOutput
+                      ? '100% vector selectable text preserved in genuine 1-channel DeviceGray (0% color ink).'
+                      : `All selected pages transformed with ${filterMode.replace('_', ' ')} profile.`}
+                  </p>
+                  <div className="flex flex-wrap items-center justify-center gap-3">
+                    <a
+                      href={grayscaleUrl}
+                      download={`grayscale_${file.name}`}
+                      className="pms-btn-primary inline-flex items-center gap-2 px-7 py-3.5 font-bold rounded-2xl text-sm"
+                    >
+                      <Download className="w-4 h-4" /> Download Grayscale PDF
+                    </a>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const w = window.open(grayscaleUrl, '_blank');
+                        w?.addEventListener('load', () => {
+                          try { w.print(); } catch {}
+                        });
+                      }}
+                      className="inline-flex items-center gap-2 px-5 py-3.5 bg-white dark:bg-slate-900 border border-[var(--pms-border)] font-bold rounded-2xl text-sm cursor-pointer"
+                    >
+                      <Printer className="w-4 h-4 text-sky-600" /> Print
+                    </button>
+                    <a
+                      href={grayscaleUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-2 px-5 py-3.5 bg-white dark:bg-slate-900 border border-[var(--pms-border)] font-semibold rounded-2xl text-sm"
+                    >
+                      <ExternalLink className="w-4 h-4" /> Open Tab
+                    </a>
+                    <button
+                      type="button"
+                      onClick={() => setShowResultPreview(!showResultPreview)}
+                      className="inline-flex items-center gap-2 px-5 py-3.5 bg-white dark:bg-slate-900 border border-[var(--pms-border)] font-semibold rounded-2xl text-sm cursor-pointer"
+                    >
+                      <Eye className="w-4 h-4" /> {showResultPreview ? 'Hide' : 'Preview'}
+                    </button>
+                  </div>
+
+                  {showResultPreview && (
+                    <div className="mt-6 w-full h-[520px] rounded-2xl border border-[var(--pms-border)] overflow-hidden bg-white shadow-inner">
+                      <iframe src={grayscaleUrl} title="Grayscale PDF Preview" className="w-full h-full border-0" />
+                    </div>
+                  )}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={resetState}
+                  className="text-sm text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white font-semibold cursor-pointer"
                 >
-                  <CheckCircle2 className="w-8 h-8" />
-                </motion.div>
-                <h3 className="text-2xl md:text-3xl font-extrabold text-slate-900 dark:text-white mb-2">
-                  PDF Converted to Grayscale!
-                </h3>
-                <p className="text-slate-600 dark:text-slate-300 mb-6 text-sm max-w-md mx-auto">
-                  All <strong className="font-bold text-emerald-700 dark:text-emerald-400"><AnimatedNumber value={pageCount} /></strong> page(s) have been transformed with your selected tone balance. Ready for printing or archiving.
-                </p>
-
-                <div className="flex flex-wrap items-center justify-center gap-3">
-                  <motion.a
-                    whileHover={prefersReduced ? undefined : { scale: 1.02 }}
-                    whileTap={prefersReduced ? undefined : { scale: 0.985 }}
-                    href={grayscaleUrl}
-                    download={`grayscale_${file.name}`}
-                    className="pms-btn-primary inline-flex items-center justify-center gap-2 px-8 py-3.5 font-bold rounded-2xl text-base"
-                  >
-                    <Download className="w-5 h-5" />
-                    Download Grayscale PDF
-                  </motion.a>
-                  <a
-                    href={grayscaleUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center justify-center gap-2 px-5 py-3.5 bg-white/75 dark:bg-slate-900/75 hover:bg-white dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 font-semibold rounded-2xl border border-[var(--pms-border)] transition-all text-sm"
-                  >
-                    <ExternalLink className="w-4 h-4" />
-                    Open in New Tab
-                  </a>
-                  <button
-                    type="button"
-                    onClick={() => setShowResultPreview(!showResultPreview)}
-                    className="inline-flex items-center justify-center gap-2 px-5 py-3.5 bg-white/75 dark:bg-slate-900/75 hover:bg-white dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 font-semibold rounded-2xl border border-[var(--pms-border)] transition-all text-sm cursor-pointer"
-                  >
-                    <Eye className="w-4 h-4" />
-                    {showResultPreview ? 'Hide Preview' : 'Show Live Preview'}
-                  </button>
-                </div>
-
-                {showResultPreview && (
-                  <div className="mt-6 text-left">
-                    <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">
-                      Monochrome Output Preview
-                    </p>
-                    <div className="w-full h-[550px] rounded-2xl border border-[var(--pms-border)] overflow-hidden bg-white shadow-inner">
-                      <iframe
-                        src={grayscaleUrl}
-                        title="Grayscale PDF Preview"
-                        className="w-full h-full border-0"
-                      />
-                    </div>
-                  </div>
-                )}
+                  ← Convert another document
+                </button>
               </div>
-
-              <button
-                type="button"
-                onClick={resetState}
-                className="text-sm text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white font-semibold cursor-pointer"
-              >
-                ← Convert another document
-              </button>
-            </motion.div>
-          )}
-        </motion.div>
-      )}
+            )}
+          </motion.div>
+        )}
       </div>
     </ToolWorkspaceShell>
   );

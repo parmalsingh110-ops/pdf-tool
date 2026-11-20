@@ -1,7 +1,8 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence, useReducedMotion } from 'motion/react';
-import { Palette, Download, RotateCcw, ChevronDown, Loader2 } from 'lucide-react';
+import { Palette, Download, RotateCcw, ChevronDown, Loader2, Wand2 } from 'lucide-react';
 import FileDropzone from '../components/FileDropzone';
+import BeforeAfterSlider from '../components/BeforeAfterSlider';
 import { useSEO } from '../hooks/useSEO';
 import { triggerBlobDownload, useAutoRevokeUrl } from '../lib/blobUrl';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
@@ -24,9 +25,51 @@ export default function ImageColorCorrection() {
   const [adjustments, setAdjustments] = useState<PhotoAdjustments>({ ...DEFAULT_ADJUSTMENTS });
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [processing, setProcessing] = useState(false);
+  const [outFormat, setOutFormat] = useState<'image/jpeg' | 'image/png' | 'image/webp'>('image/jpeg');
   const [openGroup, setOpenGroup] = useState<string | null>('💡 Light');
   const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const imgRef = useRef<HTMLImageElement>(null);
+
+  // Real Gray-World Auto White Balance + Exposure estimation from current image
+  const handleAutoBalance = useCallback(async () => {
+    if (!imgUrl) return;
+    try {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.src = imgUrl;
+      await new Promise<void>((res) => { img.onload = () => res(); });
+      const c = document.createElement('canvas');
+      c.width = 160;
+      c.height = Math.max(40, Math.round((img.naturalHeight / Math.max(1, img.naturalWidth)) * 160));
+      const ctx = c.getContext('2d', { willReadFrequently: true })!;
+      ctx.drawImage(img, 0, 0, c.width, c.height);
+      const d = ctx.getImageData(0, 0, c.width, c.height).data;
+      let sR = 0, sG = 0, sB = 0, n = 0;
+      for (let i = 0; i < d.length; i += 4) {
+        sR += d[i]; sG += d[i + 1]; sB += d[i + 2]; n++;
+      }
+      if (n === 0) return;
+      const mR = sR / n, mG = sG / n, mB = sB / n;
+      const avgL = 0.299 * mR + 0.587 * mG + 0.114 * mB;
+      // Compute real temperature (R vs B cast), tint (G cast), and exposure lift
+      const tempFix = Math.max(-45, Math.min(45, Math.round(((mB - mR) / 255) * 95)));
+      const tintFix = Math.max(-30, Math.min(30, Math.round((((mR + mB) * 0.5 - mG) / 255) * 75)));
+      const expFix = Math.max(-25, Math.min(35, Math.round(((132 - avgL) / 132) * 32)));
+      setAdjustments({
+        ...DEFAULT_ADJUSTMENTS,
+        exposure: expFix,
+        contrast: 12,
+        temperature: tempFix,
+        tint: tintFix,
+        clarity: 10,
+        vibrance: 10,
+      });
+      c.width = 0;
+      c.height = 0;
+    } catch {
+      /* silent */
+    }
+  }, [imgUrl]);
 
   const prefersReduced = useReducedMotion();
 
@@ -108,9 +151,12 @@ export default function ImageColorCorrection() {
       ctx.drawImage(img, 0, 0);
 
       const result = applyAdjustments(canvas, adjustments);
-      const blob = await new Promise<Blob | null>((res) => result.toBlob((b) => res(b), 'image/jpeg', 0.95));
+      const q = outFormat === 'image/png' ? undefined : 0.95;
+      const blob = await new Promise<Blob | null>((res) => result.toBlob((b) => res(b), outFormat, q));
       if (blob) {
-        triggerBlobDownload(blob, `edited_${file?.name || 'image.jpg'}`);
+        const ext = outFormat === 'image/png' ? 'png' : outFormat === 'image/webp' ? 'webp' : 'jpg';
+        const stem = (file?.name || 'image').replace(/\.[^.]+$/, '');
+        triggerBlobDownload(blob, `color_corrected_${stem}.${ext}`);
       }
     } catch (e: any) {
       alert(e?.message || 'Export failed.');
@@ -165,20 +211,46 @@ export default function ImageColorCorrection() {
           <div className="space-y-4">
             <div className="relative pms-glass-panel rounded-3xl p-4 sm:p-5 overflow-hidden">
               <PearlScanOverlay active={processing} label="Applying color grade…" />
-              <div
-                className="pms-checkerboard bg-white dark:bg-slate-950 rounded-2xl border border-[var(--pms-border)] overflow-hidden flex items-center justify-center p-3"
-                style={{ minHeight: 400 }}
-              >
-                <img
-                  src={previewUrl || imgUrl!}
-                  alt="Preview"
-                  ref={imgRef}
-                  className="max-w-full max-h-[500px] object-contain rounded-lg shadow-sm"
+              {previewUrl && imgUrl ? (
+                <BeforeAfterSlider
+                  beforeSrc={imgUrl}
+                  afterSrc={previewUrl}
+                  beforeLabel="Original"
+                  afterLabel="Color Corrected"
+                  maxHeightClass="max-h-[500px]"
                 />
-              </div>
+              ) : (
+                <div
+                  className="pms-checkerboard bg-white dark:bg-slate-950 rounded-2xl border border-[var(--pms-border)] overflow-hidden flex items-center justify-center p-3"
+                  style={{ minHeight: 400 }}
+                >
+                  <img
+                    src={imgUrl!}
+                    alt="Preview"
+                    ref={imgRef}
+                    className="max-w-full max-h-[500px] object-contain rounded-lg shadow-sm"
+                  />
+                </div>
+              )}
             </div>
 
-            <div className="flex gap-3 justify-center flex-wrap">
+            <div className="flex gap-2.5 justify-center items-center flex-wrap">
+              <button
+                type="button"
+                onClick={() => void handleAutoBalance()}
+                className="px-4 py-3 rounded-2xl border border-amber-400/60 bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-200 font-bold text-xs flex items-center gap-1.5 hover:opacity-90 cursor-pointer"
+              >
+                <Wand2 className="w-4 h-4" /> Auto White Balance
+              </button>
+              <select
+                value={outFormat}
+                onChange={(e) => setOutFormat(e.target.value as any)}
+                className="px-3 py-3 rounded-2xl border border-[var(--pms-border)] bg-white/85 dark:bg-slate-900 text-xs font-bold"
+              >
+                <option value="image/jpeg">JPG (95%)</option>
+                <option value="image/png">PNG (Lossless)</option>
+                <option value="image/webp">WebP</option>
+              </select>
               <motion.button
                 whileHover={prefersReduced || processing ? undefined : { scale: 1.01 }}
                 whileTap={prefersReduced || processing ? undefined : { scale: 0.985 }}
