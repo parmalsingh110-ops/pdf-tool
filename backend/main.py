@@ -4844,6 +4844,8 @@ async def passport_ai_generate(
                 "X-Passport-AI-Model": str(result.get("model", "")),
                 "X-Passport-AI-Ms": str(result.get("elapsed_ms", 0)),
                 "X-Passport-AI-Cache": str(result.get("cache", "MISS")),
+                "X-Passport-AI-Route": str(result.get("route", "")),
+                "X-Passport-AI-Tier": str(result.get("traffic_type", "")),
             },
         )
     except HTTPException:

@@ -11,3 +11,7 @@ backend/__pycache__/
 backend/data/
 *.db
 *.zip
+*service-account*.json
+*service_account*.json
+vertex-*.json
+gcp-*.json

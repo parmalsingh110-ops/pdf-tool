@@ -9,4 +9,8 @@ data/
 *.sqlite
 *.log
 .DS_Store
+*service-account*.json
+*service_account*.json
+vertex-*.json
+gcp-*.json
 

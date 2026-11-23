@@ -32,6 +32,15 @@ import numpy as np
 import requests
 
 from fast_codecs import fast_jpeg_encode, fast_json_loads
+from vertex_auth import (
+    build_vertex_generate_url,
+    get_priority_headers,
+    get_vertex_access_token,
+    is_vertex_sa_configured,
+    load_vertex_service_account,
+)
+
+_VERTEX_SA_SENTINEL = "__VERTEX_SA__"
 
 try:
     from dotenv import load_dotenv
@@ -109,7 +118,8 @@ def get_server_vision_status() -> dict[str, Any]:
     has_configured = bool(
         allow_server_ai
         and (
-            os.environ.get("GEMINI_API_KEY", "").strip()
+            is_vertex_sa_configured()
+            or os.environ.get("GEMINI_API_KEY", "").strip()
             or os.environ.get("ANTHROPIC_API_KEY", "").strip()
             or os.environ.get("OPENAI_API_KEY", "").strip()
         )
@@ -156,17 +166,18 @@ def resolve_vision_credentials(
     gemini_env = os.environ.get("GEMINI_API_KEY", "").strip()
     claude_env = os.environ.get("ANTHROPIC_API_KEY", "").strip()
     openai_env = os.environ.get("OPENAI_API_KEY", "").strip()
+    has_vertex_sa = is_vertex_sa_configured()
 
-    if prov_clean == "gemini" and gemini_env:
-        return "gemini", gemini_env
+    if prov_clean == "gemini" and (has_vertex_sa or gemini_env):
+        return "gemini", (gemini_env or _VERTEX_SA_SENTINEL)
     if prov_clean in ("claude", "anthropic") and claude_env:
         return "claude", claude_env
     if prov_clean == "openai" and openai_env:
         return "openai", openai_env
 
-    # Auto priority: Gemini Flash/Pro -> Claude Vision -> OpenAI Vision
-    if gemini_env:
-        return "gemini", gemini_env
+    # Auto priority: Vertex AI / Gemini Flash/Pro -> Claude Vision -> OpenAI Vision
+    if has_vertex_sa or gemini_env:
+        return "gemini", (gemini_env or _VERTEX_SA_SENTINEL)
     if claude_env:
         return "claude", claude_env
     if openai_env:
@@ -395,8 +406,15 @@ def is_provider_blocked(provider: str, api_key: str) -> bool:
     key_id = _key_digest(api_key)
     prov = provider.strip().lower()
     if prov == "gemini":
-        eps = ("AIStudio", "VertexExpress") if api_key.startswith("AQ.") else ("AIStudio",)
-        return all(_is_in_cooldown(_ENDPOINT_BLOCKED_UNTIL, (ep, key_id)) for ep in eps)
+        sa = load_vertex_service_account() if (api_key == _VERTEX_SA_SENTINEL or is_server_key(api_key)) else None
+        checks: list[tuple[str, str]] = []
+        if sa is not None:
+            checks.append(("VertexSA", f"sa:{sa['cred_id']}"))
+        if api_key != _VERTEX_SA_SENTINEL:
+            eps = ("AIStudio", "VertexExpress") if api_key.startswith("AQ.") else ("AIStudio",)
+            for ep in eps:
+                checks.append((ep, key_id))
+        return bool(checks) and all(_is_in_cooldown(_ENDPOINT_BLOCKED_UNTIL, pair) for pair in checks)
     return _is_in_cooldown(_ENDPOINT_BLOCKED_UNTIL, (prov, key_id))
 
 
@@ -808,29 +826,55 @@ def _call_gemini_text(
     key_id = _key_digest(api_key)
     aistudio_ep = ("https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent", "AIStudio")
     vertex_ep = ("https://aiplatform.googleapis.com/v1/publishers/google/models/{m}:generateContent", "VertexExpress")
+    vertex_sa_ep = ("__VERTEX_SA__", "VertexSA")
+
+    sa_cfg = load_vertex_service_account() if (api_key == _VERTEX_SA_SENTINEL or is_server_key(api_key)) else None
 
     with _CACHE_LOCK:
         pref_ep = _ENDPOINT_PREF.get(key_id)
-    if api_key.startswith("AQ."):
-        # AQ.* keys are Google Cloud Vertex Express keys; hit VertexExpress first to skip AIStudio discovery GET + 403 roundtrip
-        endpoints = (aistudio_ep, vertex_ep) if pref_ep == "AIStudio" else (vertex_ep, aistudio_ep)
-    else:
-        endpoints = (aistudio_ep,)
+    endpoints_list: list[tuple[str, str]] = []
+    if sa_cfg is not None:
+        endpoints_list.append(vertex_sa_ep)
+    if api_key != _VERTEX_SA_SENTINEL:
+        if api_key.startswith("AQ."):
+            # AQ.* keys are Google Cloud Vertex Express keys; hit VertexExpress first to skip AIStudio discovery GET + 403 roundtrip
+            endpoints_list.extend((aistudio_ep, vertex_ep) if pref_ep == "AIStudio" else (vertex_ep, aistudio_ep))
+        else:
+            endpoints_list.append(aistudio_ep)
 
     deadline = time.monotonic() + max(2.0, float(max_total_s))
-    headers = {"Content-Type": "application/json", "x-goog-api-key": api_key}
+    priority_hdrs = get_priority_headers()
     attempts = 0
-    max_attempts = 3
+    max_attempts = 4 if sa_cfg is not None else 3
 
-    for url_tmpl, ep_label in endpoints:
+    for url_tmpl, ep_label in endpoints_list:
         if attempts >= max_attempts or time.monotonic() >= deadline - 1.0:
             break
-        if _is_in_cooldown(_ENDPOINT_BLOCKED_UNTIL, (ep_label, key_id)):
+        ep_kid = f"sa:{sa_cfg['cred_id']}" if (ep_label == "VertexSA" and sa_cfg) else key_id
+        if _is_in_cooldown(_ENDPOINT_BLOCKED_UNTIL, (ep_label, ep_kid)):
             continue
 
-        specs, auth_blocked = _candidate_gemini_specs(ep_label, api_key, key_id)
+        is_vertex_ep = ep_label in ("VertexSA", "VertexExpress")
+        headers: dict[str, str] = {"Content-Type": "application/json"}
+        if ep_label == "VertexSA":
+            if not sa_cfg:
+                continue
+            bearer = get_vertex_access_token(sa_cfg, timeout_s=min(6.0, max(2.0, deadline - time.monotonic())))
+            if not bearer:
+                _set_cooldown(_ENDPOINT_BLOCKED_UNTIL, (ep_label, ep_kid), 120.0)
+                continue
+            headers["Authorization"] = f"Bearer {bearer}"
+            if priority_hdrs:
+                headers.update(priority_hdrs)
+            specs, auth_blocked = _candidate_gemini_specs(ep_label, api_key, ep_kid)
+        else:
+            headers["x-goog-api-key"] = api_key
+            if is_vertex_ep and priority_hdrs:
+                headers.update(priority_hdrs)
+            specs, auth_blocked = _candidate_gemini_specs(ep_label, api_key, ep_kid)
+
         if auth_blocked:
-            _set_cooldown(_ENDPOINT_BLOCKED_UNTIL, (ep_label, key_id), 3600.0)
+            _set_cooldown(_ENDPOINT_BLOCKED_UNTIL, (ep_label, ep_kid), 3600.0)
             continue
 
         for model, thinking_cfg in specs:
@@ -840,24 +884,46 @@ def _call_gemini_text(
             attempts += 1
             read_budget = min(float(timeout_s), max(1.5, remaining))
             req_timeout = (min(3.5, max(1.0, remaining * 0.4)), read_budget)
-            url = url_tmpl.format(m=model)
+            if ep_label == "VertexSA" and sa_cfg:
+                api_ver = "v1beta1" if ("preview" in model or priority_hdrs) else "v1"
+                url = build_vertex_generate_url(sa_cfg["project_id"], sa_cfg["location"], model, api_version=api_ver)
+            else:
+                url = url_tmpl.format(m=model)
+            active_headers = dict(headers)
             try:
                 payload = _build_gemini_payload(parts, json_mode, thinking_cfg)
-                resp = _http_post(url, headers=headers, json=payload, timeout=req_timeout)
+                if is_vertex_ep:
+                    payload["contents"] = [{"role": "user", "parts": parts}]
+                resp = _http_post(url, headers=active_headers, json=payload, timeout=req_timeout)
+
+                if (
+                    is_vertex_ep
+                    and "X-Vertex-AI-LLM-Shared-Request-Type" in active_headers
+                    and resp.status_code in (400, 403)
+                    and "priority" in (resp.text or "").lower()
+                ):
+                    active_headers.pop("X-Vertex-AI-LLM-Request-Type", None)
+                    active_headers.pop("X-Vertex-AI-LLM-Shared-Request-Type", None)
+                    rem_p = deadline - time.monotonic()
+                    if rem_p >= 1.5:
+                        resp = _http_post(url, headers=active_headers, json=payload, timeout=(min(3.0, max(1.0, rem_p * 0.4)), min(float(timeout_s), max(1.5, rem_p))))
 
                 if resp.status_code == 400 and thinking_cfg is not None:
                     rem2 = deadline - time.monotonic()
                     if rem2 >= 1.5:
                         t2 = (min(3.0, max(1.0, rem2 * 0.4)), min(float(timeout_s), max(1.5, rem2)))
                         payload = _build_gemini_payload(parts, json_mode, None)
-                        resp = _http_post(url, headers=headers, json=payload, timeout=t2)
+                        if is_vertex_ep:
+                            payload["contents"] = [{"role": "user", "parts": parts}]
+                        resp = _http_post(url, headers=active_headers, json=payload, timeout=t2)
 
                 if resp.ok:
                     txt = _extract_gemini_candidate_text(resp.json())
                     if txt and txt.strip():
-                        _reset_transient_failure(ep_label, key_id)
-                        with _CACHE_LOCK:
-                            _ENDPOINT_PREF[key_id] = ep_label
+                        _reset_transient_failure(ep_label, ep_kid)
+                        if ep_label != "VertexSA":
+                            with _CACHE_LOCK:
+                                _ENDPOINT_PREF[key_id] = ep_label
                         logger.info(f"[AIVision] Gemini ({ep_label}/{model}) succeeded")
                         return txt
                     logger.warning(f"[AIVision] Gemini {ep_label}/{model} returned empty candidate")
@@ -865,25 +931,25 @@ def _call_gemini_text(
 
                 if resp.status_code in (401, 403):
                     logger.warning(f"[AIVision] Gemini {ep_label}/{model} auth error ({resp.status_code})")
-                    _set_cooldown(_ENDPOINT_BLOCKED_UNTIL, (ep_label, key_id), 3600.0)
+                    _set_cooldown(_ENDPOINT_BLOCKED_UNTIL, (ep_label, ep_kid), 3600.0)
                     break
                 if resp.status_code == 402:
                     logger.warning(f"[AIVision] Gemini {ep_label}/{model} credits depleted (402)")
-                    _set_cooldown(_ENDPOINT_BLOCKED_UNTIL, (ep_label, key_id), 180.0)
+                    _set_cooldown(_ENDPOINT_BLOCKED_UNTIL, (ep_label, ep_kid), 180.0)
                     break
                 if resp.status_code == 404:
                     logger.warning(f"[AIVision] Gemini {ep_label}/{model} status (404)")
-                    _set_cooldown(_MODEL_COOLDOWN_UNTIL, (ep_label, key_id, model), 3600.0)
+                    _set_cooldown(_MODEL_COOLDOWN_UNTIL, (ep_label, ep_kid, model), 3600.0)
                 else:
                     logger.warning(f"[AIVision] Gemini {ep_label}/{model} status ({resp.status_code})")
-                    _set_cooldown(_MODEL_COOLDOWN_UNTIL, (ep_label, key_id, model), 180.0)
+                    _set_cooldown(_MODEL_COOLDOWN_UNTIL, (ep_label, ep_kid, model), 180.0)
                     if resp.status_code in (408, 429) or resp.status_code >= 500:
-                        if _record_transient_failure(ep_label, key_id):
+                        if _record_transient_failure(ep_label, ep_kid):
                             break
             except Exception as exc:
                 logger.warning(f"[AIVision] Gemini {ep_label}/{model} error: {type(exc).__name__}")
-                _set_cooldown(_MODEL_COOLDOWN_UNTIL, (ep_label, key_id, model), 180.0)
-                if _record_transient_failure(ep_label, key_id):
+                _set_cooldown(_MODEL_COOLDOWN_UNTIL, (ep_label, ep_kid, model), 180.0)
+                if _record_transient_failure(ep_label, ep_kid):
                     break
     return ""
 
@@ -1018,6 +1084,8 @@ def is_server_key(api_key: Optional[str]) -> bool:
     k = (api_key or "").strip()
     if not k:
         return False
+    if k == _VERTEX_SA_SENTINEL:
+        return True
     return k in {
         os.environ.get("GEMINI_API_KEY", "").strip(),
         os.environ.get("ANTHROPIC_API_KEY", "").strip(),
