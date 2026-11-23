@@ -3303,58 +3303,19 @@ async def pdf_to_ppt(
 
 def _find_libreoffice() -> str:
     """Find LibreOffice executable. Returns path or raises RuntimeError."""
-    candidates = [
-        "soffice", "libreoffice",
-        "/Applications/LibreOffice.app/Contents/MacOS/soffice",
-        "/usr/bin/soffice",
-    ]
-    for c in candidates:
-        if shutil.which(c) or Path(c).exists():
-            return c
-    raise RuntimeError("LibreOffice not found.")
-
-
-_LO_WARM_TEMPLATE = Path("/opt/lo_profile_template")
+    return _find_libreoffice_impl()
 
 
 def libreoffice_convert(inp: Path, out_dir: Path) -> Path:
     """
-    Convert a file to PDF using LibreOffice.
-    Uses an isolated UserInstallation profile directory seeded from the Docker pre-warmed
-    template (when present) to skip 2-5s cold registry rebuilds with 0 idle RAM.
+    Convert any Office / Text / CSV file to a high-precision PDF using LibreOffice.
+    Uses per-application export filters (Writer/Calc/Impress), preserves high-res
+    images & embedded fonts, and prevents wide Excel sheets from awkward column slicing.
     """
-    lo = _find_libreoffice()
-    with tempfile.TemporaryDirectory(prefix="lo_prof_") as tmp_prof:
-        tmp_prof_path = Path(tmp_prof).resolve()
-        if _LO_WARM_TEMPLATE.is_dir():
-            try:
-                shutil.copytree(_LO_WARM_TEMPLATE, tmp_prof_path, dirs_exist_ok=True)
-            except Exception:
-                pass
-        profile_url = f"file://{tmp_prof_path}"
-        r = subprocess.run(
-            [
-                lo,
-                f"-env:UserInstallation={profile_url}",
-                "--headless",
-                "--norestore",
-                "--nolockcheck",
-                "--convert-to", "pdf",
-                "--outdir", str(out_dir),
-                str(inp)
-            ],
-            capture_output=True, text=True, timeout=MAX_PROCESSING_SECONDS
-        )
-    if r.returncode != 0:
-        logger.error(f"[LibreOffice] Conversion failed: {r.stderr[:300]}")
-        raise RuntimeError("LibreOffice conversion failed.")
-    out_pdf = out_dir / (inp.stem + ".pdf")
-    if not out_pdf.exists():
-        raise RuntimeError("LibreOffice output PDF not found.")
-    return out_pdf
+    return convert_office_to_pdf(inp, out_dir, timeout_sec=MAX_PROCESSING_SECONDS)
 
 
-ALLOWED_OFFICE_EXTENSIONS = {".docx", ".doc", ".pptx", ".ppt", ".xlsx", ".xls", ".odt", ".odp"}
+ALLOWED_OFFICE_EXTENSIONS = ALLOWED_OFFICE_TO_PDF_EXTENSIONS
 
 
 @app.post("/convert/office-to-pdf")
@@ -3362,7 +3323,7 @@ ALLOWED_OFFICE_EXTENSIONS = {".docx", ".doc", ".pptx", ".ppt", ".xlsx", ".xls", 
 async def office_to_pdf(request: Request, file: UploadFile = File(...)):
     ext = Path(safe_filename(file.filename or "")).suffix.lower()
     if ext not in ALLOWED_OFFICE_EXTENSIONS:
-        raise HTTPException(400, f"Unsupported format. Allowed: {', '.join(ALLOWED_OFFICE_EXTENSIONS)}")
+        raise HTTPException(400, f"Unsupported format. Allowed: {', '.join(sorted(ALLOWED_OFFICE_EXTENSIONS))}")
 
     inp = temp_path(ext)
     out_dir = TEMP_DIR / uuid.uuid4().hex
@@ -3372,7 +3333,6 @@ async def office_to_pdf(request: Request, file: UploadFile = File(...)):
 
         # Acquire semaphore to limit concurrent LibreOffice processes
         async with LIBREOFFICE_SEMAPHORE:
-            from fastapi.concurrency import run_in_threadpool
             out_pdf = await run_in_threadpool(libreoffice_convert, inp, out_dir)
 
         stem = safe_filename(file.filename, "document")
@@ -3452,37 +3412,20 @@ async def make_searchable(
 @app.post("/convert/ppt-to-word")
 @limiter.limit("10/minute")
 async def ppt_to_word(request: Request, file: UploadFile = File(...)):
-    try:
-        from pptx import Presentation as Pptx
-        from docx import Document
-        from docx.shared import Pt as DPt
-    except ImportError:
-        raise HTTPException(500, "Run: pip install python-pptx python-docx")
+    ext = Path(safe_filename(file.filename or "")).suffix.lower() or ".pptx"
+    if ext not in PPT_EXTENSIONS:
+        raise HTTPException(400, f"Unsupported PowerPoint format. Allowed: {', '.join(sorted(PPT_EXTENSIONS))}")
 
-    inp = temp_path(".pptx")
+    inp = temp_path(ext)
     out = temp_path(".docx")
     try:
         inp.write_bytes(await safe_read_upload(file))
+        if ext != ".pptx":
+            async with LIBREOFFICE_SEMAPHORE:
+                await run_in_threadpool(convert_ppt_to_word, inp, out)
+        else:
+            await run_in_threadpool(convert_ppt_to_word, inp, out)
 
-        def _convert_ppt_to_word():
-            prs = Pptx(str(inp))
-            doc = Document()
-            doc.add_heading("Presentation Content", 0)
-
-            for i, slide in enumerate(prs.slides, 1):
-                doc.add_heading(f"Slide {i}", 1)
-                for shape in slide.shapes:
-                    if shape.has_text_frame:
-                        for para in shape.text_frame.paragraphs:
-                            txt = para.text.strip()
-                            if txt:
-                                p = doc.add_paragraph(txt)
-                                if para.runs and para.runs[0].font.size:
-                                    p.runs[0].font.size = para.runs[0].font.size
-
-            doc.save(str(out))
-
-        await run_in_threadpool(_convert_ppt_to_word)
         stem = safe_filename(file.filename, "document")
         out_name = Path(stem).stem + ".docx"
         return FileResponse(
@@ -3499,168 +3442,26 @@ async def ppt_to_word(request: Request, file: UploadFile = File(...)):
         raise safe_error(e, "ppt-to-word")
 
 
-# ─── 7. Word → PPT (improved: headings→slides, bullets, tables) ──
+# ─── 7. Word → PPT (exact runs, colors, images, paginated tables) ──
 
 @app.post("/convert/word-to-ppt")
 @limiter.limit("10/minute")
 async def word_to_ppt(request: Request, file: UploadFile = File(...)):
-    try:
-        from docx import Document
-        from docx.oxml.ns import qn
-        from pptx import Presentation
-        from pptx.util import Inches, Pt, Emu
-        from pptx.dml.color import RGBColor
-        from pptx.enum.text import PP_ALIGN
-    except ImportError:
-        raise HTTPException(500, "Run: pip install python-docx python-pptx")
+    ext = Path(safe_filename(file.filename or "")).suffix.lower() or ".docx"
+    if ext not in WORD_EXTENSIONS:
+        raise HTTPException(400, f"Unsupported Word format. Allowed: {', '.join(sorted(WORD_EXTENSIONS))}")
 
-    inp = temp_path(".docx")
+    inp = temp_path(ext)
     out = temp_path(".pptx")
     try:
         inp.write_bytes(await safe_read_upload(file))
+        if ext != ".docx":
+            async with LIBREOFFICE_SEMAPHORE:
+                await run_in_threadpool(convert_word_to_ppt, inp, out)
+        else:
+            await run_in_threadpool(convert_word_to_ppt, inp, out)
 
-        def _convert_word_to_ppt():
-            doc = Document(str(inp))
-            prs = Presentation()
-            prs.slide_width  = Inches(13.33)
-            prs.slide_height = Inches(7.5)
-
-            TITLE_LAYOUT   = prs.slide_layouts[0]   # Title Slide
-            CONTENT_LAYOUT = prs.slide_layouts[1]   # Title + Content
-            BLANK_LAYOUT   = prs.slide_layouts[6]   # Blank
-
-            def _add_content_slide(title_text: str) -> any:
-                sl = prs.slides.add_slide(CONTENT_LAYOUT)
-                sl.shapes.title.text = title_text[:200]
-                return sl
-
-            def _tf_for_slide(sl) -> any:
-                for ph in sl.placeholders:
-                    if ph.placeholder_format.idx == 1:
-                        return ph.text_frame
-                return None
-
-            current_slide: any = None
-            current_tf: any = None
-            current_title: str = "Content"
-            para_count_on_slide: int = 0
-            first_slide = True
-
-            for elem in doc.element.body:
-                tag = elem.tag.split('}')[-1] if '}' in elem.tag else elem.tag
-
-                if tag == 'p':
-                    from docx.text.paragraph import Paragraph as _P
-                    para = _P(elem, doc)
-                    txt  = para.text.strip()
-                    style = para.style.name if para.style else ''
-
-                    is_h1 = 'Heading 1' in style or 'Title' in style
-                    is_h2 = 'Heading 2' in style
-                    is_h3 = 'Heading 3' in style or 'Heading 4' in style
-
-                    if is_h1:
-                        current_title = txt or 'Slide'
-                        current_slide = _add_content_slide(current_title)
-                        current_tf    = _tf_for_slide(current_slide)
-                        if current_tf:
-                            current_tf.clear()
-                        para_count_on_slide = 0
-                        first_slide = False
-                        continue
-
-                    if first_slide and txt:
-                        current_title = txt[:120] or 'Content'
-                        current_slide = _add_content_slide(current_title)
-                        current_tf    = _tf_for_slide(current_slide)
-                        if current_tf:
-                            current_tf.clear()
-                        para_count_on_slide = 0
-                        first_slide = False
-                        continue
-
-                    if not txt:
-                        continue
-
-                    # Auto-paginate after 8 paragraphs on a single slide so content never overflows
-                    if current_slide is None or para_count_on_slide >= 8:
-                        cont_title = f"{current_title} (Cont.)" if current_slide is not None else current_title
-                        current_slide = _add_content_slide(cont_title)
-                        current_tf    = _tf_for_slide(current_slide)
-                        if current_tf:
-                            current_tf.clear()
-                        para_count_on_slide = 0
-
-                    if current_tf:
-                        level = 0
-                        if is_h2:     level = 0
-                        elif is_h3:   level = 1
-                        elif para.paragraph_format.left_indent and para.paragraph_format.left_indent > 0:
-                            level = min(4, int(para.paragraph_format.left_indent / 360000))
-
-                        pptx_para = current_tf.add_paragraph() if para_count_on_slide > 0 else current_tf.paragraphs[0]
-                        pptx_para.level = level
-                        para_count_on_slide += 1
-                        added_run = False
-                        for run in para.runs:
-                            run_text = run.text
-                            if not run_text:
-                                continue
-                            pptx_run = pptx_para.add_run()
-                            pptx_run.text = run_text
-                            pptx_run.font.bold   = run.bold
-                            pptx_run.font.italic = run.italic
-                            if run.font.size:
-                                pptx_run.font.size = run.font.size
-                            else:
-                                pptx_run.font.size = Pt(20 if is_h2 else 18)
-                            if run.font.color and run.font.color.type:
-                                try:
-                                    col = run.font.color.rgb
-                                    pptx_run.font.color.rgb = RGBColor(col.red, col.green, col.blue)
-                                except Exception:
-                                    pass
-                            added_run = True
-                        if not added_run:
-                            pptx_run = pptx_para.add_run()
-                            pptx_run.text = txt
-                            pptx_run.font.size = Pt(20 if is_h2 else 18)
-
-                elif tag == 'tbl':
-                    # Word table → native editable PPTX table shape
-                    from docx.table import Table as _T
-                    tbl = _T(elem, doc)
-                    rows_count = len(tbl.rows)
-                    cols_count = len(tbl.columns) if rows_count > 0 else 0
-                    if rows_count > 0 and cols_count > 0:
-                        tbl_slide = prs.slides.add_slide(BLANK_LAYOUT)
-                        max_rows = min(rows_count, 18)
-                        max_cols = min(cols_count, 10)
-                        t_shape = tbl_slide.shapes.add_table(
-                            max_rows, max_cols,
-                            Inches(0.6), Inches(0.8),
-                            Inches(12.1), Inches(min(6.0, max_rows * 0.42))
-                        )
-                        pptx_tbl = t_shape.table
-                        for r_idx in range(max_rows):
-                            row_cells = tbl.rows[r_idx].cells
-                            for c_idx in range(min(max_cols, len(row_cells))):
-                                cell_text = row_cells[c_idx].text.strip()
-                                cell = pptx_tbl.cell(r_idx, c_idx)
-                                cell.text = cell_text
-                                for p in cell.text_frame.paragraphs:
-                                    for r in p.runs:
-                                        r.font.size = Pt(12)
-                                        if r_idx == 0:
-                                            r.font.bold = True
-
-            if len(prs.slides) == 0:
-                prs.slides.add_slide(BLANK_LAYOUT)
-            prs.save(str(out))
-
-        await run_in_threadpool(_convert_word_to_ppt)
-
-        stem     = safe_filename(file.filename, "presentation")
+        stem = safe_filename(file.filename, "presentation")
         out_name = Path(stem).stem + ".pptx"
         return FileResponse(
             str(out),
@@ -3676,96 +3477,61 @@ async def word_to_ppt(request: Request, file: UploadFile = File(...)):
         raise safe_error(e, "word-to-ppt")
 
 
+# ─── 7b. Word → Excel (tables with merges/fills + structured content) ──
+
+@app.post("/convert/word-to-excel")
+@limiter.limit("10/minute")
+async def word_to_excel(request: Request, file: UploadFile = File(...)):
+    ext = Path(safe_filename(file.filename or "")).suffix.lower() or ".docx"
+    if ext not in WORD_EXTENSIONS:
+        raise HTTPException(400, f"Unsupported Word format. Allowed: {', '.join(sorted(WORD_EXTENSIONS))}")
+
+    inp = temp_path(ext)
+    out = temp_path(".xlsx")
+    try:
+        inp.write_bytes(await safe_read_upload(file))
+        if ext != ".docx":
+            async with LIBREOFFICE_SEMAPHORE:
+                await run_in_threadpool(convert_word_to_excel, inp, out)
+        else:
+            await run_in_threadpool(convert_word_to_excel, inp, out)
+
+        stem = safe_filename(file.filename, "spreadsheet")
+        out_name = Path(stem).stem + ".xlsx"
+        return FileResponse(
+            str(out),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            filename=out_name,
+            background=BackgroundTask(cleanup, inp, out)
+        )
+    except HTTPException:
+        cleanup(inp, out)
+        raise
+    except Exception as e:
+        cleanup(inp, out)
+        raise safe_error(e, "word-to-excel")
+
+
 # ─── 8. Excel → Word ────────────────────────────────────────────
 
 @app.post("/convert/excel-to-word")
 @limiter.limit("10/minute")
 async def excel_to_word(request: Request, file: UploadFile = File(...)):
-    try:
-        import openpyxl
-        from docx import Document
-        from docx.shared import Pt, RGBColor, Inches
-        from docx.enum.text import WD_ALIGN_PARAGRAPH
-        from docx.oxml.ns import qn
-        from docx.oxml import OxmlElement
-    except ImportError:
-        raise HTTPException(500, "Run: pip install openpyxl python-docx")
+    ext = Path(safe_filename(file.filename or "")).suffix.lower() or ".xlsx"
+    if ext not in EXCEL_EXTENSIONS:
+        raise HTTPException(400, f"Unsupported Excel format. Allowed: {', '.join(sorted(EXCEL_EXTENSIONS))}")
 
-    inp = temp_path(".xlsx")
+    inp = temp_path(ext)
     out = temp_path(".docx")
     try:
         inp.write_bytes(await safe_read_upload(file))
-        wb = openpyxl.load_workbook(str(inp), data_only=True)
-        doc = Document()
+        if ext in (".xls", ".ods"):
+            async with LIBREOFFICE_SEMAPHORE:
+                await run_in_threadpool(convert_excel_to_word, inp, out)
+        else:
+            await run_in_threadpool(convert_excel_to_word, inp, out)
 
-        # Document margins
-        for section in doc.sections:
-            section.top_margin    = Inches(0.75)
-            section.bottom_margin = Inches(0.75)
-            section.left_margin   = Inches(0.75)
-            section.right_margin  = Inches(0.75)
-
-        for sheet_idx, sheet_name in enumerate(wb.sheetnames):
-            ws = wb[sheet_name]
-            if sheet_idx > 0:
-                doc.add_page_break()
-
-            h = doc.add_heading(sheet_name, level=1)
-            h.runs[0].font.color.rgb = RGBColor(0x1a, 0x3a, 0x8f)
-
-            # Determine data range (skip completely empty rows/cols)
-            rows_data = []
-            for row in ws.iter_rows(values_only=True):
-                if any(c is not None and str(c).strip() for c in row):
-                    rows_data.append([str(c) if c is not None else '' for c in row])
-            if not rows_data:
-                doc.add_paragraph('(Empty sheet)')
-                continue
-
-            # Trim trailing empty columns
-            max_cols = max((len([c for c in r if c.strip()]) for r in rows_data), default=0)
-            max_cols = max(max_cols, 1)
-            rows_data = [r[:max_cols] for r in rows_data]
-            # Pad short rows
-            rows_data = [r + [''] * (max_cols - len(r)) for r in rows_data]
-
-            table = doc.add_table(rows=len(rows_data), cols=max_cols)
-            table.style = 'Table Grid'
-
-            for ri, row in enumerate(rows_data):
-                is_header = ri == 0
-                tr = table.rows[ri]
-                for ci, val in enumerate(row):
-                    cell = tr.cells[ci]
-                    cell.text = val
-                    run = cell.paragraphs[0].runs[0] if cell.paragraphs[0].runs else cell.paragraphs[0].add_run(val)
-                    run.bold = is_header
-                    run.font.size = Pt(10 if not is_header else 11)
-                    # Header shading
-                    if is_header:
-                        from docx.oxml.ns import qn
-                        from docx.oxml import OxmlElement
-                        tc = cell._tc
-                        tcPr = tc.get_or_add_tcPr()
-                        shd = OxmlElement('w:shd')
-                        shd.set(qn('w:val'), 'clear')
-                        shd.set(qn('w:color'), 'auto')
-                        shd.set(qn('w:fill'), '1A3A8F')
-                        tcPr.append(shd)
-                        run.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
-                    elif ri % 2 == 0:
-                        tc = cell._tc
-                        tcPr = tc.get_or_add_tcPr()
-                        shd = OxmlElement('w:shd')
-                        shd.set(qn('w:val'), 'clear')
-                        shd.set(qn('w:color'), 'auto')
-                        shd.set(qn('w:fill'), 'EFF6FF')
-                        tcPr.append(shd)
-
-            doc.add_paragraph()
-
-        doc.save(str(out))
-        stem     = safe_filename(file.filename, "document")
+        stem = safe_filename(file.filename, "document")
         out_name = Path(stem).stem + ".docx"
         return FileResponse(
             str(out),
@@ -3786,119 +3552,21 @@ async def excel_to_word(request: Request, file: UploadFile = File(...)):
 @app.post("/convert/excel-to-ppt")
 @limiter.limit("10/minute")
 async def excel_to_ppt(request: Request, file: UploadFile = File(...)):
-    try:
-        import openpyxl
-        from pptx import Presentation
-        from pptx.util import Inches, Pt, Emu
-        from pptx.dml.color import RGBColor
-    except ImportError:
-        raise HTTPException(500, "Run: pip install openpyxl python-pptx")
+    ext = Path(safe_filename(file.filename or "")).suffix.lower() or ".xlsx"
+    if ext not in EXCEL_EXTENSIONS:
+        raise HTTPException(400, f"Unsupported Excel format. Allowed: {', '.join(sorted(EXCEL_EXTENSIONS))}")
 
-    inp = temp_path(".xlsx")
+    inp = temp_path(ext)
     out = temp_path(".pptx")
     try:
         inp.write_bytes(await safe_read_upload(file))
-        wb = openpyxl.load_workbook(str(inp), data_only=True)
-        prs = Presentation()
-        prs.slide_width  = Inches(13.33)
-        prs.slide_height = Inches(7.5)
+        if ext in (".xls", ".ods"):
+            async with LIBREOFFICE_SEMAPHORE:
+                await run_in_threadpool(convert_excel_to_ppt, inp, out)
+        else:
+            await run_in_threadpool(convert_excel_to_ppt, inp, out)
 
-        TITLE_LAYOUT   = prs.slide_layouts[0]
-        CONTENT_LAYOUT = prs.slide_layouts[5]  # blank layout to draw manually
-        TABLE_LAYOUT   = prs.slide_layouts[6]  # blank
-
-        for sheet_name in wb.sheetnames:
-            ws = wb[sheet_name]
-
-            # Collect non-empty rows
-            rows_data = []
-            for row in ws.iter_rows(values_only=True):
-                row_vals = [str(c) if c is not None else '' for c in row]
-                if any(v.strip() for v in row_vals):
-                    rows_data.append(row_vals)
-            if not rows_data:
-                continue
-
-            # Trim trailing empty columns
-            max_cols = max((len([c for c in r if c.strip()]) for r in rows_data), default=1)
-            rows_data = [r[:max_cols] for r in rows_data]
-            rows_data = [r + [''] * (max_cols - len(r)) for r in rows_data]
-
-            # One slide per sheet — add title + table shape
-            slide = prs.slides.add_slide(TABLE_LAYOUT)
-
-            # Title text box at top
-            title_box = slide.shapes.add_textbox(
-                Inches(0.3), Inches(0.15), Inches(12.5), Inches(0.65)
-            )
-            tf = title_box.text_frame
-            tf.word_wrap = False
-            p = tf.paragraphs[0]
-            run = p.add_run()
-            run.text = sheet_name
-            run.font.size = Pt(24)
-            run.font.bold = True
-            run.font.color.rgb = RGBColor(0x1a, 0x3a, 0x8f)
-
-            # Add pptx table
-            max_rows = min(len(rows_data), 30)  # cap at 30 rows per slide
-            table_rows = rows_data[:max_rows]
-            n_rows = len(table_rows)
-            n_cols = max_cols
-
-            left   = Inches(0.3)
-            top    = Inches(0.9)
-            width  = Inches(12.7)
-            height = Inches(6.4)
-
-            tbl_shape = slide.shapes.add_table(n_rows, n_cols, left, top, width, height)
-            tbl = tbl_shape.table
-
-            for ri, row in enumerate(table_rows):
-                is_header = ri == 0
-                for ci, val in enumerate(row):
-                    cell = tbl.cell(ri, ci)
-                    cell.text = val[:100]
-                    tf2 = cell.text_frame
-                    tf2.word_wrap = True
-                    run2 = tf2.paragraphs[0].runs[0] if tf2.paragraphs[0].runs else tf2.paragraphs[0].add_run()
-                    run2.text = val[:100]
-                    run2.font.size = Pt(11 if is_header else 10)
-                    run2.font.bold = is_header
-                    # Header background
-                    from pptx.oxml.ns import qn as pqn
-                    from lxml import etree
-                    tc = cell._tc
-                    tcPr = tc.get_or_add_tcPr()
-                    solidFill = etree.SubElement(tcPr, pqn('a:solidFill'))
-                    srgbClr = etree.SubElement(solidFill, pqn('a:srgbClr'))
-                    srgbClr.set('val', '1A3A8F' if is_header else ('EFF6FF' if ri % 2 == 0 else 'FFFFFF'))
-                    if is_header:
-                        run2.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
-
-            # If sheet had more rows, add continuation slide
-            if len(rows_data) > max_rows:
-                remaining = rows_data[max_rows:]
-                slide2 = prs.slides.add_slide(TABLE_LAYOUT)
-                tb2 = slide2.shapes.add_textbox(Inches(0.3), Inches(0.15), Inches(12.5), Inches(0.65))
-                tf3 = tb2.text_frame
-                r3 = tf3.paragraphs[0].add_run()
-                r3.text = f"{sheet_name} (continued)"
-                r3.font.size = Pt(22); r3.font.bold = True
-                r3.font.color.rgb = RGBColor(0x1a, 0x3a, 0x8f)
-
-                n2 = min(len(remaining), 30)
-                tbl2_shape = slide2.shapes.add_table(n2, n_cols, left, top, width, height)
-                tbl2 = tbl2_shape.table
-                for ri, row in enumerate(remaining[:n2]):
-                    for ci, val in enumerate(row):
-                        tbl2.cell(ri, ci).text = val[:100]
-
-        if len(prs.slides) == 0:
-            prs.slides.add_slide(prs.slide_layouts[6])
-
-        prs.save(str(out))
-        stem     = safe_filename(file.filename, "presentation")
+        stem = safe_filename(file.filename, "presentation")
         out_name = Path(stem).stem + ".pptx"
         return FileResponse(
             str(out),
@@ -3919,104 +3587,21 @@ async def excel_to_ppt(request: Request, file: UploadFile = File(...)):
 @app.post("/convert/ppt-to-excel")
 @limiter.limit("10/minute")
 async def ppt_to_excel(request: Request, file: UploadFile = File(...)):
-    try:
-        from pptx import Presentation as Pptx
-        import openpyxl
-        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-    except ImportError:
-        raise HTTPException(500, "Run: pip install python-pptx openpyxl")
+    ext = Path(safe_filename(file.filename or "")).suffix.lower() or ".pptx"
+    if ext not in PPT_EXTENSIONS:
+        raise HTTPException(400, f"Unsupported PowerPoint format. Allowed: {', '.join(sorted(PPT_EXTENSIONS))}")
 
-    inp = temp_path(".pptx")
+    inp = temp_path(ext)
     out = temp_path(".xlsx")
     try:
         inp.write_bytes(await safe_read_upload(file))
-        prs = Pptx(str(inp))
-        wb  = openpyxl.Workbook()
-        wb.remove(wb.active)
+        if ext != ".pptx":
+            async with LIBREOFFICE_SEMAPHORE:
+                await run_in_threadpool(convert_ppt_to_excel, inp, out)
+        else:
+            await run_in_threadpool(convert_ppt_to_excel, inp, out)
 
-        HDR_FILL  = PatternFill("solid", fgColor="1A3A8F")
-        ALT_FILL  = PatternFill("solid", fgColor="EFF6FF")
-        HDR_FONT  = Font(bold=True, color="FFFFFF", size=11)
-        BODY_FONT = Font(size=10)
-        THIN      = Side(style="thin")
-        BORDER    = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
-        WRAP      = Alignment(wrap_text=True, vertical="top")
-
-        for slide_idx, slide in enumerate(prs.slides, 1):
-            ws = wb.create_sheet(f"Slide_{slide_idx}")
-            row_idx = 1
-
-            # Slide title in first row
-            title_text = ""
-            for shape in slide.shapes:
-                if shape.has_text_frame and shape.shape_type == 13:
-                    title_text = shape.text_frame.text.strip()
-                    break
-            if not title_text:
-                for shape in slide.shapes:
-                    if hasattr(shape, 'placeholder_format') and shape.placeholder_format:
-                        if shape.placeholder_format.idx == 0:
-                            title_text = shape.text_frame.text.strip() if shape.has_text_frame else ''
-                            break
-
-            if title_text:
-                cell = ws.cell(row_idx, 1, title_text)
-                cell.font  = Font(bold=True, size=14, color="1A3A8F")
-                cell.fill  = PatternFill("solid", fgColor="D1E4FF")
-                cell.alignment = WRAP
-                ws.merge_cells(start_row=row_idx, start_column=1, end_row=row_idx, end_column=4)
-                row_idx += 2
-
-            # Extract tables from slide
-            for shape in slide.shapes:
-                if shape.has_table:
-                    tbl = shape.table
-                    for ri, row in enumerate(tbl.rows):
-                        is_header = ri == 0
-                        for ci, cell in enumerate(row.cells):
-                            c = ws.cell(row_idx, ci + 1, cell.text.strip())
-                            c.font      = HDR_FONT if is_header else BODY_FONT
-                            c.fill      = HDR_FILL if is_header else (ALT_FILL if row_idx % 2 == 0 else PatternFill())
-                            c.border    = BORDER
-                            c.alignment = WRAP
-                        row_idx += 1
-                    row_idx += 1  # gap after table
-
-            # Extract text frames (non-title)
-            for shape in slide.shapes:
-                if not shape.has_text_frame:
-                    continue
-                is_title_shape = (hasattr(shape, 'placeholder_format') and
-                                  shape.placeholder_format and
-                                  shape.placeholder_format.idx == 0)
-                if is_title_shape:
-                    continue
-                for para in shape.text_frame.paragraphs:
-                    txt = para.text.strip()
-                    if txt:
-                        c = ws.cell(row_idx, 1, txt)
-                        c.font      = BODY_FONT
-                        c.alignment = WRAP
-                        row_idx += 1
-
-            # Auto-column widths
-            from openpyxl.utils import get_column_letter
-            for col in ws.columns:
-                max_len = 0
-                col_letter = get_column_letter(col[0].column)
-                for cell in col:
-                    try:
-                        if cell.value:
-                            max_len = max(max_len, len(str(cell.value)))
-                    except Exception:
-                        pass
-                ws.column_dimensions[col_letter].width = min(max(max_len + 2, 12), 50)
-
-        if not wb.sheetnames:
-            wb.create_sheet("Sheet1")
-
-        wb.save(str(out))
-        stem     = safe_filename(file.filename, "spreadsheet")
+        stem = safe_filename(file.filename, "spreadsheet")
         out_name = Path(stem).stem + ".xlsx"
         return FileResponse(
             str(out),

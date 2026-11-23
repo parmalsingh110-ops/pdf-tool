@@ -20,6 +20,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     mupdf-tools \
     fonts-liberation \
     fonts-dejavu-core \
+    fonts-crosextra-carlito \
+    fonts-crosextra-caladea \
+    fonts-noto-core \
+    fontconfig \
     libraqm0 \
     libfribidi0 \
     libharfbuzz0b \
@@ -49,6 +53,11 @@ RUN mkdir -p /ms-playwright \
 
 # ── App code ─────────────────────────────────────────────────────
 COPY . .
+
+# ── Install bundled Indic/Devanagari fonts into system fontconfig for LibreOffice ──
+RUN mkdir -p /usr/local/share/fonts/custom \
+    && cp -f /app/fonts/*.ttf /usr/local/share/fonts/custom/ 2>/dev/null || true \
+    && fc-cache -fv || true
 
 # ── Create temp directory & pre-warm LibreOffice profile template ─
 # Backend uses /tmp/pdf_tool_backend for all processing.
