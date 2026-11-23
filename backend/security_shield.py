@@ -332,13 +332,14 @@ class PriorityLoadBalancer:
             "/health",
             "/vision/status",
             "/api/system/health",
+            "/api/passport-ai/config",
             "/api/feedback",
             "/api/telemetry/error",
         ) or path.startswith("/api/admin/") or path.startswith("/api/print-drop/jobs/"):
             return "bypass"
 
         if (
-            path in ("/analyze/text-layout", "/analyze/page-layers", "/analyze/links", "/analyze/cmyk-preflight", "/vision/assist")
+            path in ("/analyze/text-layout", "/analyze/page-layers", "/analyze/links", "/analyze/cmyk-preflight", "/vision/assist", "/api/passport-ai/generate")
             or path.startswith("/api/print-drop/")
         ):
             return "fast"

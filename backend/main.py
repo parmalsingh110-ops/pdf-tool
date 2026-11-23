@@ -61,6 +61,10 @@ from prepress_engine import (
     analyze_cmyk_preflight,
     convert_pdf_to_vector_grayscale,
 )
+from passport_ai_studio import (
+    get_passport_ai_config,
+    generate_studio_passport_photo,
+)
 
 from vision_reconstructor import (
     normalize_input_to_pdf,
@@ -68,6 +72,24 @@ from vision_reconstructor import (
     build_exact_docx_from_scans,
     build_exact_xlsx_from_scans,
     build_exact_pptx_from_scans,
+)
+from office_converter import (
+    ALLOWED_OFFICE_TO_PDF_EXTENSIONS,
+    WORD_EXTENSIONS,
+    EXCEL_EXTENSIONS,
+    PPT_EXTENSIONS,
+    find_libreoffice as _find_libreoffice_impl,
+    convert_office_to_pdf,
+    convert_word_to_excel,
+    convert_word_to_ppt,
+    convert_excel_to_word,
+    convert_excel_to_ppt,
+    convert_ppt_to_word,
+    convert_ppt_to_excel,
+    parse_excel_typed_value,
+    _autosize_openpyxl_sheet,
+    _reset_pptx_table_theme,
+    _set_pptx_cell_border_clean,
 )
 from security_shield import (
     LOAD_BALANCER,
@@ -179,7 +201,7 @@ _SECRET_KEEP_PREFIX_PATTERNS = [
 def redact_secrets(text: Any) -> str:
     """Scrub provider keys / auth headers / env-key values from any string before it is logged or sent out."""
     s = str(text)
-    for env_name in ("GEMINI_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "ILOVEPDF_SECRET_KEY",
+    for env_name in ("GEMINI_API_KEY", "PASSPORT_GEMINI_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "ILOVEPDF_SECRET_KEY",
                      "TELEGRAM_BOT_TOKEN", "ADMIN_SECRET_KEY"):
         val = os.environ.get(env_name, "").strip()
         if len(val) >= 8 and val in s:
@@ -343,6 +365,7 @@ app.add_middleware(
         "X-Room-Token",
         "X-Request-Id",
         "X-Idempotency-Key",
+        "X-Gemini-Api-Key",
         "Accept",
         "Origin",
         "X-Requested-With",
@@ -363,6 +386,9 @@ app.add_middleware(
         "X-CMYK-Crop-Marks",
         "X-Gray-Avg-K",
         "X-Gray-Vector",
+        "X-Passport-AI-Model",
+        "X-Passport-AI-Ms",
+        "X-Passport-AI-Cache",
         "Retry-After",
     ],
     allow_credentials=False,
@@ -2446,82 +2472,223 @@ async def pdf_to_word_plaintext(request: Request, file: UploadFile = File(...), 
 # ─── 2. PDF → Excel ────────────────────────────────────────────
 
 def _extract_tables_to_excel(inp: Path, out: Path, method: str) -> int:
-    """Synchronous CPU/IO worker function executed in threadpool."""
+    """
+    Precision synchronous PDF -> Excel worker (executed in threadpool).
+    Strategy order:
+      1. pdfplumber 'lines' + PyMuPDF vector table detection (validates real multi-cell tables,
+         ignoring bogus 1x1 page border frames)
+      2. Camelot (lattice / stream) only when real multi-row/multi-col tables are detected
+      3. pdfplumber 'text' strategy or X-stop-clustered coordinate layout (never overwrites cells!)
+    Applies native numeric typing, header formatting, borders, wrap text, auto column widths,
+    and fit-to-1-page-wide landscape print setup.
+    """
     import openpyxl
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    import pdfplumber
+    import pymupdf as fitz
 
     wb = openpyxl.Workbook()
     wb.remove(wb.active)
-    tables_found = False
+
+    HDR_FILL = PatternFill("solid", fgColor="1E3A8A")
+    ALT_FILL = PatternFill("solid", fgColor="F1F5F9")
+    HDR_FONT = Font(name="Calibri", bold=True, color="FFFFFF", size=10)
+    BODY_FONT = Font(name="Calibri", size=10, color="0F172A")
+    THIN = Side(style="thin", color="94A3B8")
+    CELL_BORDER = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
+
     total_cells_written = 0
+    tables_found = False
 
-    # Try camelot (best for bordered tables)
-    try:
-        import camelot
-        for flavor in (["lattice", "stream"] if method == "auto" else [method]):
-            tables = camelot.read_pdf(str(inp), pages="all", flavor=flavor)
-            if tables and len(tables) > 0:
-                tables_found = True
-                for i, tbl in enumerate(tables):
-                    sheet_name = f"Table_{i+1}_p{tbl.page}"[:31]
-                    ws = wb.create_sheet(sheet_name)
-                    for r_idx, row in enumerate(tbl.df.values, 1):
-                        for c_idx, val in enumerate(row, 1):
-                            cell_val = str(val).strip() if val else ""
-                            cell = ws.cell(r_idx, c_idx, cell_val)
-                            if cell_val:
-                                total_cells_written += 1
-                            if r_idx == 1:
-                                cell.font = Font(bold=True)
-                                cell.fill = PatternFill("solid", fgColor="D9E1F2")
-                            cell.border = Border(
-                                left=Side(style="thin"), right=Side(style="thin"),
-                                top=Side(style="thin"), bottom=Side(style="thin")
-                            )
-                            cell.alignment = Alignment(wrap_text=True)
-                break
-    except Exception as camelot_err:
-        logger.warning(f"[PDF2Excel] Camelot failed, using pdfplumber fallback: {type(camelot_err).__name__}")
+    def _clean_matrix(raw_rows: list[list[Any]]) -> list[list[str]]:
+        cleaned = []
+        for row in raw_rows:
+            vals = [str(c).strip() if c is not None else "" for c in row]
+            if any(vals):
+                cleaned.append(vals)
+        if not cleaned:
+            return []
+        max_c = max(len(r) for r in cleaned)
+        # Trim completely empty columns
+        non_empty_cols = [
+            ci for ci in range(max_c)
+            if any((ci < len(r) and r[ci]) for r in cleaned)
+        ]
+        if not non_empty_cols:
+            return []
+        return [[(r[ci] if ci < len(r) else "") for ci in non_empty_cols] for r in cleaned]
 
-    # Fallback: pdfplumber
+    def _write_table_sheet(title: str, matrix: list[list[str]]) -> int:
+        ws = wb.create_sheet(title[:31])
+        written = 0
+        for r_idx, row in enumerate(matrix, 1):
+            is_hdr = (r_idx == 1 and len(matrix) > 1)
+            for c_idx, raw_val in enumerate(row, 1):
+                typed = parse_excel_typed_value(raw_val)
+                cell = ws.cell(r_idx, c_idx, typed)
+                if raw_val:
+                    written += 1
+                cell.font = HDR_FONT if is_hdr else BODY_FONT
+                if is_hdr:
+                    cell.fill = HDR_FILL
+                elif r_idx % 2 == 1 and r_idx > 1:
+                    cell.fill = ALT_FILL
+                cell.border = CELL_BORDER
+                align_h = "right" if isinstance(typed, (int, float)) and not isinstance(typed, bool) else "left"
+                cell.alignment = Alignment(horizontal=align_h, vertical="center", wrap_text=True)
+        _autosize_openpyxl_sheet(ws)
+        return written
+
+    def _is_real_table(matrix: list[list[str]]) -> bool:
+        if len(matrix) < 2:
+            return False
+        n_cols = max(len(r) for r in matrix)
+        if n_cols < 2:
+            return False
+        non_empty = sum(1 for r in matrix for c in r if c)
+        return non_empty >= 4
+
+    # ── Pass 1: pdfplumber line-based vector tables (exact for ruled tables) ──
+    if method in ("auto", "lattice"):
+        try:
+            tbl_idx = 0
+            with pdfplumber.open(str(inp)) as pdf:
+                for pg_num, pg in enumerate(pdf.pages, 1):
+                    pg_tables = pg.extract_tables(table_settings={
+                        "vertical_strategy": "lines",
+                        "horizontal_strategy": "lines",
+                        "snap_tolerance": 4,
+                        "join_tolerance": 4,
+                    }) or []
+                    for raw_tbl in pg_tables:
+                        mat = _clean_matrix(raw_tbl)
+                        if _is_real_table(mat):
+                            tbl_idx += 1
+                            total_cells_written += _write_table_sheet(f"P{pg_num}_Table_{tbl_idx}", mat)
+                            tables_found = True
+        except Exception as err:
+            logger.debug(f"[PDF2Excel] pdfplumber lines pass notice: {err}")
+
+    # ── Pass 2: PyMuPDF built-in vector table finder (great for partial-border tables) ──
+    if not tables_found and method in ("auto", "lattice"):
+        try:
+            tbl_idx = 0
+            doc_fitz = fitz.open(str(inp))
+            try:
+                for pg_num, pg in enumerate(doc_fitz, 1):
+                    finder = pg.find_tables()
+                    for t in (finder.tables if finder else []):
+                        mat = _clean_matrix(t.extract() or [])
+                        if _is_real_table(mat):
+                            tbl_idx += 1
+                            total_cells_written += _write_table_sheet(f"P{pg_num}_Table_{tbl_idx}", mat)
+                            tables_found = True
+            finally:
+                doc_fitz.close()
+        except Exception as err:
+            logger.debug(f"[PDF2Excel] PyMuPDF find_tables notice: {err}")
+
+    # ── Pass 3: Camelot (optional when vector lines missed or explicit stream requested) ──
     if not tables_found:
-        import pdfplumber
+        try:
+            import camelot
+            flavors = ["lattice", "stream"] if method == "auto" else [method]
+            for flavor in flavors:
+                tables = camelot.read_pdf(str(inp), pages="all", flavor=flavor)
+                valid_mats = []
+                if tables and len(tables) > 0:
+                    for tbl in tables:
+                        mat = _clean_matrix(tbl.df.values.tolist())
+                        if _is_real_table(mat):
+                            valid_mats.append((tbl.page, mat))
+                if valid_mats:
+                    tables_found = True
+                    for idx_t, (pg_no, mat) in enumerate(valid_mats, 1):
+                        total_cells_written += _write_table_sheet(f"P{pg_no}_Table_{idx_t}", mat)
+                    break
+        except Exception as camelot_err:
+            logger.warning(f"[PDF2Excel] Camelot skipped/failed, using pdfplumber fallback: {type(camelot_err).__name__}")
+
+    # ── Pass 4: pdfplumber text-aligned tables + X-clustered coordinate layout (never overwrites!) ──
+    if not tables_found:
         with pdfplumber.open(str(inp)) as pdf:
             for pg_num, pg in enumerate(pdf.pages, 1):
-                ws = wb.create_sheet(f"Page_{pg_num}")
-                row_idx = 1
                 pg_tables = pg.extract_tables(table_settings={
                     "vertical_strategy": "text",
                     "horizontal_strategy": "text",
-                    "intersection_y_tolerance": 15
-                })
-                if pg_tables:
-                    for tbl in pg_tables:
-                        for row in tbl:
-                            for c_idx, v in enumerate(row, 1):
-                                cell_val = str(v).strip() if v else ""
-                                ws.cell(row_idx, c_idx, cell_val)
-                                if cell_val:
-                                    total_cells_written += 1
-                            row_idx += 1
-                        row_idx += 2  # gap between tables
-                else:
-                    words = pg.extract_words()
-                    if words:
-                        lines = {}
-                        for w in words:
-                            y = round(w['top'] / 5) * 5
-                            lines.setdefault(y, []).append(w)
+                    "intersection_y_tolerance": 10,
+                    "intersection_x_tolerance": 10,
+                }) or []
+                valid_pg_tables = [m for m in (_clean_matrix(t) for t in pg_tables) if _is_real_table(m)]
 
-                        for y in sorted(lines.keys()):
-                            line_words = sorted(lines[y], key=lambda w: w['x0'])
-                            for w in line_words:
-                                col_idx = max(1, int(w['x0'] / 50) + 1)
-                                ws.cell(row_idx, col_idx, w['text'])
-                                total_cells_written += 1
-                            row_idx += 1
+                if valid_pg_tables:
+                    for t_i, mat in enumerate(valid_pg_tables, 1):
+                        name = f"Page_{pg_num}" if len(valid_pg_tables) == 1 else f"P{pg_num}_T{t_i}"
+                        total_cells_written += _write_table_sheet(name, mat)
+                    continue
 
-    if total_cells_written == 0:
+                words = pg.extract_words(keep_blank_chars=False, use_text_flow=False)
+                if not words:
+                    continue
+
+                # Cluster words into visual lines by vertical top coordinate
+                words_sorted = sorted(words, key=lambda w: (w["top"], w["x0"]))
+                line_groups: list[list[dict]] = []
+                for w in words_sorted:
+                    if not line_groups or abs(w["top"] - line_groups[-1][0]["top"]) > 4.5:
+                        line_groups.append([w])
+                    else:
+                        line_groups[-1].append(w)
+
+                # Merge close horizontal words into cells (gap > 14pt starts a new column cell)
+                row_cells_list: list[list[tuple[float, str]]] = []
+                x_starts: list[float] = []
+                for grp in line_groups:
+                    grp.sort(key=lambda w: w["x0"])
+                    cells_in_row: list[tuple[float, str]] = []
+                    cur_x0 = float(grp[0]["x0"])
+                    cur_x1 = float(grp[0]["x1"])
+                    cur_txt = grp[0]["text"]
+                    for w in grp[1:]:
+                        gap = float(w["x0"]) - cur_x1
+                        if gap <= 14.0:
+                            cur_txt += " " + w["text"]
+                            cur_x1 = max(cur_x1, float(w["x1"]))
+                        else:
+                            cells_in_row.append((cur_x0, cur_txt.strip()))
+                            x_starts.append(cur_x0)
+                            cur_x0 = float(w["x0"])
+                            cur_x1 = float(w["x1"])
+                            cur_txt = w["text"]
+                    cells_in_row.append((cur_x0, cur_txt.strip()))
+                    x_starts.append(cur_x0)
+                    row_cells_list.append(cells_in_row)
+
+                # Cluster column X anchors so aligned text falls in the exact same column without overwriting
+                x_starts.sort()
+                col_anchors: list[float] = []
+                for xs in x_starts:
+                    if not col_anchors or (xs - col_anchors[-1]) > 24.0:
+                        col_anchors.append(xs)
+
+                ws = wb.create_sheet(f"Page_{pg_num}")
+                for r_idx, row_cells in enumerate(row_cells_list, 1):
+                    used_col = 0
+                    for cx, ctxt in row_cells:
+                        # Pick closest anchor strictly to the right of previous used column
+                        best_col = min(range(len(col_anchors)), key=lambda i: abs(col_anchors[i] - cx)) + 1
+                        if best_col <= used_col:
+                            best_col = used_col + 1
+                        used_col = best_col
+                        typed = parse_excel_typed_value(ctxt)
+                        cell = ws.cell(r_idx, best_col, typed)
+                        cell.font = BODY_FONT
+                        cell.alignment = Alignment(vertical="center", wrap_text=True)
+                        if ctxt:
+                            total_cells_written += 1
+                _autosize_openpyxl_sheet(ws)
+
+    if total_cells_written == 0 or not wb.sheetnames:
         raise HTTPException(
             status_code=422,
             detail=(
@@ -2530,7 +2697,7 @@ def _extract_tables_to_excel(inp: Path, out: Path, method: str) -> int:
             )
         )
 
-    logger.info(f"[PDF2Excel] Extracted {total_cells_written} non-empty cells")
+    logger.info(f"[PDF2Excel] Extracted {total_cells_written} non-empty cells across {len(wb.sheetnames)} sheet(s)")
     wb.save(str(out))
     return total_cells_written
 
@@ -2632,301 +2799,348 @@ async def pdf_to_excel(
 
 def _build_structural_pptx(pdf_path: Path, out_path: Path):
     """
-    Converts a PDF (including scanned/OCR'd) into a NATIVE PowerPoint presentation.
-
-    DESIGN PHILOSOPHY:
-    The old approach was:  render page as image → overlay transparent OCR text
-    Problem:               editing text = floating text over a frozen scan image
-
-    The new approach:
-      1. Detect tables using pdfplumber → create real PPT Table shapes
-      2. Extract text blocks via PyMuPDF  → create real PPT TextBox shapes
-      3. Use a clean white background – no background image embedded
-
-    Result: A presentation that looks professional, edits cleanly, and shows
-    no signs of being a scan when content is modified.
-
-    NOTE: For scanned PDFs, OCRmyPDF must have already run before calling
-    this function so that a proper text layer exists in the PDF.
+    High-fidelity born-digital PDF -> Native Editable PowerPoint presentation:
+      1. Sets slide geometry once from page 0 (capped cleanly within PowerPoint's 56" max)
+         with a crisp white paper background.
+      2. Preserves native vector background fills/banners/accent bars (`page.get_drawings()`)
+         as real editable PPTX shapes BEHIND text so white-on-dark headers stay 100% visible!
+      3. Preserves embedded PDF images/logos/signatures with SMask alpha transparency.
+      4. Detects real ruled tables (`pdfplumber` lines strategy ONLY — never hallucinating
+         fake tables out of bullet lists!), using exact column proportions and clean borders.
+      5. Reconstructs every non-table text block with EXACT per-span font family, exact font
+         size, exact bold/italic, exact RGB color, and authentic horizontal alignment (never
+         collapsing a whole block to one size/color or arbitrarily centering left-aligned text).
     """
-    import pymupdf as fitz  # PyMuPDF
+    import io as _io
+    import pymupdf as fitz
     import pdfplumber
     from pptx import Presentation
     from pptx.util import Inches, Pt, Emu
     from pptx.dml.color import RGBColor
-    from pptx.enum.text import PP_ALIGN
+    from pptx.enum.shapes import MSO_SHAPE
+    from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
+    from vision_reconstructor import build_alpha_image_bbox_map
 
-    # ── PPT color palette ────────────────────────────────────────────
-    CLR_WHITE       = RGBColor(0xFF, 0xFF, 0xFF)
-    CLR_BG_SLIDE    = RGBColor(0xF8, 0xF9, 0xFA)   # very light gray slide bg
-    CLR_TEXT        = RGBColor(0x1A, 0x1A, 0x2E)   # near-black for body text
-    CLR_HDR_BG      = RGBColor(0x1F, 0x4E, 0x79)   # dark blue header row
-    CLR_HDR_FG      = RGBColor(0xFF, 0xFF, 0xFF)   # white header text
-    CLR_ROW_ALT     = RGBColor(0xDE, 0xEB, 0xF7)   # alternating row tint
-    CLR_BORDER      = RGBColor(0xBF, 0xBF, 0xBF)   # table cell border
+    CLR_WHITE = RGBColor(0xFF, 0xFF, 0xFF)
+    CLR_TEXT = RGBColor(0x11, 0x18, 0x27)
+    CLR_HDR_BG = RGBColor(0x1E, 0x3A, 0x8A)
+    CLR_ROW_ALT = RGBColor(0xF1, 0xF5, 0xF9)
+
+    def _map_ppt_font(raw_font: str) -> str:
+        f = (raw_font or "").lower()
+        if "+" in f:
+            f = f.split("+", 1)[-1]
+        if any(k in f for k in ("times", "georgia", "cambria", "garamond", "palatino")):
+            return "Times New Roman"
+        if any(k in f for k in ("courier", "consolas", "mono", "menlo")):
+            return "Courier New"
+        if any(k in f for k in ("devanagari", "mangal", "noto")):
+            return "Noto Sans Devanagari" if "devanagari" in f or "mangal" in f else "Calibri"
+        if "calibri" in f or "carlito" in f:
+            return "Calibri"
+        if "verdana" in f:
+            return "Verdana"
+        return "Arial"
 
     prs = Presentation()
-
     pdf_fitz = fitz.open(str(pdf_path))
+    slide_dims_set = False
+    scale_global = 1.0
 
     with pdfplumber.open(str(pdf_path)) as pdf_plumb:
         total_pages = len(pdf_plumb.pages)
         slides_built = 0
 
         for page_idx in range(total_pages):
-            page_fitz  = pdf_fitz[page_idx]
+            page_fitz = pdf_fitz[page_idx]
             page_plumb = pdf_plumb.pages[page_idx]
 
-            if page_fitz.rect.width <= 0 or page_fitz.rect.height <= 0:
-                logger.warning(f"[PDF2PPT] Page {page_idx+1} zero dimensions, skipping")
+            w_pt = float(page_fitz.rect.width)
+            h_pt = float(page_fitz.rect.height)
+            if w_pt <= 0 or h_pt <= 0:
+                logger.warning(f"[PDF2PPT] Page {page_idx + 1} zero dimensions, skipping")
                 continue
 
-            # Convert PDF points → inches (1 pt = 1/72 inch)
-            w_pt = page_fitz.rect.width
-            h_pt = page_fitz.rect.height
-            w_in = w_pt / 72.0
-            h_in = h_pt / 72.0
+            if not slide_dims_set:
+                w_in = w_pt / 72.0
+                h_in = h_pt / 72.0
+                # PowerPoint hard limit is 56 inches
+                if max(w_in, h_in) > 54.0:
+                    scale_global = 54.0 / max(w_in, h_in)
+                    w_in *= scale_global
+                    h_in *= scale_global
+                prs.slide_width = Inches(w_in)
+                prs.slide_height = Inches(h_in)
+                slide_dims_set = True
 
-            prs.slide_width  = Inches(w_in)
-            prs.slide_height = Inches(h_in)
+            # Per-page scale factor if subsequent pages have different dimensions
+            cur_slide_w_pt = (prs.slide_width / 914400.0) * 72.0
+            cur_slide_h_pt = (prs.slide_height / 914400.0) * 72.0
+            sx = min(cur_slide_w_pt / w_pt, cur_slide_h_pt / h_pt)
+            ox = (cur_slide_w_pt - w_pt * sx) / 2.0
+            oy = (cur_slide_h_pt - h_pt * sx) / 2.0
 
-            slide = prs.slides.add_slide(prs.slide_layouts[6])  # blank layout
-
-            # Clean light-gray background (no image)
+            slide = prs.slides.add_slide(prs.slide_layouts[6])
             bg = slide.background
             bg.fill.solid()
-            bg.fill.fore_color.rgb = CLR_BG_SLIDE
+            bg.fill.fore_color.rgb = CLR_WHITE
 
-            # ───────────────────────────────────────────────────────
-            # PHASE 1 — Table detection and rendering
-            # Strategy A: line-based (works for digital PDFs with vector borders)
-            # Strategy B: text-based (works for OCR'd text-aligned tables)
-            # ───────────────────────────────────────────────────────
-            table_rects = []  # (x0, top, x1, bottom) in PDF points of each placed table
+            # ── PHASE 0: Preserve colored vector banners / filled rectangles behind text ──
+            try:
+                drawings = page_fitz.get_drawings() or []
+                placed_bg_shapes = 0
+                for d in drawings:
+                    if placed_bg_shapes >= 45:
+                        break
+                    fill = d.get("fill")
+                    rect = d.get("rect")
+                    if not fill or not rect:
+                        continue
+                    # Skip pure white or near-white fills that blend into white slide background
+                    r_f, g_f, b_f = (
+                        int(round(fill[0] * 255)),
+                        int(round(fill[1] * 255)),
+                        int(round(fill[2] * 255)),
+                    )
+                    if r_f >= 248 and g_f >= 248 and b_f >= 248:
+                        continue
+                    rw = float(rect.width)
+                    rh = float(rect.height)
+                    # Only draw meaningful rectangular blocks/banners/cards/divider bars
+                    if rw < 6.0 or rh < 1.0:
+                        continue
+                    # Skip tiny bullet dots or micro vector fragments
+                    if rw < 14.0 and rh < 14.0:
+                        continue
+                    sh = slide.shapes.add_shape(
+                        MSO_SHAPE.RECTANGLE,
+                        Pt(ox + max(0.0, rect.x0) * sx),
+                        Pt(oy + max(0.0, rect.y0) * sx),
+                        Pt(max(1.0, rw * sx)),
+                        Pt(max(1.0, rh * sx)),
+                    )
+                    sh.fill.solid()
+                    sh.fill.fore_color.rgb = RGBColor(r_f, g_f, b_f)
+                    stroke = d.get("color")
+                    if stroke and len(stroke) >= 3:
+                        sh.line.color.rgb = RGBColor(
+                            int(round(stroke[0] * 255)),
+                            int(round(stroke[1] * 255)),
+                            int(round(stroke[2] * 255)),
+                        )
+                        sh.line.width = Pt(max(0.5, float(d.get("width") or 0.75) * sx))
+                    else:
+                        sh.line.fill.background()
+                    placed_bg_shapes += 1
+            except Exception as draw_err:
+                logger.debug(f"[PDF2PPT] Vector shape backdrop skip on p{page_idx + 1}: {draw_err}")
 
-            for strategy in ("lines", "text"):
-                if strategy == "lines":
-                    ts = {
-                        "vertical_strategy": "lines",
-                        "horizontal_strategy": "lines",
-                        "snap_tolerance": 5,
-                        "join_tolerance": 5,
-                    }
-                else:
-                    ts = {
-                        "vertical_strategy": "text",
-                        "horizontal_strategy": "text",
-                        "intersection_y_tolerance": 12,
-                        "intersection_x_tolerance": 12,
-                    }
+            # ── PHASE 1: Real ruled tables ONLY (lines strategy — no fake text-table hallucinations!) ──
+            table_rects: list[tuple[float, float, float, float]] = []
+            try:
+                found_tables = page_plumb.find_tables(table_settings={
+                    "vertical_strategy": "lines",
+                    "horizontal_strategy": "lines",
+                    "snap_tolerance": 4,
+                    "join_tolerance": 4,
+                }) or []
+            except Exception:
+                found_tables = []
+
+            for tbl_obj in found_tables:
+                try:
+                    tbl_data = tbl_obj.extract()
+                except Exception:
+                    continue
+                if not tbl_data:
+                    continue
+                tbl_data = [
+                    [str(c).strip() if c else "" for c in row]
+                    for row in tbl_data
+                    if any(c and str(c).strip() for c in row)
+                ]
+                if len(tbl_data) < 2:
+                    continue
+                rows = len(tbl_data)
+                cols = max(len(r) for r in tbl_data)
+                if cols < 2:
+                    continue
+
+                x0, top, x1, bottom = tbl_obj.bbox
+                # Skip bogus full-page border boxes wrapping the whole page
+                if (x1 - x0) > w_pt * 0.92 and (bottom - top) > h_pt * 0.88 and rows <= 2:
+                    continue
+
+                tbl_w_pt = max(24.0, (x1 - x0) * sx)
+                tbl_h_pt = max(14.0, (bottom - top) * sx)
 
                 try:
-                    found_tables = page_plumb.find_tables(table_settings=ts)
-                except Exception:
-                    found_tables = []
+                    tbl_shape = slide.shapes.add_table(
+                        rows, cols,
+                        Pt(ox + x0 * sx), Pt(oy + top * sx),
+                        Pt(tbl_w_pt), Pt(tbl_h_pt),
+                    )
+                    tbl = tbl_shape.table
+                    _reset_pptx_table_theme(tbl)
 
-                if not found_tables:
-                    continue  # try next strategy
-
-                for tbl_obj in found_tables:
+                    # Compute proportional column widths from actual pdfplumber cell X bounds if available
+                    col_w_pts = [tbl_w_pt / cols] * cols
                     try:
-                        tbl_data = tbl_obj.extract()
+                        x_edges = sorted({round(c[0], 1) for c in tbl_obj.cells if c} | {round(c[2], 1) for c in tbl_obj.cells if c})
+                        if len(x_edges) == cols + 1:
+                            raw_cw = [max(8.0, (x_edges[ci + 1] - x_edges[ci]) * sx) for ci in range(cols)]
+                            s_cw = sum(raw_cw)
+                            col_w_pts = [(w / s_cw) * tbl_w_pt for w in raw_cw]
                     except Exception:
-                        continue
+                        pass
+                    for ci, cw in enumerate(col_w_pts):
+                        tbl.columns[ci].width = Pt(cw)
 
-                    if not tbl_data:
-                        continue
+                    for r_idx, row in enumerate(tbl_data):
+                        row_padded = row + [""] * (cols - len(row))
+                        for c_idx, cell_text in enumerate(row_padded[:cols]):
+                            cell = tbl.cell(r_idx, c_idx)
+                            cell.vertical_anchor = MSO_ANCHOR.MIDDLE
+                            cell.margin_left = Emu(25000)
+                            cell.margin_right = Emu(25000)
+                            cell.margin_top = Emu(14000)
+                            cell.margin_bottom = Emu(14000)
 
-                    # Filter empty rows/cols
-                    tbl_data = [
-                        [str(c).strip() if c else "" for c in row]
-                        for row in tbl_data
-                        if any(c for c in row)
-                    ]
-                    if not tbl_data:
-                        continue
+                            cell.fill.solid()
+                            if r_idx == 0:
+                                cell.fill.fore_color.rgb = CLR_HDR_BG
+                            elif r_idx % 2 == 0:
+                                cell.fill.fore_color.rgb = CLR_ROW_ALT
+                            else:
+                                cell.fill.fore_color.rgb = CLR_WHITE
+                            _set_pptx_cell_border_clean(cell, "94A3B8", 0.5)
 
-                    rows = len(tbl_data)
-                    cols = max(len(r) for r in tbl_data)
-                    if rows == 0 or cols == 0:
-                        continue
+                            tf_c = cell.text_frame
+                            tf_c.word_wrap = True
+                            p_c = tf_c.paragraphs[0]
+                            r_c = p_c.add_run()
+                            r_c.text = cell_text
+                            r_c.font.size = Pt(max(7.0, min(10.0, 9.0 * sx)))
+                            r_c.font.name = "Arial"
+                            r_c.font.bold = (r_idx == 0)
+                            r_c.font.color.rgb = CLR_WHITE if r_idx == 0 else CLR_TEXT
 
-                    # pdfplumber bbox: (x0, top, x1, bottom) measured from page top
-                    x0, top, x1, bottom = tbl_obj.bbox
+                    table_rects.append((x0, top, x1, bottom))
+                except Exception as tbl_err:
+                    logger.warning(f"[PDF2PPT] Table shape failed (p{page_idx + 1}): {tbl_err}")
 
-                    tbl_x = Inches(x0   / 72.0)
-                    tbl_y = Inches(top  / 72.0)
-                    tbl_w = Inches(max((x1 - x0), 0.5) / 72.0)
-                    tbl_h = Inches(max((bottom - top), 0.2) / 72.0)
-
-                    try:
-                        tbl_shape = slide.shapes.add_table(
-                            rows, cols, tbl_x, tbl_y, tbl_w, tbl_h
-                        )
-                        tbl = tbl_shape.table
-
-                        # Normalize column widths proportionally
-                        col_width_emu = int(int(tbl_w) // max(1, cols))
-                        for ci in range(cols):
-                            tbl.columns[ci].width = Emu(col_width_emu)
-
-                        for r_idx, row in enumerate(tbl_data):
-                            # Pad short rows
-                            row_padded = row + [""] * (cols - len(row))
-                            for c_idx, cell_text in enumerate(row_padded[:cols]):
-                                cell = tbl.cell(r_idx, c_idx)
-                                cell.text = cell_text
-
-                                # Fill colors
-                                fill = cell.fill
-                                fill.solid()
-                                if r_idx == 0:
-                                    fill.fore_color.rgb = CLR_HDR_BG
-                                elif r_idx % 2 == 0:
-                                    fill.fore_color.rgb = CLR_ROW_ALT
-                                else:
-                                    fill.fore_color.rgb = CLR_WHITE
-
-                                # Text styling
-                                for para in cell.text_frame.paragraphs:
-                                    for run in para.runs:
-                                        run.font.size = Pt(9)
-                                        run.font.bold = (r_idx == 0)
-                                        run.font.color.rgb = CLR_HDR_FG if r_idx == 0 else CLR_TEXT
-
-                        table_rects.append((x0, top, x1, bottom))
-                        logger.info(
-                            f"[PDF2PPT] Table {rows}×{cols} placed on slide {page_idx+1} "
-                            f"[strategy={strategy}]"
-                        )
-
-                    except Exception as tbl_err:
-                        logger.warning(
-                            f"[PDF2PPT] Table shape failed (p{page_idx+1}): {type(tbl_err).__name__}: {tbl_err}"
-                        )
-
-                if table_rects:  # if line-strategy worked, don't try text strategy
-                    break
-
-            # ───────────────────────────────────────────────────────
-            # PHASE 2 — Text block extraction (non-table regions only)
-            # ───────────────────────────────────────────────────────
-            def _overlaps_table(bx0, by0, bx1, by1):
+            # ── PHASE 2: Embedded Images & Exact Per-Span Textboxes ──
+            def _center_inside_table(bx0: float, by0: float, bx1: float, by1: float) -> bool:
+                cx = (bx0 + bx1) * 0.5
+                cy = (by0 + by1) * 0.5
                 for (tx0, ttop, tx1, tbot) in table_rects:
-                    if bx0 < tx1 and bx1 > tx0 and by0 < tbot and by1 > ttop:
+                    if tx0 <= cx <= tx1 and ttop <= cy <= tbot:
                         return True
                 return False
 
-            # Also render native transparent SMask / clipped images cleanly instead of raw opaque dict bytes
-            from vision_reconstructor import build_alpha_image_bbox_map
             img_info_smask = build_alpha_image_bbox_map(page_fitz)
-
             fitz_blocks = page_fitz.get_text("dict", sort=True).get("blocks", [])
 
             for block in fitz_blocks:
                 if block["type"] == 1:
-                    # Preserve embedded PDF images/logos/signatures (with SMask transparency!) on the slide
                     ibx0, iby0, ibx1, iby1 = block["bbox"]
                     key = (int(round(ibx0)), int(round(iby0)), int(round(ibx1)), int(round(iby1)))
                     img_bytes = img_info_smask.get(key) or block.get("image")
                     if img_bytes and len(img_bytes) >= 32:
                         try:
-                            import io as _io
-                            img_x = Inches(max(0.0, ibx0) / 72.0)
-                            img_y = Inches(max(0.0, iby0) / 72.0)
-                            img_w = Inches(max(0.25, ibx1 - ibx0) / 72.0)
-                            img_h = Inches(max(0.25, iby1 - iby0) / 72.0)
-                            slide.shapes.add_picture(_io.BytesIO(img_bytes), img_x, img_y, width=img_w, height=img_h)
+                            slide.shapes.add_picture(
+                                _io.BytesIO(img_bytes),
+                                Pt(ox + max(0.0, ibx0) * sx),
+                                Pt(oy + max(0.0, iby0) * sx),
+                                width=Pt(max(8.0, (ibx1 - ibx0) * sx)),
+                                height=Pt(max(8.0, (iby1 - iby0) * sx)),
+                            )
                         except Exception as img_err:
-                            logger.debug(f"[PDF2PPT] Image block skip on p{page_idx+1}: {img_err}")
+                            logger.debug(f"[PDF2PPT] Image block skip on p{page_idx + 1}: {img_err}")
                     continue
+
                 if block["type"] != 0:
                     continue
 
                 bx0, by0, bx1, by1 = block["bbox"]
-
-                # Skip if block sits inside a table we already rendered
-                if _overlaps_table(bx0, by0, bx1, by1):
+                if _center_inside_table(bx0, by0, bx1, by1):
                     continue
 
-                # Gather text + style + exact color from spans
-                lines_data   = block.get("lines", [])
-                text_lines   = []
-                max_size     = 11.0
-                has_bold     = False
-                has_italic   = False
-                dom_rgb      = CLR_TEXT
-
-                for line in lines_data:
-                    line_parts = []
-                    for span in line.get("spans", []):
-                        t = span.get("text", "").rstrip()
-                        if t:
-                            line_parts.append(t)
-                            sz = span.get("size", 11.0)
-                            if sz > max_size:
-                                max_size = sz
-                            s_flags = span.get("flags", 0)
-                            if s_flags & (1 << 4):
-                                has_bold = True
-                            if s_flags & (1 << 1):
-                                has_italic = True
-                            scol = int(span.get("color", 0) or 0)
-                            if scol:
-                                dom_rgb = RGBColor((scol >> 16) & 0xFF, (scol >> 8) & 0xFF, scol & 0xFF)
-                    joined = " ".join(line_parts).strip()
-                    if joined:
-                        text_lines.append(joined)
-
-                if not text_lines:
+                lines_data = block.get("lines", [])
+                non_empty_lines = []
+                for ln in lines_data:
+                    spans = [sp for sp in ln.get("spans", []) if sp.get("text", "").strip()]
+                    if spans:
+                        non_empty_lines.append((ln, spans))
+                if not non_empty_lines:
                     continue
 
-                combined = "\n".join(text_lines)
+                # Determine authentic alignment from geometry (only center if genuinely centered on page)
+                blk_w = bx1 - bx0
+                left_gap = bx0
+                right_gap = w_pt - bx1
+                if abs(left_gap - right_gap) < w_pt * 0.04 and left_gap > w_pt * 0.12 and blk_w < w_pt * 0.78:
+                    blk_align = PP_ALIGN.CENTER
+                elif right_gap < w_pt * 0.08 and left_gap > w_pt * 0.45:
+                    blk_align = PP_ALIGN.RIGHT
+                else:
+                    blk_align = PP_ALIGN.LEFT
 
-                # Detect heading heuristic: short, large, bold, or ALL CAPS
-                is_heading = (
-                    max_size >= 13
-                    or has_bold
-                    or (len(combined) < 80 and combined == combined.upper() and len(combined) > 2)
-                )
-
-                # Padding around text block
-                pad = 1.5  # points
-                tb_x = Inches(max(0.0, bx0 - pad) / 72.0)
-                tb_y = Inches(max(0.0, by0 - pad) / 72.0)
-                tb_w = Inches(max(0.4, bx1 - bx0 + pad * 2) / 72.0)
-                tb_h = Inches(max(0.18, by1 - by0 + pad * 2) / 72.0)
+                pad_x = 4.0
+                pad_y = 2.0
+                tb_x = ox + max(0.0, bx0 - 1.0) * sx
+                tb_y = oy + max(0.0, by0 - 1.0) * sx
+                tb_w = min(cur_slide_w_pt - tb_x, max(20.0, (blk_w + pad_x * 2) * sx))
+                tb_h = max(12.0, (by1 - by0 + pad_y * 2) * sx)
 
                 try:
-                    txb = slide.shapes.add_textbox(tb_x, tb_y, tb_w, tb_h)
-                    tf  = txb.text_frame
+                    txb = slide.shapes.add_textbox(Pt(tb_x), Pt(tb_y), Pt(tb_w), Pt(tb_h))
+                    tf = txb.text_frame
                     tf.word_wrap = True
+                    tf.margin_left = Emu(0)
+                    tf.margin_right = Emu(0)
+                    tf.margin_top = Emu(0)
+                    tf.margin_bottom = Emu(0)
 
-                    for li, line_text in enumerate(text_lines):
+                    for li, (ln, spans) in enumerate(non_empty_lines):
                         p = tf.paragraphs[0] if li == 0 else tf.add_paragraph()
-                        p.space_after = Pt(2)
+                        p.alignment = blk_align
+                        p.space_before = Pt(0)
+                        p.space_after = Pt(1.5)
 
-                        run = p.add_run()
-                        run.text = line_text
+                        for si, sp in enumerate(spans):
+                            s_txt = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", sp.get("text", ""))
+                            if not s_txt:
+                                continue
+                            # Add space between adjacent spans when PDF left a word gap
+                            if si > 0:
+                                prev_x1 = spans[si - 1].get("bbox", [0, 0, 0, 0])[2]
+                                cur_x0 = sp.get("bbox", [0, 0, 0, 0])[0]
+                                if cur_x0 - prev_x1 > 1.5 and not s_txt.startswith(" "):
+                                    s_txt = " " + s_txt
 
-                        font_pt = max(7.0, min(max_size, 32.0))
-                        run.font.size   = Pt(font_pt)
-                        run.font.bold   = has_bold or is_heading
-                        run.font.italic = has_italic
-                        run.font.color.rgb = dom_rgb
-
-                        if is_heading:
-                            p.alignment = PP_ALIGN.CENTER if len(line_text) < 60 else PP_ALIGN.LEFT
-
+                            run = p.add_run()
+                            run.text = s_txt
+                            raw_font = sp.get("font", "")
+                            s_flags = int(sp.get("flags", 0) or 0)
+                            s_sz = float(sp.get("size", 11.0) or 11.0) * sx * 0.94
+                            run.font.size = Pt(max(6.0, min(48.0, s_sz)))
+                            run.font.name = _map_ppt_font(raw_font)
+                            run.font.bold = bool(s_flags & (1 << 4)) or any(
+                                k in raw_font.lower() for k in ("bold", "heavy", "black", "semibold")
+                            )
+                            run.font.italic = bool(s_flags & (1 << 1)) or any(
+                                k in raw_font.lower() for k in ("italic", "oblique")
+                            )
+                            scol = int(sp.get("color", 0) or 0)
+                            run.font.color.rgb = RGBColor((scol >> 16) & 0xFF, (scol >> 8) & 0xFF, scol & 0xFF)
                 except Exception as txb_err:
-                    logger.debug(
-                        f"[PDF2PPT] TextBox failed p{page_idx+1}: {type(txb_err).__name__}"
-                    )
+                    logger.debug(f"[PDF2PPT] TextBox failed p{page_idx + 1}: {txb_err}")
 
             slides_built += 1
             logger.info(
-                f"[PDF2PPT] Slide {page_idx+1} built: {len(table_rects)} table(s), "
-                f"{len([b for b in fitz_blocks if b['type']==0])} text block(s)"
+                f"[PDF2PPT] Slide {page_idx + 1} built: {len(table_rects)} table(s), "
+                f"{len([b for b in fitz_blocks if b['type'] == 0])} text block(s)"
             )
 
     pdf_fitz.close()
@@ -4973,6 +5187,86 @@ async def convert_to_vector_grayscale(
     except Exception as e:
         cleanup(inp, out)
         raise safe_error(e, "convert-grayscale")
+
+
+# ─── 9B. Gemini HD Passport Studio Photo Generator ────────────────────────────
+# Converts any casual phone selfie or photo-of-a-photo into an ICAO-compliant
+# HD studio passport photo with saved backend attire/background prompts.
+
+@app.get("/api/passport-ai/config")
+async def passport_ai_config():
+    """Return availability & preset catalog for Passport Photo Studio AI (no secrets)."""
+    return get_passport_ai_config()
+
+
+@app.post("/api/passport-ai/generate")
+@limiter.limit("12/minute")
+async def passport_ai_generate(
+    request: Request,
+    file: UploadFile = File(...),
+    attire: str = Form("keep_original"),
+    bg_preset: str = Form("white"),
+    bg_hex: str = Form("#FFFFFF"),
+    source_mode: str = Form("auto"),
+    aspect_ratio: str = Form("3:4"),
+    is_joint: bool = Form(False),
+    remove_glasses_glare: bool = Form(False),
+    custom_note: str = Form(""),
+):
+    """
+    Transform any mobile photo or photo-of-a-photo into a print-ready HD studio
+    passport portrait using Gemini native image editing with strict identity lock.
+    """
+    try:
+        raw = await safe_read_upload(file)
+        if not raw or len(raw) < 128:
+            raise HTTPException(400, "Please upload a valid portrait image (JPG, PNG, or WebP).")
+        if len(raw) > 25 * 1024 * 1024:
+            raise HTTPException(413, "Image too large (max 25 MB).")
+
+        # Quick magic-byte verification (JPEG / PNG / WebP / BMP / TIFF)
+        is_valid_img = (
+            raw[:3] == b"\xff\xd8\xff"
+            or raw[:8] == b"\x89PNG\r\n\x1a\n"
+            or (raw[:4] == b"RIFF" and raw[8:12] == b"WEBP")
+            or raw[:2] == b"BM"
+            or raw[:4] in (b"II*\x00", b"MM\x00*")
+        )
+        if not is_valid_img:
+            raise HTTPException(400, "Unsupported image format. Please upload a JPG, PNG, or WebP portrait photo.")
+
+        user_key = request.headers.get("x-gemini-api-key")
+        result = await run_in_threadpool(
+            generate_studio_passport_photo,
+            raw,
+            attire,
+            bg_preset,
+            bg_hex,
+            source_mode,
+            aspect_ratio,
+            is_joint,
+            remove_glasses_glare,
+            custom_note,
+            user_key,
+        )
+
+        return Response(
+            content=result["image_bytes"],
+            media_type="image/jpeg",
+            headers={
+                "Cache-Control": "no-store, no-cache, must-revalidate, private, no-transform",
+                "X-Content-Type-Options": "nosniff",
+                "X-Passport-AI-Model": str(result.get("model", "")),
+                "X-Passport-AI-Ms": str(result.get("elapsed_ms", 0)),
+                "X-Passport-AI-Cache": str(result.get("cache", "MISS")),
+            },
+        )
+    except HTTPException:
+        raise
+    except RuntimeError as re_err:
+        raise HTTPException(502, str(re_err))
+    except Exception as e:
+        raise safe_error(e, "passport-ai-generate")
 
 
 # ─── 10. PDF Repair (Corrupt PDF Recovery) ─────────────────────

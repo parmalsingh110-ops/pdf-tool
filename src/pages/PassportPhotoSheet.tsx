@@ -30,6 +30,8 @@ import {
   CreditCard,
   FileText,
   FileCheck2,
+  Wand2,
+  Shirt,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { preload, removeBackground } from '@imgly/background-removal';
@@ -37,6 +39,7 @@ import { PDFDocument } from 'pdf-lib';
 import JSZip from 'jszip';
 import FileDropzone from '../components/FileDropzone';
 import { useSEO } from '../hooks/useSEO';
+import { apiFetch } from '../lib/api';
 import { toArrayBufferBytes } from '../lib/blobUrl';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 import { AnimatedNumber, PearlScanOverlay } from '../components/pearl/PearlMotion';
@@ -96,7 +99,47 @@ export interface PhotoSlotItem {
   brightness: number; // -30 to +40 (default 0)
   contrast: number;   // -30 to +40 (default 0)
   saturation: number; // -50 to +60 (default 0) — NEW
+  // Gemini AI HD Studio Portrait State (optional — zero impact on standard local flow)
+  aiGeneratedImg?: HTMLImageElement | null;
+  aiGeneratedUrl?: string | null;
+  useAiResult?: boolean;
+  isAiGenerating?: boolean;
+  aiAppliedLabel?: string;
 }
+
+interface AiOutfitPreset {
+  id: string;
+  label: string;
+  category: 'original' | 'men' | 'women';
+  desc: string;
+}
+
+interface AiBgPreset {
+  id: string;
+  label: string;
+  hex: string;
+  desc: string;
+}
+
+const DEFAULT_AI_OUTFITS: AiOutfitPreset[] = [
+  { id: 'keep_original', label: 'Keep My Clothes (HD Only)', category: 'original', desc: 'Original outfit + DSLR lighting & clean BG' },
+  { id: 'men_navy_suit', label: "Men's Navy Suit & Tie", category: 'men', desc: 'Tailored navy coat, white shirt & silk tie' },
+  { id: 'men_black_suit', label: "Men's Black Coat & Tie", category: 'men', desc: 'Classic jet-black formal suit & tie' },
+  { id: 'men_blazer_open', label: "Men's Blazer (No Tie)", category: 'men', desc: 'Smart black blazer over white shirt' },
+  { id: 'men_white_shirt', label: 'Crisp White Formal Shirt', category: 'men', desc: 'Clean white shirt (Exam / Interview)' },
+  { id: 'men_blue_shirt', label: 'Sky Blue Formal Shirt', category: 'men', desc: 'Light blue shirt (High contrast on white)' },
+  { id: 'women_navy_blazer', label: "Women's Navy Suit Blazer", category: 'women', desc: 'Tailored navy blazer & white formal top' },
+  { id: 'women_black_blazer', label: "Women's Black Coat & Shirt", category: 'women', desc: 'Classic black blazer & ivory collared shirt' },
+  { id: 'women_formal_kurti', label: 'Formal Collared Kurti', category: 'women', desc: 'Decent deep-navy official Indian wear' },
+];
+
+const DEFAULT_AI_BGS: AiBgPreset[] = [
+  { id: 'white', label: 'Pure White', hex: '#FFFFFF', desc: 'Passport / Visa / SSC / UPSC' },
+  { id: 'light_blue', label: 'Sky Blue', hex: '#BAE6FD', desc: 'Classic Indian Studio' },
+  { id: 'royal_blue', label: 'Official Blue', hex: '#2563EB', desc: 'Vibrant Visa / ID' },
+  { id: 'light_gray', label: 'Light Gray', hex: '#E5E7EB', desc: 'UK / Schengen / Office' },
+  { id: 'red', label: 'Official Red', hex: '#DC2626', desc: 'Special Visa / Org ID' },
+];
 
 const bgRemoverConfig = {
   publicPath: 'https://cdn.jsdelivr.net/npm/@imgly/background-removal-data@1.7.0/dist/',
@@ -118,12 +161,25 @@ export default function PassportPhotoSheet() {
   const [photos, setPhotos] = useState<PhotoSlotItem[]>([]);
   const [activePhotoId, setActivePhotoId] = useState<string | null>(null);
   const [isCropModalOpen, setIsCropModalOpen] = useState<boolean>(false);
-  const [modalActiveTab, setModalActiveTab] = useState<'align' | 'light'>('align');
+  const [modalActiveTab, setModalActiveTab] = useState<'align' | 'light' | 'ai'>('align');
   const [showBiometricGuides, setShowBiometricGuides] = useState<boolean>(true);
   const [isLoadingPhotos, setIsLoadingPhotos] = useState<boolean>(false);
   const [toastMsg, setToastMsg] = useState<{ text: string; type: 'error' | 'success' | 'info' } | null>(null);
   const [activeSarkariId, setActiveSarkariId] = useState<string | null>(null);
   const [isBatchRemovingBg, setIsBatchRemovingBg] = useState<boolean>(false);
+
+  // === GEMINI AI STUDIO PASSPORT STATE ===
+  const [aiStudioAvailable, setAiStudioAvailable] = useState<boolean>(true);
+  const [aiOutfits, setAiOutfits] = useState<AiOutfitPreset[]>(DEFAULT_AI_OUTFITS);
+  const [aiBackgrounds, setAiBackgrounds] = useState<AiBgPreset[]>(DEFAULT_AI_BGS);
+  const [aiAttire, setAiAttire] = useState<string>('keep_original');
+  const [aiBgPreset, setAiBgPreset] = useState<string>('white');
+  const [aiSourceMode, setAiSourceMode] = useState<'auto' | 'photo_of_photo'>('auto');
+  const [aiRemoveGlassesGlare, setAiRemoveGlassesGlare] = useState<boolean>(true);
+  const [aiCustomNote, setAiCustomNote] = useState<string>('');
+  const [aiElapsedSec, setAiElapsedSec] = useState<number>(0);
+  const [aiPanelOpen, setAiPanelOpen] = useState<boolean>(false);
+  const [aiAttireCategory, setAiAttireCategory] = useState<'all' | 'original' | 'men' | 'women'>('all');
 
   // Drag pan refs for crop modal (mouse + touch)
   const isDraggingRef = useRef<boolean>(false);
@@ -265,10 +321,21 @@ export default function PassportPhotoSheet() {
 
   useEffect(() => {
     preload(bgRemoverConfig).catch(() => {});
+    // Non-blocking capability fetch for Gemini AI Passport Studio
+    apiFetch('/api/passport-ai/config', { method: 'GET', timeoutMs: 8000 })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((cfg) => {
+        if (!cfg) return;
+        setAiStudioAvailable(Boolean(cfg.available));
+        if (Array.isArray(cfg.outfits) && cfg.outfits.length > 0) setAiOutfits(cfg.outfits);
+        if (Array.isArray(cfg.backgrounds) && cfg.backgrounds.length > 0) setAiBackgrounds(cfg.backgrounds);
+      })
+      .catch(() => {});
     return () => {
       // Memory cleanup on unmount
       photos.forEach((p) => {
         if (p.objectUrl) URL.revokeObjectURL(p.objectUrl);
+        if (p.aiGeneratedUrl) URL.revokeObjectURL(p.aiGeneratedUrl);
       });
     };
   }, []);
@@ -489,8 +556,11 @@ export default function PassportPhotoSheet() {
   const removePhoto = (id: string) => {
     setPhotos((prev) => {
       const toRemove = prev.find((p) => p.id === id);
-      // Memory leak fix: revoke object URL when removing
-      if (toRemove) URL.revokeObjectURL(toRemove.objectUrl);
+      // Memory leak fix: revoke object URLs when removing
+      if (toRemove) {
+        URL.revokeObjectURL(toRemove.objectUrl);
+        if (toRemove.aiGeneratedUrl) URL.revokeObjectURL(toRemove.aiGeneratedUrl);
+      }
       const next = prev.filter((p) => p.id !== id);
       if (activePhotoId === id) {
         setActivePhotoId(next.length > 0 ? next[0].id : null);
@@ -602,6 +672,113 @@ export default function PassportPhotoSheet() {
     showToast(`✓ Background removed for ${doneCount} photo(s)!`, 'success');
   };
 
+  // Gemini AI Studio HD Passport Portrait Generator (always sends pristine original photo.file!)
+  const handleGenerateAiPassportPhoto = async (
+    photo: PhotoSlotItem,
+    overrides?: {
+      attire?: string;
+      bgPreset?: string;
+      sourceMode?: 'auto' | 'photo_of_photo';
+    }
+  ) => {
+    if (photo.isAiGenerating) return;
+    const chosenAttire = overrides?.attire ?? aiAttire;
+    const chosenBg = overrides?.bgPreset ?? aiBgPreset;
+    const chosenSource = overrides?.sourceMode ?? aiSourceMode;
+
+    if (overrides?.attire) setAiAttire(overrides.attire);
+    if (overrides?.bgPreset) setAiBgPreset(overrides.bgPreset);
+    if (overrides?.sourceMode) setAiSourceMode(overrides.sourceMode);
+
+    // Derive optimal aspect ratio matching currently selected passport preset
+    const ratio = basePhotoWidthMm / Math.max(1, basePhotoHeightMm);
+    const aspectRatio = photo.isJointPhoto || ratio > 1.2
+      ? '3:2'
+      : Math.abs(ratio - 1) < 0.08
+      ? '1:1'
+      : '3:4';
+
+    const bgPresetObj = aiBackgrounds.find((b) => b.id === chosenBg);
+    const targetHex = chosenBg === 'custom' ? bgColor : (bgPresetObj?.hex || '#FFFFFF');
+
+    updatePhoto(photo.id, (p) => ({ ...p, isAiGenerating: true }));
+    setAiElapsedSec(0);
+    const startedAt = Date.now();
+    const timer = window.setInterval(() => {
+      setAiElapsedSec(Math.round((Date.now() - startedAt) / 100) / 10);
+    }, 200);
+
+    try {
+      const fd = new FormData();
+      fd.append('file', photo.file, photo.file.name || 'portrait.jpg');
+      fd.append('attire', chosenAttire);
+      fd.append('bg_preset', chosenBg);
+      fd.append('bg_hex', targetHex);
+      fd.append('source_mode', chosenSource);
+      fd.append('aspect_ratio', aspectRatio);
+      fd.append('is_joint', String(photo.isJointPhoto));
+      fd.append('remove_glasses_glare', String(aiRemoveGlassesGlare));
+      if (aiCustomNote.trim()) fd.append('custom_note', aiCustomNote.trim());
+
+      const res = await apiFetch('/api/passport-ai/generate', {
+        method: 'POST',
+        body: fd,
+        timeoutMs: 55000,
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({ detail: 'AI Studio request failed.' }));
+        throw new Error(errData.detail || `Server returned ${res.status}`);
+      }
+
+      const blob = await res.blob();
+      const serverMs = Number(res.headers.get('X-Passport-AI-Ms') || 0);
+      const secStr = serverMs > 0 ? `${(serverMs / 1000).toFixed(1)}s` : `${((Date.now() - startedAt) / 1000).toFixed(1)}s`;
+      const newUrl = URL.createObjectURL(blob);
+
+      const loadedAiImg = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const imgEl = new Image();
+        imgEl.onload = () => resolve(imgEl);
+        imgEl.onerror = () => {
+          URL.revokeObjectURL(newUrl);
+          reject(new Error('Could not decode generated HD portrait.'));
+        };
+        imgEl.src = newUrl;
+      });
+
+      const outfitLabel = aiOutfits.find((o) => o.id === chosenAttire)?.label || 'Studio HD';
+      const bgLabel = chosenBg === 'custom' ? targetHex : (bgPresetObj?.label || 'White');
+
+      // Sync sheet background color with AI backdrop so edges match seamlessly
+      setBgColor(targetHex.toLowerCase());
+
+      updatePhoto(photo.id, (p) => {
+        if (p.aiGeneratedUrl) URL.revokeObjectURL(p.aiGeneratedUrl);
+        return {
+          ...p,
+          aiGeneratedImg: loadedAiImg,
+          aiGeneratedUrl: newUrl,
+          useAiResult: true,
+          isAiGenerating: false,
+          aiAppliedLabel: `${outfitLabel} · ${bgLabel} (${secStr})`,
+          // Reset manual pan/rotation since Gemini already centered & straightened head/shoulders
+          zoom: 100,
+          rotation: 0,
+          panOffset: { x: 0, y: 0 },
+          isFlippedH: false,
+        };
+      });
+
+      showToast(`✨ HD Studio Passport Photo ready in ${secStr}! Updated across your sheet.`, 'success');
+    } catch (err: any) {
+      console.error('[PassportAI] Generation failed:', err);
+      updatePhoto(photo.id, (p) => ({ ...p, isAiGenerating: false }));
+      showToast(err?.message || 'AI Studio could not generate photo. Offline tools still work!', 'error');
+    } finally {
+      window.clearInterval(timer);
+    }
+  };
+
 
   // Render a Single Photo Tile with Transforms, Studio Lighting & Borders
   const renderSinglePhotoTile = useCallback(
@@ -624,7 +801,10 @@ export default function PassportPhotoSheet() {
       ctx.fillRect(0, 0, targetW, targetH);
 
       // 2. Draw Customer Photo with Studio Lighting (Brightness / Contrast / Saturation)
-      const activeImg = photo.processedImg ?? photo.img;
+      const activeImg =
+        photo.useAiResult && photo.aiGeneratedImg
+          ? photo.aiGeneratedImg
+          : (photo.processedImg ?? photo.img);
       if (activeImg) {
         ctx.save();
         const modalRefScale = targetH / 220;
@@ -1112,7 +1292,12 @@ export default function PassportPhotoSheet() {
   };
 
   const prefersReduced = useReducedMotion();
-  const isBusy = isGenerating || isLoadingPhotos || isBatchRemovingBg || Boolean(currentPhoto?.isRemovingBg);
+  const isBusy =
+    isGenerating ||
+    isLoadingPhotos ||
+    isBatchRemovingBg ||
+    Boolean(currentPhoto?.isRemovingBg) ||
+    Boolean(currentPhoto?.isAiGenerating);
 
   return (
     <ToolWorkspaceShell
@@ -1443,8 +1628,14 @@ export default function PassportPhotoSheet() {
               style={{ backgroundColor: 'var(--pms-white)' }}
             >
               <PearlScanOverlay
-                active={currentPhoto.isRemovingBg || isBatchRemovingBg}
-                label={isBatchRemovingBg ? 'Batch removing backgrounds…' : 'AI removing portrait background…'}
+                active={Boolean(currentPhoto.isRemovingBg || isBatchRemovingBg || currentPhoto.isAiGenerating)}
+                label={
+                  currentPhoto.isAiGenerating
+                    ? `✨ Gemini AI crafting HD studio passport photo… (${aiElapsedSec.toFixed(1)}s)`
+                    : isBatchRemovingBg
+                    ? 'Batch removing backgrounds…'
+                    : 'AI removing portrait background…'
+                }
               />
               {/* Modal Header & Navigation Tabs */}
               <div className="flex flex-wrap items-center justify-between px-6 py-3.5 border-b border-[var(--pms-border)] gap-3">
@@ -1457,13 +1648,13 @@ export default function PassportPhotoSheet() {
                   </div>
                   <div>
                     <h3 className="text-sm font-bold" style={{ color: 'var(--pms-ink)' }}>
-                      Biometric &amp; Lighting Studio
+                      Biometric, Lighting &amp; AI Suit Studio
                     </h3>
-                    <p className="text-[11px]" style={{ color: 'var(--pms-muted)' }}>Center face in oval • Adjust face lighting</p>
+                    <p className="text-[11px]" style={{ color: 'var(--pms-muted)' }}>Center face in oval • Or transform any click into HD passport</p>
                   </div>
                 </div>
 
-                {/* Mode Tabs: Align & Lighting */}
+                {/* Mode Tabs: Align, Lighting & AI Studio */}
                 <div className="flex items-center gap-1 p-1 rounded-2xl border border-[var(--pms-border)]" style={{ backgroundColor: 'var(--pms-pearl)' }}>
                   <button
                     type="button"
@@ -1485,7 +1676,18 @@ export default function PassportPhotoSheet() {
                         : 'text-[var(--pms-muted)]'
                     }`}
                   >
-                    💡 Studio Face Lighting
+                    💡 Face Lighting
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setModalActiveTab('ai')}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1 ${
+                      modalActiveTab === 'ai'
+                        ? 'bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-xs'
+                        : 'text-[var(--pms-violet)] hover:bg-[var(--pms-soft-lavender)]'
+                    }`}
+                  >
+                    <Wand2 className="w-3.5 h-3.5" /> AI Suit &amp; HD
                   </button>
                 </div>
 
@@ -1542,7 +1744,10 @@ export default function PassportPhotoSheet() {
                     {(() => {
                       const modalTileH = 220;
                       const modalTileW = Math.round(((currentPhoto.isJointPhoto ? basePhotoWidthMm * 2 : basePhotoWidthMm) / basePhotoHeightMm) * modalTileH);
-                      const activeImg = currentPhoto.processedImg ?? currentPhoto.img;
+                      const activeImg =
+                        currentPhoto.useAiResult && currentPhoto.aiGeneratedImg
+                          ? currentPhoto.aiGeneratedImg
+                          : (currentPhoto.processedImg ?? currentPhoto.img);
                       const imgW = activeImg.naturalWidth || activeImg.width || 1;
                       const imgH = activeImg.naturalHeight || activeImg.height || 1;
                       const imgAspect = imgW / imgH;
@@ -1937,6 +2142,196 @@ export default function PassportPhotoSheet() {
                       </div>
                     </div>
                   )}
+
+                  {/* TAB 3: GEMINI AI SUIT & HD PASSPORT STUDIO */}
+                  {modalActiveTab === 'ai' && (
+                    <div className="space-y-3.5 text-xs">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-black text-[var(--pms-ink)] flex items-center gap-1.5">
+                          <Wand2 className="w-4 h-4 text-[var(--pms-violet)]" /> Gemini AI HD Passport Studio
+                        </span>
+                        {currentPhoto.aiGeneratedImg && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              updatePhoto(currentPhoto.id, (p) => ({ ...p, useAiResult: !p.useAiResult }))
+                            }
+                            className="px-2.5 py-1 rounded-lg border border-[var(--pms-border)] font-bold text-[11px] text-[var(--pms-violet)] bg-[var(--pms-soft-lavender)] cursor-pointer"
+                          >
+                            {currentPhoto.useAiResult ? 'View Original' : 'View AI HD'}
+                          </button>
+                        )}
+                      </div>
+
+                      {!aiStudioAvailable && (
+                        <div className="p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 text-[11px] text-amber-800 dark:text-amber-200">
+                          Server AI key not active right now. Offline crop, lighting &amp; BG removal still work 100% locally.
+                        </div>
+                      )}
+
+                      {/* Input Type: Casual Click vs Photo-of-Photo Restore */}
+                      <div className="grid grid-cols-2 gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setAiSourceMode('auto')}
+                          className={`p-2 rounded-xl border text-left transition cursor-pointer ${
+                            aiSourceMode === 'auto'
+                              ? 'border-[var(--pms-violet)] bg-[var(--pms-soft-lavender)] text-[var(--pms-ink)] font-bold'
+                              : 'border-[var(--pms-border)] text-[var(--pms-muted)]'
+                          }`}
+                        >
+                          <div className="text-[11px] font-bold">📱 Casual Mobile Click</div>
+                          <div className="text-[10px] opacity-80">Selfie / room photo → HD</div>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setAiSourceMode('photo_of_photo')}
+                          className={`p-2 rounded-xl border text-left transition cursor-pointer ${
+                            aiSourceMode === 'photo_of_photo'
+                              ? 'border-[var(--pms-violet)] bg-[var(--pms-soft-lavender)] text-[var(--pms-ink)] font-bold'
+                              : 'border-[var(--pms-border)] text-[var(--pms-muted)]'
+                          }`}
+                        >
+                          <div className="text-[11px] font-bold">🖼️ Photo-of-a-Photo</div>
+                          <div className="text-[10px] opacity-80">Remove glare, borders &amp; blur</div>
+                        </button>
+                      </div>
+
+                      {/* Background Picker */}
+                      <div>
+                        <label className="text-[10px] font-bold uppercase tracking-wider block mb-1.5" style={{ color: 'var(--pms-muted)' }}>
+                          Studio Background
+                        </label>
+                        <div className="flex flex-wrap gap-1.5">
+                          {aiBackgrounds.map((bg) => (
+                            <button
+                              key={bg.id}
+                              type="button"
+                              onClick={() => setAiBgPreset(bg.id)}
+                              className={`px-2 py-1 rounded-lg border text-[11px] font-bold flex items-center gap-1.5 cursor-pointer ${
+                                aiBgPreset === bg.id
+                                  ? 'border-[var(--pms-violet)] bg-[var(--pms-soft-lavender)] text-[var(--pms-ink)]'
+                                  : 'border-[var(--pms-border)] text-[var(--pms-muted)]'
+                              }`}
+                            >
+                              <span
+                                className="w-3 h-3 rounded-full border border-slate-400 shrink-0"
+                                style={{ backgroundColor: bg.hex }}
+                              />
+                              {bg.label}
+                            </button>
+                          ))}
+                          <button
+                            type="button"
+                            onClick={() => setAiBgPreset('custom')}
+                            className={`px-2 py-1 rounded-lg border text-[11px] font-bold flex items-center gap-1.5 cursor-pointer ${
+                              aiBgPreset === 'custom'
+                                ? 'border-[var(--pms-violet)] bg-[var(--pms-soft-lavender)] text-[var(--pms-ink)]'
+                                : 'border-[var(--pms-border)] text-[var(--pms-muted)]'
+                            }`}
+                          >
+                            <span
+                              className="w-3 h-3 rounded-full border border-slate-400 shrink-0"
+                              style={{ backgroundColor: bgColor }}
+                            />
+                            Sheet BG ({bgColor})
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Attire / Coat-Pant Suit Selector */}
+                      <div>
+                        <div className="flex items-center justify-between mb-1.5">
+                          <label className="text-[10px] font-bold uppercase tracking-wider flex items-center gap-1" style={{ color: 'var(--pms-muted)' }}>
+                            <Shirt className="w-3 h-3 text-[var(--pms-violet)]" /> Outfit / Formal Suit
+                          </label>
+                          <div className="flex gap-1 text-[10px]">
+                            {(['all', 'men', 'women'] as const).map((cat) => (
+                              <button
+                                key={cat}
+                                type="button"
+                                onClick={() => setAiAttireCategory(cat)}
+                                className={`px-2 py-0.5 rounded-md font-bold capitalize cursor-pointer ${
+                                  aiAttireCategory === cat
+                                    ? 'bg-violet-600 text-white'
+                                    : 'bg-[var(--pms-pearl)] text-[var(--pms-muted)]'
+                                }`}
+                              >
+                                {cat}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-1 gap-1.5 max-h-40 overflow-y-auto pr-1">
+                          {aiOutfits
+                            .filter((o) => aiAttireCategory === 'all' || o.category === 'original' || o.category === aiAttireCategory)
+                            .map((o) => (
+                              <button
+                                key={o.id}
+                                type="button"
+                                onClick={() => setAiAttire(o.id)}
+                                className={`px-2.5 py-2 rounded-xl border text-left transition cursor-pointer ${
+                                  aiAttire === o.id
+                                    ? 'border-[var(--pms-violet)] bg-[var(--pms-soft-lavender)] text-[var(--pms-ink)]'
+                                    : 'border-[var(--pms-border)] text-[var(--pms-muted)] hover:text-[var(--pms-ink)]'
+                                }`}
+                              >
+                                <div className="font-bold text-[11px] flex items-center justify-between">
+                                  <span>{o.label}</span>
+                                  {aiAttire === o.id && <Check className="w-3.5 h-3.5 text-[var(--pms-violet)]" />}
+                                </div>
+                                <div className="text-[10px] opacity-75">{o.desc}</div>
+                              </button>
+                            ))}
+                        </div>
+                      </div>
+
+                      <label className="flex items-center justify-between text-[11px] font-semibold cursor-pointer">
+                        <span style={{ color: 'var(--pms-ink)' }}>Remove eyeglasses glare (keep eyes clear)</span>
+                        <input
+                          type="checkbox"
+                          checked={aiRemoveGlassesGlare}
+                          onChange={(e) => setAiRemoveGlassesGlare(e.target.checked)}
+                          className="w-3.5 h-3.5 accent-violet-600"
+                        />
+                      </label>
+
+                      <input
+                        type="text"
+                        value={aiCustomNote}
+                        onChange={(e) => setAiCustomNote(e.target.value)}
+                        maxLength={100}
+                        placeholder="Optional tweak (e.g. slight warm tone, neat collar)"
+                        className="w-full px-2.5 py-1.5 rounded-lg border border-[var(--pms-border)] text-[11px]"
+                        style={{ backgroundColor: 'var(--pms-pearl)', color: 'var(--pms-ink)' }}
+                      />
+
+                      <button
+                        type="button"
+                        onClick={() => void handleGenerateAiPassportPhoto(currentPhoto)}
+                        disabled={Boolean(currentPhoto.isAiGenerating)}
+                        className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-violet-600 via-indigo-600 to-fuchsia-600 hover:opacity-95 text-white font-black text-xs shadow-md flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
+                      >
+                        {currentPhoto.isAiGenerating ? (
+                          <>
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                            Generating Studio HD ({aiElapsedSec.toFixed(1)}s)…
+                          </>
+                        ) : (
+                          <>
+                            <Sparkles className="w-4 h-4" />
+                            Generate HD Studio Passport Photo
+                          </>
+                        )}
+                      </button>
+
+                      {currentPhoto.aiAppliedLabel && (
+                        <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold text-center">
+                          ✓ Applied: {currentPhoto.aiAppliedLabel} (Face identity 100% locked)
+                        </p>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             </motion.div>
@@ -2009,7 +2404,11 @@ export default function PassportPhotoSheet() {
                     >
                       <div className="w-12 h-14 rounded-xl overflow-hidden bg-slate-200 dark:bg-slate-700 shrink-0 border border-[var(--pms-border)] relative group">
                         <img
-                          src={photo.processedImg?.src || photo.objectUrl}
+                          src={
+                            (photo.useAiResult && photo.aiGeneratedUrl) ||
+                            photo.processedImg?.src ||
+                            photo.objectUrl
+                          }
                           alt={`Photo ${idx + 1}`}
                           className="w-full h-full object-cover"
                         />
@@ -2018,11 +2417,16 @@ export default function PassportPhotoSheet() {
                         </div>
                       </div>
                       <div className="min-w-0">
-                        <p className="text-xs font-bold truncate" style={{ color: 'var(--pms-ink)' }}>
-                          Photo {idx + 1}
+                        <p className="text-xs font-bold truncate flex items-center gap-1.5" style={{ color: 'var(--pms-ink)' }}>
+                          <span>Photo {idx + 1}</span>
+                          {photo.useAiResult && photo.aiGeneratedImg && (
+                            <span className="px-1.5 py-0.5 rounded-md bg-emerald-600 text-white text-[9px] font-black">
+                              AI HD ✓
+                            </span>
+                          )}
                         </p>
                         <p className="text-[11px] text-[var(--pms-violet)] font-semibold flex items-center gap-1">
-                          <Camera className="w-3 h-3" /> Crop &amp; Face Lighting
+                          <Camera className="w-3 h-3" /> Crop, Lighting &amp; AI Suit
                         </p>
                       </div>
                     </div>
@@ -2092,6 +2496,232 @@ export default function PassportPhotoSheet() {
                     </div>
                   </div>
                 ))}
+
+                {/* ─── INLINE GEMINI AI STUDIO CARD (OPTIONAL — ZERO IMPACT ON ACCURATE PHOTOS) ─── */}
+                {currentPhoto && (
+                  <div
+                    className="mt-4 p-4 rounded-2xl border border-violet-300/70 dark:border-violet-800/70 space-y-3"
+                    style={{ backgroundColor: 'var(--pms-pearl)' }}
+                  >
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <div>
+                        <span className="text-xs font-black flex items-center gap-1.5" style={{ color: 'var(--pms-ink)' }}>
+                          <Wand2 className="w-4 h-4 text-[var(--pms-violet)]" />
+                          AI Studio Passport &amp; Suit Maker (Gemini HD)
+                        </span>
+                        <p className="text-[11px] mt-0.5" style={{ color: 'var(--pms-muted)' }}>
+                          Normal mobile click or photo-of-a-photo? Convert to crisp HD passport with clean background &amp; optional coat/suit.
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        {currentPhoto.aiGeneratedImg && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              updatePhoto(currentPhoto.id, (p) => ({ ...p, useAiResult: !p.useAiResult }))
+                            }
+                            className="px-2.5 py-1 rounded-xl border border-[var(--pms-border)] text-[11px] font-bold cursor-pointer"
+                            style={{ backgroundColor: 'var(--pms-white)', color: 'var(--pms-ink)' }}
+                          >
+                            {currentPhoto.useAiResult ? '↩ Show Original' : '✨ Show AI HD'}
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => setAiPanelOpen((v) => !v)}
+                          className="px-2.5 py-1 rounded-xl border border-[var(--pms-border)] bg-[var(--pms-soft-lavender)] text-[var(--pms-violet)] text-[11px] font-bold cursor-pointer"
+                        >
+                          {aiPanelOpen ? 'Hide Options' : 'All Suits & BGs'}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* 1-Click Fast Presets */}
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      <button
+                        type="button"
+                        disabled={Boolean(currentPhoto.isAiGenerating)}
+                        onClick={() =>
+                          void handleGenerateAiPassportPhoto(currentPhoto, {
+                            attire: 'keep_original',
+                            bgPreset: 'white',
+                            sourceMode: 'auto',
+                          })
+                        }
+                        className="py-2 px-3 rounded-xl border border-[var(--pms-border)] hover:border-violet-500 text-left transition cursor-pointer disabled:opacity-50"
+                        style={{ backgroundColor: 'var(--pms-white)', color: 'var(--pms-ink)' }}
+                      >
+                        <div className="text-[11px] font-black flex items-center gap-1">
+                          <Sparkles className="w-3 h-3 text-violet-600" /> HD Pure White BG
+                        </div>
+                        <div className="text-[10px]" style={{ color: 'var(--pms-muted)' }}>
+                          Keep clothes • Studio lighting
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        disabled={Boolean(currentPhoto.isAiGenerating)}
+                        onClick={() =>
+                          void handleGenerateAiPassportPhoto(currentPhoto, {
+                            attire: 'men_navy_suit',
+                            bgPreset: 'white',
+                            sourceMode: 'auto',
+                          })
+                        }
+                        className="py-2 px-3 rounded-xl border border-[var(--pms-border)] hover:border-violet-500 text-left transition cursor-pointer disabled:opacity-50"
+                        style={{ backgroundColor: 'var(--pms-white)', color: 'var(--pms-ink)' }}
+                      >
+                        <div className="text-[11px] font-black flex items-center gap-1">
+                          <Shirt className="w-3 h-3 text-indigo-600" /> Coat, Shirt &amp; Tie
+                        </div>
+                        <div className="text-[10px]" style={{ color: 'var(--pms-muted)' }}>
+                          Formal navy suit • White BG
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        disabled={Boolean(currentPhoto.isAiGenerating)}
+                        onClick={() =>
+                          void handleGenerateAiPassportPhoto(currentPhoto, {
+                            attire: 'keep_original',
+                            bgPreset: 'white',
+                            sourceMode: 'photo_of_photo',
+                          })
+                        }
+                        className="py-2 px-3 rounded-xl border border-[var(--pms-border)] hover:border-violet-500 text-left transition cursor-pointer disabled:opacity-50"
+                        style={{ backgroundColor: 'var(--pms-white)', color: 'var(--pms-ink)' }}
+                      >
+                        <div className="text-[11px] font-black flex items-center gap-1">
+                          <Camera className="w-3 h-3 text-emerald-600" /> Photo-of-Photo HD
+                        </div>
+                        <div className="text-[10px]" style={{ color: 'var(--pms-muted)' }}>
+                          Fix glare, blur &amp; borders
+                        </div>
+                      </button>
+                    </div>
+
+                    {/* Expandable Full Suit & Background Customizer */}
+                    {aiPanelOpen && (
+                      <div
+                        className="p-3.5 rounded-2xl border border-[var(--pms-border)] space-y-3 text-xs"
+                        style={{ backgroundColor: 'var(--pms-white)' }}
+                      >
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div>
+                            <label className="text-[10px] font-bold uppercase tracking-wider block mb-1" style={{ color: 'var(--pms-muted)' }}>
+                              Choose Outfit / Suit
+                            </label>
+                            <select
+                              value={aiAttire}
+                              onChange={(e) => setAiAttire(e.target.value)}
+                              className="w-full px-2.5 py-2 rounded-xl border border-[var(--pms-border)] text-xs font-bold"
+                              style={{ backgroundColor: 'var(--pms-pearl)', color: 'var(--pms-ink)' }}
+                            >
+                              {aiOutfits.map((o) => (
+                                <option key={o.id} value={o.id}>
+                                  {o.label}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <div>
+                            <label className="text-[10px] font-bold uppercase tracking-wider block mb-1" style={{ color: 'var(--pms-muted)' }}>
+                              Choose Studio Background
+                            </label>
+                            <div className="flex flex-wrap gap-1.5 items-center pt-0.5">
+                              {aiBackgrounds.map((bg) => (
+                                <button
+                                  key={bg.id}
+                                  type="button"
+                                  title={bg.label}
+                                  onClick={() => setAiBgPreset(bg.id)}
+                                  className={`w-7 h-7 rounded-full border-2 flex items-center justify-center cursor-pointer transition-transform hover:scale-110 ${
+                                    aiBgPreset === bg.id
+                                      ? 'border-[var(--pms-violet)] ring-2 ring-violet-500/30'
+                                      : 'border-slate-300'
+                                  }`}
+                                  style={{ backgroundColor: bg.hex }}
+                                >
+                                  {aiBgPreset === bg.id && (
+                                    <Check className={`w-3.5 h-3.5 ${bg.id === 'royal_blue' || bg.id === 'red' ? 'text-white' : 'text-slate-900'}`} />
+                                  )}
+                                </button>
+                              ))}
+                              <button
+                                type="button"
+                                onClick={() => setAiBgPreset('custom')}
+                                className={`px-2 py-1 rounded-lg border text-[10px] font-bold cursor-pointer ${
+                                  aiBgPreset === 'custom'
+                                    ? 'border-[var(--pms-violet)] bg-[var(--pms-soft-lavender)] text-[var(--pms-violet)]'
+                                    : 'border-[var(--pms-border)] text-[var(--pms-muted)]'
+                                }`}
+                              >
+                                Custom ({bgColor})
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                          <label className="flex items-center gap-1.5 font-semibold cursor-pointer" style={{ color: 'var(--pms-ink)' }}>
+                            <input
+                              type="checkbox"
+                              checked={aiSourceMode === 'photo_of_photo'}
+                              onChange={(e) => setAiSourceMode(e.target.checked ? 'photo_of_photo' : 'auto')}
+                              className="w-3.5 h-3.5 accent-violet-600"
+                            />
+                            Photo-of-a-Photo HD Restore mode
+                          </label>
+                          <label className="flex items-center gap-1.5 font-semibold cursor-pointer" style={{ color: 'var(--pms-ink)' }}>
+                            <input
+                              type="checkbox"
+                              checked={aiRemoveGlassesGlare}
+                              onChange={(e) => setAiRemoveGlassesGlare(e.target.checked)}
+                              className="w-3.5 h-3.5 accent-violet-600"
+                            />
+                            Remove glasses glare
+                          </label>
+                        </div>
+
+                        <button
+                          type="button"
+                          disabled={Boolean(currentPhoto.isAiGenerating)}
+                          onClick={() => void handleGenerateAiPassportPhoto(currentPhoto)}
+                          className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-violet-600 via-indigo-600 to-fuchsia-600 text-white font-black text-xs shadow-sm flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
+                        >
+                          {currentPhoto.isAiGenerating ? (
+                            <>
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                              Creating HD Passport Portrait ({aiElapsedSec.toFixed(1)}s)…
+                            </>
+                          ) : (
+                            <>
+                              <Sparkles className="w-4 h-4" />
+                              Generate Custom HD Passport Photo
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    )}
+
+                    {currentPhoto.isAiGenerating && (
+                      <div className="flex items-center justify-center gap-2 text-xs font-bold text-[var(--pms-violet)] py-1">
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>Gemini AI crafting crisp studio HD photo… ({aiElapsedSec.toFixed(1)}s)</span>
+                      </div>
+                    )}
+
+                    {currentPhoto.aiAppliedLabel && !currentPhoto.isAiGenerating && (
+                      <div className="text-[11px] font-bold text-emerald-700 dark:text-emerald-400 flex items-center justify-between gap-2">
+                        <span>✓ Active: {currentPhoto.aiAppliedLabel}</span>
+                        <span className="text-[10px] opacity-80">Exact face preserved</span>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -2776,7 +3406,9 @@ export default function PassportPhotoSheet() {
             <PearlScanOverlay
               active={isBusy}
               label={
-                isBatchRemovingBg
+                currentPhoto?.isAiGenerating
+                  ? `✨ Gemini AI crafting HD studio passport photo… (${aiElapsedSec.toFixed(1)}s)`
+                  : isBatchRemovingBg
                   ? 'Removing backgrounds across session…'
                   : currentPhoto?.isRemovingBg
                   ? 'Segmenting portrait background…'
