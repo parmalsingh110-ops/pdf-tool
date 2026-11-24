@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PDF Studio Viewer — PDF Media Suite</title>
+  <link rel="stylesheet" href="viewer.css">
+</head>
+<body data-theme="dark">
+  <!-- Hidden File Inputs -->
+  <input type="file" id="open-pdf-input" accept="application/pdf,.pdf,image/*" hidden>
+  <input type="file" id="merge-pdf-input" accept="application/pdf,.pdf" multiple hidden>
+  <input type="file" id="insert-img-input" accept="image/*" multiple hidden>
+  <input type="file" id="append-img-pages-input" accept="image/*" multiple hidden>
+  <input type="file" id="sig-upload-input" accept="image/*" hidden>
+
+  <!-- ═══ TOP ACROBAT-STYLE COMMAND BAR ═══ -->
+  <header class="topbar">
+    <div class="topbar-left">
+      <button class="tb-btn icon-only" id="btn-toggle-left" title="Toggle Pages & Outline Sidebar">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/></svg>
+      </button>
+      <div class="brand-chip">
+        <img src="icons/icon32.png" alt="PDF Media Suite" class="brand-logo">
+        <span class="brand-badge">STUDIO</span>
+      </div>
+      <div class="doc-title-wrap">
+        <input type="text" id="doc-filename" class="doc-filename" value="No Document Loaded" spellcheck="false" title="Click to rename output PDF">
+        <span id="unsaved-dot" class="unsaved-pill" hidden>● Edited</span>
+      </div>
+      <button class="tb-btn" id="btn-open-file" title="Open a PDF or Image from computer (Ctrl+O)">
+        📂 <span>Open</span>
+      </button>
+    </div>
+
+    <!-- Page Navigation + Zoom -->
+    <div class="topbar-center">
+      <div class="tb-group">
+        <button class="tb-btn icon-only" id="btn-prev-page" title="Previous Page (↑)">◀</button>
+        <div class="page-jump">
+          <input type="number" id="page-num-input" min="1" value="1" aria-label="Page number">
+          <span>/</span>
+          <span id="page-count-label">0</span>
+        </div>
+        <button class="tb-btn icon-only" id="btn-next-page" title="Next Page (↓)">▶</button>
+      </div>
+
+      <div class="tb-divider"></div>
+
+      <div class="tb-group">
+        <button class="tb-btn icon-only" id="btn-zoom-out" title="Zoom Out (Ctrl+-)">−</button>
+        <select id="zoom-select" class="tb-select" aria-label="Zoom level">
+          <option value="fit-width">Fit Width</option>
+          <option value="fit-page">Fit Page</option>
+          <option value="0.5">50%</option>
+          <option value="0.75">75%</option>
+          <option value="1" selected>100%</option>
+          <option value="1.25">125%</option>
+          <option value="1.5">150%</option>
+          <option value="2">200%</option>
+          <option value="3">300%</option>
+        </select>
+        <button class="tb-btn icon-only" id="btn-zoom-in" title="Zoom In (Ctrl++)">+</button>
+      </div>
+
+      <div class="tb-divider"></div>
+
+      <!-- Live Annotation & Markup Mode Bar -->
+      <div class="tb-group mode-strip" role="toolbar" aria-label="Annotation tools">
+        <button class="tb-btn mode-btn active" data-mode="select" title="Select Text / Move Annotations (V)">
+          🖱️ <span>Select</span>
+        </button>
+        <button class="tb-btn mode-btn" data-mode="highlight" title="Highlight Area (H)">
+          🖍️ <span>Highlight</span>
+        </button>
+        <button class="tb-btn mode-btn" data-mode="text" title="Add Text Anywhere (T)">
+          ✏️ <span>Text</span>
+        </button>
+        <button class="tb-btn mode-btn" data-mode="draw" title="Freehand Ink Pen (D)">
+          🖊️ <span>Draw</span>
+        </button>
+        <button class="tb-btn mode-btn" data-mode="whiteout" title="Whiteout / Erase Cover (W)">
+          ⬜ <span>Erase</span>
+        </button>
+        <button class="tb-btn mode-btn" data-mode="redact" title="Blackout Redact Sensitive Info (R)">
+          ⬛ <span>Redact</span>
+        </button>
+        <button class="tb-btn" id="btn-open-sign-modal" title="Add Handwritten Signature or Official Stamp (S)">
+          ✍️ <span>Sign</span>
+        </button>
+        <button class="tb-btn" id="btn-insert-image" title="Place Image / Photo / Stamp on Page">
+          🖼️ <span>Image</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Right Primary Actions -->
+    <div class="topbar-right">
+      <button class="tb-btn icon-only" id="btn-undo" title="Undo Last Edit (Ctrl+Z)" disabled>↶</button>
+      <button class="tb-btn icon-only" id="btn-redo" title="Redo (Ctrl+Y)" disabled>↷</button>
+      <button class="tb-btn icon-only" id="btn-rotate-quick" title="Rotate Current Page 90°">🔄</button>
+      <button class="tb-btn icon-only" id="btn-find-toggle" title="Find in Document (Ctrl+F)">🔍</button>
+      <button class="tb-btn icon-only" id="btn-theme-cycle" title="Switch Reading Theme (Dark / Light / Sepia)">🌓</button>
+      <button class="tb-btn" id="btn-print" title="Print PDF with all edits (Ctrl+P)">
+        🖨️ <span>Print</span>
+      </button>
+      <button class="tb-btn primary-save" id="btn-save-pdf" title="Save & Download Edited PDF (Ctrl+S)">
+        💾 <span>Save PDF</span>
+      </button>
+      <button class="tb-btn accent-tools active" id="btn-toggle-right" title="Toggle All PDF Studio Tools">
+        🧰 <span>Tools</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- ═══ CONTEXTUAL ANNOTATION STYLE SUB-BAR ═══ -->
+  <div class="annot-subbar" id="annot-subbar" hidden>
+    <span class="subbar-label" id="subbar-mode-label">Highlight Tool</span>
+    <div class="color-swatches" id="annot-colors">
+      <button class="swatch active" data-color="#facc15" style="background:#facc15" title="Yellow"></button>
+      <button class="swatch" data-color="#ef4444" style="background:#ef4444" title="Red"></button>
+      <button class="swatch" data-color="#22c55e" style="background:#22c55e" title="Green"></button>
+      <button class="swatch" data-color="#3b82f6" style="background:#3b82f6" title="Blue"></button>
+      <button class="swatch" data-color="#111827" style="background:#111827" title="Black"></button>
+      <button class="swatch" data-color="#7c3aed" style="background:#7c3aed" title="Purple"></button>
+      <input type="color" id="annot-custom-color" value="#ef4444" title="Custom Color">
+    </div>
+    <label class="subbar-field">
+      <span>Size</span>
+      <input type="range" id="annot-size" min="2" max="42" value="14">
+      <span id="annot-size-val">14</span>
+    </label>
+    <span class="subbar-hint" id="subbar-hint">Click or drag directly on any PDF page</span>
+    <button class="tb-btn sm" id="btn-bake-annotations" title="Flatten active annotations into PDF bytes">✓ Apply to PDF</button>
+    <button class="tb-btn sm ghost" id="btn-done-mode">Done (Esc)</button>
+  </div>
+
+  <!-- ═══ FLOATING SEARCH BAR (Ctrl+F) ═══ -->
+  <div class="find-bar" id="find-bar" hidden>
+    <input type="text" id="find-input" placeholder="Find text in PDF…" autocomplete="off">
+    <span class="find-status" id="find-status">0 / 0</span>
+    <button class="tb-btn sm icon-only" id="btn-find-prev" title="Previous Match (Shift+Enter)">▲</button>
+    <button class="tb-btn sm icon-only" id="btn-find-next" title="Next Match (Enter)">▼</button>
+    <button class="tb-btn sm icon-only" id="btn-find-close" title="Close (Esc)">✕</button>
+  </div>
+
+  <!-- ═══ MAIN 3-PANE STUDIO WORKSPACE ═══ -->
+  <div class="workspace">
+
+    <!-- LEFT SIDEBAR: THUMBNAILS, OUTLINE & INFO -->
+    <aside class="left-sidebar" id="left-sidebar">
+      <div class="sidebar-tabs">
+        <button class="side-tab active" data-ltab="thumbs">🖼️ Pages</button>
+        <button class="side-tab" data-ltab="outline">📑 Outline</button>
+        <button class="side-tab" data-ltab="info">ℹ️ Info</button>
+      </div>
+
+      <!-- Pages Thumbnail List -->
+      <div class="side-pane active" id="pane-thumbs">
+        <div class="thumb-list" id="thumb-list"></div>
+      </div>
+
+      <!-- Bookmarks Outline -->
+      <div class="side-pane" id="pane-outline" hidden>
+        <div class="outline-list" id="outline-list">
+          <div class="empty-side-msg">No bookmarks in this PDF.</div>
+        </div>
+      </div>
+
+      <!-- Document Info & Metadata -->
+      <div class="side-pane" id="pane-info" hidden>
+        <div class="info-card" id="doc-info-list"></div>
+        <div class="info-actions">
+          <button class="dock-action-btn full" id="btn-scrub-metadata">🧹 Scrub Hidden Metadata</button>
+          <button class="dock-action-btn full secondary" id="btn-open-native-chrome" hidden>🌐 Open in Chrome Default Viewer</button>
+        </div>
+      </div>
+    </aside>
+
+    <!-- CENTER VIEWPORT: PDF PAGES + EMPTY DROPZONE -->
+    <main class="pdf-viewport" id="pdf-viewport">
+      <!-- Empty / Welcome Dropzone State -->
+      <div class="empty-state" id="empty-state">
+        <div class="empty-drop-card" id="empty-drop-card">
+          <img src="icons/icon128.png" alt="PDF Media Suite" class="empty-logo">
+          <h1>PDF Media Suite — Built-in Studio Viewer</h1>
+          <p>Open, Read, Print, Edit, Sign, Compress, Merge, Split, Redact &amp; Convert PDFs <strong>100% right inside this tab</strong> — powered by open-source Mozilla PDF.js &amp; pdf-lib.</p>
+          <div class="empty-cta-row">
+            <button class="hero-open-btn" id="btn-hero-open">📂 Choose PDF or Image File</button>
+          </div>
+          <span class="empty-hint">or drag &amp; drop any <strong>.pdf, .jpg, .png, .webp</strong> anywhere in this window</span>
+          <div id="file-url-tip" class="file-url-tip" hidden>
+            <strong>Opening a local <code>file:///</code> PDF?</strong>
+            <span>Either drop the file above, or enable <em>"Allow access to file URLs"</em> in <code>chrome://extensions</code> so local PDFs open automatically!</span>
+            <button class="tb-btn sm" id="btn-open-ext-settings">⚙️ Open Extension Settings</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Loading Spinner -->
+      <div class="loading-overlay" id="loading-overlay" hidden>
+        <div class="spinner"></div>
+        <div class="loading-text" id="loading-text">Loading PDF…</div>
+      </div>
+
+      <!-- Rendered Pages Container -->
+      <div class="pages-stage" id="pages-stage"></div>
+    </main>
+
+    <!-- RIGHT SIDEBAR: ACROBAT-STYLE IN-VIEWER STUDIO TOOLS DOCK -->
+    <aside class="right-dock" id="right-dock">
+      <div class="dock-header">
+        <div>
+          <h2 class="dock-title">Studio PDF Tools</h2>
+          <p class="dock-sub">All tools work directly here — no tab redirect</p>
+        </div>
+      </div>
+
+      <!-- Search Tools inside Viewer -->
+      <div class="dock-search-wrap">
+        <input type="text" id="dock-search" placeholder="Filter tools (compress, merge, sign, word…)" autocomplete="off">
+      </div>
+
+      <!-- Tool List View -->
+      <div class="dock-tools-list" id="dock-tools-list">
+        <!-- Populated by viewer.js -->
+      </div>
+
+      <!-- Active Tool Inline Drawer (slides over dock when a tool is clicked) -->
+      <div class="tool-drawer" id="tool-drawer" hidden>
+        <div class="drawer-header">
+          <button class="tb-btn sm" id="btn-drawer-back">← All Tools</button>
+          <h3 id="drawer-title">Tool</h3>
+        </div>
+        <div class="drawer-body" id="drawer-body"></div>
+      </div>
+
+      <!-- Auto-Intercept Preference Footer -->
+      <div class="dock-footer">
+        <label class="toggle-row" title="Automatically open web & downloaded PDFs in this Studio Viewer">
+          <span>⚡ Auto-open PDFs in Studio</span>
+          <input type="checkbox" id="chk-auto-viewer" checked>
+        </label>
+      </div>
+    </aside>
+  </div>
+
+  <!-- ═══ SIGNATURE & OFFICIAL STAMP MODAL ═══ -->
+  <div class="modal-backdrop" id="sign-modal" hidden>
+    <div class="modal-card">
+      <div class="modal-head">
+        <h3>✍️ Create Signature or Official Stamp</h3>
+        <button class="tb-btn sm icon-only" id="btn-close-sign-modal">✕</button>
+      </div>
+      <div class="modal-tabs">
+        <button class="m-tab active" data-stab="draw">🖊️ Draw Sign</button>
+        <button class="m-tab" data-stab="type">⌨️ Type Sign</button>
+        <button class="m-tab" data-stab="stamp">🏛️ Official Stamp</button>
+        <button class="m-tab" data-stab="upload">📤 Upload Image</button>
+      </div>
+
+      <!-- Draw Tab -->
+      <div class="sig-pane" id="sig-pane-draw">
+        <canvas id="sig-pad-canvas" width="460" height="170"></canvas>
+        <div class="sig-controls">
+          <div class="sig-ink-colors">
+            <span>Ink:</span>
+            <button class="swatch active" data-sigcolor="#0f172a" style="background:#0f172a" title="Black Ink"></button>
+            <button class="swatch" data-sigcolor="#1d4ed8" style="background:#1d4ed8" title="Blue Ballpoint Ink"></button>
+            <button class="swatch" data-sigcolor="#dc2626" style="background:#dc2626" title="Red Official Ink"></button>
+          </div>
+          <button class="tb-btn sm ghost" id="btn-clear-sig-pad">Clear Pad</button>
+        </div>
+      </div>
+
+      <!-- Type Tab -->
+      <div class="sig-pane" id="sig-pane-type" hidden>
+        <input type="text" id="sig-type-input" class="sig-type-input" placeholder="Type your full name…" value="">
+        <div class="sig-preview-typed" id="sig-preview-typed">Your Signature</div>
+      </div>
+
+      <!-- Official Stamp Tab -->
+      <div class="sig-pane" id="sig-pane-stamp" hidden>
+        <div class="stamp-grid" id="stamp-grid">
+          <button class="stamp-chip active" data-stamp="SELF-ATTESTED" data-scolor="#1d4ed8">SELF-ATTESTED + Date</button>
+          <button class="stamp-chip" data-stamp="APPROVED" data-scolor="#15803d">APPROVED</button>
+          <button class="stamp-chip" data-stamp="VERIFIED" data-scolor="#0369a1">VERIFIED</button>
+          <button class="stamp-chip" data-stamp="CONFIDENTIAL" data-scolor="#dc2626">CONFIDENTIAL</button>
+          <button class="stamp-chip" data-stamp="PAID" data-scolor="#15803d">PAID</button>
+          <button class="stamp-chip" data-stamp="ORIGINAL" data-scolor="#7c3aed">TRUE COPY / ORIGINAL</button>
+        </div>
+        <label class="drawer-field" style="margin-top:10px;">
+          <span>Custom Stamp Subtext (Optional Name / Date)</span>
+          <input type="text" id="stamp-subtext" placeholder="e.g. Verified on DD-MM-YYYY">
+        </label>
+      </div>
+
+      <!-- Upload Tab -->
+      <div class="sig-pane" id="sig-pane-upload" hidden>
+        <div class="sig-upload-box" id="btn-trigger-sig-upload">
+          <span>📤 Click to pick signature photo (PNG / JPG)</span>
+          <small>Auto cleans white paper background into transparent ink!</small>
+        </div>
+        <canvas id="sig-upload-preview" width="360" height="120" hidden></canvas>
+      </div>
+
+      <div class="modal-foot">
+        <label class="toggle-row compact">
+          <input type="checkbox" id="chk-sign-all-pages">
+          <span>Apply on ALL pages (bottom-right)</span>
+        </label>
+        <div class="modal-foot-btns">
+          <button class="tb-btn ghost" id="btn-cancel-sign">Cancel</button>
+          <button class="tb-btn primary-save" id="btn-place-sign">✓ Place on PDF</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ EXTRACTED TEXT / MARKDOWN MODAL ═══ -->
+  <div class="modal-backdrop" id="text-modal" hidden>
+    <div class="modal-card wide">
+      <div class="modal-head">
+        <h3 id="text-modal-title">📃 Extracted PDF Text</h3>
+        <button class="tb-btn sm icon-only" id="btn-close-text-modal">✕</button>
+      </div>
+      <textarea id="extracted-text-area" class="extracted-textarea" readonly></textarea>
+      <div class="modal-foot">
+        <span id="extracted-stats" class="muted-note"></span>
+        <div class="modal-foot-btns">
+          <button class="tb-btn" id="btn-copy-extracted">📋 Copy All</button>
+          <button class="tb-btn primary-save" id="btn-download-extracted">💾 Download File</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ PASSWORD UNLOCK MODAL (for Encrypted PDFs) ═══ -->
+  <div class="modal-backdrop" id="password-modal" hidden>
+    <div class="modal-card narrow">
+      <div class="modal-head">
+        <h3>🔒 Password-Protected PDF</h3>
+      </div>
+      <p class="modal-desc" id="password-modal-msg">This PDF is encrypted. Enter its password to open and unlock it locally.</p>
+      <input type="password" id="pdf-password-input" class="drawer-input" placeholder="Enter PDF password…">
+      <div class="modal-foot" style="justify-content:flex-end;">
+        <button class="tb-btn ghost" id="btn-cancel-password">Cancel</button>
+        <button class="tb-btn primary-save" id="btn-submit-password">🔓 Unlock &amp; Open</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification -->
+  <div class="studio-toast" id="studio-toast" hidden></div>
+
+  <!-- Local Bundled Open-Source Engines (Zero Remote Code — 100% MV3 Compliant) -->
+  <script src="vendor/pdf-lib.min.js"></script>
+  <script src="vendor/jszip.min.js"></script>
+  <script src="idb.js"></script>
+  <script type="module" src="viewer.js"></script>
+</body>
+</html>

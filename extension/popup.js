@@ -155,6 +155,52 @@ const TOOLS_CATALOG = [
   { id: 'crypto-sign',      name: 'Crypto Sign (PKI)',         desc: 'Sign documents with RSA/ECDSA cryptographic keys',  category: 'security', icon: '🔏', path: '/crypto-sign',            badge: 'PKI',       tags: ['crypto','sign','rsa','ecdsa','pki','digital sign','key'] },
 ];
 
+// Map core PDF tool paths directly to built-in Studio Viewer tools (zero website redirect!)
+const STUDIO_IN_VIEWER_MAP = {
+  '/edit': 'markup',
+  '/compress': 'compress',
+  '/target-compress': 'compress',
+  '/merge': 'merge',
+  '/split': 'split',
+  '/extract-pages': 'split',
+  '/organize': 'organize',
+  '/reverse': 'organize',
+  '/remove-blank-pages': 'organize',
+  '/duplicate-pages': 'organize',
+  '/rotate-pages': 'rotate',
+  '/watermark': 'watermark',
+  '/page-numbers': 'pagenums',
+  '/bates-numbering': 'pagenums',
+  '/redact': 'pii',
+  '/masked-aadhaar': 'pii',
+  '/remove-text': 'markup',
+  '/highlight-text': 'markup',
+  '/self-attest': 'sign',
+  '/certify-document': 'sign',
+  '/pdf-to-word': 'word',
+  '/pdf-to-excel': 'excel',
+  '/pdf-to-ppt': 'ppt',
+  '/pdf-to-jpg': 'pdf2img',
+  '/jpg-to-pdf': 'img2pdf',
+  '/extract-text': 'text',
+  '/pdf-to-markdown': 'text',
+  '/grayscale-pdf': 'inksaver',
+  '/ink-saver': 'inksaver',
+  '/flatten-pdf': 'flatten',
+  '/remove-metadata': 'flatten',
+};
+
+let activeTabPdfUrl = '';
+
+function openBuiltInStudioViewer(pdfUrl = '', studioTool = '') {
+  const base = chrome.runtime.getURL('viewer.html');
+  const qs = new URLSearchParams();
+  if (pdfUrl) qs.set('file', pdfUrl);
+  if (studioTool) qs.set('tool', studioTool);
+  const query = qs.toString();
+  chrome.tabs.create({ url: query ? `${base}?${query}` : base });
+}
+
 // ─── STATE ────────────────────────────────────────────────────────────────
 let currentCategory = 'popular';
 let searchQuery = '';
@@ -176,16 +222,29 @@ const btnHistory        = document.getElementById('btn-history');
 const clearRecentBtn    = document.getElementById('clear-recent');
 const bannerCompress    = document.getElementById('banner-compress');
 const bannerConvert     = document.getElementById('banner-convert');
-const bannerAll         = document.getElementById('banner-all');
+const bannerOpenStudio  = document.getElementById('banner-open-studio');
+const btnLaunchViewer   = document.getElementById('btn-launch-viewer');
+const popupAutoViewer   = document.getElementById('popup-auto-viewer');
 
 // ─── INIT ─────────────────────────────────────────────────────────────────
 async function init() {
+  chrome.runtime.sendMessage({ type: 'GET_AUTO_PDF_VIEWER' }, (res) => {
+    if (popupAutoViewer && res) popupAutoViewer.checked = res.enabled !== false;
+  });
+  if (popupAutoViewer) {
+    popupAutoViewer.addEventListener('change', () => {
+      chrome.runtime.sendMessage({ type: 'SET_AUTO_PDF_VIEWER', enabled: popupAutoViewer.checked });
+    });
+  }
+  if (btnLaunchViewer) {
+    btnLaunchViewer.addEventListener('click', () => openBuiltInStudioViewer(activeTabPdfUrl));
+  }
+
   await Promise.all([
     checkCurrentTabForPdf(),
     loadRecentFiles(),
   ]);
-  // Small delay to show skeleton, then render
-  setTimeout(renderTools, 100);
+  setTimeout(renderTools, 60);
 }
 
 // ─── PDF TAB DETECTION ────────────────────────────────────────────────────
@@ -193,21 +252,17 @@ function checkCurrentTabForPdf() {
   return new Promise((resolve) => {
     chrome.runtime.sendMessage({ type: 'GET_CURRENT_TAB_INFO' }, (response) => {
       if (response && response.isPdf) {
+        activeTabPdfUrl = response.url || '';
         pdfBanner.style.display = 'flex';
         const title = response.title || response.url || 'PDF file is open in this tab';
-        const shortName = title.length > 35 ? title.substring(0, 35) + '...' : title;
+        const shortName = title.length > 32 ? title.substring(0, 32) + '...' : title;
         pdfBannerFile.textContent = shortName;
 
-        // Banner action buttons
-        bannerCompress.addEventListener('click', () => {
-          chrome.tabs.create({ url: `${BASE_URL}/compress?utm_source=extension_pdf_banner` });
-        });
-        bannerConvert.addEventListener('click', () => {
-          chrome.tabs.create({ url: `${BASE_URL}/pdf-to-word?utm_source=extension_pdf_banner` });
-        });
-        bannerAll.addEventListener('click', () => {
-          chrome.tabs.create({ url: `${BASE_URL}/all-tools?utm_source=extension_pdf_banner` });
-        });
+        if (bannerOpenStudio) {
+          bannerOpenStudio.addEventListener('click', () => openBuiltInStudioViewer(activeTabPdfUrl));
+        }
+        bannerCompress.addEventListener('click', () => openBuiltInStudioViewer(activeTabPdfUrl, 'compress'));
+        bannerConvert.addEventListener('click', () => openBuiltInStudioViewer(activeTabPdfUrl, 'word'));
       }
       resolve();
     });
@@ -255,7 +310,12 @@ function renderRecentPanel() {
   recentList.querySelectorAll('.recent-item').forEach((el) => {
     el.addEventListener('click', () => {
       const path = el.getAttribute('data-path');
-      chrome.tabs.create({ url: `${BASE_URL}${path}?utm_source=extension_recent` });
+      const studioTool = STUDIO_IN_VIEWER_MAP[path];
+      if (studioTool) {
+        openBuiltInStudioViewer(activeTabPdfUrl, studioTool);
+      } else {
+        chrome.tabs.create({ url: `${BASE_URL}${path}?utm_source=extension_recent` });
+      }
     });
   });
 }
@@ -303,7 +363,10 @@ function renderTools() {
 
   toolsContainer.innerHTML = unique
     .map(
-      (tool) => `
+      (tool) => {
+        const inStudio = Boolean(STUDIO_IN_VIEWER_MAP[tool.path]);
+        const badgeText = inStudio ? '⚡ In-Viewer' : tool.badge;
+        return `
     <div class="tool-item" data-path="${escapeHtml(tool.path)}" data-id="${escapeHtml(tool.id)}" role="button" tabindex="0" title="${escapeHtml(tool.desc)}">
       <div class="tool-left">
         <span class="tool-emoji">${escapeHtml(tool.icon)}</span>
@@ -312,9 +375,10 @@ function renderTools() {
           <span class="tool-desc">${escapeHtml(tool.desc)}</span>
         </div>
       </div>
-      ${tool.badge ? `<span class="tool-badge">${escapeHtml(tool.badge)}</span>` : '<span class="tool-arrow">→</span>'}
+      ${badgeText ? `<span class="tool-badge">${escapeHtml(badgeText)}</span>` : '<span class="tool-arrow">→</span>'}
     </div>
-  `
+  `;
+      }
     )
     .join('');
 
@@ -325,7 +389,12 @@ function renderTools() {
       const id = el.getAttribute('data-id');
       const tool = TOOLS_CATALOG.find((t) => t.id === id);
       if (tool) addToRecent(tool);
-      chrome.tabs.create({ url: `${BASE_URL}${path}?utm_source=extension_popup` });
+      const studioTool = STUDIO_IN_VIEWER_MAP[path];
+      if (studioTool) {
+        openBuiltInStudioViewer(activeTabPdfUrl, studioTool);
+      } else {
+        chrome.tabs.create({ url: `${BASE_URL}${path}?utm_source=extension_popup` });
+      }
     };
     el.addEventListener('click', handleOpen);
     el.addEventListener('keydown', (e) => { if (e.key === 'Enter') handleOpen(); });
@@ -418,28 +487,32 @@ clearRecentBtn.addEventListener('click', () => {
   renderRecentPanel();
 });
 
-// Dropzone — Smart file-type detection
+// Dropzone — Instant Built-in Studio Viewer Handoff via IndexedDB!
 quickDropzone.addEventListener('click', () => dropFileInput.click());
 
-function handleFileDrop(file) {
+async function handleFileDrop(file) {
   if (!file) return;
   const name = file.name.toLowerCase();
-  let path = '/compress'; // default for PDFs
 
-  if (name.endsWith('.pdf')) {
-    path = '/compress';
-  } else if (name.match(/\.(jpg|jpeg|png|webp|bmp|tiff|gif)$/)) {
-    path = '/jpg-to-pdf';
-  } else if (name.match(/\.(doc|docx)$/)) {
-    path = '/universal-converter';
-  } else if (name.match(/\.(xls|xlsx)$/)) {
-    path = '/universal-converter';
-  } else if (name.match(/\.(ppt|pptx)$/)) {
-    path = '/universal-converter';
+  // Open PDFs & Images directly inside the built-in Studio PDF Viewer (zero website redirect!)
+  if (name.endsWith('.pdf') || /\.(jpg|jpeg|png|webp|bmp|gif)$/.test(name)) {
+    try {
+      if (window.PMSStudioDB) {
+        const localId = await window.PMSStudioDB.savePendingStudioFile(file);
+        const viewerUrl = chrome.runtime.getURL(`viewer.html?localId=${encodeURIComponent(localId)}`);
+        chrome.tabs.create({ url: viewerUrl });
+        return;
+      }
+    } catch (err) {
+      console.warn('[Popup] IDB handoff fallback:', err);
+    }
+    openBuiltInStudioViewer();
+    return;
   }
 
+  // Office documents (.docx/.xlsx/.pptx) -> Universal Converter
   chrome.tabs.create({
-    url: `${BASE_URL}${path}?utm_source=extension_dropzone`,
+    url: `${BASE_URL}/universal-converter?utm_source=extension_dropzone`,
   });
 }
 

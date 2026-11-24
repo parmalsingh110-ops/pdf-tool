@@ -137,6 +137,84 @@ body {
   height: 16px;
 }
 
+.auto-viewer-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 7px;
+  border-radius: 99px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  font-size: 9.5px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.auto-viewer-pill input {
+  accent-color: var(--brand-red);
+  cursor: pointer;
+}
+
+/* ─── BUILT-IN STUDIO VIEWER LAUNCH STRIP ─────────────────────────────── */
+.studio-launch-bar {
+  padding: 8px 12px 2px 12px;
+  flex-shrink: 0;
+}
+
+.studio-hero-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 9px 12px;
+  border-radius: 11px;
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  background: linear-gradient(135deg, #ef4444, #dc2626);
+  color: #ffffff;
+  cursor: pointer;
+  text-align: left;
+  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.25);
+  transition: transform var(--transition), box-shadow var(--transition);
+}
+.studio-hero-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(239, 68, 68, 0.34);
+}
+.sh-left {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+.sh-icon {
+  font-size: 20px;
+  flex-shrink: 0;
+}
+.sh-left strong {
+  display: block;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.2;
+}
+.sh-left small {
+  display: block;
+  font-size: 9.8px;
+  opacity: 0.9;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sh-arrow {
+  font-size: 10.5px;
+  font-weight: 800;
+  background: rgba(255, 255, 255, 0.2);
+  padding: 3px 8px;
+  border-radius: 99px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
 /* ─── PDF DETECTED BANNER ────────────────────────────────────────────── */
 .pdf-detected-banner {
   display: flex;
