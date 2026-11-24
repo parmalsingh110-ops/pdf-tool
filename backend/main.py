@@ -4797,10 +4797,12 @@ async def passport_ai_generate(
     is_joint: bool = Form(False),
     remove_glasses_glare: bool = Form(False),
     custom_note: str = Form(""),
+    fix_pose: bool = Form(True),
 ):
     """
     Transform any mobile photo or photo-of-a-photo into a print-ready HD studio
-    passport portrait using Gemini native image editing with strict identity lock.
+    passport portrait using Gemini native image editing with strict identity lock,
+    mandatory front-facing ICAO pose correction, and OpenCV biometric auto-framing.
     """
     try:
         raw = await safe_read_upload(file)
@@ -4833,6 +4835,8 @@ async def passport_ai_generate(
             remove_glasses_glare,
             custom_note,
             user_key,
+            34.0,
+            fix_pose,
         )
 
         return Response(
@@ -4846,6 +4850,7 @@ async def passport_ai_generate(
                 "X-Passport-AI-Cache": str(result.get("cache", "MISS")),
                 "X-Passport-AI-Route": str(result.get("route", "")),
                 "X-Passport-AI-Tier": str(result.get("traffic_type", "")),
+                "X-Passport-AI-Framing": str(result.get("framing", "")),
             },
         )
     except HTTPException:
