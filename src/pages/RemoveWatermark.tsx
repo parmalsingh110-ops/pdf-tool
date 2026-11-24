@@ -15,6 +15,7 @@ import { apiFetch } from '../lib/api';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 import { PearlScanOverlay } from '../components/pearl/PearlMotion';
 import { toArrayBufferBytes } from '../lib/blobUrl';
+import { releaseCanvas } from '../lib/safeCanvas';
 
 type RemovalMode = 'bottom-crop' | 'box-erase' | 'contrast-cleaner' | 'backend-vector';
 
@@ -50,6 +51,7 @@ export default function RemoveWatermark() {
   const [boxes, setBoxes] = useState<EraseBox[]>([]);
   const [drawing, setDrawing] = useState(false);
   const [startPt, setStartPt] = useState<{ x: number; y: number } | null>(null);
+  const [draftBox, setDraftBox] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
 
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -85,13 +87,18 @@ export default function RemoveWatermark() {
         const page = await pdf.getPage(p);
         const vp = page.getViewport({ scale: 1.5 });
         const canvas = document.createElement('canvas');
-        canvas.width = vp.width;
-        canvas.height = vp.height;
-        const ctx = canvas.getContext('2d')!;
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        await page.render({ canvasContext: ctx, viewport: vp, canvas }).promise;
-        imgs.push(canvas.toDataURL('image/jpeg', 0.88));
+        try {
+          canvas.width = vp.width;
+          canvas.height = vp.height;
+          const ctx = canvas.getContext('2d')!;
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          await page.render({ canvasContext: ctx, viewport: vp, canvas }).promise;
+          imgs.push(canvas.toDataURL('image/jpeg', 0.88));
+        } finally {
+          releaseCanvas(canvas);
+          page.cleanup();
+        }
       }
 
       setPageImages(imgs);
@@ -102,23 +109,50 @@ export default function RemoveWatermark() {
     }
   };
 
-  const getRelCoords = useCallback((e: React.MouseEvent) => {
+  const getRelCoords = useCallback((e: React.PointerEvent) => {
     if (!imgRef.current) return { x: 0, y: 0 };
     const r = imgRef.current.getBoundingClientRect();
+    if (!r.width || !r.height) return { x: 0, y: 0 };
     return {
-      x: ((e.clientX - r.left) / r.width) * 100,
-      y: ((e.clientY - r.top) / r.height) * 100
+      x: Math.max(0, Math.min(100, ((e.clientX - r.left) / r.width) * 100)),
+      y: Math.max(0, Math.min(100, ((e.clientY - r.top) / r.height) * 100))
     };
   }, []);
 
-  const onMouseDown = (e: React.MouseEvent) => {
+  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (mode !== 'box-erase') return;
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    e.preventDefault();
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      // Ignore capture errors
+    }
     const pt = getRelCoords(e);
     setStartPt(pt);
+    setDraftBox({ x: pt.x, y: pt.y, w: 0, h: 0 });
     setDrawing(true);
   };
 
-  const onMouseUp = (e: React.MouseEvent) => {
+  const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!drawing || !startPt) return;
+    const cur = getRelCoords(e);
+    setDraftBox({
+      x: Math.min(startPt.x, cur.x),
+      y: Math.min(startPt.y, cur.y),
+      w: Math.abs(cur.x - startPt.x),
+      h: Math.abs(cur.y - startPt.y),
+    });
+  };
+
+  const onPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    try {
+      if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      }
+    } catch {
+      // Ignore
+    }
     if (!drawing || !startPt) return;
     const end = getRelCoords(e);
     const x = Math.min(startPt.x, end.x);
@@ -133,6 +167,21 @@ export default function RemoveWatermark() {
       ]);
     }
     setDrawing(false);
+    setStartPt(null);
+    setDraftBox(null);
+  };
+
+  const onPointerCancel = (e: React.PointerEvent<HTMLDivElement>) => {
+    try {
+      if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      }
+    } catch {
+      // Ignore
+    }
+    setDrawing(false);
+    setStartPt(null);
+    setDraftBox(null);
   };
 
   const executeRemoval = async () => {
@@ -234,40 +283,45 @@ export default function RemoveWatermark() {
         const page = await pdf.getPage(p);
         const vp = page.getViewport({ scale: 2.0 });
         const canvas = document.createElement('canvas');
-        canvas.width = vp.width;
-        canvas.height = vp.height;
-        const ctx = canvas.getContext('2d')!;
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        await page.render({ canvasContext: ctx, viewport: vp, canvas }).promise;
+        try {
+          canvas.width = vp.width;
+          canvas.height = vp.height;
+          const ctx = canvas.getContext('2d')!;
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          await page.render({ canvasContext: ctx, viewport: vp, canvas }).promise;
 
-        const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const d = imgData.data;
-        for (let i = 0; i < d.length; i += 4) {
-          const brightness = (d[i] + d[i + 1] + d[i + 2]) / 3;
-          if (brightness > contrastThreshold) {
-            d[i] = 255;
-            d[i + 1] = 255;
-            d[i + 2] = 255;
-          } else {
-            d[i] = Math.max(0, d[i] - 30);
-            d[i + 1] = Math.max(0, d[i + 1] - 30);
-            d[i + 2] = Math.max(0, d[i + 2] - 30);
+          const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const d = imgData.data;
+          for (let i = 0; i < d.length; i += 4) {
+            const brightness = (d[i] + d[i + 1] + d[i + 2]) / 3;
+            if (brightness > contrastThreshold) {
+              d[i] = 255;
+              d[i + 1] = 255;
+              d[i + 2] = 255;
+            } else {
+              d[i] = Math.max(0, d[i] - 30);
+              d[i + 1] = Math.max(0, d[i + 1] - 30);
+              d[i + 2] = Math.max(0, d[i + 2] - 30);
+            }
           }
-        }
-        ctx.putImageData(imgData, 0, 0);
+          ctx.putImageData(imgData, 0, 0);
 
-        const imgDataUrl = canvas.toDataURL('image/jpeg', 0.94);
-        const imgBytes = dataUrlToBytes(imgDataUrl);
-        const pdfImg = await newDoc.embedJpg(imgBytes);
-        const origVp = page.getViewport({ scale: 1.0 });
-        const newPage = newDoc.addPage([origVp.width, origVp.height]);
-        newPage.drawImage(pdfImg, {
-          x: 0,
-          y: 0,
-          width: origVp.width,
-          height: origVp.height
-        });
+          const imgDataUrl = canvas.toDataURL('image/jpeg', 0.94);
+          const imgBytes = dataUrlToBytes(imgDataUrl);
+          const pdfImg = await newDoc.embedJpg(imgBytes);
+          const origVp = page.getViewport({ scale: 1.0 });
+          const newPage = newDoc.addPage([origVp.width, origVp.height]);
+          newPage.drawImage(pdfImg, {
+            x: 0,
+            y: 0,
+            width: origVp.width,
+            height: origVp.height
+          });
+        } finally {
+          releaseCanvas(canvas);
+          page.cleanup();
+        }
       }
 
       const finalBytes = await newDoc.save();
@@ -597,10 +651,12 @@ export default function RemoveWatermark() {
 
             <div
               className={`relative border border-[var(--pms-border-strong)] shadow-xl bg-white select-none overflow-hidden rounded-xl max-w-full ${
-                mode === 'box-erase' ? 'cursor-crosshair' : ''
+                mode === 'box-erase' ? 'cursor-crosshair touch-none' : ''
               }`}
-              onMouseDown={onMouseDown}
-              onMouseUp={onMouseUp}
+              onPointerDown={onPointerDown}
+              onPointerMove={onPointerMove}
+              onPointerUp={onPointerUp}
+              onPointerCancel={onPointerCancel}
             >
               <img
                 ref={imgRef}
@@ -638,6 +694,18 @@ export default function RemoveWatermark() {
                   Eraser
                 </div>
               ))}
+
+              {mode === 'box-erase' && draftBox && draftBox.w > 0.2 && draftBox.h > 0.2 && (
+                <div
+                  className="absolute bg-rose-500/20 border-2 border-dashed border-rose-600 pointer-events-none"
+                  style={{
+                    left: `${draftBox.x}%`,
+                    top: `${draftBox.y}%`,
+                    width: `${draftBox.w}%`,
+                    height: `${draftBox.h}%`,
+                  }}
+                />
+              )}
             </div>
           </div>
         </motion.div>

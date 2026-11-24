@@ -17,8 +17,8 @@ import FileDropzone from '../components/FileDropzone';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 import { AnimatedNumber, PearlScanOverlay } from '../components/pearl/PearlMotion';
 import ToolSEOSection from '../components/ToolSEOSection';
-import { downloadBlob } from '../lib/utils';
-import { toArrayBufferBytes, useAutoRevokeUrl } from '../lib/blobUrl';
+import { toArrayBufferBytes, triggerBlobDownload, useAutoRevokeUrl } from '../lib/blobUrl';
+import { isPdfFile } from '../lib/fileAccept';
 import { loadPdfDocumentSafely } from '../lib/pdfLoad';
 
 export default function AdmitCardOptimizer() {
@@ -48,7 +48,7 @@ export default function AdmitCardOptimizer() {
   useAutoRevokeUrl(previewUrl);
 
   const handleFileUpload = async (file: File) => {
-    if (file.type !== 'application/pdf') {
+    if (!isPdfFile(file)) {
       alert('Please upload an Admit Card in PDF format.');
       return;
     }
@@ -59,7 +59,7 @@ export default function AdmitCardOptimizer() {
       const u8 = new Uint8Array(buffer);
       setPdfBytes(u8);
 
-      const doc = await pdfjsLib.getDocument({ data: u8 }).promise;
+      const doc = await pdfjsLib.getDocument({ data: u8.slice(0) }).promise;
       setTotalPages(doc.numPages);
 
       // Try reading text from Page 1 to auto-detect center address keywords
@@ -257,7 +257,7 @@ export default function AdmitCardOptimizer() {
 
       const outBytes = await outDoc.save();
       const blob = new Blob([toArrayBufferBytes(outBytes)], { type: 'application/pdf' });
-      downloadBlob(blob, `1Page_AdmitCard_${fileName}`);
+      triggerBlobDownload(blob, `1Page_AdmitCard_${fileName}`);
       setPreviewUrl(URL.createObjectURL(blob));
     } catch (err) {
       console.error(err);

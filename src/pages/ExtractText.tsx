@@ -9,6 +9,8 @@ import { useSEO } from '../hooks/useSEO';
 import { useToast } from '../components/Toast';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 import { AnimatedNumber, PearlScanOverlay } from '../components/pearl/PearlMotion';
+import { triggerBlobDownload } from '../lib/blobUrl';
+import { copyTextToClipboard } from '../lib/clipboard';
 
 interface PageTextItem {
   pageNumber: number;
@@ -139,38 +141,27 @@ export default function ExtractText() {
   const downloadAsTxt = () => {
     const full = pages.map(p => `=== Page ${p.pageNumber} ===\n\n${p.text}`).join('\n\n\n');
     const blob = new Blob([full], { type: 'text/plain;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${file?.name.replace(/\.pdf$/i, '') || 'document'}_extracted.txt`;
-    a.click();
-    URL.revokeObjectURL(url);
+    triggerBlobDownload(blob, `${file?.name.replace(/\.pdf$/i, '') || 'document'}_extracted.txt`);
   };
 
   const downloadAsMarkdown = () => {
     const md = pages.map(p => `## Page ${p.pageNumber}\n\n${p.text}`).join('\n\n---\n\n');
     const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${file?.name.replace(/\.pdf$/i, '') || 'document'}_extracted.md`;
-    a.click();
-    URL.revokeObjectURL(url);
+    triggerBlobDownload(blob, `${file?.name.replace(/\.pdf$/i, '') || 'document'}_extracted.md`);
   };
 
   const downloadAsJson = () => {
     const jsonStr = JSON.stringify(pages, null, 2);
     const blob = new Blob([jsonStr], { type: 'application/json;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${file?.name.replace(/\.pdf$/i, '') || 'document'}_extracted.json`;
-    a.click();
-    URL.revokeObjectURL(url);
+    triggerBlobDownload(blob, `${file?.name.replace(/\.pdf$/i, '') || 'document'}_extracted.json`);
   };
 
   const copyText = async (textToCopy: string, isAll: boolean) => {
-    await navigator.clipboard.writeText(textToCopy);
+    const ok = await copyTextToClipboard(textToCopy);
+    if (!ok) {
+      toast.error('Could not copy text to clipboard.');
+      return;
+    }
     if (isAll) {
       setCopiedAll(true);
       setTimeout(() => setCopiedAll(false), 2000);

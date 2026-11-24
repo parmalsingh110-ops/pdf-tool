@@ -6,7 +6,10 @@ import { PDFDocument } from 'pdf-lib';
 import JSZip from 'jszip';
 import { useSEO } from '../hooks/useSEO';
 import { dataUrlToBytes } from '../lib/utils';
-import { toArrayBufferBytes, triggerBlobDownload } from '../lib/blobUrl';
+import { toArrayBufferBytes, triggerBlobDownload, triggerDataUrlDownload } from '../lib/blobUrl';
+import { ACCEPT_IMAGES } from '../lib/fileAccept';
+import { applyBoxBlurImageData, supportsCanvasFilter } from '../lib/photoAdjustments';
+import { clampCanvasDimensions, releaseCanvas } from '../lib/safeCanvas';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 import { AnimatedNumber, PearlScanOverlay } from '../components/pearl/PearlMotion';
 
@@ -41,6 +44,7 @@ export default function DocumentScanner() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [useCamera, setUseCamera] = useState(false);
   const [stream, setStream] = useState<MediaStream | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
 
   const pagesRef = useRef<ScannedPage[]>(pages);
   useEffect(() => {
@@ -48,14 +52,28 @@ export default function DocumentScanner() {
   }, [pages]);
 
   useEffect(() => {
+    streamRef.current = stream;
+  }, [stream]);
+
+  useEffect(() => {
+    if (useCamera && stream && videoRef.current) {
+      videoRef.current.srcObject = stream;
+      videoRef.current.play().catch(() => {});
+    }
+  }, [useCamera, stream]);
+
+  useEffect(() => {
     return () => {
-      // Cleanup URLs on unmount
+      // Cleanup URLs and live camera stream on unmount
       pagesRef.current.forEach(p => {
         URL.revokeObjectURL(p.originalUrl);
         if (p.croppedUrl) URL.revokeObjectURL(p.croppedUrl);
         if (p.resultUrl) URL.revokeObjectURL(p.resultUrl);
       });
-      if (stream) stream.getTracks().forEach(t => t.stop());
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(t => t.stop());
+        streamRef.current = null;
+      }
     };
   }, []);
 
@@ -96,26 +114,48 @@ export default function DocumentScanner() {
   };
 
   const startCamera = async () => {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      alert('Camera access requires a secure HTTPS connection and a browser with camera support. You can upload photos from your gallery instead.');
+      return;
+    }
     try {
-      const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } } });
+      const s = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+        audio: false,
+      });
       setStream(s);
       setUseCamera(true);
       setStep('upload');
-      setTimeout(() => { if (videoRef.current) videoRef.current.srcObject = s; }, 100);
+      setTimeout(() => {
+        if (videoRef.current) {
+          videoRef.current.srcObject = s;
+          videoRef.current.play().catch(() => {});
+        }
+      }, 60);
     } catch {
-      alert('Camera access denied. Please allow camera permission.');
+      alert('Camera access denied or unavailable. Please allow camera permission in browser settings or upload a photo.');
     }
   };
 
   const capturePhoto = () => {
     if (!videoRef.current) return;
     const v = videoRef.current;
+    if (v.videoWidth === 0 || v.videoHeight === 0) {
+      alert('Camera is still starting up. Please wait a moment and try again.');
+      return;
+    }
+    const clamped = clampCanvasDimensions(v.videoWidth, v.videoHeight);
     const canvas = document.createElement('canvas');
-    canvas.width = v.videoWidth;
-    canvas.height = v.videoHeight;
-    const ctx = canvas.getContext('2d')!;
-    ctx.drawImage(v, 0, 0);
+    canvas.width = clamped.width;
+    canvas.height = clamped.height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      releaseCanvas(canvas);
+      return;
+    }
+    ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
     canvas.toBlob(blob => {
+      releaseCanvas(canvas);
       if (!blob) return;
       const f = new File([blob], `scan_${Date.now()}.jpg`, { type: 'image/jpeg' });
       // Stop camera
@@ -242,14 +282,22 @@ export default function DocumentScanner() {
       const hRight = Math.hypot(absPts[2].x - absPts[1].x, absPts[2].y - absPts[1].y);
       const outW = Math.round(Math.max(wTop, wBot));
       const outH = Math.round(Math.max(hLeft, hRight));
+      const clampedOut = clampCanvasDimensions(outW, outH);
 
-      const warpedCanvas = wrapPerspective(img, absPts, outW, outH);
-      const blob = await new Promise<Blob|null>(r => warpedCanvas.toBlob(b => r(b), 'image/jpeg', 0.95));
-      if (blob) {
-        const u = URL.createObjectURL(blob);
-        updateActivePage({ croppedUrl: u });
-        setStep('filter');
-        setTimeout(() => runFilter(u, activePage.enhanceMode, activePage.rotation), 50);
+      const warpedCanvas = wrapPerspective(img, absPts, clampedOut.width, clampedOut.height);
+      try {
+        const blob = await new Promise<Blob | null>(r => warpedCanvas.toBlob(b => r(b), 'image/jpeg', 0.95));
+        if (blob) {
+          const u = URL.createObjectURL(blob);
+          if (activePage.croppedUrl) {
+            try { URL.revokeObjectURL(activePage.croppedUrl); } catch {}
+          }
+          updateActivePage({ croppedUrl: u });
+          setStep('filter');
+          setTimeout(() => runFilter(u, activePage.enhanceMode, activePage.rotation), 50);
+        }
+      } finally {
+        releaseCanvas(warpedCanvas);
       }
     } catch(e) {
       alert("Crop failed.");
@@ -264,145 +312,170 @@ export default function DocumentScanner() {
     try {
       const img = new Image();
       img.src = sourceUrl;
-      await new Promise<void>((res) => { img.onload = () => res(); });
+      await new Promise<void>((res, rej) => { img.onload = () => res(); img.onerror = () => rej(new Error('Image load failed')); });
+      await img.decode().catch(() => {});
+
+      const isRotated = rot % 180 !== 0;
+      const rawW = isRotated ? img.naturalHeight : img.naturalWidth;
+      const rawH = isRotated ? img.naturalWidth : img.naturalHeight;
+      const clamped = clampCanvasDimensions(rawW, rawH);
 
       const canvas = document.createElement('canvas');
-      const isRotated = rot % 180 !== 0;
-      canvas.width = isRotated ? img.naturalHeight : img.naturalWidth;
-      canvas.height = isRotated ? img.naturalWidth : img.naturalHeight;
-      const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
-      
-      ctx.translate(canvas.width / 2, canvas.height / 2);
-      ctx.rotate((rot * Math.PI) / 180);
-      ctx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
+      canvas.width = clamped.width;
+      canvas.height = clamped.height;
+      try {
+        const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
+        const drawW = img.naturalWidth * clamped.scale;
+        const drawH = img.naturalHeight * clamped.scale;
 
-      const w = canvas.width, h = canvas.height;
-      const imageData = ctx.getImageData(0, 0, w, h);
-      const d = imageData.data;
+        ctx.translate(canvas.width / 2, canvas.height / 2);
+        ctx.rotate((rot * Math.PI) / 180);
+        ctx.drawImage(img, -drawW / 2, -drawH / 2, drawW, drawH);
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
 
-      if (mode === 'magic_color') {
-        // CamScanner Pro Magic Color: removes desk shadows, cleans paper to white while keeping vivid stamp/ink color
-        let minL = 255, maxL = 0;
-        for (let i = 0; i < d.length; i += 16) {
-          const l = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
-          if (l < minL) minL = l;
-          if (l > maxL) maxL = l;
-        }
+        const w = canvas.width, h = canvas.height;
+        const imageData = ctx.getImageData(0, 0, w, h);
+        const d = imageData.data;
 
-        const whiteThresh = Math.max(160, maxL * 0.82);
-        const blackPoint = minL * 1.15;
-        const range = Math.max(1, whiteThresh - blackPoint);
+        if (mode === 'magic_color') {
+          // CamScanner Pro Magic Color: removes desk shadows, cleans paper to white while keeping vivid stamp/ink color
+          let minL = 255, maxL = 0;
+          for (let i = 0; i < d.length; i += 16) {
+            const l = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+            if (l < minL) minL = l;
+            if (l > maxL) maxL = l;
+          }
 
-        for (let i = 0; i < d.length; i += 4) {
-          const r = d[i], g = d[i + 1], b = d[i + 2];
-          const lum = 0.299 * r + 0.587 * g + 0.114 * b;
-          const maxC = Math.max(r, g, b);
-          const minC = Math.min(r, g, b);
-          const sat = maxC === 0 ? 0 : (maxC - minC) / maxC;
+          const whiteThresh = Math.max(160, maxL * 0.82);
+          const blackPoint = minL * 1.15;
+          const range = Math.max(1, whiteThresh - blackPoint);
 
-          if (lum >= whiteThresh && sat < 0.2) {
-            d[i] = 255;
-            d[i + 1] = 255;
-            d[i + 2] = 255;
+          for (let i = 0; i < d.length; i += 4) {
+            const r = d[i], g = d[i + 1], b = d[i + 2];
+            const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+            const maxC = Math.max(r, g, b);
+            const minC = Math.min(r, g, b);
+            const sat = maxC === 0 ? 0 : (maxC - minC) / maxC;
+
+            if (lum >= whiteThresh && sat < 0.2) {
+              d[i] = 255;
+              d[i + 1] = 255;
+              d[i + 2] = 255;
+            } else {
+              let nr = ((r - blackPoint) / range) * 255;
+              let ng = ((g - blackPoint) / range) * 255;
+              let nb = ((b - blackPoint) / range) * 255;
+
+              // Preserve colored signatures, seals, and stamps
+              if (sat > 0.22) {
+                nr = r * 1.08;
+                ng = g * 1.08;
+                nb = b * 1.08;
+              }
+
+              d[i]     = Math.min(255, Math.max(0, nr));
+              d[i + 1] = Math.min(255, Math.max(0, ng));
+              d[i + 2] = Math.min(255, Math.max(0, nb));
+            }
+          }
+          ctx.setTransform(1, 0, 0, 1, 0, 0);
+          ctx.putImageData(new ImageData(d, w, h), 0, 0);
+
+        } else if (mode === 'document' || mode === 'screen') {
+          let minL = 255, maxL = 0;
+          for (let i = 0; i < d.length; i += 16) {
+            const l = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+            if (l < minL) minL = l;
+            if (l > maxL) maxL = l;
+          }
+          
+          let whitePoint = maxL;
+          let blackPoint = minL;
+
+          if (mode === 'screen') {
+            // Screen Moiré logic fix: Aggressive push to pure white
+            whitePoint = maxL * 0.85; 
+            blackPoint = minL + 25;
+
+            if (supportsCanvasFilter()) {
+              ctx.putImageData(imageData, 0, 0);
+              ctx.filter = 'blur(2px)';
+              ctx.drawImage(canvas, 0, 0);
+              ctx.filter = 'none';
+              const blurred = ctx.getImageData(0, 0, w, h).data;
+              for (let i = 0; i < d.length; i++) {
+                d[i] = blurred[i];
+              }
+            } else {
+              const blurred = applyBoxBlurImageData(d, w, h, 2);
+              for (let i = 0; i < d.length; i++) {
+                d[i] = blurred[i];
+              }
+            }
           } else {
-            let nr = ((r - blackPoint) / range) * 255;
-            let ng = ((g - blackPoint) / range) * 255;
-            let nb = ((b - blackPoint) / range) * 255;
+             whitePoint = maxL * 0.85; 
+          }
 
-            // Preserve colored signatures, seals, and stamps
-            if (sat > 0.22) {
-              nr = r * 1.08;
-              ng = g * 1.08;
-              nb = b * 1.08;
+          const range = Math.max(1, whitePoint - blackPoint);
+          const scale = 255 / range;
+
+          for (let i = 0; i < d.length; i += 4) {
+            let r = (d[i] - blackPoint) * scale;
+            let g = (d[i + 1] - blackPoint) * scale;
+            let b = (d[i + 2] - blackPoint) * scale;
+            
+            if (mode === 'screen' && r > 200 && g > 200 && b > 200) {
+              r = g = b = 255;
             }
 
-            d[i]     = Math.min(255, Math.max(0, nr));
-            d[i + 1] = Math.min(255, Math.max(0, ng));
-            d[i + 2] = Math.min(255, Math.max(0, nb));
-          }
-        }
-        ctx.setTransform(1, 0, 0, 1, 0, 0);
-        ctx.putImageData(new ImageData(d, w, h), 0, 0);
-
-      } else if (mode === 'document' || mode === 'screen') {
-        let minL = 255, maxL = 0;
-        for (let i = 0; i < d.length; i += 16) {
-          const l = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
-          if (l < minL) minL = l;
-          if (l > maxL) maxL = l;
-        }
-        
-        let whitePoint = maxL;
-        let blackPoint = minL;
-
-        if (mode === 'screen') {
-          // Screen Moiré logic fix: Aggressive push to pure white
-          whitePoint = maxL * 0.85; 
-          blackPoint = minL + 25;
-
-          ctx.putImageData(imageData, 0, 0);
-          ctx.filter = 'blur(2px)';
-          ctx.drawImage(canvas, 0, 0);
-          ctx.filter = 'none';
-          const blurred = ctx.getImageData(0,0,w,h).data;
-          for (let i = 0; i < d.length; i++) {
-            d[i] = blurred[i];
-          }
-        } else {
-           whitePoint = maxL * 0.85; 
-        }
-
-        const range = Math.max(1, whitePoint - blackPoint);
-        const scale = 255 / range;
-
-        for (let i = 0; i < d.length; i += 4) {
-          let r = (d[i] - blackPoint) * scale;
-          let g = (d[i + 1] - blackPoint) * scale;
-          let b = (d[i + 2] - blackPoint) * scale;
-          
-          if (mode === 'screen' && r > 200 && g > 200 && b > 200) {
-            r = g = b = 255;
+            d[i]     = Math.min(255, Math.max(0, r));
+            d[i + 1] = Math.min(255, Math.max(0, g));
+            d[i + 2] = Math.min(255, Math.max(0, b));
           }
 
-          d[i]     = Math.min(255, Math.max(0, r));
-          d[i + 1] = Math.min(255, Math.max(0, g));
-          d[i + 2] = Math.min(255, Math.max(0, b));
-        }
+          if (mode === 'screen') {
+            ctx.putImageData(new ImageData(d, w, h), 0, 0);
+            ctx.globalCompositeOperation = 'overlay';
+            ctx.globalAlpha = 0.3;
+            ctx.drawImage(canvas, 0, 0);
+            ctx.globalAlpha = 1.0;
+            ctx.globalCompositeOperation = 'source-over';
+          } else {
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+            ctx.putImageData(new ImageData(d, w, h), 0, 0);
+          }
 
-        if (mode === 'screen') {
+        } else if (mode === 'bw') {
+          let sum = 0, count = 0;
+          for (let i = 0; i < d.length; i += 4) {
+            sum += 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+            count++;
+          }
+          const threshold = (sum / count) * 0.95;
+          for (let i = 0; i < d.length; i += 4) {
+            const l = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+            const v = l > threshold ? 255 : 0;
+            d[i] = d[i + 1] = d[i + 2] = v;
+          }
           ctx.putImageData(new ImageData(d, w, h), 0, 0);
-          ctx.globalCompositeOperation = 'overlay';
-          ctx.globalAlpha = 0.3;
-          ctx.drawImage(canvas, 0, 0);
-          ctx.globalAlpha = 1.0;
-          ctx.globalCompositeOperation = 'source-over';
         } else {
           ctx.setTransform(1, 0, 0, 1, 0, 0);
           ctx.putImageData(new ImageData(d, w, h), 0, 0);
         }
 
-      } else if (mode === 'bw') {
-        let sum = 0, count = 0;
-        for (let i = 0; i < d.length; i += 4) {
-          sum += 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
-          count++;
+        const blob = await new Promise<Blob | null>(res => canvas.toBlob(b => res(b), 'image/jpeg', 0.92));
+        if (blob) {
+          const u = URL.createObjectURL(blob);
+          setPages(prev => prev.map(p => {
+            if (p.id !== activePageId) return p;
+            if (p.resultUrl && p.resultUrl !== u) {
+              try { URL.revokeObjectURL(p.resultUrl); } catch {}
+            }
+            return { ...p, resultUrl: u, enhanceMode: mode, rotation: rot };
+          }));
         }
-        const threshold = (sum / count) * 0.95; 
-        for (let i = 0; i < d.length; i += 4) {
-          const l = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
-          const v = l > threshold ? 255 : 0;
-          d[i] = d[i + 1] = d[i + 2] = v;
-        }
-        ctx.putImageData(new ImageData(d, w, h), 0, 0);
-      } else {
-        ctx.setTransform(1, 0, 0, 1, 0, 0);
-        ctx.putImageData(new ImageData(d, w, h), 0, 0);
-      }
-
-      const blob = await new Promise<Blob | null>(res => canvas.toBlob(b => res(b), 'image/jpeg', 0.92));
-      if (blob) {
-        const u = URL.createObjectURL(blob);
-        updateActivePage({ resultUrl: u, enhanceMode: mode, rotation: rot });
+      } finally {
+        releaseCanvas(canvas);
       }
     } catch(e) {
       console.error(e);
@@ -472,12 +545,19 @@ export default function DocumentScanner() {
     }
   };
 
-  const downloadCurrentAsJpg = () => {
+  const downloadCurrentAsJpg = async () => {
     if (!activePage?.resultUrl) return;
-    const a = document.createElement('a');
-    a.href = activePage.resultUrl;
-    a.download = `Scan_${Date.now()}.jpg`;
-    a.click();
+    const filename = `Scan_${Date.now()}.jpg`;
+    if (activePage.resultUrl.startsWith('data:')) {
+      triggerDataUrlDownload(activePage.resultUrl, filename);
+      return;
+    }
+    try {
+      const blob = await fetch(activePage.resultUrl).then((r) => r.blob());
+      triggerBlobDownload(blob, filename);
+    } catch {
+      alert('Failed to download scanned image.');
+    }
   };
 
   const prefersReduced = useReducedMotion();
@@ -538,7 +618,7 @@ export default function DocumentScanner() {
             >
               <Plus className="w-6 h-6 mb-1" />
               <span className="text-[10px] font-bold uppercase tracking-wider">Add Page</span>
-              <input type="file" multiple accept="image/*" className="hidden" onChange={handleFiles} />
+              <input type="file" multiple accept={ACCEPT_IMAGES} className="sr-only" onChange={handleFiles} />
             </label>
           </div>
 
@@ -566,7 +646,7 @@ export default function DocumentScanner() {
               {useCamera ? (
                 <div className="space-y-4 max-w-2xl mx-auto w-full">
                   <div className="relative rounded-2xl overflow-hidden bg-black shadow-inner border border-[var(--pms-border)]">
-                    <video ref={videoRef} autoPlay playsInline className="w-full max-h-[500px]" />
+                    <video ref={videoRef} autoPlay playsInline muted className="w-full max-h-[500px]" />
                     <div className="absolute inset-0 border-4 border-dashed border-white/30 m-6 rounded-xl pointer-events-none" />
                   </div>
                   <div className="flex gap-3">
@@ -594,7 +674,7 @@ export default function DocumentScanner() {
                     </div>
                     <span className="font-bold text-xl" style={{ color: 'var(--pms-ink)' }}>Upload multi-page documents</span>
                     <span className="text-sm mt-2" style={{ color: 'var(--pms-muted)' }}>Select multiple JPG, PNG files</span>
-                    <input type="file" multiple accept="image/*" className="hidden" onChange={handleFiles} />
+                    <input type="file" multiple accept={ACCEPT_IMAGES} className="sr-only" onChange={handleFiles} />
                   </label>
                   <div className="relative flex items-center justify-center my-4">
                     <div className="absolute border-b border-[var(--pms-border)] w-full top-1/2"></div>
@@ -649,7 +729,7 @@ export default function DocumentScanner() {
                       className="relative inline-block border border-[var(--pms-border)] rounded-xl overflow-visible shadow-md touch-none select-none max-w-full"
                       onPointerMove={handleMove}
                       onPointerUp={() => setActivePt(null)}
-                      onPointerLeave={() => setActivePt(null)}
+                      onPointerCancel={() => setActivePt(null)}
                     >
                       <img src={activePage.originalUrl} alt="Crop Source" className="max-h-[60vh] w-auto h-auto block rounded-xl" draggable={false} onDragStart={e => e.preventDefault()} />
 
@@ -665,8 +745,13 @@ export default function DocumentScanner() {
                       {activePage.corners.map((pt, i) => (
                         <div
                           key={i}
-                          onPointerDown={() => setActivePt(i)}
-                          className="absolute w-8 h-8 -ml-4 -mt-4 bg-[var(--pms-violet)] border-2 border-white rounded-full shadow-lg z-10 cursor-grab active:cursor-grabbing hover:scale-110 transition-transform flex items-center justify-center"
+                          onPointerDown={(e) => {
+                            try {
+                              e.currentTarget.setPointerCapture(e.pointerId);
+                            } catch {}
+                            setActivePt(i);
+                          }}
+                          className="absolute w-8 h-8 -ml-4 -mt-4 bg-[var(--pms-violet)] border-2 border-white rounded-full shadow-lg z-10 cursor-grab active:cursor-grabbing hover:scale-110 transition-transform flex items-center justify-center touch-none"
                           style={{ left: `${pt.x}%`, top: `${pt.y}%` }}
                         >
                           <div className="w-2 h-2 bg-white rounded-full opacity-60 pointer-events-none"></div>

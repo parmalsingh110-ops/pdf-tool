@@ -59,6 +59,7 @@ export default function RedactPdf() {
   const [rects, setRects] = useState<RedactRect[]>([]);
   const [drawing, setDrawing] = useState(false);
   const [startPt, setStartPt] = useState<{ x: number; y: number } | null>(null);
+  const [draftRect, setDraftRect] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const [selectedStyle, setSelectedStyle] = useState<RedactStyle>('blackout');
   const [customSearchTerm, setCustomSearchTerm] = useState('');
 
@@ -124,23 +125,50 @@ export default function RedactPdf() {
     }
   };
 
-  const getRelCoords = useCallback((e: React.MouseEvent) => {
+  const getRelCoords = useCallback((e: React.PointerEvent) => {
     if (!imgRef.current) return { x: 0, y: 0 };
     const r = imgRef.current.getBoundingClientRect();
+    if (!r.width || !r.height) return { x: 0, y: 0 };
     return {
-      x: ((e.clientX - r.left) / r.width) * 100,
-      y: ((e.clientY - r.top) / r.height) * 100
+      x: Math.max(0, Math.min(100, ((e.clientX - r.left) / r.width) * 100)),
+      y: Math.max(0, Math.min(100, ((e.clientY - r.top) / r.height) * 100))
     };
   }, []);
 
-  const onMouseDown = (e: React.MouseEvent) => {
+  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!pageImages.length) return;
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    e.preventDefault();
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      // Ignore capture errors on synthetic events
+    }
     const pt = getRelCoords(e);
     setStartPt(pt);
+    setDraftRect({ x: pt.x, y: pt.y, w: 0, h: 0 });
     setDrawing(true);
   };
 
-  const onMouseUp = (e: React.MouseEvent) => {
+  const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!drawing || !startPt) return;
+    const cur = getRelCoords(e);
+    setDraftRect({
+      x: Math.min(startPt.x, cur.x),
+      y: Math.min(startPt.y, cur.y),
+      w: Math.abs(cur.x - startPt.x),
+      h: Math.abs(cur.y - startPt.y),
+    });
+  };
+
+  const onPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    try {
+      if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      }
+    } catch {
+      // Ignore
+    }
     if (!drawing || !startPt) return;
     const end = getRelCoords(e);
     const x = Math.min(startPt.x, end.x);
@@ -162,6 +190,20 @@ export default function RedactPdf() {
     }
     setDrawing(false);
     setStartPt(null);
+    setDraftRect(null);
+  };
+
+  const onPointerCancel = (e: React.PointerEvent<HTMLDivElement>) => {
+    try {
+      if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      }
+    } catch {
+      // Ignore
+    }
+    setDrawing(false);
+    setStartPt(null);
+    setDraftRect(null);
   };
 
   const PII_PATTERNS = [
@@ -783,9 +825,11 @@ export default function RedactPdf() {
 
             {/* Document Page Viewport with Redaction Overlay (keep bg-white crisp paper surface) */}
             <div
-              className="relative border border-[var(--pms-border-strong)] shadow-xl bg-white select-none cursor-crosshair overflow-hidden rounded-xl max-w-full"
-              onMouseDown={onMouseDown}
-              onMouseUp={onMouseUp}
+              className="relative border border-[var(--pms-border-strong)] shadow-xl bg-white select-none touch-none cursor-crosshair overflow-hidden rounded-xl max-w-full"
+              onPointerDown={onPointerDown}
+              onPointerMove={onPointerMove}
+              onPointerUp={onPointerUp}
+              onPointerCancel={onPointerCancel}
             >
               <img
                 ref={imgRef}
@@ -815,6 +859,19 @@ export default function RedactPdf() {
                   {r.style === 'confidential' && 'CONFIDENTIAL'}
                 </div>
               ))}
+
+              {/* Live draft redaction box while dragging */}
+              {draftRect && draftRect.w > 0.2 && draftRect.h > 0.2 && (
+                <div
+                  className="absolute pointer-events-none border-2 border-dashed border-rose-500 bg-rose-500/20"
+                  style={{
+                    left: `${draftRect.x}%`,
+                    top: `${draftRect.y}%`,
+                    width: `${draftRect.w}%`,
+                    height: `${draftRect.h}%`,
+                  }}
+                />
+              )}
             </div>
           </div>
 

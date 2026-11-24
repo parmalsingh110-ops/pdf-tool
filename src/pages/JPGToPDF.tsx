@@ -8,7 +8,9 @@ import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { dataUrlToBytes } from '../lib/utils';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
-import { toArrayBufferBytes } from '../lib/blobUrl';
+import { toArrayBufferBytes, triggerBlobDownload } from '../lib/blobUrl';
+import { clampCanvasDimensions, releaseCanvas, safeCanvasToDataUrl } from '../lib/safeCanvas';
+import { ACCEPT_IMAGES } from '../lib/fileAccept';
 import { AnimatedNumber, PearlScanOverlay, PearlStageSwitch } from '../components/pearl/PearlMotion';
 
 type PageSizeOption = 'fit' | 'a4' | 'letter';
@@ -114,30 +116,37 @@ export default function JPGToPDF() {
       const img = new Image();
       img.onload = () => {
         const canvas = document.createElement('canvas');
-        const rot = item.rotation % 360;
-        const isSwapped = rot === 90 || rot === 270;
-        const w = isSwapped ? img.naturalHeight : img.naturalWidth;
-        const h = isSwapped ? img.naturalWidth : img.naturalHeight;
+        try {
+          const rot = item.rotation % 360;
+          const isSwapped = rot === 90 || rot === 270;
+          const rawW = isSwapped ? img.naturalHeight : img.naturalWidth;
+          const rawH = isSwapped ? img.naturalWidth : img.naturalHeight;
+          const { width: w, height: h, scale } = clampCanvasDimensions(rawW, rawH);
 
-        canvas.width = w;
-        canvas.height = h;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return reject(new Error('Canvas context failed'));
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) return reject(new Error('Canvas context failed'));
 
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, w, h);
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, w, h);
 
-        ctx.save();
-        ctx.translate(w / 2, h / 2);
-        ctx.rotate((rot * Math.PI) / 180);
-        ctx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
-        ctx.restore();
+          ctx.save();
+          ctx.translate(w / 2, h / 2);
+          ctx.rotate((rot * Math.PI) / 180);
+          const drawW = img.naturalWidth * scale;
+          const drawH = img.naturalHeight * scale;
+          ctx.drawImage(img, -drawW / 2, -drawH / 2, drawW, drawH);
+          ctx.restore();
 
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
-        const bytes = dataUrlToBytes(dataUrl);
-        canvas.width = 0;
-        canvas.height = 0;
-        resolve({ bytes, width: w, height: h });
+          const dataUrl = safeCanvasToDataUrl(canvas, 'image/jpeg', 0.92);
+          const bytes = dataUrlToBytes(dataUrl);
+          resolve({ bytes, width: w, height: h });
+        } catch (err) {
+          reject(err);
+        } finally {
+          releaseCanvas(canvas);
+        }
       };
       img.onerror = () => reject(new Error('Failed to load image: ' + item.file.name));
       img.src = item.previewUrl;
@@ -200,14 +209,7 @@ export default function JPGToPDF() {
         }
 
         const zipBlob = await zip.generateAsync({ type: 'blob' });
-        const url = URL.createObjectURL(zipBlob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `converted_images_pdf_${Date.now()}.zip`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
+        triggerBlobDownload(zipBlob, `converted_images_pdf_${Date.now()}.zip`);
       } else {
         // Combined single PDF
         const pdfDoc = await PDFDocument.create();
@@ -265,11 +267,7 @@ export default function JPGToPDF() {
                 onDrop={handleDrop}
                 multiple={true}
                 accept={{
-                  'image/jpeg': ['.jpg', '.jpeg'],
-                  'image/png': ['.png'],
-                  'image/webp': ['.webp'],
-                  'image/gif': ['.gif'],
-                  'image/bmp': ['.bmp'],
+                  'image/*': ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.heic', '.heif', '.avif'],
                 }}
                 title="Select images to convert"
                 subtitle="or drag & drop JPG, PNG, WebP images here"
@@ -353,7 +351,7 @@ export default function JPGToPDF() {
                       <Plus className="w-4 h-4" /> Add More
                       <input
                         type="file"
-                        accept=".jpg,.jpeg,.png,.webp,.gif,.bmp"
+                        accept={ACCEPT_IMAGES}
                         multiple
                         className="hidden"
                         onChange={(e) => {

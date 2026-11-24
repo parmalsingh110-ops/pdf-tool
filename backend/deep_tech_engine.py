@@ -33,6 +33,8 @@ import pymupdf as fitz
 import numpy as np
 from PIL import Image, ExifTags
 
+from image_utils import IMAGE_EXTENSIONS as _IMG_UTILS_EXTENSIONS, is_image_bytes, safe_open_image
+
 logger = logging.getLogger("pdf_tool")
 
 # ─── Shared Constants ────────────────────────────────────────────────────────
@@ -65,7 +67,7 @@ SUSPICIOUS_PRODUCERS = [
     "remini",
 ]
 
-IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff")
+IMAGE_EXTENSIONS = tuple(sorted(_IMG_UTILS_EXTENSIONS))
 
 
 def _encode_png_data_url(img_rgb_or_bgr: np.ndarray, is_bgr: bool = True, max_dim: int = 1200) -> str:
@@ -193,8 +195,7 @@ def analyze_forensics_deep(raw_bytes: bytes, filename: str) -> dict[str, Any]:
     import hashlib
 
     file_sha256 = hashlib.sha256(raw_bytes).hexdigest()
-    ext = os.path.splitext((filename or "").lower())[1]
-    is_image = ext in IMAGE_EXTENSIONS or raw_bytes[:3] == b"\xff\xd8\xff" or raw_bytes[:8] == b"\x89PNG\r\n\x1a\n"
+    is_image = is_image_bytes(raw_bytes, filename)
 
     anomalies: list[dict[str, Any]] = []
     tamper_points = 0
@@ -750,18 +751,23 @@ def analyze_forensics_deep(raw_bytes: bytes, filename: str) -> dict[str, Any]:
 
 
 def _analyze_image_forensics(raw_bytes: bytes, filename: str, file_sha256: str) -> dict[str, Any]:
-    """Forensic audit for uploaded JPG/PNG/WebP screenshots or WhatsApp scans."""
-    pil_img = Image.open(io.BytesIO(raw_bytes))
+    """Forensic audit for uploaded JPG/PNG/WebP/HEIC/AVIF screenshots or WhatsApp scans."""
+    pil_img, exif = safe_open_image(
+        raw_bytes,
+        max_dim=2048,
+        flatten_alpha_bg=(255, 255, 255),
+        preserve_exif=True,
+    )
     orig_w, orig_h = pil_img.size
-    rgb_img = np.asarray(pil_img.convert("RGB"))
+    rgb_img = np.asarray(pil_img)
     anomalies: list[dict[str, Any]] = []
     tamper_points = 0
 
-    exif = pil_img.getexif()
     exif_readable: dict[str, str] = {}
-    for k, v in exif.items():
-        tag_name = ExifTags.TAGS.get(k, str(k))
-        exif_readable[tag_name] = str(v)[:100]
+    if exif:
+        for k, v in exif.items():
+            tag_name = ExifTags.TAGS.get(k, str(k))
+            exif_readable[tag_name] = str(v)[:100]
 
     software = str(exif_readable.get("Software") or pil_img.info.get("Software") or pil_img.info.get("Creator") or "").strip()
     camera_make = str(exif_readable.get("Make") or "").strip()
@@ -1188,12 +1194,11 @@ def process_true_vector_4k(
       - Always performs morphological shadow illumination normalization + bilateral denoiser.
       - Optional RapidOCR overlays an invisible selectable text layer inside the output PDF.
     """
-    ext = os.path.splitext((filename or "").lower())[1]
-    is_image = ext in IMAGE_EXTENSIONS or raw_bytes[:3] == b"\xff\xd8\xff" or raw_bytes[:8] == b"\x89PNG\r\n\x1a\n"
+    is_image = is_image_bytes(raw_bytes, filename)
 
     src_pages_bgr: list[tuple[np.ndarray, float, float]] = []
     if is_image:
-        pil = Image.open(io.BytesIO(raw_bytes)).convert("RGB")
+        pil, _ = safe_open_image(raw_bytes, max_dim=2800, flatten_alpha_bg=(255, 255, 255))
         bgr = cv2.cvtColor(np.asarray(pil), cv2.COLOR_RGB2BGR)
         w_pt = round(bgr.shape[1] * 72.0 / 150.0, 2)
         h_pt = round(bgr.shape[0] * 72.0 / 150.0, 2)

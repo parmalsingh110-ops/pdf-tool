@@ -18,10 +18,18 @@ function inferMimeType(fileName: string, fallbackType?: string): string {
   if (lower.endsWith('.pdf')) return 'application/pdf';
   if (lower.endsWith('.png')) return 'image/png';
   if (lower.endsWith('.webp')) return 'image/webp';
-  if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg';
+  if (lower.endsWith('.jpg') || lower.endsWith('.jpeg') || lower.endsWith('.jfif') || lower.endsWith('.mpo')) {
+    return 'image/jpeg';
+  }
+  if (lower.endsWith('.heic')) return 'image/heic';
+  if (lower.endsWith('.heif')) return 'image/heif';
+  if (lower.endsWith('.avif')) return 'image/avif';
+  if (lower.endsWith('.gif')) return 'image/gif';
+  if (lower.endsWith('.bmp')) return 'image/bmp';
+  if (lower.endsWith('.tif') || lower.endsWith('.tiff')) return 'image/tiff';
   if (lower.endsWith('.docx')) return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
   if (lower.endsWith('.doc')) return 'application/msword';
-  return fallbackType || 'application/pdf';
+  return fallbackType || 'application/octet-stream';
 }
 
 function openShareDB(): Promise<IDBDatabase> {
@@ -358,7 +366,7 @@ export function registerServiceWorker(): void {
     }
   }
 
-  if ('serviceWorker' in navigator) {
+  if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator && navigator.serviceWorker) {
     const doRegister = () => {
       navigator.serviceWorker
         .register('/sw.js', { scope: '/', updateViaCache: 'none' })
@@ -438,9 +446,13 @@ export async function promptPWAInstall(): Promise<boolean> {
 
 export function isPWARunningStandalone(): boolean {
   if (typeof window === 'undefined') return false;
-  return (
-    window.matchMedia('(display-mode: standalone)').matches ||
-    (window.navigator as any).standalone === true ||
-    document.referrer.includes('android-app://')
-  );
+  try {
+    return (
+      (typeof window.matchMedia === 'function' && window.matchMedia('(display-mode: standalone)').matches) ||
+      (window.navigator as any).standalone === true ||
+      document.referrer.includes('android-app://')
+    );
+  } catch {
+    return false;
+  }
 }

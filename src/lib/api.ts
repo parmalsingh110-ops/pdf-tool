@@ -9,6 +9,8 @@ import { isAllowedBackendOverride } from './privacy';
  *   with Retry-After) and Render cold-start 502/504 errors using jittered backoff.
  * - Coalesces concurrent identical GET requests in-flight to eliminate duplicate network calls.
  * - Prevents Mixed Content errors in production and enforces hard request timeouts.
+ * - Mobile-resilient: guards storage in WebViews/private mode, supports LAN dev testing,
+ *   and classifies iOS Safari `Load failed` / CGNAT 429 responses cleanly.
  */
 
 interface NodeHealth {
@@ -21,13 +23,48 @@ interface NodeHealth {
 const NODE_HEALTH = new Map<string, NodeHealth>();
 const IN_FLIGHT_GET = new Map<string, Promise<{ status: number; statusText: string; headers: [string, string][]; body: ArrayBuffer }>>();
 
-function sanitizeNodeUrl(raw: string, isLiveHost: boolean): string | null {
+function isPrivateLanHostname(hostname: string): boolean {
+  const h = (hostname || '').toLowerCase();
+  if (!h) return false;
+  if (h === 'localhost' || h === '127.0.0.1' || h === '::1' || h === '[::1]' || h.endsWith('.local')) {
+    return true;
+  }
+  if (/^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(h)) return true;
+  if (/^192\.168\.\d{1,3}\.\d{1,3}$/.test(h)) return true;
+  if (/^172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}$/.test(h)) return true;
+  return false;
+}
+
+function safeReadBackendOverride(): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    return localStorage.getItem('pdf_admin_backend_url');
+  } catch {
+    return null;
+  }
+}
+
+function sanitizeNodeUrl(raw: string, isLiveHost: boolean, currentHostname: string): string | null {
   let cleaned = raw.trim().replace(/\/+$/, '');
   if (!cleaned) return null;
 
+  const pointsToLocal = cleaned.includes('localhost') || cleaned.includes('127.0.0.1');
+
   // In live production (e.g. pdfmediasuite.in), ignore localhost entries to prevent Mixed Content
-  if (isLiveHost && (cleaned.includes('localhost') || cleaned.includes('127.0.0.1'))) {
+  if (isLiveHost && pointsToLocal) {
     return null;
+  }
+
+  // On LAN mobile testing (e.g. http://192.168.1.8:3000), map localhost backend to the LAN host IP
+  if (
+    !isLiveHost &&
+    pointsToLocal &&
+    currentHostname &&
+    currentHostname !== 'localhost' &&
+    currentHostname !== '127.0.0.1' &&
+    isPrivateLanHostname(currentHostname)
+  ) {
+    cleaned = cleaned.replace(/\/\/(localhost|127\.0\.0\.1)(?=[:/]|$)/i, `//${currentHostname}`);
   }
 
   // Upgrade HTTP to HTTPS when served from an HTTPS origin
@@ -35,7 +72,9 @@ function sanitizeNodeUrl(raw: string, isLiveHost: boolean): string | null {
     typeof window !== 'undefined' &&
     window.location.protocol === 'https:' &&
     cleaned.startsWith('http://') &&
-    !cleaned.includes('localhost')
+    !cleaned.includes('localhost') &&
+    !cleaned.includes('127.0.0.1') &&
+    !isPrivateLanHostname(currentHostname)
   ) {
     cleaned = cleaned.replace(/^http:\/\//, 'https://');
   }
@@ -43,17 +82,14 @@ function sanitizeNodeUrl(raw: string, isLiveHost: boolean): string | null {
 }
 
 export function getApiPoolUrls(): string[] {
-  if (typeof window !== 'undefined') {
-    const custom = localStorage.getItem('pdf_admin_backend_url');
-    if (custom && custom.trim() && isAllowedBackendOverride(custom)) {
-      return [custom.trim().replace(/\/+$/, '')];
-    }
+  const custom = safeReadBackendOverride();
+  if (custom && custom.trim() && isAllowedBackendOverride(custom)) {
+    return [custom.trim().replace(/\/+$/, '')];
   }
 
-  const isLiveHost =
-    typeof window !== 'undefined' &&
-    window.location.hostname !== 'localhost' &&
-    window.location.hostname !== '127.0.0.1';
+  const currentHostname = typeof window !== 'undefined' ? window.location.hostname || '' : '';
+  const isLocalOrLan = !currentHostname || isPrivateLanHostname(currentHostname);
+  const isLiveHost = typeof window !== 'undefined' && !isLocalOrLan;
 
   const rawPool = [
     import.meta.env.VITE_API_POOL_URLS,
@@ -67,22 +103,28 @@ export function getApiPoolUrls(): string[] {
       new Set(
         rawPool
           .split(',')
-          .map((part) => sanitizeNodeUrl(part, isLiveHost))
+          .map((part) => sanitizeNodeUrl(part, isLiveHost, currentHostname))
           .filter((u): u is string => u !== null)
       )
     );
     if (urls.length > 0) return urls;
   }
 
+  const devHost = currentHostname || 'localhost';
+
   if (import.meta.env.DEV) {
-    return ['http://localhost:8000'];
+    return [`http://${devHost}:8000`];
   }
 
   if (typeof window !== 'undefined' && window.location.protocol === 'https:') {
     return [''];
   }
 
-  return [isLiveHost ? '' : 'http://localhost:8000'];
+  if (isLocalOrLan && currentHostname) {
+    return [`http://${devHost}:8000`];
+  }
+
+  return [isLiveHost ? '' : `http://${devHost}:8000`];
 }
 
 export function getApiBaseUrl(): string {
@@ -142,6 +184,23 @@ export interface ApiFetchOptions extends RequestInit {
   maxRetries?: number;
 }
 
+function parseRetryAfterMs(headerVal: string | null, maxMs: number): number | null {
+  if (!headerVal) return null;
+  const trimmed = headerVal.trim();
+  const seconds = Number(trimmed);
+  if (Number.isFinite(seconds) && seconds > 0) {
+    return Math.min(maxMs, Math.round(seconds * 1000));
+  }
+  const dateMs = Date.parse(trimmed);
+  if (Number.isFinite(dateMs)) {
+    const delta = dateMs - Date.now();
+    if (delta > 0) {
+      return Math.min(maxMs, delta);
+    }
+  }
+  return null;
+}
+
 function sleepWithSignal(ms: number, signal?: AbortSignal | null): Promise<void> {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) {
@@ -185,6 +244,7 @@ export async function apiFetch(endpoint: string, options: ApiFetchOptions = {}):
   const execRequest = async (): Promise<Response> => {
     const pool = isAbsolute ? [''] : getApiPoolUrls();
     let lastError: any = null;
+    let didTimeOut = false;
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       const chosenBase = isAbsolute
@@ -216,18 +276,24 @@ export async function apiFetch(endpoint: string, options: ApiFetchOptions = {}):
         });
         const elapsedMs = Math.round(performance.now() - startMs);
 
-        // Handle Virtual Waiting Room backpressure (503) or quick cold-start warmup (502/504).
-        // Never retry long-running timed-out/crashed heavy POST uploads that already ran >15s on server.
+        // Handle Virtual Waiting Room backpressure (503), CGNAT burst rate limits (429),
+        // or Render cold-start warmup (502/504) up to 35s elapsed.
+        const isRateLimited = response.status === 429;
+        const isGatewayBackpressure =
+          response.status === 503 || response.status === 502 || response.status === 504;
         const canRetryGateway =
-          (response.status === 503 || response.status === 502 || response.status === 504) &&
+          (isGatewayBackpressure || isRateLimited) &&
           attempt < maxRetries &&
-          (method === 'GET' || elapsedMs < 15000);
+          (method === 'GET' || elapsedMs < 35000);
+
         if (canRetryGateway) {
-          recordNodeOutcome(chosenBase, false, elapsedMs);
-          const retryAfterHdr = Number(response.headers.get('Retry-After'));
-          const baseDelayMs = Number.isFinite(retryAfterHdr) && retryAfterHdr > 0
-            ? Math.min(8000, retryAfterHdr * 1000)
-            : 1200 * (attempt + 1);
+          if (!isRateLimited) {
+            recordNodeOutcome(chosenBase, false, elapsedMs);
+          }
+          const maxWaitMs = isRateLimited ? 6000 : 8000;
+          const retryAfterMs = parseRetryAfterMs(response.headers.get('Retry-After'), maxWaitMs);
+          const baseDelayMs =
+            retryAfterMs !== null ? retryAfterMs : Math.min(maxWaitMs, 1200 * (attempt + 1));
           const jitterMs = Math.floor(Math.random() * 450);
           await sleepWithSignal(baseDelayMs + jitterMs, fetchOptions.signal);
           continue;
@@ -241,13 +307,19 @@ export async function apiFetch(endpoint: string, options: ApiFetchOptions = {}):
         recordNodeOutcome(chosenBase, false, elapsedMs);
 
         const callerAborted = Boolean(fetchOptions.signal?.aborted);
-        // Never re-send an already timed-out heavy request onto an active backend (prevents duplicate OOM spikes)
-        if (callerAborted || timedOut || err?.name === 'AbortError') {
+        if (callerAborted) {
           throw err;
         }
 
-        // Retry only fast transient network drops (e.g. cold connection wakeup <12s)
-        if (attempt < maxRetries && (method === 'GET' || elapsedMs < 12000)) {
+        // Never re-send an already timed-out heavy request onto an active backend (prevents duplicate OOM spikes);
+        // break out so the user receives the clean timeout error message below.
+        if (timedOut || err?.name === 'AbortError') {
+          didTimeOut = didTimeOut || timedOut;
+          break;
+        }
+
+        // Retry transient network drops / cold connection wakeups up to 35s
+        if (attempt < maxRetries && (method === 'GET' || elapsedMs < 35000)) {
           const backoffMs = 900 * (attempt + 1) + Math.floor(Math.random() * 350);
           try {
             await sleepWithSignal(backoffMs, fetchOptions.signal);
@@ -264,6 +336,7 @@ export async function apiFetch(endpoint: string, options: ApiFetchOptions = {}):
 
     const err = lastError;
     const isAborted =
+      didTimeOut ||
       err?.name === 'AbortError' ||
       err?.message?.toLowerCase().includes('abort') ||
       err?.message?.toLowerCase().includes('aborted');
@@ -283,11 +356,18 @@ export async function apiFetch(endpoint: string, options: ApiFetchOptions = {}):
         });
       } catch {}
     }
-    if (err?.name === 'AbortError' || isAborted) {
+    if (didTimeOut || err?.name === 'AbortError' || isAborted) {
       throw new Error(`Request timed out after ${Math.round(timeoutMs / 1000)}s. The backend may be waking up or processing a heavy task. Please try again.`);
     }
-    if (err?.message?.includes('Failed to fetch') || err?.message?.includes('NetworkError')) {
-      throw new Error('Could not connect to the backend server. If using free hosting, please wait 30 seconds for the server to wake up and try again.');
+    if (
+      err?.message?.includes('Failed to fetch') ||
+      err?.message?.includes('NetworkError') ||
+      err?.message?.includes('Load failed') ||
+      err?.message?.includes('ERR_CONNECTION_REFUSED')
+    ) {
+      throw new Error(
+        'Could not connect to the backend server. Please check your mobile data or Wi-Fi connection; if the server is waking up, wait 20–30 seconds and try again.'
+      );
     }
     throw err;
   };

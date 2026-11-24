@@ -47,6 +47,11 @@ import PearlAuroraBackground from '../components/pearl/PearlAuroraBackground';
 import { AnimatedNumber } from '../components/pearl/PearlMotion';
 import ToolSEOSection from '../components/ToolSEOSection';
 import { apiFetch, API_BASE } from '../lib/api';
+import { triggerBlobDownload, triggerDataUrlDownload } from '../lib/blobUrl';
+import { copyTextToClipboard } from '../lib/clipboard';
+import { ACCEPT_IMAGES, ACCEPT_PDF_AND_IMAGES, inferMimeFromFile } from '../lib/fileAccept';
+import { printHtmlDocument, printPdfBlob } from '../lib/printHelper';
+import { clampPdfScale, releaseCanvas } from '../lib/safeCanvas';
 import { escapeHtml } from '../lib/utils';
 import {
   generateSecretToken,
@@ -582,7 +587,7 @@ export default function ScanToPrint() {
         if (isFromCamera || /^image\.\w+$|^photo\.\w+$/i.test(f.name)) {
           const ext = f.name.split('.').pop() || 'jpg';
           fileToQueue = new File([f], `Camera_Scan_${timeTag}_${idx + 1}.${ext}`, {
-            type: f.type || 'image/jpeg',
+            type: inferMimeFromFile(f, 'image/jpeg'),
             lastModified: Date.now(),
           });
         }
@@ -937,7 +942,11 @@ export default function ScanToPrint() {
 
         const BarcodeDetectorClass = (window as any).BarcodeDetector;
         if (!BarcodeDetectorClass) {
-          setQrScanError('Live QR auto-detection is not supported on this browser version. Please type the Counter PIN shown below the QR.');
+          stream.getTracks().forEach((t) => t.stop());
+          activeStream = null;
+          setQrScanError(
+            'Live in-browser QR scanning is not supported on Safari/iOS. Tip: Open your iPhone Camera app to scan the Counter QR directly, or type the 6-digit Counter PIN below.'
+          );
           return;
         }
 
@@ -1634,14 +1643,12 @@ export default function ScanToPrint() {
   }, [isSenderMode, sessionCode, roomReadToken, counterE2eeKey, addIncomingJob]);
 
   // ─── Print QR Code (Shopkeeper can print and stick on counter) ───────────
-  const handlePrintQr = () => {
+  const handlePrintQr = async () => {
     if (!qrDataUrl) return;
-    const win = window.open('', '_blank');
-    if (!win) return;
     const safePin = escapeHtml(sessionCode);
     const safeShop = escapeHtml(shopName || 'DIRECT PRINT STATION');
     const safeStandeeUrl = escapeHtml(mobileLink.split('#')[0]);
-    win.document.write(`
+    const html = `
       <!DOCTYPE html>
       <html>
         <head>
@@ -1755,17 +1762,10 @@ export default function ScanToPrint() {
             <div class="footer-badge">🔒 100% Private • Zero-Knowledge AES-256 QR • Zero Data Stored</div>
             <div class="link-text">${safeStandeeUrl}</div>
           </div>
-          <script>
-            window.onload = function() {
-              window.focus();
-              setTimeout(function() { window.print(); }, 200);
-              window.onafterprint = function() { window.close(); };
-            };
-          <\/script>
         </body>
       </html>
-    `);
-    win.document.close();
+    `;
+    await printHtmlDocument(html, `Counter QR Standee - ${sessionCode}`);
   };
 
   // ─── Single-Pass Zero-Knowledge Payload Seal Helper (encrypts ONCE for both P2P & Relay) ───
@@ -1780,7 +1780,7 @@ export default function ScanToPrint() {
       const [encBuf, encMeta] = await Promise.all([
         encryptBytesWithKey(plainBuf, senderE2eeKey),
         encryptJsonWithKey(
-          { name: file.name, type: file.type || 'application/pdf', size: file.size },
+          { name: file.name, type: inferMimeFromFile(file, 'application/pdf'), size: file.size },
           senderE2eeKey
         ),
       ]);
@@ -1982,7 +1982,7 @@ export default function ScanToPrint() {
                 name: encMeta ? 'sealed_doc.bin' : file.name,
                 encMeta: encMeta || undefined,
                 size: wireSize,
-                type: encMeta ? 'application/octet-stream' : (file.type || 'application/pdf'),
+                type: encMeta ? 'application/octet-stream' : inferMimeFromFile(file, 'application/pdf'),
                 timestamp,
                 totalChunks: totalChunksEst,
                 copies: senderCopies,
@@ -2098,7 +2098,7 @@ export default function ScanToPrint() {
                   deviceLabel: getDeviceLabel(),
                   name: file.name,
                   size: file.size,
-                  type: file.type || 'application/pdf',
+                  type: inferMimeFromFile(file, 'application/pdf'),
                   dataUrl: '',
                   timestamp,
                   copies: senderCopies,
@@ -2166,7 +2166,7 @@ export default function ScanToPrint() {
         deviceLabel: 'Counter PC',
         name: file.name,
         size: file.size,
-        type: file.type || 'application/pdf',
+        type: inferMimeFromFile(file, 'application/pdf'),
         dataUrl: blobUrl,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         copies: 1,
@@ -2234,9 +2234,6 @@ export default function ScanToPrint() {
 
       if (job.type.startsWith('image/')) {
         // ── Image Print ──────────────────────────────────────────────────
-        const printWindow = window.open('', '_blank');
-        if (!printWindow) { alert('Please allow popups to print.'); return; }
-
         const filter = job.colorMode === 'bw' ? 'filter: grayscale(100%) contrast(125%);' : '';
 
         // Determine orientation
@@ -2262,9 +2259,10 @@ export default function ScanToPrint() {
           `)
           .join('');
 
-        printWindow.document.write(`
+        const title = `${job.name} — Print (×${job.copies}${isImgLandscape ? ' · Landscape' : ''})`;
+        const html = `
           <!DOCTYPE html><html>
-          <head><title>${escapeHtml(job.name)} — Print (×${job.copies}${isImgLandscape ? ' · Landscape' : ''})</title>
+          <head><title>${escapeHtml(title)}</title>
           <style>
             @page { size: ${pageSize}; margin: 6mm; }
             * { box-sizing: border-box; }
@@ -2286,13 +2284,15 @@ export default function ScanToPrint() {
               ${filter}
             }
           </style></head>
-          <body>${imgHtml}
-          <script>window.onload = function() { window.focus(); window.print(); window.onafterprint = function() { window.close(); }; };<\/script>
-          </body></html>
-        `);
-        printWindow.document.close();
+          <body>${imgHtml}</body></html>
+        `;
+        const ok = await printHtmlDocument(html, title);
+        if (!ok) {
+          alert('Unable to open print dialog on this browser.');
+          return;
+        }
       } else {
-        // ── PDF Print via pdfjs → canvas → print window ──────────────────
+        // ── PDF Print via pdfjs → canvas → hidden print frame ────────────
         const { buffer, type } = await urlToArrayBuffer(job.dataUrl);
         const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(buffer) });
         const pdf = await loadingTask.promise;
@@ -2322,40 +2322,32 @@ export default function ScanToPrint() {
 
           if (pageIsLandscape) landscapeCount++;
 
-          const viewport = page.getViewport({ scale: renderScale });
+          const safeScale = clampPdfScale(baseViewport.width, baseViewport.height, renderScale);
+          const viewport = page.getViewport({ scale: safeScale });
           const canvas = document.createElement('canvas');
           canvas.width = viewport.width;
           canvas.height = viewport.height;
-          const ctx = canvas.getContext('2d')!;
-          await page.render({ canvasContext: ctx, viewport, canvas } as any).promise;
+          try {
+            const ctx = canvas.getContext('2d')!;
+            await page.render({ canvasContext: ctx, viewport, canvas } as any).promise;
 
-          // Convert to binary Blob URL (avoids massive base64 memory overhead)
-          const blob = await new Promise<Blob | null>((res) => canvas.toBlob(res, 'image/jpeg', renderQuality));
-          const pageSrc = blob ? URL.createObjectURL(blob) : canvas.toDataURL('image/jpeg', renderQuality);
-          if (pageSrc.startsWith('blob:')) tempBlobUrls.push(pageSrc);
+            // Convert to binary Blob URL (avoids massive base64 memory overhead)
+            const blob = await new Promise<Blob | null>((res) => canvas.toBlob(res, 'image/jpeg', renderQuality));
+            const pageSrc = blob ? URL.createObjectURL(blob) : canvas.toDataURL('image/jpeg', renderQuality);
+            if (pageSrc.startsWith('blob:')) tempBlobUrls.push(pageSrc);
 
-          renderedPages.push({
-            src: pageSrc,
-            isLandscape: pageIsLandscape,
-          });
-          // Allow GC between pages for large docs
-          canvas.width = 0;
-          canvas.height = 0;
+            renderedPages.push({
+              src: pageSrc,
+              isLandscape: pageIsLandscape,
+            });
+          } finally {
+            releaseCanvas(canvas);
+            page.cleanup();
+          }
         }
 
         const isDocLandscape = landscapeCount >= renderedPages.length / 2;
         const defaultPageSize = isDocLandscape ? 'A4 landscape' : 'A4 portrait';
-
-        const printWindow = window.open('', '_blank');
-        if (!printWindow) {
-          // Popup blocked — open native PDF directly
-          const blob = arrayBufferToBlob(buffer, type);
-          const tempUrl = URL.createObjectURL(blob);
-          window.open(tempUrl, '_blank');
-          setTimeout(() => { try { URL.revokeObjectURL(tempUrl); } catch {} }, 30000);
-          tempBlobUrls.forEach((u) => { try { URL.revokeObjectURL(u); } catch {} });
-          return;
-        }
 
         // Build print page — each page gets exact A4 sizing according to its orientation
         const pagesHtml = copiesArr
@@ -2369,9 +2361,10 @@ export default function ScanToPrint() {
           )
           .join('');
 
-        printWindow.document.write(`
+        const title = `${job.name} (${totalPages}p ×${job.copies}${isDocLandscape ? ' · Landscape' : ''})`;
+        const html = `
           <!DOCTYPE html><html>
-          <head><title>${escapeHtml(job.name)} (${totalPages}p ×${job.copies}${isDocLandscape ? ' · Landscape' : ''})</title>
+          <head><title>${escapeHtml(title)}</title>
           <style>
             @page {
               size: ${defaultPageSize};
@@ -2432,16 +2425,15 @@ export default function ScanToPrint() {
           </style></head>
           <body>
             ${pagesHtml}
-            <script>
-              window.onload = function() {
-                window.focus();
-                setTimeout(function() { window.print(); }, 150);
-                window.onafterprint = function() { window.close(); };
-              };
-            <\/script>
           </body></html>
-        `);
-        printWindow.document.close();
+        `;
+        const printed = await printHtmlDocument(html, title);
+        if (!printed) {
+          const blob = arrayBufferToBlob(buffer, type);
+          await printPdfBlob(blob, job.name || 'document.pdf');
+          tempBlobUrls.forEach((u) => { try { URL.revokeObjectURL(u); } catch {} });
+          return;
+        }
         if (tempBlobUrls.length > 0) {
           setTimeout(() => {
             tempBlobUrls.forEach((u) => { try { URL.revokeObjectURL(u); } catch {} });
@@ -2455,9 +2447,7 @@ export default function ScanToPrint() {
       console.error('Print rendering error', err);
       try {
         const { buffer, type } = await urlToArrayBuffer(job.dataUrl);
-        const tempUrl = URL.createObjectURL(arrayBufferToBlob(buffer, type));
-        window.open(tempUrl, '_blank');
-        setTimeout(() => { try { URL.revokeObjectURL(tempUrl); } catch {} }, 30000);
+        await printPdfBlob(arrayBufferToBlob(buffer, type), job.name || 'document.pdf');
       } catch {
         alert('Could not render document for printing.');
       }
@@ -2578,10 +2568,12 @@ export default function ScanToPrint() {
   };
 
   // ─── Copy link ──────────────────────────────────────────────────────────
-  const copyLink = () => {
-    navigator.clipboard.writeText(mobileLink).catch(() => {});
-    setCopiedLink(true);
-    setTimeout(() => setCopiedLink(false), 2000);
+  const copyLink = async () => {
+    const ok = await copyTextToClipboard(mobileLink);
+    if (ok) {
+      setCopiedLink(true);
+      setTimeout(() => setCopiedLink(false), 2000);
+    }
   };
 
   // ─── Derived ────────────────────────────────────────────────────────────
@@ -3232,8 +3224,8 @@ export default function ScanToPrint() {
                       <input
                         type="file"
                         multiple
-                        accept="application/pdf,image/*,.pdf,.jpg,.jpeg,.png,.webp,.doc,.docx"
-                        className="hidden"
+                        accept={`${ACCEPT_PDF_AND_IMAGES},.doc,.docx`}
+                        className="sr-only"
                         onChange={(e) => {
                           handleFilesSelected(Array.from(e.target.files || []), false);
                           e.target.value = '';
@@ -3248,9 +3240,9 @@ export default function ScanToPrint() {
                         <span>Take Photo / Camera Scan</span>
                         <input
                           type="file"
-                          accept="image/*"
+                          accept={ACCEPT_IMAGES}
                           capture="environment"
-                          className="hidden"
+                          className="sr-only"
                           onChange={(e) => {
                             const files = Array.from(e.target.files || []);
                             if (files.length) handleFilesSelected(files, true);
@@ -3481,11 +3473,17 @@ export default function ScanToPrint() {
           {/* Download */}
           <button
             type="button"
-            onClick={() => {
-              const a = document.createElement('a');
-              a.href = job.dataUrl;
-              a.download = job.name;
-              a.click();
+            onClick={async () => {
+              if (job.dataUrl.startsWith('data:')) {
+                triggerDataUrlDownload(job.dataUrl, job.name);
+                return;
+              }
+              try {
+                const { buffer, type } = await urlToArrayBuffer(job.dataUrl);
+                triggerBlobDownload(arrayBufferToBlob(buffer, type), job.name);
+              } catch {
+                triggerDataUrlDownload(job.dataUrl, job.name);
+              }
             }}
             title="Download"
             className="p-1.5 rounded-xl pms-glass-panel border border-[var(--pms-border)] hover:border-rose-400/60 transition cursor-pointer"
@@ -3806,7 +3804,7 @@ export default function ScanToPrint() {
                       tokenNum: tokenCounterRef.current++,
                       name: file.name,
                       size: file.size,
-                      type: file.type || 'application/pdf',
+                      type: inferMimeFromFile(file, 'application/pdf'),
                       dataUrl: blobUrl,
                       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
                       copies: 1,
@@ -3823,8 +3821,8 @@ export default function ScanToPrint() {
                 <input
                   type="file"
                   multiple
-                  accept="application/pdf,image/*"
-                  className="hidden"
+                  accept={ACCEPT_PDF_AND_IMAGES}
+                  className="sr-only"
                   onChange={handleShopkeeperFileDrop}
                 />
               </label>

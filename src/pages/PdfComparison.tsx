@@ -230,18 +230,48 @@ export default function PdfComparison() {
     }
   };
 
-  // Slider Mouse Drag Handlers
+  // Slider Pointer Drag Handlers (Mouse + Touch + Pen)
   const handleSliderMove = (clientX: number) => {
     if (!sliderRef.current) return;
     const rect = sliderRef.current.getBoundingClientRect();
+    if (!rect.width) return;
     const x = clientX - rect.left;
     const pct = Math.max(0, Math.min(100, (x / rect.width) * 100));
     setSliderPos(pct);
   };
 
-  const onMouseDown = () => { isDraggingRef.current = true; };
-  const onMouseUp = () => { isDraggingRef.current = false; };
-  const onMouseMove = (e: React.MouseEvent) => {
+  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    e.preventDefault();
+    isDraggingRef.current = true;
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      // Ignore capture errors
+    }
+    handleSliderMove(e.clientX);
+  };
+  const onPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    isDraggingRef.current = false;
+    try {
+      if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      }
+    } catch {
+      // Ignore
+    }
+  };
+  const onPointerCancel = (e: React.PointerEvent<HTMLDivElement>) => {
+    isDraggingRef.current = false;
+    try {
+      if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      }
+    } catch {
+      // Ignore
+    }
+  };
+  const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     if (isDraggingRef.current) handleSliderMove(e.clientX);
   };
 
@@ -565,11 +595,12 @@ export default function PdfComparison() {
             <div className="pms-glass-panel p-4 sm:p-5 rounded-3xl flex justify-center overflow-auto">
               <div
                 ref={sliderRef}
-                className="relative border border-[var(--pms-border-strong)] shadow-xl bg-white select-none overflow-hidden rounded-2xl mx-auto cursor-ew-resize max-w-full transition-transform"
+                className="relative border border-[var(--pms-border-strong)] shadow-xl bg-white select-none touch-none overflow-hidden rounded-2xl mx-auto cursor-ew-resize max-w-full transition-transform"
                 style={{ transform: `scale(${zoomLevel / 100})`, transformOrigin: 'top center' }}
-                onMouseDown={onMouseDown}
-                onMouseUp={onMouseUp}
-                onMouseMove={onMouseMove}
+                onPointerDown={onPointerDown}
+                onPointerUp={onPointerUp}
+                onPointerCancel={onPointerCancel}
+                onPointerMove={onPointerMove}
               >
                 {/* Document B (Underneath / Full) */}
                 <img

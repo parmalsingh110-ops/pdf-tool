@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { 
   ShieldCheck, Key, Lock, CheckCircle2, Download, FileText, 
-  UserCheck, Award, RefreshCw
+  UserCheck, Award, RefreshCw, AlertCircle
 } from 'lucide-react';
 import { motion, useReducedMotion } from 'motion/react';
 import { PDFDocument } from 'pdf-lib';
@@ -42,6 +42,7 @@ export default function CryptographicSignatures() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [auditReceipt, setAuditReceipt] = useState<any | null>(null);
+  const [signError, setSignError] = useState<string | null>(null);
 
   const prefersReduced = useReducedMotion();
   useAutoRevokeUrl(resultUrl);
@@ -52,6 +53,7 @@ export default function CryptographicSignatures() {
       setFile(f);
       setResultUrl(null);
       setAuditReceipt(null);
+      setSignError(null);
 
       // Load preview of page 1
       try {
@@ -183,6 +185,14 @@ export default function CryptographicSignatures() {
 
   const executeSigning = async () => {
     if (!file) return;
+    setSignError(null);
+
+    if (typeof window === 'undefined' || !window.crypto?.subtle) {
+      setSignError(
+        'RSA-2048 cryptographic signing requires a secure HTTPS connection (or localhost) because Web Crypto APIs are disabled on insecure HTTP origins. Open this page over HTTPS and try again.'
+      );
+      return;
+    }
 
     setIsProcessing(true);
     try {
@@ -285,7 +295,7 @@ export default function CryptographicSignatures() {
       setAuditReceipt(receipt);
     } catch (err: any) {
       console.error('Digital signing error:', err);
-      alert(`Signing failed: ${err?.message || 'Unknown error'}`);
+      setSignError(`Signing failed: ${err?.message || 'Unknown error'}`);
     } finally {
       setIsProcessing(false);
     }
@@ -310,6 +320,7 @@ export default function CryptographicSignatures() {
     setResultUrl(null);
     setAuditReceipt(null);
     setPagePreview(null);
+    setSignError(null);
   };
 
   const stageKey = !file ? 'upload' : !resultUrl ? 'configure' : 'result';
@@ -472,6 +483,13 @@ export default function CryptographicSignatures() {
                   ))}
                 </div>
               </div>
+
+              {signError && (
+                <div className="p-3.5 rounded-2xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800/70 text-rose-700 dark:text-rose-300 text-xs flex items-start gap-2.5">
+                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span className="leading-relaxed">{signError}</span>
+                </div>
+              )}
 
               {/* Action */}
               <button

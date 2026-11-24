@@ -27,6 +27,9 @@ import ToolSEOSection from '../components/ToolSEOSection';
 import { apiFetch } from '../lib/api';
 import { toArrayBufferBytes } from '../lib/blobUrl';
 import { downloadBlob } from '../lib/utils';
+import { sha256Hex } from '../lib/safeCrypto';
+import { isImageFile, isPdfFile } from '../lib/fileAccept';
+import { releaseCanvas } from '../lib/safeCanvas';
 
 function cleanWinAnsi(str: string): string {
   if (!str) return '';
@@ -69,18 +72,12 @@ interface MetadataAudit {
   recovered_hidden_count?: number;
 }
 
-const IMAGE_ACCEPT_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
-
 function isSupportedImageFile(file: File): boolean {
-  if (IMAGE_ACCEPT_TYPES.includes(file.type)) return true;
-  return /\.(jpe?g|png|webp)$/i.test(file.name);
+  return isImageFile(file);
 }
 
 async function computeSha256Hex(buffer: ArrayBuffer): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', buffer);
-  return Array.from(new Uint8Array(digest))
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('');
+  return sha256Hex(buffer);
 }
 
 /** Browser-native JPEG Error Level Analysis heatmap fallback when backend is unreachable. */
@@ -127,8 +124,8 @@ async function generateLocalElaPreview(sourceImg: HTMLImageElement | HTMLCanvasE
   }
   ctx2.putImageData(recompData, 0, 0);
   const out = c2.toDataURL('image/png');
-  c1.width = 0;
-  c2.width = 0;
+  releaseCanvas(c1);
+  releaseCanvas(c2);
   return out;
 }
 
@@ -172,10 +169,10 @@ export default function DocForensics() {
   const [pageNativeSize, setPageNativeSize] = useState<{ width: number; height: number }>({ width: 595, height: 842 });
 
   const handleFileUpload = async (selectedFile: File) => {
-    const isPdf = selectedFile.type === 'application/pdf' || /\.pdf$/i.test(selectedFile.name);
+    const isPdf = isPdfFile(selectedFile);
     const isImg = isSupportedImageFile(selectedFile);
     if (!isPdf && !isImg) {
-      alert('Please upload a PDF document or JPG/PNG/WebP image scan.');
+      alert('Please upload a PDF document or JPG/PNG/WebP/HEIC/AVIF image scan.');
       return;
     }
 
@@ -393,12 +390,15 @@ export default function DocForensics() {
               if (p === 1) {
                 const elaVp = pObj.getViewport({ scale: 1.2 });
                 const tmpC = document.createElement('canvas');
-                tmpC.width = Math.round(elaVp.width);
-                tmpC.height = Math.round(elaVp.height);
-                await pObj.render({ canvasContext: tmpC.getContext('2d')!, viewport: elaVp, canvas: tmpC }).promise;
-                const localEla = await generateLocalElaPreview(tmpC);
-                setElaPreviews({ '1': localEla });
-                tmpC.width = 0;
+                try {
+                  tmpC.width = Math.round(elaVp.width);
+                  tmpC.height = Math.round(elaVp.height);
+                  await pObj.render({ canvasContext: tmpC.getContext('2d')!, viewport: elaVp, canvas: tmpC }).promise;
+                  const localEla = await generateLocalElaPreview(tmpC);
+                  setElaPreviews({ '1': localEla });
+                } finally {
+                  releaseCanvas(tmpC);
+                }
               }
             } catch {}
           }
@@ -636,9 +636,7 @@ export default function DocForensics() {
               multiple={false}
               accept={{
                 'application/pdf': ['.pdf'],
-                'image/jpeg': ['.jpg', '.jpeg'],
-                'image/png': ['.png'],
-                'image/webp': ['.webp'],
+                'image/*': ['.jpg', '.jpeg', '.png', '.webp', '.heic', '.heif', '.avif'],
               }}
               title="Drop Salary Slip, Bank Statement, Marksheet, or WhatsApp Scan (PDF / JPG / PNG)"
               subtitle="Audits vector whiteout masks, concealed underlying text, JPEG ELA splice regions, EXIF tags, font jitter, and signature ByteRanges"

@@ -114,7 +114,7 @@ export function PearlScanOverlay({
         />
       )}
       {label && (
-        <div className="absolute bottom-3 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full text-[11px] font-bold bg-white/90 dark:bg-slate-900/90 border border-[var(--pms-border)] shadow-sm backdrop-blur-md text-[var(--pms-ink)] whitespace-nowrap">
+        <div className="absolute bottom-3 left-1/2 -translate-x-1/2 max-w-[90%] truncate text-center px-3 py-1 rounded-full text-[11px] font-bold bg-white/90 dark:bg-slate-900/90 border border-[var(--pms-border)] shadow-sm backdrop-blur-md text-[var(--pms-ink)]">
           {label}
         </div>
       )}

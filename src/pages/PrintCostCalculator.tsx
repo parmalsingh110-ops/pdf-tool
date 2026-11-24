@@ -22,6 +22,9 @@ import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 import { AnimatedNumber, PearlProcessCard } from '../components/pearl/PearlMotion';
 import ToolSEOSection from '../components/ToolSEOSection';
 import { escapeHtml } from '../lib/utils';
+import { isPdfFile } from '../lib/fileAccept';
+import { printHtmlDocument } from '../lib/printHelper';
+import { releaseCanvas } from '../lib/safeCanvas';
 
 interface PageBreakdown {
   pageNum: number;
@@ -95,7 +98,7 @@ export default function PrintCostCalculator() {
   };
 
   const handleFileUpload = async (uploadedFile: File) => {
-    if (uploadedFile.type !== 'application/pdf') {
+    if (!isPdfFile(uploadedFile)) {
       alert('Please upload a PDF document.');
       return;
     }
@@ -120,37 +123,42 @@ export default function PrintCostCalculator() {
         canvas.height = viewport.height;
         const ctx = canvas.getContext('2d');
 
-        if (ctx) {
-          await page.render({ canvasContext: ctx, viewport, canvas } as any).promise;
-          const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
-          
-          let colorPixelCount = 0;
-          let totalChecked = 0;
-
-          // Sample pixels across page to detect color
-          for (let p = 0; p < imgData.length; p += 16) {
-            const r = imgData[p];
-            const g = imgData[p + 1];
-            const b = imgData[p + 2];
+        try {
+          if (ctx) {
+            await page.render({ canvasContext: ctx, viewport, canvas } as any).promise;
+            const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
             
-            // Check chromatic variation (|R-G| or |G-B|)
-            const diffRG = Math.abs(r - g);
-            const diffGB = Math.abs(g - b);
-            const diffRB = Math.abs(r - b);
+            let colorPixelCount = 0;
+            let totalChecked = 0;
 
-            if ((diffRG > 18 || diffGB > 18 || diffRB > 18) && (r < 240 || g < 240 || b < 240)) {
-              colorPixelCount++;
+            // Sample pixels across page to detect color
+            for (let p = 0; p < imgData.length; p += 16) {
+              const r = imgData[p];
+              const g = imgData[p + 1];
+              const b = imgData[p + 2];
+              
+              // Check chromatic variation (|R-G| or |G-B|)
+              const diffRG = Math.abs(r - g);
+              const diffGB = Math.abs(g - b);
+              const diffRB = Math.abs(r - b);
+
+              if ((diffRG > 18 || diffGB > 18 || diffRB > 18) && (r < 240 || g < 240 || b < 240)) {
+                colorPixelCount++;
+              }
+              totalChecked++;
             }
-            totalChecked++;
-          }
 
-          const ratio = (colorPixelCount / Math.max(1, totalChecked)) * 100;
-          const isColor = ratio > 1.2; // >1.2% chromatic pixels = Color Page
-          breakdown.push({
-            pageNum: i,
-            isColor,
-            colorScore: Math.round(ratio),
-          });
+            const ratio = (colorPixelCount / Math.max(1, totalChecked)) * 100;
+            const isColor = ratio > 1.2; // >1.2% chromatic pixels = Color Page
+            breakdown.push({
+              pageNum: i,
+              isColor,
+              colorScore: Math.round(ratio),
+            });
+          }
+        } finally {
+          releaseCanvas(canvas);
+          page.cleanup();
         }
 
         setAnalysisProgress(Math.round((i / total) * 100));
@@ -233,13 +241,7 @@ export default function PrintCostCalculator() {
   }, [upiPayString]);
 
   // Clean 80mm POS Thermal / Laser Bill Receipt Printer
-  const handlePrintBillSlip = () => {
-    const printWin = window.open('', '_blank');
-    if (!printWin) {
-      alert('Please allow popups to print the bill receipt.');
-      return;
-    }
-
+  const handlePrintBillSlip = async () => {
     const receiptNo = `INV-${Date.now().toString(36).toUpperCase().slice(-5)}`;
     const now = new Date().toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' });
 
@@ -251,7 +253,7 @@ export default function PrintCostCalculator() {
     const safePaper = escapeHtml(paperType);
     const safeUpiId = escapeHtml(upiId);
 
-    printWin.document.write(`
+    const html = `
       <!DOCTYPE html>
       <html>
         <head>
@@ -334,18 +336,13 @@ export default function PrintCostCalculator() {
             <div>*** Thank You! Visit Again ***</div>
             <div style="font-size: 8px; margin-top: 4px; color: #888;">Powered by PDF Media Suite</div>
           </div>
-
-          <script>
-            window.onload = function() {
-              window.focus();
-              window.print();
-              window.onafterprint = function() { window.close(); };
-            };
-          </script>
         </body>
       </html>
-    `);
-    printWin.document.close();
+    `;
+    const ok = await printHtmlDocument(html, `Bill Receipt - ${shopName}`);
+    if (!ok) {
+      alert('Unable to open print dialog on this browser.');
+    }
   };
 
   return (

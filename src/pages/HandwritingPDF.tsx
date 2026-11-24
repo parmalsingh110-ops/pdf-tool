@@ -25,7 +25,7 @@ import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 import { AnimatedNumber, PearlScanOverlay } from '../components/pearl/PearlMotion';
-import { toArrayBufferBytes } from '../lib/blobUrl';
+import { toArrayBufferBytes, triggerBlobDownload, triggerDataUrlDownload } from '../lib/blobUrl';
 import { dataUrlToBytes } from '../lib/utils';
 
 interface HandwritingFont {
@@ -580,27 +580,40 @@ export default function HandwritingPDF() {
     }, 1500);
   };
 
-  // Signature drawing pad logic
+  // Signature drawing pad logic (scaled to intrinsic canvas pixels for accurate mobile touch)
+  const getSignCoords = (
+    e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>,
+    canvas: HTMLCanvasElement
+  ) => {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = rect.width > 0 ? canvas.width / rect.width : 1;
+    const scaleY = rect.height > 0 ? canvas.height / rect.height : 1;
+    const clientX = 'touches' in e ? (e.touches[0]?.clientX ?? 0) : e.clientX;
+    const clientY = 'touches' in e ? (e.touches[0]?.clientY ?? 0) : e.clientY;
+    return {
+      x: (clientX - rect.left) * scaleX,
+      y: (clientY - rect.top) * scaleY,
+    };
+  };
+
   const startSignDraw = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
+    if ('touches' in e && e.touches.length === 0) return;
     setIsDrawingSign(true);
     const canvas = signCanvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d')!;
-    const rect = canvas.getBoundingClientRect();
-    const x = ('clientX' in e ? e.clientX : e.touches[0].clientX) - rect.left;
-    const y = ('clientY' in e ? e.clientY : e.touches[0].clientY) - rect.top;
+    const { x, y } = getSignCoords(e, canvas);
     ctx.beginPath();
     ctx.moveTo(x, y);
   };
 
   const drawSignMove = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
     if (!isDrawingSign) return;
+    if ('touches' in e && e.touches.length === 0) return;
     const canvas = signCanvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d')!;
-    const rect = canvas.getBoundingClientRect();
-    const x = ('clientX' in e ? e.clientX : e.touches[0].clientX) - rect.left;
-    const y = ('clientY' in e ? e.clientY : e.touches[0].clientY) - rect.top;
+    const { x, y } = getSignCoords(e, canvas);
     ctx.lineWidth = 2.2;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
@@ -655,15 +668,7 @@ export default function HandwritingPDF() {
 
       const pdfBytes = await newPdfDoc.save();
       const blob = new Blob([toArrayBufferBytes(pdfBytes)], { type: 'application/pdf' });
-      const url = URL.createObjectURL(blob);
-
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'handwritten_assignment.pdf';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      triggerBlobDownload(blob, 'handwritten_assignment.pdf');
     } catch (e: any) {
       console.error('PDF export failed:', e);
       alert('Failed to generate handwritten PDF.');
@@ -678,12 +683,7 @@ export default function HandwritingPDF() {
     if (!canvas) return;
 
     const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
-    const a = document.createElement('a');
-    a.href = dataUrl;
-    a.download = `handwritten_page_${currentPage}.jpg`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+    triggerDataUrlDownload(dataUrl, `handwritten_page_${currentPage}.jpg`);
   };
 
   // Printable A-Z Template Sheet Generator
@@ -746,12 +746,7 @@ export default function HandwritingPDF() {
     });
 
     const dataUrl = templateCanvas.toDataURL('image/png');
-    const a = document.createElement('a');
-    a.href = dataUrl;
-    a.download = 'handwriting_sample_template.png';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+    triggerDataUrlDownload(dataUrl, 'handwriting_sample_template.png');
   };
 
   return (
@@ -1360,9 +1355,11 @@ export default function HandwritingPDF() {
                   onMouseDown={startSignDraw}
                   onMouseMove={drawSignMove}
                   onMouseUp={endSignDraw}
+                  onMouseLeave={endSignDraw}
                   onTouchStart={startSignDraw}
                   onTouchMove={drawSignMove}
                   onTouchEnd={endSignDraw}
+                  onTouchCancel={endSignDraw}
                   className="w-full h-[160px] cursor-crosshair block touch-none"
                 />
               </div>

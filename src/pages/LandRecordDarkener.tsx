@@ -16,8 +16,11 @@ import { usePageSEO } from '../lib/usePageSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 import { AnimatedNumber, PearlScanOverlay } from '../components/pearl/PearlMotion';
-import { toArrayBufferBytes } from '../lib/blobUrl';
-import { dataUrlToBytes, downloadBlob } from '../lib/utils';
+import { toArrayBufferBytes, triggerBlobDownload } from '../lib/blobUrl';
+import { ACCEPT_PDF_AND_IMAGES, isPdfFile } from '../lib/fileAccept';
+import { printHtmlDocument } from '../lib/printHelper';
+import { clampCanvasDimensions, clampPdfScale, releaseCanvas } from '../lib/safeCanvas';
+import { dataUrlToBytes } from '../lib/utils';
 
 type DarkenPreset = 'map_lines' | 'jamabandi_text' | 'deep_xerox' | 'extreme';
 
@@ -57,12 +60,14 @@ export default function LandRecordDarkener() {
     setIsProcessing(true);
 
     try {
-      if (selected.type === 'application/pdf') {
+      if (isPdfFile(selected)) {
         const arrayBuffer = await selected.arrayBuffer();
         const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
         setPageCount(pdf.numPages);
         const page = await pdf.getPage(1);
-        const viewport = page.getViewport({ scale: 2.5 }); // High-DPI for fine land map lines
+        const baseVp = page.getViewport({ scale: 1.0 });
+        const safeScale = clampPdfScale(baseVp.width, baseVp.height, 2.5);
+        const viewport = page.getViewport({ scale: safeScale }); // High-DPI for fine land map lines
 
         const canvas = document.createElement('canvas');
         canvas.width = viewport.width;
@@ -72,18 +77,20 @@ export default function LandRecordDarkener() {
           await page.render({ canvasContext: ctx, viewport, canvas } as any).promise;
           setSourceCanvas(canvas);
         }
+        page.cleanup();
       } else {
         setPageCount(1);
         const reader = new FileReader();
         reader.onload = (ev) => {
           const img = new Image();
           img.onload = () => {
+            const clamped = clampCanvasDimensions(img.naturalWidth || img.width, img.naturalHeight || img.height);
             const canvas = document.createElement('canvas');
-            canvas.width = img.width;
-            canvas.height = img.height;
+            canvas.width = clamped.width;
+            canvas.height = clamped.height;
             const ctx = canvas.getContext('2d');
             if (ctx) {
-              ctx.drawImage(img, 0, 0);
+              ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
               setSourceCanvas(canvas);
             }
           };
@@ -193,7 +200,11 @@ export default function LandRecordDarkener() {
       removeBackgroundTint,
       lineThicknessBoost
     );
-    setProcessedDataUrl(res.toDataURL('image/jpeg', 0.94));
+    try {
+      setProcessedDataUrl(res.toDataURL('image/jpeg', 0.94));
+    } finally {
+      if (res !== sourceCanvas) releaseCanvas(res);
+    }
   };
 
   useEffect(() => {
@@ -215,41 +226,50 @@ export default function LandRecordDarkener() {
       const maxWidth = ptWidth - margin * 2;
       const maxHeight = ptHeight - margin * 2;
 
-      if (file && (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf'))) {
+      if (file && isPdfFile(file)) {
         const arrayBuffer = await file.arrayBuffer();
         const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
 
         for (let p = 1; p <= pdf.numPages; p++) {
           const page = await pdf.getPage(p);
-          const viewport = page.getViewport({ scale: 2.2 });
+          const baseVp = page.getViewport({ scale: 1.0 });
+          const safeScale = clampPdfScale(baseVp.width, baseVp.height, 2.2);
+          const viewport = page.getViewport({ scale: safeScale });
           const canvas = document.createElement('canvas');
           canvas.width = viewport.width;
           canvas.height = viewport.height;
-          const ctx = canvas.getContext('2d');
-          if (ctx) {
-            await page.render({ canvasContext: ctx, viewport, canvas } as any).promise;
-            const darkened = processDarkenCanvas(
-              canvas,
-              blackThreshold,
-              contrastLevel,
-              removeBackgroundTint,
-              lineThicknessBoost
-            );
-            const jpgDataUrl = darkened.toDataURL('image/jpeg', 0.92);
-            const jpgBytes = dataUrlToBytes(jpgDataUrl);
-            const embeddedImg = await pdfDoc.embedJpg(jpgBytes);
+          let darkened: HTMLCanvasElement | null = null;
+          try {
+            const ctx = canvas.getContext('2d');
+            if (ctx) {
+              await page.render({ canvasContext: ctx, viewport, canvas } as any).promise;
+              darkened = processDarkenCanvas(
+                canvas,
+                blackThreshold,
+                contrastLevel,
+                removeBackgroundTint,
+                lineThicknessBoost
+              );
+              const jpgDataUrl = darkened.toDataURL('image/jpeg', 0.92);
+              const jpgBytes = dataUrlToBytes(jpgDataUrl);
+              const embeddedImg = await pdfDoc.embedJpg(jpgBytes);
 
-            const docPage = pdfDoc.addPage([ptWidth, ptHeight]);
-            const scale = Math.min(maxWidth / canvas.width, maxHeight / canvas.height);
-            const drawW = canvas.width * scale;
-            const drawH = canvas.height * scale;
+              const docPage = pdfDoc.addPage([ptWidth, ptHeight]);
+              const scale = Math.min(maxWidth / canvas.width, maxHeight / canvas.height);
+              const drawW = canvas.width * scale;
+              const drawH = canvas.height * scale;
 
-            docPage.drawImage(embeddedImg, {
-              x: (ptWidth - drawW) / 2,
-              y: (ptHeight - drawH) / 2,
-              width: drawW,
-              height: drawH,
-            });
+              docPage.drawImage(embeddedImg, {
+                x: (ptWidth - drawW) / 2,
+                y: (ptHeight - drawH) / 2,
+                width: drawW,
+                height: drawH,
+              });
+            }
+          } finally {
+            if (darkened && darkened !== canvas) releaseCanvas(darkened);
+            releaseCanvas(canvas);
+            page.cleanup();
           }
         }
       } else {
@@ -273,7 +293,7 @@ export default function LandRecordDarkener() {
 
       const pdfBytes = await pdfDoc.save();
       const blob = new Blob([toArrayBufferBytes(pdfBytes)], { type: 'application/pdf' });
-      downloadBlob(blob, 'darkened_land_record_print.pdf');
+      triggerBlobDownload(blob, 'darkened_land_record_print.pdf');
     } catch (err) {
       alert('Error creating PDF.');
     } finally {
@@ -282,18 +302,19 @@ export default function LandRecordDarkener() {
   };
 
   // 1-Click Print
-  const handlePrint = () => {
+  const handlePrint = async () => {
     if (!processedDataUrl) return;
-    const printWin = window.open('', '_blank');
-    if (!printWin) return;
-    printWin.document.write(`
+    const html = `
       <!DOCTYPE html>
       <html>
         <head><title>Land Record Print</title><style>@page { size: auto; margin: 5mm; } body { margin: 0; display:flex; align-items:center; justify-content:center; } img { width: 96vw; height: auto; }</style></head>
-        <body><img src="${processedDataUrl}" onload="window.print(); window.close();" /></body>
+        <body><img src="${processedDataUrl}" /></body>
       </html>
-    `);
-    printWin.document.close();
+    `;
+    const ok = await printHtmlDocument(html, 'Land Record Print');
+    if (!ok) {
+      alert('Unable to open print dialog on this browser. Please download the darkened PDF instead.');
+    }
   };
 
   return (
@@ -373,8 +394,8 @@ export default function LandRecordDarkener() {
                 </span>
                 <input
                   type="file"
-                  accept="application/pdf,image/*"
-                  className="hidden"
+                  accept={ACCEPT_PDF_AND_IMAGES}
+                  className="sr-only"
                   onChange={handleFileUpload}
                 />
               </label>

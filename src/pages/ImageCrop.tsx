@@ -91,7 +91,10 @@ export default function ImageCrop() {
     if (!dragging) return;
     const handleMouseMove = (e: MouseEvent) => onDragMove(e.clientX, e.clientY);
     const handleTouchMove = (e: TouchEvent) => {
-      if (e.touches.length > 0) onDragMove(e.touches[0].clientX, e.touches[0].clientY);
+      if (e.touches.length > 0) {
+        e.preventDefault();
+        onDragMove(e.touches[0].clientX, e.touches[0].clientY);
+      }
     };
     const handleUp = () => onEndDrag();
 
@@ -99,11 +102,13 @@ export default function ImageCrop() {
     window.addEventListener('mouseup', handleUp);
     window.addEventListener('touchmove', handleTouchMove, { passive: false });
     window.addEventListener('touchend', handleUp);
+    window.addEventListener('touchcancel', handleUp);
     return () => {
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleUp);
       window.removeEventListener('touchmove', handleTouchMove);
       window.removeEventListener('touchend', handleUp);
+      window.removeEventListener('touchcancel', handleUp);
     };
   }, [dragging, onDragMove, onEndDrag]);
 

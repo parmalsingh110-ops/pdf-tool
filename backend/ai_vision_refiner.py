@@ -810,6 +810,41 @@ def _build_gemini_payload(
     return {"contents": [{"parts": parts}], "generationConfig": gen_cfg}
 
 
+def _parse_b64_image_mime_and_data(b64_img: str) -> tuple[str, str]:
+    """
+    Preserve actual MIME type from `data:<mime>;base64,...` or sniff PNG/WebP/GIF/JPEG
+    magic bytes from raw base64 instead of hardcoding `image/jpeg`.
+    """
+    mime = ""
+    clean_b64 = (b64_img or "").strip()
+    if clean_b64.startswith("data:") and "," in clean_b64:
+        header, clean_b64 = clean_b64.split(",", 1)
+        m = re.match(r"^data:([a-zA-Z0-9.+_-]+/[a-zA-Z0-9.+_-]+)", header)
+        if m:
+            cand = m.group(1).lower()
+            if cand in ("image/jpeg", "image/jpg", "image/png", "image/webp", "image/gif"):
+                mime = "image/jpeg" if cand == "image/jpg" else cand
+    elif "," in clean_b64:
+        clean_b64 = clean_b64.split(",", 1)[1]
+
+    if not mime and clean_b64:
+        try:
+            head_b64 = clean_b64[:32]
+            pad = "=" * ((4 - len(head_b64) % 4) % 4)
+            raw_head = base64.b64decode(head_b64 + pad, validate=False)
+            if raw_head.startswith(b"\x89PNG\r\n\x1a\n"):
+                mime = "image/png"
+            elif len(raw_head) >= 12 and raw_head[:4] == b"RIFF" and raw_head[8:12] == b"WEBP":
+                mime = "image/webp"
+            elif raw_head[:6] in (b"GIF87a", b"GIF89a"):
+                mime = "image/gif"
+            elif raw_head[:3] == b"\xff\xd8\xff":
+                mime = "image/jpeg"
+        except Exception:
+            pass
+    return (mime or "image/jpeg"), clean_b64
+
+
 def _call_gemini_text(
     api_key: str,
     prompt: str,
@@ -820,8 +855,8 @@ def _call_gemini_text(
 ) -> str:
     parts: list[dict[str, Any]] = [{"text": prompt}]
     if b64_jpg:
-        clean_b64 = b64_jpg.split(",", 1)[1] if "," in b64_jpg else b64_jpg
-        parts.append({"inline_data": {"mime_type": "image/jpeg", "data": clean_b64}})
+        img_mime, clean_b64 = _parse_b64_image_mime_and_data(b64_jpg)
+        parts.append({"inline_data": {"mime_type": img_mime, "data": clean_b64}})
 
     key_id = _key_digest(api_key)
     aistudio_ep = ("https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent", "AIStudio")
@@ -967,8 +1002,8 @@ def _call_claude_text(
     }
     content: list[dict[str, Any]] = []
     if b64_jpg:
-        clean_b64 = b64_jpg.split(",", 1)[1] if "," in b64_jpg else b64_jpg
-        content.append({"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": clean_b64}})
+        img_mime, clean_b64 = _parse_b64_image_mime_and_data(b64_jpg)
+        content.append({"type": "image", "source": {"type": "base64", "media_type": img_mime, "data": clean_b64}})
     content.append({"type": "text", "text": prompt})
 
     deadline = time.monotonic() + max(2.0, float(max_total_s))
@@ -1024,8 +1059,8 @@ def _call_openai_text(
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
     if b64_jpg:
-        clean_b64 = b64_jpg.split(",", 1)[1] if "," in b64_jpg else b64_jpg
-        content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{clean_b64}", "detail": "high"}})
+        img_mime, clean_b64 = _parse_b64_image_mime_and_data(b64_jpg)
+        content.append({"type": "image_url", "image_url": {"url": f"data:{img_mime};base64,{clean_b64}", "detail": "high"}})
 
     deadline = time.monotonic() + max(2.0, float(max_total_s))
     for model in _OPENAI_MODELS:

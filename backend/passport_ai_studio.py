@@ -32,6 +32,7 @@ import requests
 from PIL import Image, ImageOps
 
 from fast_codecs import fast_jpeg_encode
+from image_utils import safe_open_image
 from vertex_auth import (
     build_vertex_generate_url,
     get_priority_headers,
@@ -420,39 +421,26 @@ def build_passport_studio_prompt(
 def _prepare_fast_input_b64(raw_bytes: bytes, max_dim: int = 896) -> str:
     """
     Fixes EXIF phone orientation (critical for iPhone/Android vertical photos!),
-    converts to RGB, resizes to max 896px (40% smaller token/upload payload with
-    100% facial pore/hair detail), and encodes with PyTurboJPEG (`fast_jpeg_encode`).
+    flattens transparency onto pure white, uses JPEG/MPO draft() to avoid OOM on 48–200 MP
+    mobile photos, resizes to max 896px, and encodes with PyTurboJPEG (`fast_jpeg_encode`).
     Zero-recompress fast-path if client already sent a clean <=960px RGB JPEG without EXIF rotation!
     """
-    img = Image.open(io.BytesIO(raw_bytes))
-    try:
-        exif = img.getexif()
-        orientation = exif.get(274) if exif else None
-    except Exception:
-        orientation = None
+    if raw_bytes[:3] == b"\xff\xd8\xff" and len(raw_bytes) <= 220_000:
+        img_probe = Image.open(io.BytesIO(raw_bytes))
+        try:
+            exif = img_probe.getexif()
+            orientation = exif.get(274) if exif else None
+        except Exception:
+            orientation = None
+        w, h = img_probe.size
+        if (
+            img_probe.mode == "RGB"
+            and orientation in (None, 1)
+            and max(w, h) <= max(max_dim, 960)
+        ):
+            return base64.b64encode(raw_bytes).decode("ascii")
 
-    w, h = img.size
-    if (
-        raw_bytes[:3] == b"\xff\xd8\xff"
-        and img.mode == "RGB"
-        and orientation in (None, 1)
-        and max(w, h) <= max(max_dim, 960)
-        and len(raw_bytes) <= 220_000
-    ):
-        return base64.b64encode(raw_bytes).decode("ascii")
-
-    img = ImageOps.exif_transpose(img)
-    if img.mode != "RGB":
-        img = img.convert("RGB")
-
-    w, h = img.size
-    scale = min(1.0, max_dim / float(max(w, h, 1)))
-    if scale < 0.99:
-        img = img.resize(
-            (max(64, int(w * scale)), max(64, int(h * scale))),
-            Image.Resampling.LANCZOS,
-        )
-
+    img, _ = safe_open_image(raw_bytes, max_dim=max_dim, flatten_alpha_bg=(255, 255, 255))
     arr_rgb = np.array(img, dtype=np.uint8)
     arr_bgr = cv2.cvtColor(arr_rgb, cv2.COLOR_RGB2BGR)
     jpg_bytes = fast_jpeg_encode(arr_bgr, quality=86)

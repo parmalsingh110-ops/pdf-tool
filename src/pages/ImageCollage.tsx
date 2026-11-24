@@ -4,6 +4,8 @@ import { LayoutGrid, Download, Plus, X, Loader2, CheckCircle2 } from 'lucide-rea
 import FileDropzone from '../components/FileDropzone';
 import { useSEO } from '../hooks/useSEO';
 import { triggerBlobDownload } from '../lib/blobUrl';
+import { clampCanvasDimensions, releaseCanvas, safeCanvasToBlob } from '../lib/safeCanvas';
+import { ACCEPT_IMAGES } from '../lib/fileAccept';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 import { AnimatedNumber, PearlScanOverlay } from '../components/pearl/PearlMotion';
 
@@ -60,18 +62,26 @@ export default function ImageCollage() {
   const exportCollage = async () => {
     if (images.length === 0) return;
     setBusy(true);
+    const canvas = canvasRef.current || document.createElement('canvas');
     try {
       const totalCells = cols * rows;
-      const canvas = canvasRef.current || document.createElement('canvas');
       const cellW = Math.floor((outputSize - (cols + 1) * gap) / cols);
       const cellH = Math.floor(cellW * 1.2);
-      canvas.width = outputSize;
-      canvas.height = rows * cellH + (rows + 1) * gap;
-      const ctx = canvas.getContext('2d')!;
+      const rawW = outputSize;
+      const rawH = rows * cellH + (rows + 1) * gap;
+      const { width, height, scale } = clampCanvasDimensions(rawW, rawH);
+
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error('Canvas context unavailable');
+
+      ctx.save();
+      ctx.scale(scale, scale);
 
       // Background
       ctx.fillStyle = bgColor;
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillRect(0, 0, rawW, rawH);
 
       // Draw images
       for (let i = 0; i < Math.min(images.length, totalCells); i++) {
@@ -87,6 +97,7 @@ export default function ImageCollage() {
           img.onload = () => res();
           img.onerror = () => res();
         });
+        if (!img.naturalWidth || !img.naturalHeight) continue;
 
         // Rounded clip
         if (borderRadius > 0) {
@@ -115,12 +126,13 @@ export default function ImageCollage() {
         if (borderRadius > 0) ctx.restore();
       }
 
-      const blob = await new Promise<Blob | null>((res) => canvas.toBlob((b) => res(b), 'image/png'));
-      if (blob) {
-        triggerBlobDownload(blob, 'collage.png');
-        setExportedOnce(true);
-      }
+      ctx.restore();
+
+      const blob = await safeCanvasToBlob(canvas, 'image/png');
+      triggerBlobDownload(blob, 'collage.png');
+      setExportedOnce(true);
     } finally {
+      releaseCanvas(canvas);
       setBusy(false);
     }
   };
@@ -154,7 +166,7 @@ export default function ImageCollage() {
               multiple={true}
               title="Drop photos for collage"
               subtitle="Select multiple JPG, PNG, or WebP images"
-              accept={{ 'image/*': ['.jpg', '.jpeg', '.png', '.webp'] }}
+              accept={{ 'image/*': ['.jpg', '.jpeg', '.png', '.webp', '.heic', '.heif', '.avif'] }}
             />
           ) : (
             <>
@@ -184,7 +196,7 @@ export default function ImageCollage() {
                             <img src={images[i].url} alt="" className="w-full h-full object-cover" />
                             <button
                               onClick={() => removeImage(images[i].id)}
-                              className="absolute top-1.5 right-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity shadow cursor-pointer"
+                              className="absolute top-1.5 right-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-full p-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity shadow cursor-pointer"
                               aria-label="Remove image"
                             >
                               <X className="w-3 h-3" />
@@ -206,7 +218,7 @@ export default function ImageCollage() {
                   <Plus className="w-4 h-4 text-[var(--pms-violet)]" /> Add more
                   <input
                     type="file"
-                    accept="image/*"
+                    accept={ACCEPT_IMAGES}
                     multiple
                     className="hidden"
                     onChange={(e) => {

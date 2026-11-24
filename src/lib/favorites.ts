@@ -6,15 +6,22 @@ export interface FavoriteItem {
 }
 
 function load(): FavoriteItem[] {
+  if (typeof window === 'undefined') return [];
   try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+    const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+    return Array.isArray(parsed) ? parsed : [];
   } catch {
     return [];
   }
 }
 
 function save(items: FavoriteItem[]) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+  } catch {
+    // Ignore storage access errors in strict WebViews / private mode
+  }
 }
 
 export function getFavorites(): FavoriteItem[] {

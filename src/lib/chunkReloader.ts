@@ -39,7 +39,12 @@ export function isChunkLoadError(err: any): boolean {
 export function handleChunkLoadFailure(source = 'unknown'): boolean {
   if (typeof window === 'undefined') return false;
 
-  const lastReload = sessionStorage.getItem(CHUNK_RELOAD_KEY);
+  let lastReload: string | null = null;
+  try {
+    lastReload = sessionStorage.getItem(CHUNK_RELOAD_KEY);
+  } catch {
+    // Storage blocked (e.g. iOS Block All Cookies / strict Android WebView)
+  }
   const now = Date.now();
 
   // If reloaded recently (within 15s), don't reload again (could be an offline network failure)
@@ -48,7 +53,11 @@ export function handleChunkLoadFailure(source = 'unknown'): boolean {
     return false;
   }
 
-  sessionStorage.setItem(CHUNK_RELOAD_KEY, String(now));
+  try {
+    sessionStorage.setItem(CHUNK_RELOAD_KEY, String(now));
+  } catch {
+    // Ignore storage quota/security errors
+  }
   console.warn(`[ChunkLoader] Stale deployment chunk detected from ${source}. Reloading page to fetch latest version...`);
 
   // Immediate page refresh to grab fresh index.html and current chunks

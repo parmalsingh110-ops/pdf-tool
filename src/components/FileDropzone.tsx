@@ -1,11 +1,25 @@
-import { useCallback, useState } from 'react';
-import { useDropzone, FileRejection } from 'react-dropzone';
+import { useCallback, useMemo, useState } from 'react';
+import { useDropzone, type FileRejection } from 'react-dropzone';
 import { motion, useReducedMotion } from 'motion/react';
 import { UploadCloud, ShieldCheck, AlertCircle, X, FileText, Sparkles } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { inferMimeFromFile, isImageFile, isPdfFile } from '../lib/fileAccept';
 
 const MAX_WARN_MB = 50;
 const DEFAULT_MAX_SIZE_BYTES = 100 * 1024 * 1024; // 100 MB hard safety ceiling
+
+const BROAD_IMAGE_EXTS = [
+  '.jpg',
+  '.jpeg',
+  '.png',
+  '.webp',
+  '.gif',
+  '.bmp',
+  '.heic',
+  '.heif',
+  '.avif',
+  '.jfif',
+];
 
 interface FileDropzoneProps {
   onDrop: (acceptedFiles: File[]) => void;
@@ -24,10 +38,90 @@ interface FileDropzoneProps {
 
 function getFileTypeHint(accept: Record<string, string[]>): string {
   const exts = Object.values(accept).flat();
-  if (exts.length === 0) return '';
+  if (exts.length === 0) {
+    const keys = Object.keys(accept);
+    if (keys.some((k) => k.startsWith('image/'))) return 'Image files supported';
+    if (keys.includes('application/pdf')) return 'PDF files supported';
+    return '';
+  }
   if (exts.includes('.pdf') && exts.length === 1) return 'PDF files supported';
   const formatted = [...new Set(exts.map((e) => e.replace('.', '').toUpperCase()))].join(', ');
   return `${formatted} files supported`;
+}
+
+function ensureFileMime(file: File, mime: string, defaultExt?: string): File {
+  const currentMime = (file.type || '').trim().toLowerCase();
+  const hasConcreteMime =
+    Boolean(currentMime) && currentMime !== 'application/octet-stream' && currentMime !== '*/*';
+  const needsExt = Boolean(defaultExt && !/\.[a-z0-9]{2,6}$/i.test(file.name || ''));
+
+  if (hasConcreteMime && !needsExt) return file;
+  const nextName = needsExt ? `${file.name || 'file'}${defaultExt}` : file.name;
+  try {
+    return new File([file], nextName, {
+      type: hasConcreteMime ? file.type : mime,
+      lastModified: file.lastModified || Date.now(),
+    });
+  } catch {
+    return file;
+  }
+}
+
+async function sniffMagicMime(file: File): Promise<{ mime: string; ext: string } | null> {
+  try {
+    const buf = await file.slice(0, 16).arrayBuffer();
+    const b = new Uint8Array(buf);
+    if (b.length < 4) return null;
+
+    // %PDF
+    if (b[0] === 0x25 && b[1] === 0x50 && b[2] === 0x44 && b[3] === 0x46) {
+      return { mime: 'application/pdf', ext: '.pdf' };
+    }
+    // JPEG
+    if (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) {
+      return { mime: 'image/jpeg', ext: '.jpg' };
+    }
+    // PNG
+    if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) {
+      return { mime: 'image/png', ext: '.png' };
+    }
+    // GIF
+    if (b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x38) {
+      return { mime: 'image/gif', ext: '.gif' };
+    }
+    // BMP
+    if (b[0] === 0x42 && b[1] === 0x4d) {
+      return { mime: 'image/bmp', ext: '.bmp' };
+    }
+    // WebP (RIFF....WEBP)
+    if (
+      b.length >= 12 &&
+      b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46 &&
+      b[8] === 0x57 && b[9] === 0x45 && b[10] === 0x42 && b[11] === 0x50
+    ) {
+      return { mime: 'image/webp', ext: '.webp' };
+    }
+    // TIFF
+    if (
+      (b[0] === 0x49 && b[1] === 0x49 && b[2] === 0x2a && b[3] === 0x00) ||
+      (b[0] === 0x4d && b[1] === 0x4d && b[2] === 0x00 && b[3] === 0x2a)
+    ) {
+      return { mime: 'image/tiff', ext: '.tiff' };
+    }
+    // ISO BMFF (HEIC / HEIF / AVIF): ....ftyp<brand>
+    if (b.length >= 12 && b[4] === 0x66 && b[5] === 0x74 && b[6] === 0x79 && b[7] === 0x70) {
+      const brand = String.fromCharCode(b[8], b[9], b[10], b[11]).toLowerCase();
+      if (brand === 'avif' || brand === 'avis') {
+        return { mime: 'image/avif', ext: '.avif' };
+      }
+      if (['heic', 'heix', 'hevc', 'hevx', 'mif1', 'msf1', 'heim', 'heis'].includes(brand)) {
+        return { mime: 'image/heic', ext: '.heic' };
+      }
+    }
+  } catch {
+    // Ignore read errors
+  }
+  return null;
 }
 
 export default function FileDropzone({
@@ -45,22 +139,22 @@ export default function FileDropzone({
 }: FileDropzoneProps) {
   const [dropError, setDropError] = useState<string | null>(null);
 
-  const handleDrop = useCallback(
-    (acceptedFiles: File[]) => {
-      setDropError(null);
-      // Warn if any file exceeds 50 MB (processing may be slower)
-      const oversized = acceptedFiles.filter((f) => f.size > MAX_WARN_MB * 1024 * 1024);
-      if (oversized.length > 0 && onDropRejected) {
-        onDropRejected(
-          `Large file detected (${(oversized[0].size / 1024 / 1024).toFixed(1)} MB). Processing may take a moment.`,
-        );
+  // Broaden `image/*` with mobile camera formats (.heic, .heif, .avif, .jfif) so iOS/Android pickers don't drop photos
+  const normalizedAccept = useMemo(() => {
+    if (!accept) return undefined;
+    const next: Record<string, string[]> = {};
+    for (const [mime, exts] of Object.entries(accept)) {
+      if (mime === 'image/*') {
+        next['image/*'] =
+          exts.length === 0 ? [] : Array.from(new Set([...exts, ...BROAD_IMAGE_EXTS]));
+      } else {
+        next[mime] = exts;
       }
-      onDrop(acceptedFiles);
-    },
-    [onDrop, onDropRejected],
-  );
+    }
+    return next;
+  }, [accept]);
 
-  const handleRejected = useCallback(
+  const reportRejections = useCallback(
     (fileRejections: FileRejection[]) => {
       if (fileRejections.length === 0) return;
       const codes = fileRejections.flatMap((r) => r.errors.map((e) => e.code));
@@ -83,10 +177,133 @@ export default function FileDropzone({
     [maxSize, onDropRejected],
   );
 
+  const finalizeDrop = useCallback(
+    (acceptedFiles: File[], rescuedFiles: File[], hardRejections: FileRejection[]) => {
+      const combined = [...acceptedFiles, ...rescuedFiles];
+      const finalRejections = [...hardRejections];
+
+      let allowed = combined;
+      const effectiveMax = !multiple ? 1 : maxFiles > 0 ? maxFiles : 0;
+      if (effectiveMax > 0 && combined.length > effectiveMax) {
+        allowed = combined.slice(0, effectiveMax);
+        const overflow = combined.slice(effectiveMax);
+        for (const f of overflow) {
+          finalRejections.push({
+            file: f,
+            errors: [{ code: 'too-many-files', message: 'Too many files' }],
+          });
+        }
+      }
+
+      if (allowed.length > 0) {
+        setDropError(null);
+        // Warn if any file exceeds 50 MB (processing may be slower)
+        const oversized = allowed.filter((f) => f.size > MAX_WARN_MB * 1024 * 1024);
+        if (oversized.length > 0 && onDropRejected) {
+          onDropRejected(
+            `Large file detected (${(oversized[0].size / 1024 / 1024).toFixed(1)} MB). Processing may take a moment.`,
+          );
+        }
+        onDrop(allowed);
+      }
+
+      if (finalRejections.length > 0) {
+        reportRejections(finalRejections);
+      }
+    },
+    [maxFiles, multiple, onDrop, onDropRejected, reportRejections],
+  );
+
+  const handleUnifiedDrop = useCallback(
+    (acceptedFiles: File[], fileRejections: FileRejection[]) => {
+      if (fileRejections.length === 0) {
+        finalizeDrop(acceptedFiles, [], []);
+        return;
+      }
+
+      const acceptKeys = Object.keys(accept || {}).map((k) => k.toLowerCase());
+      const acceptExts = Object.values(accept || {})
+        .flat()
+        .map((e) => e.toLowerCase());
+
+      const acceptsAnyImage = acceptKeys.includes('image/*');
+      const acceptsSomeImage = acceptKeys.some((k) => k.startsWith('image/'));
+      const acceptsPdf =
+        acceptKeys.includes('application/pdf') || acceptExts.includes('.pdf');
+
+      const syncRescued: File[] = [];
+      const needsMagicSniff: FileRejection[] = [];
+      const hardRejections: FileRejection[] = [];
+
+      for (const rej of fileRejections) {
+        const onlyTypeError =
+          rej.errors.length > 0 && rej.errors.every((e) => e.code === 'file-invalid-type');
+        if (!onlyTypeError) {
+          hardRejections.push(rej);
+          continue;
+        }
+
+        const f = rej.file;
+        const rawType = (f.type || '').trim().toLowerCase();
+        const isGenericMime =
+          !rawType || rawType === 'application/octet-stream' || rawType === '*/*';
+
+        // 1. Rescue PDF files with empty/generic Android MIME or uppercase extensions
+        if (acceptsPdf && isPdfFile(f)) {
+          syncRescued.push(ensureFileMime(f, 'application/pdf', '.pdf'));
+          continue;
+        }
+
+        // 2. Rescue image files (including HEIC/HEIF/AVIF/JFIF or empty Android content:// MIME)
+        if (acceptsSomeImage && isImageFile(f)) {
+          const inferred = inferMimeFromFile(f, 'image/jpeg').toLowerCase();
+          if (acceptsAnyImage || acceptKeys.includes(inferred)) {
+            syncRescued.push(ensureFileMime(f, inferred));
+            continue;
+          }
+        }
+
+        // 3. Android content:// picker often yields extensionless files with empty/octet-stream MIME
+        if (isGenericMime && (acceptsPdf || acceptsSomeImage)) {
+          needsMagicSniff.push(rej);
+          continue;
+        }
+
+        hardRejections.push(rej);
+      }
+
+      if (needsMagicSniff.length === 0) {
+        finalizeDrop(acceptedFiles, syncRescued, hardRejections);
+        return;
+      }
+
+      void (async () => {
+        const asyncRescued = [...syncRescued];
+        const remainingRejections = [...hardRejections];
+
+        for (const rej of needsMagicSniff) {
+          const sniffed = await sniffMagicMime(rej.file);
+          if (
+            sniffed &&
+            ((sniffed.mime === 'application/pdf' && acceptsPdf) ||
+              (sniffed.mime.startsWith('image/') &&
+                (acceptsAnyImage || acceptKeys.includes(sniffed.mime))))
+          ) {
+            asyncRescued.push(ensureFileMime(rej.file, sniffed.mime, sniffed.ext));
+          } else {
+            remainingRejections.push(rej);
+          }
+        }
+
+        finalizeDrop(acceptedFiles, asyncRescued, remainingRejections);
+      })();
+    },
+    [accept, finalizeDrop],
+  );
+
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
-    onDrop: handleDrop,
-    onDropRejected: handleRejected,
-    accept,
+    onDrop: handleUnifiedDrop,
+    accept: normalizedAccept,
     maxFiles: maxFiles > 0 ? maxFiles : undefined,
     maxSize,
     multiple,

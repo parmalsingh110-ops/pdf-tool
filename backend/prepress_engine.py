@@ -23,6 +23,7 @@ import pikepdf
 from PIL import Image
 
 from fast_codecs import fast_jpeg_encode
+from image_utils import is_image_bytes, is_pdf_bytes, safe_open_image
 
 logger = logging.getLogger("pdf_tool.prepress")
 
@@ -34,29 +35,26 @@ _INK_COV_LINE_RE = re.compile(
 
 def ensure_pdf_input(raw_bytes: bytes, filename: str, out_pdf: Path, dpi: int = 300) -> bool:
     """
-    Accepts PDF or raster image (JPG/PNG/WebP/TIFF).
+    Accepts PDF or raster image (JPG/PNG/WebP/HEIC/AVIF/TIFF/BMP/GIF, including extensionless blobs).
     If input is already PDF, writes directly to `out_pdf` and returns False (not converted from image).
-    If input is an image, embeds cleanly at target press DPI into `out_pdf` and returns True.
+    If input is an image, applies EXIF orientation, white alpha flattening, and 4800px RAM cap,
+    then embeds cleanly at target press DPI into `out_pdf` and returns True.
     """
-    if raw_bytes[:5] == b"%PDF-":
+    if is_pdf_bytes(raw_bytes):
         out_pdf.write_bytes(raw_bytes)
         return False
 
-    ext = Path(filename or "").suffix.lower()
-    if ext in (".jpg", ".jpeg", ".png", ".webp", ".tif", ".tiff", ".bmp"):
-        img = Image.open(io.BytesIO(raw_bytes))
-        if img.mode not in ("RGB", "CMYK", "L"):
-            img = img.convert("RGB")
+    if is_image_bytes(raw_bytes, filename):
+        img, _ = safe_open_image(raw_bytes, max_dim=4800, flatten_alpha_bg=(255, 255, 255))
         target_dpi = max(72, min(600, int(dpi)))
         w_pt = (img.width / target_dpi) * 72.0
         h_pt = (img.height / target_dpi) * 72.0
 
-        # Embed lossless PNG (for RGB/L) or high-quality JPEG (for CMYK) into single-page PDF
         buf = io.BytesIO()
-        if img.mode == "CMYK":
-            img.save(buf, format="JPEG", quality=96)
-        else:
+        if max(img.width, img.height) <= 2400:
             img.save(buf, format="PNG")
+        else:
+            img.save(buf, format="JPEG", quality=95)
         img_bytes = buf.getvalue()
 
         doc = fitz.open()
@@ -66,7 +64,7 @@ def ensure_pdf_input(raw_bytes: bytes, filename: str, out_pdf: Path, dpi: int = 
         doc.close()
         return True
 
-    raise ValueError("Unsupported file format. Please upload a PDF, JPG, PNG, WebP, or TIFF file.")
+    raise ValueError("Unsupported file format. Please upload a PDF, JPG, PNG, WebP, HEIC, AVIF, or TIFF file.")
 
 
 def _rewrite_ops_pure_k(ops: list[tuple[Any, Any]]) -> tuple[list[tuple[Any, Any]], bool]:

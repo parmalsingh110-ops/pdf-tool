@@ -5,6 +5,7 @@ import Layout from './components/Layout';
 import ScrollToTop from './components/ScrollToTop';
 import Home from './pages/Home';
 import { getSharedFilesFromCache, subscribeSharedFilesReady } from './lib/shareTarget';
+import { getApiBaseUrl } from './lib/api';
 import { PearlRouteSkeleton } from './components/pearl/PearlMotion';
 
 // ── Lazy Loaded Tool & Informational Pages (Code Splitting for Core Web Vitals) ──
@@ -179,9 +180,18 @@ export default function App() {
 
   // ── Backend Warmup Ping ─────────────────────────────────────────
   useEffect(() => {
-    const API_BASE = import.meta.env.VITE_API_URL;
-    if (API_BASE && API_BASE.startsWith('http') && !API_BASE.includes('localhost')) {
-      fetch(`${API_BASE}/health`, { method: 'HEAD' }).catch(() => {/* silent */});
+    try {
+      const apiBase = getApiBaseUrl();
+      const isLocalOrLan =
+        !apiBase ||
+        apiBase.includes('localhost') ||
+        apiBase.includes('127.0.0.1') ||
+        /:\/\/(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(apiBase);
+      if (apiBase && apiBase.startsWith('http') && !isLocalOrLan) {
+        fetch(`${apiBase}/health`, { method: 'HEAD' }).catch(() => {/* silent */});
+      }
+    } catch {
+      /* silent */
     }
   }, []);
 

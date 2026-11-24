@@ -10,6 +10,7 @@ import { useSEO } from '../hooks/useSEO';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 import { PearlScanOverlay, PearlStageSwitch } from '../components/pearl/PearlMotion';
 import { useAutoRevokeUrl, toArrayBufferBytes } from '../lib/blobUrl';
+import { safeRandomUUID } from '../lib/safeCrypto';
 
 type PrintPermission = 'none' | 'low' | 'high';
 
@@ -120,7 +121,7 @@ export default function ProtectPDF() {
         ? ownerPassword
         : (allowCopying && allowModifying && printingVal === 'highResolution')
           ? userPassword
-          : crypto.randomUUID();
+          : safeRandomUUID();
 
       await pdfDoc.encrypt({
         userPassword,

@@ -5,6 +5,8 @@ import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 import { AnimatedNumber, PearlScanOverlay, PearlStageSwitch } from '../components/pearl/PearlMotion';
+import { sha1Hex, sha256Hex } from '../lib/safeCrypto';
+import { copyTextToClipboard } from '../lib/clipboard';
 
 interface HashResult {
   name: string;
@@ -13,11 +15,6 @@ interface HashResult {
   md5: string;
   sha1: string;
   sha256: string;
-}
-
-async function computeHash(buffer: ArrayBuffer, algo: string): Promise<string> {
-  const hashBuffer = await crypto.subtle.digest(algo, buffer);
-  return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
 export default function FileHash() {
@@ -38,8 +35,8 @@ export default function FileHash() {
     setBusy(true);
     try {
       const buf = await f.arrayBuffer();
-      const sha1 = await computeHash(buf, 'SHA-1');
-      const sha256 = await computeHash(buf, 'SHA-256');
+      const sha1 = await sha1Hex(buf);
+      const sha256 = await sha256Hex(buf);
       const md5 = sha1.slice(0, 32);
 
       setResult({
@@ -58,9 +55,11 @@ export default function FileHash() {
   };
 
   const copy = async (text: string, label: string) => {
-    await navigator.clipboard.writeText(text);
-    setCopied(label);
-    setTimeout(() => setCopied(null), 2000);
+    const ok = await copyTextToClipboard(text);
+    if (ok) {
+      setCopied(label);
+      setTimeout(() => setCopied(null), 2000);
+    }
   };
 
   const stageKey = !file ? 'upload' : busy ? 'hashing' : 'result';

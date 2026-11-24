@@ -27,8 +27,11 @@ import ShareQrModal from '../components/ShareQrModal';
 import BeforeAfterSlider from '../components/BeforeAfterSlider';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 import { AnimatedNumber, PearlScanOverlay } from '../components/pearl/PearlMotion';
-import { toArrayBufferBytes, useAutoRevokeUrl } from '../lib/blobUrl';
-import { dataUrlToBytes, downloadBlob } from '../lib/utils';
+import { toArrayBufferBytes, triggerBlobDownload, useAutoRevokeUrl } from '../lib/blobUrl';
+import { ACCEPT_PDF_AND_IMAGES, isPdfFile } from '../lib/fileAccept';
+import { printPdfBlob } from '../lib/printHelper';
+import { clampCanvasDimensions, clampPdfScale, releaseCanvas } from '../lib/safeCanvas';
+import { dataUrlToBytes } from '../lib/utils';
 import {
   type XeroxCleanMode,
   type InkComparison,
@@ -196,13 +199,15 @@ export default function XeroxCleaner() {
     const loaded: PageItem[] = [];
     try {
       for (const f of selectedFiles) {
-        if (f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf')) {
+        if (isPdfFile(f)) {
           const ab = await f.arrayBuffer();
           const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(ab) }).promise;
           for (let p = 1; p <= pdf.numPages; p++) {
             setStatusLabel(`Reading ${f.name} (Page ${p}/${pdf.numPages})...`);
             const page = await pdf.getPage(p);
-            const vp = page.getViewport({ scale: 2.0 });
+            const baseVp = page.getViewport({ scale: 1.0 });
+            const safeScale = clampPdfScale(baseVp.width, baseVp.height, 2.0);
+            const vp = page.getViewport({ scale: safeScale });
             const canvas = document.createElement('canvas');
             canvas.width = vp.width;
             canvas.height = vp.height;
@@ -230,9 +235,13 @@ export default function XeroxCleaner() {
               // Cap ultra-huge 20MP camera photos at 2400px long side (300 DPI A4) to keep browser fast & sharp
               const maxDim = 2400;
               const scale = Math.min(1, maxDim / Math.max(img.naturalWidth, img.naturalHeight));
+              const clamped = clampCanvasDimensions(
+                Math.round(img.naturalWidth * scale),
+                Math.round(img.naturalHeight * scale)
+              );
               const canvas = document.createElement('canvas');
-              canvas.width = Math.round(img.naturalWidth * scale);
-              canvas.height = Math.round(img.naturalHeight * scale);
+              canvas.width = clamped.width;
+              canvas.height = clamped.height;
               const ctx = canvas.getContext('2d', { willReadFrequently: true });
               if (ctx) {
                 ctx.fillStyle = '#ffffff';
@@ -320,37 +329,42 @@ export default function XeroxCleaner() {
       const pdfDoc = await PDFDocument.create();
       for (let i = 0; i < pages.length; i++) {
         setStatusLabel(`Cleaning & assembling page ${i + 1} of ${pages.length}...`);
-        const { cleaned } = buildCleanedPage(pages[i]);
-        const jpgDataUrl = cleaned.toDataURL('image/jpeg', 0.92);
-        const jpgBytes = dataUrlToBytes(jpgDataUrl);
-        const jpgImage = await pdfDoc.embedJpg(jpgBytes);
+        const { oriented, cleaned } = buildCleanedPage(pages[i]);
+        try {
+          const jpgDataUrl = cleaned.toDataURL('image/jpeg', 0.92);
+          const jpgBytes = dataUrlToBytes(jpgDataUrl);
+          const jpgImage = await pdfDoc.embedJpg(jpgBytes);
 
-        let pageW = 595.28;
-        let pageH = 841.89;
-        if (paperSize === 'auto_a4') {
-          if (cleaned.width > cleaned.height) {
-            pageW = 841.89;
-            pageH = 595.28;
+          let pageW = 595.28;
+          let pageH = 841.89;
+          if (paperSize === 'auto_a4') {
+            if (cleaned.width > cleaned.height) {
+              pageW = 841.89;
+              pageH = 595.28;
+            }
+          } else if (paperSize === 'legal') {
+            pageW = 612;
+            pageH = 1008;
+          } else if (paperSize === 'original') {
+            // Match exact aspect ratio scaled to A4-equivalent width
+            pageW = 595.28;
+            pageH = Math.max(200, (cleaned.height / Math.max(1, cleaned.width)) * pageW);
           }
-        } else if (paperSize === 'legal') {
-          pageW = 612;
-          pageH = 1008;
-        } else if (paperSize === 'original') {
-          // Match exact aspect ratio scaled to A4-equivalent width
-          pageW = 595.28;
-          pageH = Math.max(200, (cleaned.height / Math.max(1, cleaned.width)) * pageW);
-        }
 
-        const scale = Math.min(pageW / cleaned.width, pageH / cleaned.height);
-        const drawW = cleaned.width * scale;
-        const drawH = cleaned.height * scale;
-        const page = pdfDoc.addPage([pageW, pageH]);
-        page.drawImage(jpgImage, {
-          x: (pageW - drawW) / 2,
-          y: (pageH - drawH) / 2,
-          width: drawW,
-          height: drawH,
-        });
+          const scale = Math.min(pageW / cleaned.width, pageH / cleaned.height);
+          const drawW = cleaned.width * scale;
+          const drawH = cleaned.height * scale;
+          const page = pdfDoc.addPage([pageW, pageH]);
+          page.drawImage(jpgImage, {
+            x: (pageW - drawW) / 2,
+            y: (pageH - drawH) / 2,
+            width: drawW,
+            height: drawH,
+          });
+        } finally {
+          releaseCanvas(cleaned);
+          if (oriented !== pages[i].originalCanvas) releaseCanvas(oriented);
+        }
 
         // Yield between pages to keep UI responsive
         if (i % 2 === 1) await new Promise((r) => setTimeout(r, 0));
@@ -370,19 +384,13 @@ export default function XeroxCleaner() {
 
   const handleDownloadPdf = async () => {
     const blob = await assembleCleanPdfBlob();
-    if (blob) downloadBlob(blob, `clean-xerox-pro-${Date.now()}.pdf`);
+    if (blob) triggerBlobDownload(blob, `clean-xerox-pro-${Date.now()}.pdf`);
   };
 
   const handleDirectPrint = async () => {
     const blob = await assembleCleanPdfBlob();
     if (!blob) return;
-    const url = URL.createObjectURL(blob);
-    const win = window.open(url, '_blank');
-    if (win) {
-      win.addEventListener('load', () => {
-        try { win.print(); } catch {}
-      });
-    }
+    await printPdfBlob(blob, `clean-xerox-pro-${Date.now()}.pdf`);
   };
 
   const handleOpenShareQr = async () => {
@@ -397,7 +405,7 @@ export default function XeroxCleaner() {
     if (!c) return;
     c.toBlob(
       (blob) => {
-        if (blob) downloadBlob(blob, `clean-page-${activePageIndex + 1}.jpg`);
+        if (blob) triggerBlobDownload(blob, `clean-page-${activePageIndex + 1}.jpg`);
       },
       'image/jpeg',
       0.95
@@ -426,9 +434,9 @@ export default function XeroxCleaner() {
               <input
                 type="file"
                 multiple
-                accept=".pdf,image/png,image/jpeg,image/webp"
+                accept={ACCEPT_PDF_AND_IMAGES}
                 onChange={(e) => handleFileInput(e, false)}
-                className="hidden"
+                className="sr-only"
               />
               <div
                 className="w-16 h-16 rounded-2xl text-emerald-600 dark:text-emerald-400 border border-[var(--pms-border)] flex items-center justify-center mb-4 group-hover:scale-105 transition-transform"
@@ -462,9 +470,9 @@ export default function XeroxCleaner() {
                     <input
                       type="file"
                       multiple
-                      accept=".pdf,image/png,image/jpeg,image/webp"
+                      accept={ACCEPT_PDF_AND_IMAGES}
                       onChange={(e) => handleFileInput(e, true)}
-                      className="hidden"
+                      className="sr-only"
                     />
                   </label>
                   <button

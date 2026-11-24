@@ -22,6 +22,8 @@ Run:
 
 import os
 import re
+import io
+import zipfile
 import hmac
 import hashlib
 import secrets
@@ -44,10 +46,12 @@ from fastapi.responses import FileResponse, JSONResponse
 from starlette.background import BackgroundTask
 from starlette.middleware.base import BaseHTTPMiddleware
 from dotenv import load_dotenv
-from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi import Limiter
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
+import image_utils  # Registers pillow-heif & truncated-image tolerance at startup
+from image_utils import is_image_bytes, normalize_image_for_pymupdf
 from fast_codecs import (
     SmartGZipMiddleware,
     fast_json_dumps,
@@ -120,18 +124,26 @@ MAX_PDF_PAGES: int = int(os.environ.get("MAX_PDF_PAGES", "300"))
 MAX_DPI: int = int(os.environ.get("MAX_DPI", "300"))
 MIN_DPI: int = 72
 MAX_PROCESSING_SECONDS: int = int(os.environ.get("MAX_PROCESSING_SECONDS", "300"))
-MAX_IMAGE_PIXELS: int = int(os.environ.get("MAX_IMAGE_PIXELS", "100000000"))
+MAX_IMAGE_PIXELS: int = int(os.environ.get("MAX_IMAGE_PIXELS", "220000000"))
 
 try:
-    from PIL import Image as _PILImage
+    from PIL import Image as _PILImage, UnidentifiedImageError as _PILUnidentifiedImageError
     _PILImage.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS
+    _PILDecompressionBombError = _PILImage.DecompressionBombError
 except Exception:
-    pass
+    _PILUnidentifiedImageError = Exception  # type: ignore[assignment,misc]
+    _PILDecompressionBombError = Exception  # type: ignore[assignment,misc]
 
 # Disable /docs and /redoc in production (set ENABLE_DOCS=true to re-enable)
 ENABLE_DOCS: bool = os.environ.get("ENABLE_DOCS", "false").lower() == "true"
 
-# CORS: comma-separated list of allowed origins
+# CORS: comma-separated list of allowed origins + regex for Render / LAN mobile testing
+_CORS_ORIGIN_REGEX_STR = (
+    r"^https:\/\/([a-zA-Z0-9-]+\.)*(pdfmediasuite\.in|onrender\.com)$"
+    r"|^http:\/\/(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)(:\d+)?$"
+)
+_CORS_ORIGIN_REGEX = re.compile(_CORS_ORIGIN_REGEX_STR)
+
 _raw_origins = os.environ.get(
     "ALLOWED_ORIGINS",
     "https://www.pdfmediasuite.in,https://pdfmediasuite.in,http://localhost:3000,http://localhost:4173,http://127.0.0.1:3000"
@@ -151,6 +163,14 @@ for o in _raw_origins.split(","):
             ALLOWED_ORIGINS_SET.add("https://pdfmediasuite.in")
             ALLOWED_ORIGINS_SET.add("https://www.pdfmediasuite.in")
 ALLOWED_ORIGINS: list[str] = list(ALLOWED_ORIGINS_SET)
+
+
+def _cors_headers_for_request(request: Request) -> dict[str, str]:
+    """Return Access-Control-Allow-Origin header if the request Origin is allowed."""
+    origin = (request.headers.get("origin") or "").strip().rstrip("/")
+    if origin and (origin in ALLOWED_ORIGINS_SET or _CORS_ORIGIN_REGEX.match(origin)):
+        return {"Access-Control-Allow-Origin": origin, "Vary": "Origin"}
+    return {}
 
 # LibreOffice concurrency: limit concurrent soffice processes to avoid RAM exhaustion
 LIBREOFFICE_SEMAPHORE = asyncio.Semaphore(int(os.environ.get("MAX_CONCURRENT_LIBREOFFICE", "2")))
@@ -318,9 +338,24 @@ app = FastAPI(
     default_response_class=get_default_json_response_class(),
 )
 
-# Attach rate limiter to app state
+# Attach rate limiter to app state with clean JSON + Retry-After + CORS headers
 app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+
+async def _custom_rate_limit_handler(request: Request, exc: RateLimitExceeded):
+    headers = {"Retry-After": "5"}
+    headers.update(_cors_headers_for_request(request))
+    return JSONResponse(
+        status_code=429,
+        content={
+            "detail": "Too many requests from your network right now. Retrying automatically...",
+            "error": "rate_limit_exceeded",
+        },
+        headers=headers,
+    )
+
+
+app.add_exception_handler(RateLimitExceeded, _custom_rate_limit_handler)
 
 
 @app.exception_handler(Exception)
@@ -341,10 +376,11 @@ async def _global_crash_shield_handler(request: Request, exc: Exception):
             "detail": "Server encountered a temporary processing error and recovered safely. Please try again.",
             "recovered": True,
         },
+        headers=_cors_headers_for_request(request),
     )
 
 
-# ─── Middleware Stack ───────────────────────────────────────────
+# ─── Middleware Stack (Starlette executes LIFO: last added = outermost!) ────────
 
 # 1. Selective SIMD zlib-ng GZip compression (bypasses PDFs, DOCX/XLSX/PPTX, images & E2EE streams)
 app.add_middleware(SmartGZipMiddleware, minimum_size=500)
@@ -352,50 +388,8 @@ app.add_middleware(SmartGZipMiddleware, minimum_size=500)
 # 2. Multi-Lane Priority Load Balancer, Virtual Waiting Room & Edge WAF
 app.add_middleware(LoadBalancerAndFirewallMiddleware, ip_resolver=get_real_client_ip)
 
-# 3. CORS — restricted to known production origins & subdomains (outermost so 429/503 carry CORS headers)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
-    allow_origin_regex=r"^https:\/\/([a-zA-Z0-9-]+\.)*pdfmediasuite\.in$",
-    allow_methods=["GET", "POST", "DELETE", "HEAD", "OPTIONS"],
-    allow_headers=[
-        "Content-Type",
-        "Authorization",
-        "X-Admin-Key",
-        "X-Room-Token",
-        "X-Request-Id",
-        "X-Idempotency-Key",
-        "X-Gemini-Api-Key",
-        "Accept",
-        "Origin",
-        "X-Requested-With",
-        "Cache-Control",
-    ],
-    expose_headers=[
-        "X-Match-Count",
-        "X-Request-Id",
-        "X-Load-Lane",
-        "X-Queue-Wait-Ms",
-        "X-Cache",
-        "X-Orig-Bytes",
-        "X-Compressed-Bytes",
-        "X-CMYK-Profile",
-        "X-CMYK-Pure-K",
-        "X-CMYK-Avg-TAC",
-        "X-CMYK-Max-TAC",
-        "X-CMYK-Crop-Marks",
-        "X-Gray-Avg-K",
-        "X-Gray-Vector",
-        "X-Passport-AI-Model",
-        "X-Passport-AI-Ms",
-        "X-Passport-AI-Cache",
-        "Retry-After",
-    ],
-    allow_credentials=False,
-)
 
-
-# 4. Security Headers Middleware
+# 3. Security Headers Middleware
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     """Adds security response headers to every response."""
 
@@ -488,25 +482,65 @@ class BandwidthLoggerMiddleware(BaseHTTPMiddleware):
 
 app.add_middleware(BandwidthLoggerMiddleware)
 
+# 5. CORS — registered LAST (outermost in Starlette LIFO stack, outside BandwidthLogger & SecurityHeaders)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=ALLOWED_ORIGINS,
+    allow_origin_regex=_CORS_ORIGIN_REGEX_STR,
+    allow_methods=["GET", "POST", "DELETE", "HEAD", "OPTIONS"],
+    allow_headers=["*"],
+    expose_headers=[
+        "Content-Disposition",
+        "X-Match-Count",
+        "X-Request-Id",
+        "X-Load-Lane",
+        "X-Queue-Wait-Ms",
+        "X-Cache",
+        "X-Orig-Bytes",
+        "X-Compressed-Bytes",
+        "X-CMYK-Profile",
+        "X-CMYK-Pure-K",
+        "X-CMYK-Avg-TAC",
+        "X-CMYK-Max-TAC",
+        "X-CMYK-Crop-Marks",
+        "X-Gray-Avg-K",
+        "X-Gray-Vector",
+        "X-Passport-AI-Model",
+        "X-Passport-AI-Ms",
+        "X-Passport-AI-Cache",
+        "X-Passport-AI-Route",
+        "X-Passport-AI-Tier",
+        "X-Passport-AI-Framing",
+        "X-Repair-Strategy",
+        "X-Vector-Paths",
+        "X-Bezier-Nodes",
+        "X-Ocr-Words",
+        "Retry-After",
+    ],
+    allow_credentials=False,
+)
+
 TEMP_DIR = Path(tempfile.gettempdir()) / "pdf_tool_backend"
 TEMP_DIR.mkdir(exist_ok=True)
 
 
 # ─── Security Helpers ──────────────────────────────────────────
 
-async def safe_read_upload(file: UploadFile) -> bytes:
+async def safe_read_upload(file: UploadFile, max_bytes: int = MAX_UPLOAD_BYTES) -> bytes:
     """
-    Read uploaded file into bytes with a hard size cap.
-    Raises HTTP 413 if the file exceeds MAX_UPLOAD_BYTES.
+    Read uploaded file into bytes with a hard size cap (`max_bytes`, default MAX_UPLOAD_BYTES).
+    Raises HTTP 413 if the file exceeds `max_bytes`.
     Avoids reading the entire file when the Content-Length header already
     reveals the file is too large.
     """
+    limit_bytes = max(1024, int(max_bytes or MAX_UPLOAD_BYTES))
+    limit_mb = max(1, round(limit_bytes / (1024 * 1024)))
     # Quick check: if Content-Length header is present and already too large, reject early
     content_length = file.size  # FastAPI sets this from Content-Length
-    if content_length is not None and content_length > MAX_UPLOAD_BYTES:
+    if content_length is not None and content_length > limit_bytes:
         raise HTTPException(
             status_code=413,
-            detail=f"File too large. Maximum allowed size is {MAX_UPLOAD_MB} MB."
+            detail=f"File too large. Maximum allowed size is {limit_mb} MB."
         )
 
     # Read in chunks so we can enforce the limit even without a Content-Length header
@@ -518,10 +552,10 @@ async def safe_read_upload(file: UploadFile) -> bytes:
         if not chunk:
             break
         total += len(chunk)
-        if total > MAX_UPLOAD_BYTES:
+        if total > limit_bytes:
             raise HTTPException(
                 status_code=413,
-                detail=f"File too large. Maximum allowed size is {MAX_UPLOAD_MB} MB."
+                detail=f"File too large. Maximum allowed size is {limit_mb} MB."
             )
         chunks.append(chunk)
     raw_data = b"".join(chunks)
@@ -531,21 +565,26 @@ async def safe_read_upload(file: UploadFile) -> bytes:
 
 def safe_filename(user_filename: str | None, fallback: str = "output") -> str:
     """
-    Sanitize a user-supplied filename for use in Content-Disposition headers.
+    Sanitize a user-supplied filename for safe ASCII HTTP Content-Disposition headers.
     - Strips path separators (../  /  \\)
-    - Keeps only alphanumeric, dash, underscore, dot
+    - Uses re.ASCII so Devanagari/Hindi/Unicode names NEVER trigger latin-1 UnicodeEncodeError
+    - Keeps only ASCII alphanumeric, dash, underscore, dot
     - Truncates to 200 characters
-    - Falls back to 'output' if result is empty
+    - Falls back cleanly while preserving valid ASCII extension when stem becomes empty
     """
     if not user_filename:
         return fallback
     # Take only the basename — no directory traversal possible
-    name = Path(user_filename).name
-    # Strip non-safe characters
-    name = re.sub(r"[^\w.\-]", "_", name)
-    # Truncate
-    name = name[:200]
-    return name if name else fallback
+    base = Path(user_filename).name
+    raw_stem, raw_suffix = os.path.splitext(base)
+    safe_suffix = raw_suffix if re.fullmatch(r"\.[A-Za-z0-9]{1,10}", raw_suffix, flags=re.ASCII) else ""
+    clean_stem = re.sub(r"[^\w.\-]", "_", raw_stem, flags=re.ASCII)
+    clean_stem = re.sub(r"_+", "_", clean_stem).strip("_.")
+    if not clean_stem or not any(ch.isalnum() for ch in clean_stem):
+        fb_stem, fb_suffix = os.path.splitext(fallback)
+        fb_stem = fb_stem or "output"
+        return f"{fb_stem}{safe_suffix or fb_suffix}"[:200]
+    return f"{clean_stem[: max(1, 200 - len(safe_suffix))]}{safe_suffix}"
 
 
 def safe_error(e: Exception, endpoint: str = "") -> HTTPException:
@@ -637,9 +676,9 @@ def read_root(request: Request):
 # Ultra-lightweight health check — supports both HEAD (Uptime Robot) and GET.
 # HEAD request: server sends ONLY headers (zero body bytes transferred).
 # GET request: returns a tiny fixed-size JSON body.
-# Rate-limited to 30 requests/minute per IP to block bots.
+# Rate-limited to 120 requests/minute per IP (CGNAT-friendly for mobile networks).
 @app.api_route("/health", methods=["GET", "HEAD"])
-@limiter.limit("30/minute")
+@limiter.limit("120/minute")
 def health(request: Request, response: Response):
     if request.method == "HEAD":
         # Zero bytes sent — perfect for Uptime Robot pings
@@ -1879,7 +1918,7 @@ async def pdf_to_word(
     out = temp_path(".docx")
     try:
         raw_bytes = await safe_read_upload(file)
-        inp, was_image = normalize_input_to_pdf(raw_bytes, file.filename, inp)
+        inp, was_image = await run_in_threadpool(normalize_input_to_pdf, raw_bytes, file.filename, inp)
         check_pdf_page_count(inp, "pdf-to-word")
 
         eff_strict = _form_bool(strict_local, False)
@@ -2723,7 +2762,7 @@ async def pdf_to_excel(
     out = temp_path(".xlsx")
     try:
         raw_bytes = await safe_read_upload(file)
-        inp, was_image = normalize_input_to_pdf(raw_bytes, file.filename, inp)
+        inp, was_image = await run_in_threadpool(normalize_input_to_pdf, raw_bytes, file.filename, inp)
         check_pdf_page_count(inp, "pdf-to-excel")
         eff_strict = _form_bool(strict_local, False)
         eff_provider = _form_str(ai_provider, "auto") or "auto"
@@ -3182,7 +3221,7 @@ async def pdf_to_ppt(
     out = temp_path(".pptx")
     try:
         raw_bytes = await safe_read_upload(file)
-        inp, was_image = normalize_input_to_pdf(raw_bytes, file.filename, inp)
+        inp, was_image = await run_in_threadpool(normalize_input_to_pdf, raw_bytes, file.filename, inp)
         check_pdf_page_count(inp, "pdf-to-ppt")
 
         eff_strict = _form_bool(strict_local, False)
@@ -3318,18 +3357,80 @@ def libreoffice_convert(inp: Path, out_dir: Path) -> Path:
 ALLOWED_OFFICE_EXTENSIONS = ALLOWED_OFFICE_TO_PDF_EXTENSIONS
 
 
+_OFFICE_MIME_TO_EXT: dict[str, str] = {
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation": ".pptx",
+    "application/msword": ".doc",
+    "application/vnd.ms-excel": ".xls",
+    "application/vnd.ms-powerpoint": ".ppt",
+    "application/vnd.oasis.opendocument.text": ".odt",
+    "application/vnd.oasis.opendocument.spreadsheet": ".ods",
+    "application/vnd.oasis.opendocument.presentation": ".odp",
+    "application/rtf": ".rtf",
+    "text/rtf": ".rtf",
+    "text/csv": ".csv",
+    "text/plain": ".txt",
+}
+
+
+def _infer_office_extension(raw_bytes: bytes, content_type: Optional[str]) -> str:
+    """Infer Office document extension for extensionless mobile Blob uploads via ZIP XML, MIME, or OLE2."""
+    # 1. Inspect OOXML / OpenDocument ZIP interior entries
+    if raw_bytes.startswith(b"PK\x03\x04"):
+        try:
+            with zipfile.ZipFile(io.BytesIO(raw_bytes), "r") as zf:
+                names = set(zf.namelist())
+                if "word/document.xml" in names:
+                    return ".docx"
+                if "xl/workbook.xml" in names:
+                    return ".xlsx"
+                if "ppt/presentation.xml" in names:
+                    return ".pptx"
+                if "mimetype" in names:
+                    mt = zf.read("mimetype").decode("ascii", errors="ignore").strip().lower()
+                    if mt in _OFFICE_MIME_TO_EXT:
+                        return _OFFICE_MIME_TO_EXT[mt]
+        except Exception:
+            pass
+
+    # 2. Content-Type header mapping
+    ct = (content_type or "").split(";", 1)[0].strip().lower()
+    if ct in _OFFICE_MIME_TO_EXT:
+        return _OFFICE_MIME_TO_EXT[ct]
+
+    # 3. Legacy OLE2 binary compound documents (.doc / .xls / .ppt)
+    if raw_bytes.startswith(b"\xd0\xcf\x11\xe0"):
+        if b"W\x00o\x00r\x00d\x00D\x00o\x00c\x00u\x00m\x00e\x00n\x00t" in raw_bytes:
+            return ".doc"
+        if (
+            b"W\x00o\x00r\x00k\x00b\x00o\x00o\x00k" in raw_bytes
+            or b"B\x00o\x00o\x00k" in raw_bytes
+        ):
+            return ".xls"
+        if b"P\x00o\x00w\x00e\x00r\x00P\x00o\x00i\x00n\x00t\x00 \x00D\x00o\x00c\x00u\x00m\x00e\x00n\x00t" in raw_bytes:
+            return ".ppt"
+        return ".doc"
+
+    return ""
+
+
 @app.post("/convert/office-to-pdf")
 @limiter.limit("10/minute")
 async def office_to_pdf(request: Request, file: UploadFile = File(...)):
-    ext = Path(safe_filename(file.filename or "")).suffix.lower()
-    if ext not in ALLOWED_OFFICE_EXTENSIONS:
-        raise HTTPException(400, f"Unsupported format. Allowed: {', '.join(sorted(ALLOWED_OFFICE_EXTENSIONS))}")
-
-    inp = temp_path(ext)
+    inp: Optional[Path] = None
     out_dir = TEMP_DIR / uuid.uuid4().hex
-    out_dir.mkdir(exist_ok=True)
     try:
-        inp.write_bytes(await safe_read_upload(file))
+        raw_bytes = await safe_read_upload(file)
+        ext = Path(safe_filename(file.filename or "")).suffix.lower()
+        if ext not in ALLOWED_OFFICE_EXTENSIONS:
+            ext = _infer_office_extension(raw_bytes, getattr(file, "content_type", None))
+        if ext not in ALLOWED_OFFICE_EXTENSIONS:
+            raise HTTPException(400, f"Unsupported format. Allowed: {', '.join(sorted(ALLOWED_OFFICE_EXTENSIONS))}")
+
+        inp = temp_path(ext)
+        out_dir.mkdir(exist_ok=True)
+        inp.write_bytes(raw_bytes)
 
         # Acquire semaphore to limit concurrent LibreOffice processes
         async with LIBREOFFICE_SEMAPHORE:
@@ -3343,10 +3444,16 @@ async def office_to_pdf(request: Request, file: UploadFile = File(...)):
             background=BackgroundTask(cleanup, inp, out_dir)
         )
     except HTTPException:
-        cleanup(inp, out_dir)
+        if inp is not None:
+            cleanup(inp, out_dir)
+        else:
+            cleanup(out_dir)
         raise
     except Exception as e:
-        cleanup(inp, out_dir)
+        if inp is not None:
+            cleanup(inp, out_dir)
+        else:
+            cleanup(out_dir)
         raise safe_error(e, "office-to-pdf")
 
 
@@ -3861,6 +3968,11 @@ async def edit_pdf_endpoint(request: Request, file: UploadFile = File(...), edit
                     xref = 0
                 asset_source = str(action.get("source") or ("native" if xref > 0 else "scan")).lower()
                 img_bytes = _decode_data_url_bytes(str(action.get("imageDataUrl") or ""))
+                if img_bytes:
+                    try:
+                        img_bytes = normalize_image_for_pymupdf(img_bytes)
+                    except Exception as norm_err:
+                        logger.warning(f"[EditPDF] Image normalization skipped: {type(norm_err).__name__}")
 
                 # Same-box native replace stays cleanly in-place via doc.replace_image
                 same_box = (
@@ -4427,7 +4539,7 @@ async def edit_pdf_endpoint(request: Request, file: UploadFile = File(...), edit
         doc.close()
 
         stem = safe_filename(file.filename, "document")
-        out_name = "edited_" + stem
+        out_name = f"edited_{Path(stem).stem}.pdf"
         return FileResponse(str(out), media_type="application/pdf",
                             filename=out_name,
                             background=BackgroundTask(cleanup, inp, out))
@@ -4559,22 +4671,28 @@ async def replace_pdf_image(
     import pymupdf as fitz
     inp = temp_path(".pdf")
     out = temp_path(".pdf")
-    img_path = temp_path(".png")
     try:
         inp.write_bytes(await safe_read_upload(file))
-        img_bytes = await safe_read_upload(image)
-        img_path.write_bytes(img_bytes)
+        raw_img_bytes = await safe_read_upload(image)
+        try:
+            norm_img_bytes = await run_in_threadpool(normalize_image_for_pymupdf, raw_img_bytes)
+        except _PILDecompressionBombError:
+            raise HTTPException(413, "Image resolution exceeds safe processing limits. Please upload a smaller image.")
+        except (_PILUnidentifiedImageError, ValueError, OSError):
+            raise HTTPException(400, "Unsupported or corrupted image file. Please upload a valid JPG, PNG, WebP, HEIC, or AVIF image.")
 
         check_pdf_page_count(inp, "edit-pdf/replace-image")
 
         doc = fitz.open(str(inp))
         if page < 0 or page >= len(doc):
+            doc.close()
             raise HTTPException(400, f"Page index {page} out of range.")
 
         pg = doc[page]
         image_list = pg.get_images(full=True)
 
         if not image_list:
+            doc.close()
             raise HTTPException(404, "No images found on the specified page.")
 
         # Find target xref
@@ -4587,26 +4705,27 @@ async def replace_pdf_image(
         # Validate xref exists in image list
         valid_xrefs = {img[0] for img in image_list}
         if target_xref not in valid_xrefs:
+            doc.close()
             raise HTTPException(404, f"Image xref {target_xref} not found on page {page}.")
 
-        # Replace the image
-        pg.replace_image(target_xref, filename=str(img_path))
+        # Replace the image with normalized PyMuPDF-safe bytes (fixes WebP/AVIF/HEIC & EXIF rotation)
+        pg.replace_image(target_xref, stream=norm_img_bytes)
 
         doc.save(str(out), garbage=3, deflate=True)
         doc.close()
 
         stem = safe_filename(file.filename, "document")
-        out_name = "img_replaced_" + stem
+        out_name = f"img_replaced_{Path(stem).stem}.pdf"
         return FileResponse(
             str(out), media_type="application/pdf",
             filename=out_name,
-            background=BackgroundTask(cleanup, inp, out, img_path)
+            background=BackgroundTask(cleanup, inp, out)
         )
     except HTTPException:
-        cleanup(inp, out, img_path)
+        cleanup(inp, out)
         raise
     except Exception as e:
-        cleanup(inp, out, img_path)
+        cleanup(inp, out)
         raise safe_error(e, "edit-pdf/replace-image")
 
 
@@ -4785,7 +4904,7 @@ async def passport_ai_config():
 
 
 @app.post("/api/passport-ai/generate")
-@limiter.limit("12/minute")
+@limiter.limit("30/minute")
 async def passport_ai_generate(
     request: Request,
     file: UploadFile = File(...),
@@ -4805,22 +4924,15 @@ async def passport_ai_generate(
     mandatory front-facing ICAO pose correction, and OpenCV biometric auto-framing.
     """
     try:
-        raw = await safe_read_upload(file)
+        raw = await safe_read_upload(file, max_bytes=25 * 1024 * 1024)
         if not raw or len(raw) < 128:
-            raise HTTPException(400, "Please upload a valid portrait image (JPG, PNG, or WebP).")
-        if len(raw) > 25 * 1024 * 1024:
-            raise HTTPException(413, "Image too large (max 25 MB).")
+            raise HTTPException(400, "Please upload a valid portrait image (JPG, PNG, WebP, HEIC, or AVIF).")
 
-        # Quick magic-byte verification (JPEG / PNG / WebP / BMP / TIFF)
-        is_valid_img = (
-            raw[:3] == b"\xff\xd8\xff"
-            or raw[:8] == b"\x89PNG\r\n\x1a\n"
-            or (raw[:4] == b"RIFF" and raw[8:12] == b"WEBP")
-            or raw[:2] == b"BM"
-            or raw[:4] in (b"II*\x00", b"MM\x00*")
-        )
-        if not is_valid_img:
-            raise HTTPException(400, "Unsupported image format. Please upload a JPG, PNG, or WebP portrait photo.")
+        if not is_image_bytes(raw, file.filename):
+            raise HTTPException(
+                400,
+                "Unsupported image format. Please upload a JPG, PNG, WebP, HEIC, or AVIF portrait photo.",
+            )
 
         user_key = request.headers.get("x-gemini-api-key")
         result = await run_in_threadpool(
@@ -4855,8 +4967,18 @@ async def passport_ai_generate(
         )
     except HTTPException:
         raise
+    except _PILDecompressionBombError:
+        raise HTTPException(
+            413,
+            "Image resolution exceeds safe processing limits. Please upload a smaller portrait photo.",
+        )
+    except _PILUnidentifiedImageError:
+        raise HTTPException(
+            400,
+            "Could not decode this portrait image. If uploading an iPhone HEIC/AVIF photo, ensure it is valid or try saving as JPG/PNG.",
+        )
     except RuntimeError as re_err:
-        raise HTTPException(502, str(re_err))
+        raise HTTPException(503, str(re_err))
     except Exception as e:
         raise safe_error(e, "passport-ai-generate")
 
@@ -4936,14 +5058,13 @@ async def repair_pdf(request: Request, file: UploadFile = File(...)):
             )
 
         stem = safe_filename(file.filename, "document")
-        out_name = "repaired_" + stem
+        out_name = f"repaired_{Path(stem).stem}.pdf"
         response = FileResponse(
             str(out), media_type="application/pdf",
             filename=out_name,
             background=BackgroundTask(cleanup, inp, out)
         )
         response.headers["X-Repair-Strategy"] = strategy_used
-        response.headers["Access-Control-Expose-Headers"] = "X-Repair-Strategy"
         return response
     except HTTPException:
         cleanup(inp, out)
@@ -5488,7 +5609,7 @@ async def auto_crop_margins(
         doc.close()
 
         stem = safe_filename(file.filename, "document")
-        out_name = "autocropped_" + stem
+        out_name = f"autocropped_{Path(stem).stem}.pdf"
         return FileResponse(
             str(out), media_type="application/pdf",
             filename=out_name,
@@ -5707,7 +5828,7 @@ async def compress_pdf(
         )
 
         stem = safe_filename(file.filename, "document")
-        out_name = "compressed_" + stem
+        out_name = f"compressed_{Path(stem).stem}.pdf"
         return FileResponse(
             str(out),
             media_type="application/pdf",
@@ -5747,7 +5868,7 @@ async def extract_tables(
     out = temp_path(".xlsx")
     try:
         raw_bytes = await safe_read_upload(file)
-        inp, was_image = normalize_input_to_pdf(raw_bytes, file.filename, inp)
+        inp, was_image = await run_in_threadpool(normalize_input_to_pdf, raw_bytes, file.filename, inp)
         check_pdf_page_count(inp, "extract-tables")
         eff_strict = _form_bool(strict_local, False)
         eff_provider = _form_str(ai_provider, "auto") or "auto"
@@ -5948,13 +6069,12 @@ async def search_replace(
         doc.close()
 
         stem = safe_filename(file.filename, "document")
-        out_name = "replaced_" + stem
+        out_name = f"replaced_{Path(stem).stem}.pdf"
         return FileResponse(
             str(out), media_type="application/pdf",
             filename=out_name,
             headers={
                 "X-Match-Count": str(match_count),
-                "Access-Control-Expose-Headers": "X-Match-Count"
             },
             background=BackgroundTask(cleanup, inp, out)
         )
@@ -6218,11 +6338,11 @@ async def remove_watermark(
         scheduled_cleanup = True
 
         safe_name = safe_filename(file.filename, "clean_output.pdf")
+        out_name = f"clean_{Path(safe_name).stem}.pdf"
         return FileResponse(
             str(out),
             media_type="application/pdf",
-            filename=f"clean_{safe_name}",
-            headers={"Content-Disposition": f'attachment; filename="clean_{safe_name}"'}
+            filename=out_name,
         )
     except HTTPException:
         raise
@@ -6844,14 +6964,13 @@ async def analyze_forensics(request: Request, file: UploadFile = File(...)):
       - Inline font splicing, baseline vertical jitter & text-over-scan detection
       - Real JPEG Error Level Analysis (ELA) heatmap & splice hotspot detection
     """
-    from deep_tech_engine import analyze_forensics_deep, IMAGE_EXTENSIONS
+    from deep_tech_engine import analyze_forensics_deep
 
     inp = None
     try:
         raw_bytes = await safe_read_upload(file)
         fname = file.filename or "Document.pdf"
-        ext = Path(fname).suffix.lower()
-        is_img = ext in IMAGE_EXTENSIONS or raw_bytes[:3] == b"\xff\xd8\xff" or raw_bytes[:8] == b"\x89PNG\r\n\x1a\n"
+        is_img = is_image_bytes(raw_bytes, fname)
         if not is_img:
             inp = temp_path(".pdf")
             inp.write_bytes(raw_bytes)
@@ -6865,6 +6984,14 @@ async def analyze_forensics(request: Request, file: UploadFile = File(...)):
         if inp:
             cleanup(inp)
         raise
+    except _PILDecompressionBombError:
+        if inp:
+            cleanup(inp)
+        raise HTTPException(413, "Image resolution exceeds safe processing limits. Please upload a smaller file.")
+    except _PILUnidentifiedImageError:
+        if inp:
+            cleanup(inp)
+        raise HTTPException(400, "Could not decode uploaded image. Please upload a valid PDF, JPG, PNG, WebP, HEIC, or AVIF file.")
     except Exception as e:
         if inp:
             cleanup(inp)
@@ -6895,14 +7022,13 @@ async def convert_true_vector_4k(
       - Mathematical OpenCV RETR_CCOMP Cubic Bezier SVG & native Vector PDF tracing
       - Optional RapidOCR searchable invisible text layer
     """
-    from deep_tech_engine import process_true_vector_4k, IMAGE_EXTENSIONS
+    from deep_tech_engine import process_true_vector_4k
 
     inp = None
     try:
         raw_bytes = await safe_read_upload(file)
         fname = file.filename or "scan.pdf"
-        ext = Path(fname).suffix.lower()
-        is_img = ext in IMAGE_EXTENSIONS or raw_bytes[:3] == b"\xff\xd8\xff" or raw_bytes[:8] == b"\x89PNG\r\n\x1a\n"
+        is_img = is_image_bytes(raw_bytes, fname)
         if not is_img:
             inp = temp_path(".pdf")
             inp.write_bytes(raw_bytes)
@@ -6942,6 +7068,14 @@ async def convert_true_vector_4k(
         if inp:
             cleanup(inp)
         raise
+    except _PILDecompressionBombError:
+        if inp:
+            cleanup(inp)
+        raise HTTPException(413, "Image resolution exceeds safe processing limits. Please upload a smaller file.")
+    except _PILUnidentifiedImageError:
+        if inp:
+            cleanup(inp)
+        raise HTTPException(400, "Could not decode uploaded image. Please upload a valid PDF, JPG, PNG, WebP, HEIC, or AVIF file.")
     except Exception as e:
         if inp:
             cleanup(inp)

@@ -1,6 +1,7 @@
 import React, { useRef, useEffect } from 'react';
-import { X, QrCode, Smartphone, Share2, Check, Copy } from 'lucide-react';
+import { X, Smartphone, Share2, Check, Copy } from 'lucide-react';
 import QRCode from 'qrcode';
+import { copyTextToClipboard } from '../lib/clipboard';
 
 interface ShareQrModalProps {
   isOpen: boolean;
@@ -48,21 +49,37 @@ export default function ShareQrModal({
 
   if (!isOpen) return null;
 
-  const handleCopyLink = () => {
-    navigator.clipboard.writeText(currentUrl);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  const handleCopyLink = async () => {
+    const ok = await copyTextToClipboard(currentUrl);
+    if (ok) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
   };
 
   const handleWhatsAppShare = () => {
     const text = encodeURIComponent(
       `Open and use ${title} on PDF Media Suite (Free, fast & private): ${currentUrl}`
     );
-    window.open(`https://api.whatsapp.com/send?text=${text}`, '_blank');
+    const waUrl = `https://api.whatsapp.com/send?text=${text}`;
+    const opened = window.open(waUrl, '_blank', 'noopener,noreferrer');
+    if (!opened && typeof document !== 'undefined' && document.body) {
+      // Fallback for mobile Safari / in-app WebViews where window.open is popup-blocked
+      const a = document.createElement('a');
+      a.href = waUrl;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      a.style.display = 'none';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        if (a.parentNode) a.parentNode.removeChild(a);
+      }, 200);
+    }
   };
 
   const handleNativeShare = async () => {
-    if (fileBlobUrl && navigator.canShare) {
+    if (fileBlobUrl && typeof navigator !== 'undefined' && typeof navigator.canShare === 'function' && typeof navigator.share === 'function') {
       try {
         const resp = await fetch(fileBlobUrl);
         const blob = await resp.blob();
@@ -75,11 +92,12 @@ export default function ShareQrModal({
           });
           return;
         }
-      } catch (e) {
+      } catch (e: any) {
+        if (e?.name === 'AbortError') return;
         console.warn('Native file share failed:', e);
       }
     }
-    if (navigator.share) {
+    if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
       try {
         await navigator.share({
           title,
@@ -87,7 +105,9 @@ export default function ShareQrModal({
           url: currentUrl,
         });
         return;
-      } catch {}
+      } catch (e: any) {
+        if (e?.name === 'AbortError') return;
+      }
     }
     handleWhatsAppShare();
   };
@@ -119,20 +139,20 @@ export default function ShareQrModal({
           <canvas ref={canvasRef} className="w-44 h-44 rounded-lg block" />
         </div>
 
-        <div className="text-[11px] font-semibold text-slate-400 mb-4 uppercase tracking-wider">
+        <div className="text-[11px] font-semibold text-slate-400 mb-4 uppercase tracking-wider truncate">
           {fileName}
         </div>
 
         <div className="grid grid-cols-2 gap-2.5">
           <button
-            onClick={handleNativeShare}
+            onClick={() => void handleNativeShare()}
             className="flex items-center justify-center gap-1.5 py-2.5 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-md transition"
           >
             <Share2 className="w-3.5 h-3.5" />
             {fileBlobUrl && typeof navigator !== 'undefined' && 'canShare' in navigator ? 'Share File' : 'WhatsApp'}
           </button>
           <button
-            onClick={handleCopyLink}
+            onClick={() => void handleCopyLink()}
             className="flex items-center justify-center gap-1.5 py-2.5 px-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-semibold transition"
           >
             {copied ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
@@ -143,4 +163,3 @@ export default function ShareQrModal({
     </div>
   );
 }
-

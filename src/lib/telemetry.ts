@@ -61,14 +61,31 @@ let intervalStarted = false;
  */
 export function getBackendUrl(): string {
   if (typeof window !== 'undefined') {
-    const custom = localStorage.getItem('pdf_admin_backend_url');
-    if (custom && custom.trim() && isAllowedBackendOverride(custom)) {
-      return custom.trim().replace(/\/$/, '');
+    try {
+      const custom = localStorage.getItem('pdf_admin_backend_url');
+      if (custom && custom.trim() && isAllowedBackendOverride(custom)) {
+        return custom.trim().replace(/\/$/, '');
+      }
+    } catch {
+      // Ignore storage access errors in strict WebViews / Block All Cookies mode
     }
   }
   const envUrl = import.meta.env.VITE_API_URL || import.meta.env.VITE_BACKEND_URL;
   if (envUrl && envUrl.trim()) return envUrl.trim().replace(/\/$/, '');
-  return typeof window !== 'undefined' && window.location.hostname === 'localhost' ? 'http://localhost:8000' : '';
+  if (typeof window !== 'undefined') {
+    const h = window.location.hostname || '';
+    const isLocalOrLan =
+      h === 'localhost' ||
+      h === '127.0.0.1' ||
+      h.endsWith('.local') ||
+      /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(h) ||
+      /^192\.168\.\d{1,3}\.\d{1,3}$/.test(h) ||
+      /^172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}$/.test(h);
+    if (import.meta.env.DEV || isLocalOrLan) {
+      return `http://${h || 'localhost'}:8000`;
+    }
+  }
+  return '';
 }
 
 /**

@@ -22,7 +22,10 @@ import { useSEO } from '../hooks/useSEO';
 import { usePageSEO } from '../lib/usePageSEO';
 import { dataUrlToBytes } from '../lib/utils';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
-import { toArrayBufferBytes, useAutoRevokeUrl } from '../lib/blobUrl';
+import { toArrayBufferBytes, triggerBlobDownload, useAutoRevokeUrl } from '../lib/blobUrl';
+import { isImageFile } from '../lib/fileAccept';
+import { printPdfBlob } from '../lib/printHelper';
+import { clampCanvasDimensions, clampPdfScale, releaseCanvas } from '../lib/safeCanvas';
 import { AnimatedNumber, PearlScanOverlay, PearlStageSwitch } from '../components/pearl/PearlMotion';
 import {
   type InkSaverMode,
@@ -87,6 +90,7 @@ export default function InkSaverPDF() {
   const pdfDocRef = useRef<pdfjsLib.PDFDocumentProxy | null>(null);
   const sourceImageRef = useRef<HTMLImageElement | null>(null);
   const cachedPageCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const resultBlobRef = useRef<Blob | null>(null);
   const abortControllerRef = useRef<boolean>(false);
 
   useAutoRevokeUrl(resultUrl);
@@ -98,27 +102,29 @@ export default function InkSaverPDF() {
     const procCanvas = document.createElement('canvas');
     procCanvas.width = srcCanvas.width;
     procCanvas.height = srcCanvas.height;
-    const ctx = procCanvas.getContext('2d', { willReadFrequently: true });
-    if (!ctx) return;
-    ctx.drawImage(srcCanvas, 0, 0);
+    try {
+      const ctx = procCanvas.getContext('2d', { willReadFrequently: true });
+      if (!ctx) return;
+      ctx.drawImage(srcCanvas, 0, 0);
 
-    const comparison = processInkSaverCanvas(procCanvas, {
-      mode,
-      ecoStrength,
-      lumaThreshold,
-      preservePhotos,
-      forceMonochrome,
-      stripShadedBoxes,
-      hollowThickFills,
-      sourceColorHex,
-      targetBgHex,
-      colorTolerance,
-    });
+      const comparison = processInkSaverCanvas(procCanvas, {
+        mode,
+        ecoStrength,
+        lumaThreshold,
+        preservePhotos,
+        forceMonochrome,
+        stripShadedBoxes,
+        hollowThickFills,
+        sourceColorHex,
+        targetBgHex,
+        colorTolerance,
+      });
 
-    setPreviewAfterUrl(procCanvas.toDataURL('image/jpeg', 0.88));
-    setInkStats(comparison);
-    procCanvas.width = 0;
-    procCanvas.height = 0;
+      setPreviewAfterUrl(procCanvas.toDataURL('image/jpeg', 0.88));
+      setInkStats(comparison);
+    } finally {
+      releaseCanvas(procCanvas);
+    }
   }, [
     mode,
     ecoStrength,
@@ -137,17 +143,23 @@ export default function InkSaverPDF() {
     if (!pdf) return;
     try {
       const page = await pdf.getPage(pageNum);
-      const vp = page.getViewport({ scale: 1.35 });
+      const baseVp = page.getViewport({ scale: 1.0 });
+      const safeScale = clampPdfScale(baseVp.width, baseVp.height, 1.35);
+      const vp = page.getViewport({ scale: safeScale });
       const canvas = document.createElement('canvas');
       canvas.width = vp.width;
       canvas.height = vp.height;
       const ctx = canvas.getContext('2d', { willReadFrequently: true });
-      if (!ctx) return;
+      if (!ctx) {
+        releaseCanvas(canvas);
+        return;
+      }
       ctx.fillStyle = '#ffffff';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       await page.render({ canvasContext: ctx, viewport: vp, canvas } as any).promise;
       page.cleanup();
 
+      releaseCanvas(cachedPageCanvasRef.current);
       cachedPageCanvasRef.current = canvas;
       setPreviewBeforeUrl(canvas.toDataURL('image/jpeg', 0.86));
     } catch (e) {
@@ -176,9 +188,7 @@ export default function InkSaverPDF() {
     sourceImageRef.current = null;
     cachedPageCanvasRef.current = null;
 
-    const isImg =
-      selected.type.startsWith('image/') ||
-      /\.(jpe?g|png|webp)$/i.test(selected.name);
+    const isImg = isImageFile(selected);
     setIsImageInput(isImg);
 
     try {
@@ -242,65 +252,18 @@ export default function InkSaverPDF() {
         const img = sourceImageRef.current;
         const maxDim = 2400;
         const sc = Math.min(1, maxDim / Math.max(img.naturalWidth, img.naturalHeight));
+        const clamped = clampCanvasDimensions(
+          Math.round(img.naturalWidth * sc),
+          Math.round(img.naturalHeight * sc)
+        );
         const canvas = document.createElement('canvas');
-        canvas.width = Math.round(img.naturalWidth * sc);
-        canvas.height = Math.round(img.naturalHeight * sc);
-        const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-
-        const stats = processInkSaverCanvas(canvas, {
-          mode,
-          ecoStrength,
-          lumaThreshold,
-          preservePhotos,
-          forceMonochrome,
-          stripShadedBoxes,
-          hollowThickFills,
-          sourceColorHex,
-          targetBgHex,
-          colorTolerance,
-        });
-        totalSavingsSum += stats.savedPercent;
-        processedCount = 1;
-
-        const jpgBytes = dataUrlToBytes(canvas.toDataURL('image/jpeg', 0.92));
-        const embedded = await outputPdf.embedJpg(jpgBytes);
-        const a4W = canvas.width > canvas.height ? 841.89 : 595.28;
-        const a4H = canvas.width > canvas.height ? 595.28 : 841.89;
-        const fit = Math.min(a4W / canvas.width, a4H / canvas.height);
-        const pg = outputPdf.addPage([a4W, a4H]);
-        pg.drawImage(embedded, {
-          x: (a4W - canvas.width * fit) / 2,
-          y: (a4H - canvas.height * fit) / 2,
-          width: canvas.width * fit,
-          height: canvas.height * fit,
-        });
-        canvas.width = 0;
-        canvas.height = 0;
-      } else {
-        const pdf =
-          pdfDocRef.current ||
-          (await pdfjsLib.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise);
-        const pagesToProcess = parsePageRange(pageRangeStr, pdf.numPages);
-
-        for (let idx = 0; idx < pagesToProcess.length; idx++) {
-          if (abortControllerRef.current) throw new Error('Cancelled by user');
-          const pNum = pagesToProcess[idx];
-          setProgressMsg(`Optimizing page ${pNum} (${idx + 1}/${pagesToProcess.length})...`);
-
-          const page = await pdf.getPage(pNum);
-          const viewport = page.getViewport({ scale: exportDpiScale });
-          const canvas = document.createElement('canvas');
-          canvas.width = viewport.width;
-          canvas.height = viewport.height;
-          const ctx = canvas.getContext('2d', { willReadFrequently: true });
-          if (!ctx) continue;
-
+        canvas.width = clamped.width;
+        canvas.height = clamped.height;
+        try {
+          const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
           ctx.fillStyle = '#ffffff';
           ctx.fillRect(0, 0, canvas.width, canvas.height);
-          await page.render({ canvasContext: ctx, viewport, canvas } as any).promise;
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
           const stats = processInkSaverCanvas(canvas, {
             mode,
@@ -315,18 +278,74 @@ export default function InkSaverPDF() {
             colorTolerance,
           });
           totalSavingsSum += stats.savedPercent;
-          processedCount++;
+          processedCount = 1;
 
-          const imgBytes = dataUrlToBytes(canvas.toDataURL('image/jpeg', 0.91));
-          const embeddedImage = await outputPdf.embedJpg(imgBytes);
-          const outW = viewport.width / exportDpiScale;
-          const outH = viewport.height / exportDpiScale;
-          const outPage = outputPdf.addPage([outW, outH]);
-          outPage.drawImage(embeddedImage, { x: 0, y: 0, width: outW, height: outH });
+          const jpgBytes = dataUrlToBytes(canvas.toDataURL('image/jpeg', 0.92));
+          const embedded = await outputPdf.embedJpg(jpgBytes);
+          const a4W = canvas.width > canvas.height ? 841.89 : 595.28;
+          const a4H = canvas.width > canvas.height ? 595.28 : 841.89;
+          const fit = Math.min(a4W / canvas.width, a4H / canvas.height);
+          const pg = outputPdf.addPage([a4W, a4H]);
+          pg.drawImage(embedded, {
+            x: (a4W - canvas.width * fit) / 2,
+            y: (a4H - canvas.height * fit) / 2,
+            width: canvas.width * fit,
+            height: canvas.height * fit,
+          });
+        } finally {
+          releaseCanvas(canvas);
+        }
+      } else {
+        const pdf =
+          pdfDocRef.current ||
+          (await pdfjsLib.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise);
+        const pagesToProcess = parsePageRange(pageRangeStr, pdf.numPages);
 
-          canvas.width = 0;
-          canvas.height = 0;
-          page.cleanup();
+        for (let idx = 0; idx < pagesToProcess.length; idx++) {
+          if (abortControllerRef.current) throw new Error('Cancelled by user');
+          const pNum = pagesToProcess[idx];
+          setProgressMsg(`Optimizing page ${pNum} (${idx + 1}/${pagesToProcess.length})...`);
+
+          const page = await pdf.getPage(pNum);
+          const baseVp = page.getViewport({ scale: 1.0 });
+          const safeScale = clampPdfScale(baseVp.width, baseVp.height, exportDpiScale);
+          const viewport = page.getViewport({ scale: safeScale });
+          const canvas = document.createElement('canvas');
+          canvas.width = viewport.width;
+          canvas.height = viewport.height;
+          try {
+            const ctx = canvas.getContext('2d', { willReadFrequently: true });
+            if (!ctx) continue;
+
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            await page.render({ canvasContext: ctx, viewport, canvas } as any).promise;
+
+            const stats = processInkSaverCanvas(canvas, {
+              mode,
+              ecoStrength,
+              lumaThreshold,
+              preservePhotos,
+              forceMonochrome,
+              stripShadedBoxes,
+              hollowThickFills,
+              sourceColorHex,
+              targetBgHex,
+              colorTolerance,
+            });
+            totalSavingsSum += stats.savedPercent;
+            processedCount++;
+
+            const imgBytes = dataUrlToBytes(canvas.toDataURL('image/jpeg', 0.91));
+            const embeddedImage = await outputPdf.embedJpg(imgBytes);
+            const outW = baseVp.width;
+            const outH = baseVp.height;
+            const outPage = outputPdf.addPage([outW, outH]);
+            outPage.drawImage(embeddedImage, { x: 0, y: 0, width: outW, height: outH });
+          } finally {
+            releaseCanvas(canvas);
+            page.cleanup();
+          }
           if (idx % 2 === 1) await new Promise((r) => setTimeout(r, 0));
         }
       }
@@ -334,6 +353,7 @@ export default function InkSaverPDF() {
       setProgressMsg('Finalizing print-optimized PDF...');
       const bytes = await outputPdf.save();
       const blob = new Blob([toArrayBufferBytes(bytes)], { type: 'application/pdf' });
+      resultBlobRef.current = blob;
       setResultUrl(URL.createObjectURL(blob));
       setFinalAvgSaved(processedCount > 0 ? Math.round(totalSavingsSum / processedCount) : 0);
     } catch (error: any) {
@@ -377,9 +397,7 @@ export default function InkSaverPDF() {
                 multiple={false}
                 accept={{
                   'application/pdf': ['.pdf'],
-                  'image/jpeg': ['.jpg', '.jpeg'],
-                  'image/png': ['.png'],
-                  'image/webp': ['.webp'],
+                  'image/*': [],
                 }}
                 title="Select PDF or Image to Save Ink"
                 subtitle="Supports dark lecture slides, study notes, bank/exam forms, and scanned papers"
@@ -824,20 +842,25 @@ export default function InkSaverPDF() {
                   less toner/ink while preserving text sharpness.
                 </p>
                 <div className="flex flex-wrap items-center justify-center gap-3">
-                  <a
-                    href={resultUrl}
-                    download={`ink_saver_${file.name.replace(/\.[^.]+$/, '')}.pdf`}
-                    className="pms-btn-primary inline-flex items-center justify-center gap-2 px-7 py-3.5 text-sm font-bold rounded-2xl"
-                  >
-                    <Download className="w-4 h-4" /> Download Ink-Saver PDF
-                  </a>
                   <button
                     type="button"
-                    onClick={() => {
-                      const w = window.open(resultUrl, '_blank');
-                      w?.addEventListener('load', () => {
-                        try { w.print(); } catch {}
-                      });
+                    onClick={async () => {
+                      const blob =
+                        resultBlobRef.current ||
+                        (await fetch(resultUrl).then((r) => r.blob()));
+                      triggerBlobDownload(blob, `ink_saver_${file.name.replace(/\.[^.]+$/, '')}.pdf`);
+                    }}
+                    className="pms-btn-primary inline-flex items-center justify-center gap-2 px-7 py-3.5 text-sm font-bold rounded-2xl cursor-pointer"
+                  >
+                    <Download className="w-4 h-4" /> Download Ink-Saver PDF
+                  </button>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const blob =
+                        resultBlobRef.current ||
+                        (await fetch(resultUrl).then((r) => r.blob()));
+                      await printPdfBlob(blob, `ink_saver_${file.name.replace(/\.[^.]+$/, '')}.pdf`);
                     }}
                     className="inline-flex items-center justify-center gap-2 px-5 py-3.5 bg-white/85 dark:bg-slate-900 border border-[var(--pms-border)] rounded-2xl text-sm font-bold cursor-pointer hover:border-emerald-500"
                   >

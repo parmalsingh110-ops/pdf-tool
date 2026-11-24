@@ -22,8 +22,11 @@ import ToolSEOSection from '../components/ToolSEOSection';
 import BeforeAfterSlider from '../components/BeforeAfterSlider';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 import { AnimatedNumber, PearlScanOverlay } from '../components/pearl/PearlMotion';
-import { toArrayBufferBytes } from '../lib/blobUrl';
-import { dataUrlToBytes, downloadBlob } from '../lib/utils';
+import { toArrayBufferBytes, triggerBlobDownload } from '../lib/blobUrl';
+import { ACCEPT_IMAGES } from '../lib/fileAccept';
+import { printPdfBlob } from '../lib/printHelper';
+import { clampCanvasDimensions, releaseCanvas } from '../lib/safeCanvas';
+import { dataUrlToBytes } from '../lib/utils';
 import {
   type BoardCleanMode,
   type InkComparison,
@@ -133,9 +136,13 @@ export default function BoardNotesCleaner() {
           img.onload = () => {
             const maxDim = 2200;
             const sc = Math.min(1, maxDim / Math.max(img.naturalWidth, img.naturalHeight));
+            const clamped = clampCanvasDimensions(
+              Math.round(img.naturalWidth * sc),
+              Math.round(img.naturalHeight * sc)
+            );
             const canvas = document.createElement('canvas');
-            canvas.width = Math.round(img.naturalWidth * sc);
-            canvas.height = Math.round(img.naturalHeight * sc);
+            canvas.width = clamped.width;
+            canvas.height = clamped.height;
             const ctx = canvas.getContext('2d', { willReadFrequently: true });
             if (ctx) {
               ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
@@ -213,24 +220,29 @@ export default function BoardNotesCleaner() {
       const pdfDoc = await PDFDocument.create();
       for (let i = 0; i < slides.length; i++) {
         setStatusLabel(`Cleaning & assembling board ${i + 1} of ${slides.length}...`);
-        const { cleaned } = buildCleanedSlide(slides[i]);
-        const isLandscape = cleaned.width > cleaned.height;
-        const pageW = isLandscape ? 841.89 : 595.28;
-        const pageH = isLandscape ? 595.28 : 841.89;
-        const margin = 20;
-        const scale = Math.min((pageW - margin * 2) / cleaned.width, (pageH - margin * 2) / cleaned.height);
-        const drawW = cleaned.width * scale;
-        const drawH = cleaned.height * scale;
+        const { oriented, cleaned } = buildCleanedSlide(slides[i]);
+        try {
+          const isLandscape = cleaned.width > cleaned.height;
+          const pageW = isLandscape ? 841.89 : 595.28;
+          const pageH = isLandscape ? 595.28 : 841.89;
+          const margin = 20;
+          const scale = Math.min((pageW - margin * 2) / cleaned.width, (pageH - margin * 2) / cleaned.height);
+          const drawW = cleaned.width * scale;
+          const drawH = cleaned.height * scale;
 
-        const imgBytes = dataUrlToBytes(cleaned.toDataURL('image/jpeg', 0.92));
-        const embeddedImg = await pdfDoc.embedJpg(imgBytes);
-        const page = pdfDoc.addPage([pageW, pageH]);
-        page.drawImage(embeddedImg, {
-          x: (pageW - drawW) / 2,
-          y: (pageH - drawH) / 2,
-          width: drawW,
-          height: drawH,
-        });
+          const imgBytes = dataUrlToBytes(cleaned.toDataURL('image/jpeg', 0.92));
+          const embeddedImg = await pdfDoc.embedJpg(imgBytes);
+          const page = pdfDoc.addPage([pageW, pageH]);
+          page.drawImage(embeddedImg, {
+            x: (pageW - drawW) / 2,
+            y: (pageH - drawH) / 2,
+            width: drawW,
+            height: drawH,
+          });
+        } finally {
+          releaseCanvas(cleaned);
+          if (oriented !== slides[i].originalCanvas) releaseCanvas(oriented);
+        }
         if (i % 2 === 1) await new Promise((r) => setTimeout(r, 0));
       }
       const pdfBytes = await pdfDoc.save();
@@ -247,17 +259,13 @@ export default function BoardNotesCleaner() {
 
   const handleDownloadPdf = async () => {
     const blob = await assemblePdfBlob();
-    if (blob) downloadBlob(blob, `clean_board_notes_${slides.length}p.pdf`);
+    if (blob) triggerBlobDownload(blob, `clean_board_notes_${slides.length}p.pdf`);
   };
 
   const handleDirectPrint = async () => {
     const blob = await assemblePdfBlob();
     if (!blob) return;
-    const url = URL.createObjectURL(blob);
-    const w = window.open(url, '_blank');
-    w?.addEventListener('load', () => {
-      try { w.print(); } catch {}
-    });
+    await printPdfBlob(blob, `clean_board_notes_${slides.length}p.pdf`);
   };
 
   const handleDownloadJpg = () => {
@@ -265,7 +273,7 @@ export default function BoardNotesCleaner() {
     if (!c) return;
     c.toBlob(
       (b) => {
-        if (b) downloadBlob(b, `board-note-${activeIdx + 1}.jpg`);
+        if (b) triggerBlobDownload(b, `board-note-${activeIdx + 1}.jpg`);
       },
       'image/jpeg',
       0.95
@@ -360,14 +368,14 @@ export default function BoardNotesCleaner() {
                   <span className="text-[11px] text-[var(--pms-muted)] mt-1 block">
                     Supports batch multi-photo upload (JPG, PNG, WebP)
                   </span>
-                  <input type="file" multiple accept="image/*" className="hidden" onChange={(e) => handleFileInput(e, false)} />
+                  <input type="file" multiple accept={ACCEPT_IMAGES} className="sr-only" onChange={(e) => handleFileInput(e, false)} />
                 </label>
 
                 {slides.length > 0 && (
                   <label className="px-3.5 py-5 rounded-2xl border border-[var(--pms-border)] bg-[var(--pms-soft-blue)] text-[var(--pms-ink)] text-xs font-bold flex flex-col items-center justify-center gap-1 cursor-pointer hover:opacity-90">
                     <Plus className="w-5 h-5 text-sky-600" />
                     <span>Add More</span>
-                    <input type="file" multiple accept="image/*" className="hidden" onChange={(e) => handleFileInput(e, true)} />
+                    <input type="file" multiple accept={ACCEPT_IMAGES} className="sr-only" onChange={(e) => handleFileInput(e, true)} />
                   </label>
                 )}
               </div>

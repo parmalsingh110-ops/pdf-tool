@@ -22,6 +22,7 @@ import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { apiFetch } from '../lib/api';
 import { triggerBlobDownload } from '../lib/blobUrl';
+import { copyTextToClipboard } from '../lib/clipboard';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 import { AnimatedNumber, PearlScanOverlay, PearlStageSwitch } from '../components/pearl/PearlMotion';
 
@@ -250,7 +251,7 @@ export default function ExtractTables() {
     triggerBlobDownload(blob, `${file?.name.replace(/\.pdf$/i, '')}_Table_${activeTableIdx + 1}.json`);
   };
 
-  const copyMarkdown = () => {
+  const copyMarkdown = async () => {
     const currentTable = tables[activeTableIdx];
     if (!currentTable) return;
 
@@ -260,9 +261,11 @@ export default function ExtractTables() {
     const dataLines = currentTable.rows.slice(1).map(r => `| ${r.join(' | ')} |`).join('\n');
 
     const md = `${headerLine}\n${separatorLine}\n${dataLines}`;
-    navigator.clipboard.writeText(md);
-    setCopiedFormat('markdown');
-    setTimeout(() => setCopiedFormat(null), 2000);
+    const ok = await copyTextToClipboard(md);
+    if (ok) {
+      setCopiedFormat('markdown');
+      setTimeout(() => setCopiedFormat(null), 2000);
+    }
   };
 
   const reset = () => {

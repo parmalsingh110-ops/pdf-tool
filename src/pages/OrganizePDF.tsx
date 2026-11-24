@@ -437,7 +437,7 @@ export default function OrganizePDF() {
                   </div>
 
                   {/* Top Action Buttons */}
-                  <div className="absolute top-3.5 right-3.5 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                  <div className="absolute top-3.5 right-3.5 flex items-center gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity z-10">
                     <button
                       onClick={(e) => {
                         e.stopPropagation();

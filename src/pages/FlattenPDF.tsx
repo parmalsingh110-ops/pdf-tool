@@ -9,6 +9,7 @@ import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { dataUrlToBytes } from '../lib/utils';
 import { toArrayBufferBytes } from '../lib/blobUrl';
+import { clampPdfScale, releaseCanvas } from '../lib/safeCanvas';
 import { useToast } from '../components/Toast';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 import { PearlScanOverlay, PearlStageSwitch } from '../components/pearl/PearlMotion';
@@ -65,13 +66,20 @@ export default function FlattenPDF() {
 
       // Render page 1 preview thumbnail
       const page1 = await pdfjsDoc.getPage(1);
-      const viewport = page1.getViewport({ scale: 0.45 });
+      const baseVp1 = page1.getViewport({ scale: 1.0 });
+      const thumbScale = clampPdfScale(baseVp1.width, baseVp1.height, 0.45);
+      const viewport = page1.getViewport({ scale: thumbScale });
       const canvas = document.createElement('canvas');
-      canvas.width = viewport.width;
-      canvas.height = viewport.height;
-      const ctx = canvas.getContext('2d')!;
-      await page1.render({ canvasContext: ctx, viewport, canvas } as any).promise;
-      setThumbUrl(canvas.toDataURL('image/jpeg', 0.85));
+      try {
+        canvas.width = Math.max(1, Math.round(viewport.width));
+        canvas.height = Math.max(1, Math.round(viewport.height));
+        const ctx = canvas.getContext('2d')!;
+        await page1.render({ canvasContext: ctx, viewport, canvas } as any).promise;
+        setThumbUrl(canvas.toDataURL('image/jpeg', 0.85));
+      } finally {
+        releaseCanvas(canvas);
+        page1.cleanup();
+      }
 
       // Inspect with pdf-lib to check if interactive form fields exist
       const pdfLibDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
@@ -133,36 +141,40 @@ export default function FlattenPDF() {
           setProgressPercent(Math.round(15 + (pageNum / total) * 75));
 
           const page = await pdfjsDoc.getPage(pageNum);
-          const viewport = page.getViewport({ scale });
+          const baseVp = page.getViewport({ scale: 1.0 });
+          const safeScale = clampPdfScale(baseVp.width, baseVp.height, scale);
+          const viewport = page.getViewport({ scale: safeScale });
 
           const canvas = document.createElement('canvas');
-          canvas.width = viewport.width;
-          canvas.height = viewport.height;
-          const ctx = canvas.getContext('2d')!;
+          try {
+            canvas.width = Math.max(1, Math.round(viewport.width));
+            canvas.height = Math.max(1, Math.round(viewport.height));
+            const ctx = canvas.getContext('2d');
+            if (!ctx) throw new Error('Canvas context unavailable');
 
-          // Solid white background to prevent transparent bleed
-          ctx.fillStyle = '#ffffff';
-          ctx.fillRect(0, 0, canvas.width, canvas.height);
+            // Solid white background to prevent transparent bleed
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-          await page.render({ canvasContext: ctx, viewport, canvas } as any).promise;
+            await page.render({ canvasContext: ctx, viewport, canvas } as any).promise;
 
-          const imgDataUrl = canvas.toDataURL('image/jpeg', 0.92);
-          const imgBytes = dataUrlToBytes(imgDataUrl);
-          const embeddedImg = await newPdfDoc.embedJpg(imgBytes);
+            const imgDataUrl = canvas.toDataURL('image/jpeg', 0.92);
+            const imgBytes = dataUrlToBytes(imgDataUrl);
+            const embeddedImg = await newPdfDoc.embedJpg(imgBytes);
 
-          const origW = viewport.width / scale;
-          const origH = viewport.height / scale;
-          const newPage = newPdfDoc.addPage([origW, origH]);
-          newPage.drawImage(embeddedImg, {
-            x: 0,
-            y: 0,
-            width: origW,
-            height: origH,
-          });
-
-          // Memory cleanup
-          canvas.width = 0;
-          canvas.height = 0;
+            const origW = baseVp.width;
+            const origH = baseVp.height;
+            const newPage = newPdfDoc.addPage([origW, origH]);
+            newPage.drawImage(embeddedImg, {
+              x: 0,
+              y: 0,
+              width: origW,
+              height: origH,
+            });
+          } finally {
+            releaseCanvas(canvas);
+            page.cleanup();
+          }
         }
 
         setProgressPercent(95);

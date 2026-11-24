@@ -14,6 +14,7 @@ import { AnimatedNumber, PearlScanOverlay, PearlStageSwitch } from '../component
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { toArrayBufferBytes, triggerBlobDownload } from '../lib/blobUrl';
+import { copyTextToClipboard } from '../lib/clipboard';
 
 interface PageText {
   pageNumber: number;
@@ -225,12 +226,14 @@ export default function AiPdfSummarizer() {
     setChatQuery('');
   };
 
-  const copySummaryMarkdown = () => {
+  const copySummaryMarkdown = async () => {
     if (!summary) return;
     const md = `# Summary: ${file?.name || 'Document'}\n\n## Executive Summary\n${summary.executiveSummary}\n\n## Key Highlights\n${summary.keyPoints.map(k => `- ${k}`).join('\n')}\n\n## Document Metrics\n- Total Pages: ${summary.stats.totalPages}\n- Total Words: ${summary.stats.totalWords}\n- Estimated Reading Time: ${summary.stats.readingTimeMin} min\n`;
-    navigator.clipboard.writeText(md);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    const ok = await copyTextToClipboard(md);
+    if (ok) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
   };
 
   const downloadSummaryPdf = async () => {

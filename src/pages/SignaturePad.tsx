@@ -4,6 +4,9 @@ import { Pen, Download, Type, Image as ImageIcon, Trash2 } from 'lucide-react';
 import { useSEO } from '../hooks/useSEO';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 import { PearlScanOverlay } from '../components/pearl/PearlMotion';
+import { triggerBlobDownload } from '../lib/blobUrl';
+import { releaseCanvas } from '../lib/safeCanvas';
+import { ACCEPT_IMAGES } from '../lib/fileAccept';
 
 const CURSIVE_FONTS = [
   { name: 'Dancing Script', css: "'Dancing Script', cursive" },
@@ -171,13 +174,11 @@ export default function SignaturePad() {
         octx.drawImage(tempCanvas, minX - pad, minY - pad, cropW, cropH, 0, 0, cropW, cropH);
 
         out.toBlob(blob => {
+          releaseCanvas(tempCanvas);
+          releaseCanvas(out);
           setIsBusy(false);
           if (!blob) return;
-          const a = document.createElement('a');
-          a.href = URL.createObjectURL(blob);
-          a.download = 'signature.png';
-          a.click();
-          URL.revokeObjectURL(a.href);
+          triggerBlobDownload(blob, 'signature.png');
         }, 'image/png');
       } catch {
         setIsBusy(false);
@@ -234,6 +235,7 @@ export default function SignaturePad() {
               onTouchStart={startDraw}
               onTouchMove={draw}
               onTouchEnd={endDraw}
+              onTouchCancel={endDraw}
             />
             <div className="absolute bottom-2 left-1/2 -translate-x-1/2 px-3 py-0.5 rounded-full bg-white/85 border border-slate-200 text-[11px] font-medium text-slate-500 pointer-events-none">
               {mode === 'draw' ? 'Draw your signature above' : mode === 'type' ? 'Type below to preview' : 'Upload an image'}
@@ -304,7 +306,7 @@ export default function SignaturePad() {
           {mode === 'upload' && (
             <label className="flex items-center justify-center gap-2 w-full py-3.5 bg-[var(--pms-white)] border-2 border-dashed border-[var(--pms-border-strong)] hover:border-rose-400 rounded-2xl font-bold text-sm cursor-pointer transition-colors" style={{ color: 'var(--pms-ink)' }}>
               <ImageIcon className="w-4 h-4 text-[var(--pms-violet)]" /> Upload signature image
-              <input type="file" accept="image/*" className="hidden" onChange={handleUpload} />
+              <input type="file" accept={ACCEPT_IMAGES} className="sr-only" onChange={handleUpload} />
             </label>
           )}
 

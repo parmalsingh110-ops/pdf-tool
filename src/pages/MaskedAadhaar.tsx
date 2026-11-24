@@ -6,7 +6,9 @@ import { useSEO } from '../hooks/useSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
 import { PDFDocument } from 'pdf-lib';
 import { dataUrlToBytes } from '../lib/utils';
-import { toArrayBufferBytes } from '../lib/blobUrl';
+import { toArrayBufferBytes, triggerBlobDownload, triggerDataUrlDownload } from '../lib/blobUrl';
+import { clampCanvasDimensions, clampPdfScale, releaseCanvas } from '../lib/safeCanvas';
+import { ACCEPT_PDF_AND_IMAGES, isPdfFile } from '../lib/fileAccept';
 import { useToast } from '../components/Toast';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 import { AnimatedNumber, PearlScanOverlay } from '../components/pearl/PearlMotion';
@@ -85,7 +87,7 @@ export default function MaskedAadhaar() {
     setFile(uploadedFile);
     setExportUrl(null);
 
-    if (uploadedFile.type === 'application/pdf' || uploadedFile.name.endsWith('.pdf')) {
+    if (isPdfFile(uploadedFile)) {
       setIsPdf(true);
       try {
         const arrayBuffer = await uploadedFile.arrayBuffer();
@@ -94,13 +96,20 @@ export default function MaskedAadhaar() {
         setCurrentPage(1);
 
         const page = await pdfDoc.getPage(1);
-        const viewport = page.getViewport({ scale: 2.0 });
+        const baseVp = page.getViewport({ scale: 1.0 });
+        const safeScale = clampPdfScale(baseVp.width, baseVp.height, 2.0);
+        const viewport = page.getViewport({ scale: safeScale });
         const canvas = document.createElement('canvas');
-        canvas.width = viewport.width;
-        canvas.height = viewport.height;
-        const ctx = canvas.getContext('2d')!;
-        await page.render({ canvasContext: ctx, viewport, canvas } as any).promise;
-        setRenderedImageUrl(canvas.toDataURL('image/jpeg', 0.95));
+        try {
+          canvas.width = Math.max(1, Math.round(viewport.width));
+          canvas.height = Math.max(1, Math.round(viewport.height));
+          const ctx = canvas.getContext('2d')!;
+          await page.render({ canvasContext: ctx, viewport, canvas } as any).promise;
+          setRenderedImageUrl(canvas.toDataURL('image/jpeg', 0.95));
+        } finally {
+          releaseCanvas(canvas);
+          page.cleanup();
+        }
       } catch (err) {
         toast.error('Could not render PDF. If it is password protected, please unlock it first using our Unlock PDF tool.');
       }
@@ -198,121 +207,110 @@ export default function MaskedAadhaar() {
       });
 
       const canvas = document.createElement('canvas');
-      canvas.width = img.width;
-      canvas.height = img.height;
-      const ctx = canvas.getContext('2d')!;
+      try {
+        const clamped = clampCanvasDimensions(img.naturalWidth || img.width, img.naturalHeight || img.height);
+        canvas.width = clamped.width;
+        canvas.height = clamped.height;
+        const ctx = canvas.getContext('2d')!;
 
-      // 1. Draw original base image
-      ctx.drawImage(img, 0, 0);
+        // 1. Draw original base image
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
-      // 2. Render Masks
-      masks.forEach((mask) => {
-        const rx = (mask.xPercent / 100) * canvas.width;
-        const ry = (mask.yPercent / 100) * canvas.height;
-        const rw = (mask.wPercent / 100) * canvas.width;
-        const rh = (mask.hPercent / 100) * canvas.height;
+        // 2. Render Masks
+        masks.forEach((mask) => {
+          const rx = (mask.xPercent / 100) * canvas.width;
+          const ry = (mask.yPercent / 100) * canvas.height;
+          const rw = (mask.wPercent / 100) * canvas.width;
+          const rh = (mask.hPercent / 100) * canvas.height;
 
-        if (mask.style === 'uidai_xxxx') {
-          // UIDAI official masked overlay
-          ctx.fillStyle = '#ffffff';
-          ctx.fillRect(rx, ry, rw, rh);
-          ctx.strokeStyle = '#e2e8f0';
-          ctx.lineWidth = 1;
-          ctx.strokeRect(rx, ry, rw, rh);
+          if (mask.style === 'uidai_xxxx') {
+            // UIDAI official masked overlay
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(rx, ry, rw, rh);
+            ctx.strokeStyle = '#e2e8f0';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(rx, ry, rw, rh);
 
-          // Draw "XXXX XXXX " text centered
-          ctx.fillStyle = '#0f172a';
-          ctx.font = `bold ${Math.round(rh * 0.7)}px Arial, sans-serif`;
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          ctx.fillText('XXXX  XXXX', rx + rw / 2, ry + rh / 2);
-        } else if (mask.style === 'black_bar') {
-          ctx.fillStyle = '#000000';
-          ctx.fillRect(rx, ry, rw, rh);
-        } else if (mask.style === 'white_bar') {
-          ctx.fillStyle = '#ffffff';
-          ctx.fillRect(rx, ry, rw, rh);
-        } else if (mask.style === 'qr_mask') {
-          // QR Code redaction
-          ctx.fillStyle = '#0f172a';
-          ctx.fillRect(rx, ry, rw, rh);
-          ctx.fillStyle = '#ffffff';
-          ctx.font = `bold ${Math.round(rh * 0.12)}px sans-serif`;
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          ctx.fillText('QR CODE REDACTED', rx + rw / 2, ry + rh / 2 - 10);
-          ctx.fillText('(UIDAI COMPLIANT)', rx + rw / 2, ry + rh / 2 + 10);
-        }
-      });
-
-      // 3. Optional KYC Protection Watermark
-      if (includeKycWatermark && kycPurposeText) {
-        ctx.save();
-        ctx.translate(canvas.width / 2, canvas.height / 2);
-        ctx.rotate((-25 * Math.PI) / 180);
-        ctx.fillStyle = 'rgba(239, 68, 68, 0.28)'; // translucent red
-        ctx.font = `bold ${Math.round(canvas.width * 0.045)}px sans-serif`;
-        ctx.textAlign = 'center';
-        const dateStr = new Date().toLocaleDateString('en-IN');
-        ctx.fillText(`${kycPurposeText} - ${dateStr}`, 0, 0);
-        ctx.restore();
-      }
-
-      if (format === 'jpg') {
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
-        const a = document.createElement('a');
-        a.href = dataUrl;
-        a.download = `masked_aadhaar_${Date.now()}.jpg`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        setLastExportFormat('jpg');
-        toast.success('Masked Aadhaar JPG exported successfully!');
-      } else {
-        const pdfDoc = await PDFDocument.create();
-        const page1 = pdfDoc.addPage([canvas.width * 0.5, canvas.height * 0.5]);
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
-        const imgBytes = dataUrlToBytes(dataUrl);
-        const jpgImg = await pdfDoc.embedJpg(imgBytes);
-
-        page1.drawImage(jpgImg, {
-          x: 0,
-          y: 0,
-          width: canvas.width * 0.5,
-          height: canvas.height * 0.5,
+            // Draw "XXXX XXXX " text centered
+            ctx.fillStyle = '#0f172a';
+            ctx.font = `bold ${Math.round(rh * 0.7)}px Arial, sans-serif`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('XXXX  XXXX', rx + rw / 2, ry + rh / 2);
+          } else if (mask.style === 'black_bar') {
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(rx, ry, rw, rh);
+          } else if (mask.style === 'white_bar') {
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(rx, ry, rw, rh);
+          } else if (mask.style === 'qr_mask') {
+            // QR Code redaction
+            ctx.fillStyle = '#0f172a';
+            ctx.fillRect(rx, ry, rw, rh);
+            ctx.fillStyle = '#ffffff';
+            ctx.font = `bold ${Math.round(rh * 0.12)}px sans-serif`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('QR CODE REDACTED', rx + rw / 2, ry + rh / 2 - 10);
+            ctx.fillText('(UIDAI COMPLIANT)', rx + rw / 2, ry + rh / 2 + 10);
+          }
         });
 
-        // If source was a multi-page PDF, preserve pages 2..N (e.g. Aadhaar Back side with address)
-        if (file && (file.type === 'application/pdf' || file.name.endsWith('.pdf')) && pdfPageCount > 1) {
-          try {
-            const srcBytes = await file.arrayBuffer();
-            const srcDoc = await PDFDocument.load(srcBytes, { ignoreEncryption: true });
-            const extraIndices = Array.from({ length: srcDoc.getPageCount() - 1 }, (_, i) => i + 1);
-            const copiedPages = await pdfDoc.copyPages(srcDoc, extraIndices);
-            for (const cp of copiedPages) {
-              pdfDoc.addPage(cp);
-            }
-          } catch (e) {
-            console.warn('[MaskedAadhaar] Could not copy remaining pages:', e);
-          }
+        // 3. Optional KYC Protection Watermark
+        if (includeKycWatermark && kycPurposeText) {
+          ctx.save();
+          ctx.translate(canvas.width / 2, canvas.height / 2);
+          ctx.rotate((-25 * Math.PI) / 180);
+          ctx.fillStyle = 'rgba(239, 68, 68, 0.28)'; // translucent red
+          ctx.font = `bold ${Math.round(canvas.width * 0.045)}px sans-serif`;
+          ctx.textAlign = 'center';
+          const dateStr = new Date().toLocaleDateString('en-IN');
+          ctx.fillText(`${kycPurposeText} - ${dateStr}`, 0, 0);
+          ctx.restore();
         }
 
-        const pdfBytes = await pdfDoc.save();
-        const blob = new Blob([toArrayBufferBytes(pdfBytes)], { type: 'application/pdf' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `masked_aadhaar_${Date.now()}.pdf`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        setLastExportFormat('pdf');
-        toast.success('Masked Aadhaar exported successfully!');
-        setTimeout(() => {
-          try {
-            URL.revokeObjectURL(url);
-          } catch {}
-        }, 15000);
+        if (format === 'jpg') {
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
+          triggerDataUrlDownload(dataUrl, `masked_aadhaar_${Date.now()}.jpg`);
+          setLastExportFormat('jpg');
+          toast.success('Masked Aadhaar JPG exported successfully!');
+        } else {
+          const pdfDoc = await PDFDocument.create();
+          const page1 = pdfDoc.addPage([canvas.width * 0.5, canvas.height * 0.5]);
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+          const imgBytes = dataUrlToBytes(dataUrl);
+          const jpgImg = await pdfDoc.embedJpg(imgBytes);
+
+          page1.drawImage(jpgImg, {
+            x: 0,
+            y: 0,
+            width: canvas.width * 0.5,
+            height: canvas.height * 0.5,
+          });
+
+          // If source was a multi-page PDF, preserve pages 2..N (e.g. Aadhaar Back side with address)
+          if (file && isPdfFile(file) && pdfPageCount > 1) {
+            try {
+              const srcBytes = await file.arrayBuffer();
+              const srcDoc = await PDFDocument.load(srcBytes, { ignoreEncryption: true });
+              const extraIndices = Array.from({ length: srcDoc.getPageCount() - 1 }, (_, i) => i + 1);
+              const copiedPages = await pdfDoc.copyPages(srcDoc, extraIndices);
+              for (const cp of copiedPages) {
+                pdfDoc.addPage(cp);
+              }
+            } catch (e) {
+              console.warn('[MaskedAadhaar] Could not copy remaining pages:', e);
+            }
+          }
+
+          const pdfBytes = await pdfDoc.save();
+          const blob = new Blob([toArrayBufferBytes(pdfBytes)], { type: 'application/pdf' });
+          triggerBlobDownload(blob, `masked_aadhaar_${Date.now()}.pdf`);
+          setLastExportFormat('pdf');
+          toast.success('Masked Aadhaar exported successfully!');
+        }
+      } finally {
+        releaseCanvas(canvas);
       }
     } catch (err: any) {
       console.error('[MaskedAadhaar] Export failed:', err);
@@ -353,7 +351,7 @@ export default function MaskedAadhaar() {
             </span>
             <input
               type="file"
-              accept="image/*,application/pdf"
+              accept={ACCEPT_PDF_AND_IMAGES}
               onChange={(e) => {
                 setLastExportFormat(null);
                 handleFileUpload(e);
@@ -444,6 +442,7 @@ export default function MaskedAadhaar() {
               ref={imageContainerRef}
               onPointerMove={handlePointerMove}
               onPointerUp={handlePointerUp}
+              onPointerCancel={handlePointerUp}
               className="relative border-2 border-dashed border-[var(--pms-border-strong)] rounded-2xl overflow-hidden bg-white select-none shadow-inner touch-none"
             >
               <img

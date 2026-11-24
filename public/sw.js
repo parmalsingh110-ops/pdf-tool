@@ -15,10 +15,18 @@ function inferMimeType(fileName, fallbackType) {
   if (lower.endsWith('.pdf')) return 'application/pdf';
   if (lower.endsWith('.png')) return 'image/png';
   if (lower.endsWith('.webp')) return 'image/webp';
-  if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg';
+  if (lower.endsWith('.jpg') || lower.endsWith('.jpeg') || lower.endsWith('.jfif') || lower.endsWith('.mpo')) {
+    return 'image/jpeg';
+  }
+  if (lower.endsWith('.heic')) return 'image/heic';
+  if (lower.endsWith('.heif')) return 'image/heif';
+  if (lower.endsWith('.avif')) return 'image/avif';
+  if (lower.endsWith('.gif')) return 'image/gif';
+  if (lower.endsWith('.bmp')) return 'image/bmp';
+  if (lower.endsWith('.tif') || lower.endsWith('.tiff')) return 'image/tiff';
   if (lower.endsWith('.docx')) return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
   if (lower.endsWith('.doc')) return 'application/msword';
-  return fallbackType || 'application/pdf';
+  return fallbackType || 'application/octet-stream';
 }
 
 function openShareDB() {
@@ -141,6 +149,9 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
+  // Fast-path: ignore all non-POST requests before parsing URL
+  if (event.request.method !== 'POST') return;
+
   let url;
   try {
     url = new URL(event.request.url);
@@ -148,76 +159,73 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Intercept Web Share Target POST requests from Android / Windows Share Sheet
-  if (
-    event.request.method === 'POST' &&
-    (url.pathname === '/share-target' || url.pathname.endsWith('/share-target'))
-  ) {
-    event.respondWith(
-      (async () => {
-        const now = Date.now();
-        try {
-          const formData = await event.request.formData();
-          let rawFiles = formData.getAll('shared_files');
+  // Never intercept cross-origin API POST requests (prevents iOS WebKit SW `Load failed` interference)
+  if (url.origin !== self.location.origin) return;
 
-          // Fallback: scan all formData entries for any File/Blob regardless of field key
-          const allCandidateFiles = [...(rawFiles || [])];
-          for (const [key, value] of formData.entries()) {
-            if (key !== 'shared_files' && value && typeof value === 'object') {
-              if (
-                value instanceof Blob ||
-                typeof value.arrayBuffer === 'function' ||
-                typeof value.stream === 'function'
-              ) {
-                allCandidateFiles.push(value);
-              }
+  // Intercept ONLY same-origin Web Share Target POST /share-target
+  if (url.pathname !== '/share-target') return;
+
+  event.respondWith(
+    (async () => {
+      const now = Date.now();
+      try {
+        const formData = await event.request.formData();
+        let rawFiles = formData.getAll('shared_files');
+
+        // Fallback: scan all formData entries for any File/Blob regardless of field key
+        const allCandidateFiles = [...(rawFiles || [])];
+        for (const [key, value] of formData.entries()) {
+          if (key !== 'shared_files' && value && typeof value === 'object') {
+            if (
+              value instanceof Blob ||
+              typeof value.arrayBuffer === 'function' ||
+              typeof value.stream === 'function'
+            ) {
+              allCandidateFiles.push(value);
             }
           }
-
-          const title = formData.get('title') || '';
-          const text = formData.get('text') || '';
-
-          const materializedFiles = [];
-          for (let i = 0; i < allCandidateFiles.length; i++) {
-            const f = allCandidateFiles[i];
-            if (!f || typeof f !== 'object') continue;
-            const buffer = await extractBufferFromFileEntry(f);
-            if (buffer && buffer.byteLength > 0) {
-              const rawName = f.name || `Shared_Document_${now}_${i + 1}.pdf`;
-              const resolvedType = inferMimeType(rawName, f.type);
-              materializedFiles.push({
-                name: rawName,
-                type: resolvedType,
-                size: buffer.byteLength,
-                lastModified: f.lastModified || now,
-                buffer,
-              });
-            }
-          }
-
-          if (materializedFiles.length > 0) {
-            // Write to BOTH CacheStorage and IndexedDB before redirecting
-            await Promise.allSettled([
-              saveSharedFilesToCacheStorage(materializedFiles, title, text, now),
-              saveSharedRecordToIDB({
-                id: 'latest_share',
-                files: materializedFiles,
-                title: String(title),
-                text: String(text),
-                timestamp: now,
-              }),
-            ]);
-          }
-        } catch (err) {
-          console.error('[PMS ServiceWorker] Error processing share target:', err);
         }
 
-        // Redirect to /scan-to-print with from_share=true & timestamp (HTTP 303 See Other)
-        return Response.redirect(`/scan-to-print?from_share=true&share_ts=${now}`, 303);
-      })()
-    );
-    return;
-  }
+        const title = formData.get('title') || '';
+        const text = formData.get('text') || '';
 
-  // Pass-through for all other requests
+        const materializedFiles = [];
+        for (let i = 0; i < allCandidateFiles.length; i++) {
+          const f = allCandidateFiles[i];
+          if (!f || typeof f !== 'object') continue;
+          const buffer = await extractBufferFromFileEntry(f);
+          if (buffer && buffer.byteLength > 0) {
+            const rawName = f.name || `Shared_Document_${now}_${i + 1}.pdf`;
+            const resolvedType = inferMimeType(rawName, f.type);
+            materializedFiles.push({
+              name: rawName,
+              type: resolvedType,
+              size: buffer.byteLength,
+              lastModified: f.lastModified || now,
+              buffer,
+            });
+          }
+        }
+
+        if (materializedFiles.length > 0) {
+          // Write to BOTH CacheStorage and IndexedDB before redirecting
+          await Promise.allSettled([
+            saveSharedFilesToCacheStorage(materializedFiles, title, text, now),
+            saveSharedRecordToIDB({
+              id: 'latest_share',
+              files: materializedFiles,
+              title: String(title),
+              text: String(text),
+              timestamp: now,
+            }),
+          ]);
+        }
+      } catch (err) {
+        console.error('[PMS ServiceWorker] Error processing share target:', err);
+      }
+
+      // Redirect to /scan-to-print with from_share=true & timestamp (HTTP 303 See Other)
+      return Response.redirect(`/scan-to-print?from_share=true&share_ts=${now}`, 303);
+    })()
+  );
 });

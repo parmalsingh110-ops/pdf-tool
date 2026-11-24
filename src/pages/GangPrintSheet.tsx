@@ -13,8 +13,11 @@ import '../lib/pdfWorker';
 import { useSEO } from '../hooks/useSEO';
 import { usePageSEO } from '../lib/usePageSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
-import { dataUrlToBytes, downloadBlob } from '../lib/utils';
-import { toArrayBufferBytes } from '../lib/blobUrl';
+import { dataUrlToBytes } from '../lib/utils';
+import { toArrayBufferBytes, triggerBlobDownload } from '../lib/blobUrl';
+import { ACCEPT_PDF_AND_IMAGES, isPdfFile } from '../lib/fileAccept';
+import { printHtmlDocument } from '../lib/printHelper';
+import { clampCanvasDimensions, clampPdfScale, releaseCanvas } from '../lib/safeCanvas';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 import { AnimatedNumber, PearlScanOverlay } from '../components/pearl/PearlMotion';
 
@@ -56,28 +59,35 @@ export default function GangPrintSheet() {
     if (!files.length) return;
 
     for (const file of files) {
-      if (file.type === 'application/pdf') {
+      if (isPdfFile(file)) {
         try {
           const arrayBuffer = await file.arrayBuffer();
           const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
           const page = await pdf.getPage(1);
-          const viewport = page.getViewport({ scale: 2.0 });
+          const baseVp = page.getViewport({ scale: 1.0 });
+          const safeScale = clampPdfScale(baseVp.width, baseVp.height, 2.0);
+          const viewport = page.getViewport({ scale: safeScale });
           const canvas = document.createElement('canvas');
           canvas.width = viewport.width;
           canvas.height = viewport.height;
-          const ctx = canvas.getContext('2d');
-          if (ctx) {
-            await page.render({ canvasContext: ctx, viewport, canvas } as any).promise;
-            const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
-            setCards((prev) => [
-              ...prev,
-              {
-                id: Math.random().toString(36).substring(2, 9),
-                customerName: file.name.replace(/\.[^/.]+$/, ''),
-                dataUrl,
-                aspectRatio: canvas.width / canvas.height,
-              },
-            ]);
+          try {
+            const ctx = canvas.getContext('2d');
+            if (ctx) {
+              await page.render({ canvasContext: ctx, viewport, canvas } as any).promise;
+              const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+              setCards((prev) => [
+                ...prev,
+                {
+                  id: Math.random().toString(36).substring(2, 9),
+                  customerName: file.name.replace(/\.[^/.]+$/, ''),
+                  dataUrl,
+                  aspectRatio: canvas.width / canvas.height,
+                },
+              ]);
+            }
+          } finally {
+            releaseCanvas(canvas);
+            page.cleanup();
           }
         } catch (err) {
           console.error('PDF error', err);
@@ -125,11 +135,13 @@ export default function GangPrintSheet() {
       sheetHeight = 4200;
     }
 
-    canvas.width = sheetWidth;
-    canvas.height = sheetHeight;
+    const clamped = clampCanvasDimensions(sheetWidth, sheetHeight);
+    canvas.width = clamped.width;
+    canvas.height = clamped.height;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
+    ctx.setTransform(clamped.scale, 0, 0, clamped.scale, 0, 0);
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, sheetWidth, sheetHeight);
 
@@ -236,7 +248,7 @@ export default function GangPrintSheet() {
 
       const pdfBytes = toArrayBufferBytes(await pdfDoc.save());
       const blob = new Blob([pdfBytes], { type: 'application/pdf' });
-      downloadBlob(blob, `gang_print_${paperType}_sheet.pdf`);
+      triggerBlobDownload(blob, `gang_print_${paperType}_sheet.pdf`);
     } catch {
       alert('Error generating PDF.');
     } finally {
@@ -245,11 +257,9 @@ export default function GangPrintSheet() {
   };
 
   // 1-Click Print
-  const handlePrint = () => {
+  const handlePrint = async () => {
     if (!previewDataUrl) return;
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) return;
-    printWindow.document.write(`
+    const html = `
       <!DOCTYPE html>
       <html>
         <head>
@@ -261,11 +271,14 @@ export default function GangPrintSheet() {
           </style>
         </head>
         <body>
-          <img src="${previewDataUrl}" onload="window.print(); window.close();" />
+          <img src="${previewDataUrl}" />
         </body>
       </html>
-    `);
-    printWindow.document.close();
+    `;
+    const ok = await printHtmlDocument(html, 'Gang Print Sheet');
+    if (!ok) {
+      alert('Unable to open print dialog on this browser. Please export the 300 DPI PDF instead.');
+    }
   };
 
   const maxSlots = paperType === 'photo_4x6' ? 2 : paperType === 'legal' ? 10 : 8;
@@ -333,8 +346,8 @@ export default function GangPrintSheet() {
                 <input
                   type="file"
                   multiple
-                  accept="application/pdf,image/*"
-                  className="hidden"
+                  accept={ACCEPT_PDF_AND_IMAGES}
+                  className="sr-only"
                   onChange={handleFileUpload}
                 />
               </label>

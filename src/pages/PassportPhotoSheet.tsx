@@ -40,7 +40,11 @@ import JSZip from 'jszip';
 import FileDropzone from '../components/FileDropzone';
 import { useSEO } from '../hooks/useSEO';
 import { apiFetch } from '../lib/api';
-import { toArrayBufferBytes } from '../lib/blobUrl';
+import { toArrayBufferBytes, triggerBlobDownload } from '../lib/blobUrl';
+import { inferMimeFromFile } from '../lib/fileAccept';
+import { applyBasicPhotoFilterFallback, supportsCanvasFilter } from '../lib/photoAdjustments';
+import { printHtmlDocument } from '../lib/printHelper';
+import { clampCanvasDimensions, releaseCanvas, safeCanvasToBlob } from '../lib/safeCanvas';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 import { AnimatedNumber, PearlScanOverlay } from '../components/pearl/PearlMotion';
 
@@ -98,6 +102,7 @@ export interface PhotoSlotItem {
   objectUrl: string;
   img: HTMLImageElement;
   processedImg: HTMLImageElement | null;
+  processedUrl?: string | null;
   copies: number;
   zoom: number; // 60 - 200%
   rotation: number; // -30 to +30 deg (slider) or -180 to 180 (90° steps)
@@ -156,32 +161,48 @@ const DEFAULT_AI_OUTFITS: AiOutfitPreset[] = [
  * with zero loss in facial detail, and automatically bakes in EXIF phone orientation.
  */
 async function prepareFastAiUploadBlob(photo: PhotoSlotItem, maxDim = 960, quality = 0.86): Promise<Blob> {
+  const fallbackInMemoryBlob = async (): Promise<Blob> => {
+    const buf = await photo.file.arrayBuffer();
+    return new Blob([buf], { type: inferMimeFromFile(photo.file, 'image/jpeg') });
+  };
+
+  let canvas: HTMLCanvasElement | null = null;
   try {
     const img = photo.img;
+    await img.decode().catch(() => {});
     const natW = img.naturalWidth || img.width || 0;
     const natH = img.naturalHeight || img.height || 0;
-    if (natW < 64 || natH < 64) return photo.file;
-    // Already small clean JPEG? Upload directly
-    if (photo.file.type === 'image/jpeg' && photo.file.size <= 160_000 && Math.max(natW, natH) <= maxDim) {
-      return photo.file;
+    if (natW < 64 || natH < 64) {
+      return await fallbackInMemoryBlob();
     }
     const scale = Math.min(1, maxDim / Math.max(natW, natH));
-    const dstW = Math.max(64, Math.round(natW * scale));
-    const dstH = Math.max(64, Math.round(natH * scale));
-    const canvas = document.createElement('canvas');
+    const clamped = clampCanvasDimensions(
+      Math.max(64, Math.round(natW * scale)),
+      Math.max(64, Math.round(natH * scale))
+    );
+    const dstW = clamped.width;
+    const dstH = clamped.height;
+    canvas = document.createElement('canvas');
     canvas.width = dstW;
     canvas.height = dstH;
     const ctx = canvas.getContext('2d');
-    if (!ctx) return photo.file;
+    if (!ctx) {
+      return await fallbackInMemoryBlob();
+    }
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, dstW, dstH);
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
     ctx.drawImage(img, 0, 0, dstW, dstH);
-    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', quality));
-    return blob && blob.size > 1024 ? blob : photo.file;
+    const blob = await new Promise<Blob | null>((resolve) => canvas!.toBlob(resolve, 'image/jpeg', quality));
+    if (blob && blob.size > 1024) {
+      return blob;
+    }
+    return await fallbackInMemoryBlob();
   } catch {
-    return photo.file;
+    return await fallbackInMemoryBlob();
+  } finally {
+    releaseCanvas(canvas);
   }
 }
 
@@ -239,15 +260,23 @@ export default function PassportPhotoSheet() {
   const photosCleanupRef = useRef<PhotoSlotItem[]>([]);
   photosCleanupRef.current = photos;
 
-  // Drag pan refs for crop modal (mouse + touch)
+  // Drag pan refs for crop modal (unified Pointer Events)
   const isDraggingRef = useRef<boolean>(false);
+  const activePointerIdRef = useRef<number | null>(null);
   const dragStartRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const toastTimerRef = useRef<number | null>(null);
 
-  // Toast helper
-  const showToast = (text: string, type: 'error' | 'success' | 'info' = 'info') => {
+  // Toast helper (clears previous timer; errors stay visible longer on mobile)
+  const showToast = useCallback((text: string, type: 'error' | 'success' | 'info' = 'info') => {
+    if (toastTimerRef.current !== null) {
+      window.clearTimeout(toastTimerRef.current);
+    }
     setToastMsg({ text, type });
-    setTimeout(() => setToastMsg(null), 3500);
-  };
+    toastTimerRef.current = window.setTimeout(() => {
+      setToastMsg(null);
+      toastTimerRef.current = null;
+    }, type === 'error' ? 6500 : 3500);
+  }, []);
 
   // Active photo
   const currentPhoto = useMemo(() => {
@@ -379,7 +408,7 @@ export default function PassportPhotoSheet() {
 
   useEffect(() => {
     // Non-blocking capability fetch & Render cold-start wake-up (do NOT eagerly preload 40MB @imgly CDN model so mobile bandwidth stays 100% free for Gemini AI!)
-    apiFetch('/api/passport-ai/config', { method: 'GET', timeoutMs: 8000 })
+    apiFetch('/api/passport-ai/config', { method: 'GET', timeoutMs: 35000 })
       .then((res) => (res.ok ? res.json() : null))
       .then((cfg) => {
         if (!cfg) return;
@@ -389,12 +418,20 @@ export default function PassportPhotoSheet() {
       })
       .catch(() => {});
     return () => {
-      // Complete memory cleanup on unmount (including all cached AI variant URLs)
+      if (toastTimerRef.current !== null) {
+        window.clearTimeout(toastTimerRef.current);
+        toastTimerRef.current = null;
+      }
+      // Complete memory cleanup on unmount (including all cached AI variant & BG-removed URLs)
       photosCleanupRef.current.forEach((p) => {
         const revoked = new Set<string>();
         if (p.objectUrl) {
           URL.revokeObjectURL(p.objectUrl);
           revoked.add(p.objectUrl);
+        }
+        if (p.processedUrl && !revoked.has(p.processedUrl)) {
+          URL.revokeObjectURL(p.processedUrl);
+          revoked.add(p.processedUrl);
         }
         if (p.aiGeneratedUrl && !revoked.has(p.aiGeneratedUrl)) {
           URL.revokeObjectURL(p.aiGeneratedUrl);
@@ -577,41 +614,131 @@ export default function PassportPhotoSheet() {
     if (!filesToAdd.length) return;
     setIsLoadingPhotos(true);
     const newItems: PhotoSlotItem[] = [];
+    let heicDecodeFailed = false;
+    let genericFailedCount = 0;
 
     try {
       for (const f of filesToAdd) {
-        const url = URL.createObjectURL(f);
-        const loadedImg = await new Promise<HTMLImageElement>((resolve, reject) => {
-          const imgEl = new Image();
-          imgEl.onload = () => resolve(imgEl);
-          imgEl.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Image load failed')); };
-          imgEl.src = url;
-        });
+        let tempUrl: string | null = null;
+        try {
+          // Immediately materialize bytes in RAM so Android content:// handles never fail later with ERR_UPLOAD_FILE_CHANGED
+          const buf = await f.arrayBuffer();
+          const safeMime = inferMimeFromFile(f, 'image/jpeg');
+          let safeFile = new File([buf], f.name || 'photo.jpg', {
+            type: safeMime,
+            lastModified: f.lastModified || Date.now(),
+          });
 
-        const newItem: PhotoSlotItem = {
-          id: `photo_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-          file: f,
-          objectUrl: url,
-          img: loadedImg,
-          processedImg: null, // null = use original img (not stale copy)
-          copies: photos.length === 0 ? targetPhotoCount : 1,
-          zoom: 100,
-          rotation: 0,
-          isFlippedH: false,
-          panOffset: { x: 0, y: 0 },
-          isBgRemoved: false,
-          isRemovingBg: false,
-          isJointPhoto: false,
-          brightness: 0,
-          contrast: 0,
-          saturation: 0,
-        };
-        newItems.push(newItem);
+          tempUrl = URL.createObjectURL(safeFile);
+          let workingUrl = tempUrl;
+          let workingImg = await new Promise<HTMLImageElement>((resolve, reject) => {
+            const imgEl = new Image();
+            imgEl.onload = () => resolve(imgEl);
+            imgEl.onerror = () => reject(new Error('Image load failed'));
+            imgEl.src = workingUrl;
+          });
+          await workingImg.decode().catch(() => {});
+
+          // Downscale huge 12–200 MP mobile camera photos (>2048px) cleanly so mobile RAM stays tiny
+          const natW = workingImg.naturalWidth || workingImg.width || 0;
+          const natH = workingImg.naturalHeight || workingImg.height || 0;
+          if (Math.max(natW, natH) > 2048) {
+            const scale = 2048 / Math.max(natW, natH);
+            const clamped = clampCanvasDimensions(
+              Math.max(1, Math.round(natW * scale)),
+              Math.max(1, Math.round(natH * scale))
+            );
+            const downCanvas = document.createElement('canvas');
+            downCanvas.width = clamped.width;
+            downCanvas.height = clamped.height;
+            try {
+              const dctx = downCanvas.getContext('2d');
+              if (dctx) {
+                const exportMime = safeMime === 'image/png' ? 'image/png' : 'image/jpeg';
+                if (exportMime === 'image/jpeg') {
+                  dctx.fillStyle = '#ffffff';
+                  dctx.fillRect(0, 0, clamped.width, clamped.height);
+                }
+                dctx.imageSmoothingEnabled = true;
+                dctx.imageSmoothingQuality = 'high';
+                dctx.drawImage(workingImg, 0, 0, clamped.width, clamped.height);
+                const scaledBlob = await safeCanvasToBlob(
+                  downCanvas,
+                  exportMime,
+                  exportMime === 'image/jpeg' ? 0.92 : undefined
+                );
+                const scaledUrl = URL.createObjectURL(scaledBlob);
+                try {
+                  const scaledImg = await new Promise<HTMLImageElement>((resolve, reject) => {
+                    const imgEl = new Image();
+                    imgEl.onload = () => resolve(imgEl);
+                    imgEl.onerror = () => reject(new Error('Downscaled decode failed'));
+                    imgEl.src = scaledUrl;
+                  });
+                  await scaledImg.decode().catch(() => {});
+                  URL.revokeObjectURL(workingUrl);
+                  tempUrl = scaledUrl;
+                  workingUrl = scaledUrl;
+                  workingImg = scaledImg;
+                  safeFile = new File([scaledBlob], safeFile.name, {
+                    type: scaledBlob.type || exportMime,
+                    lastModified: safeFile.lastModified,
+                  });
+                } catch {
+                  URL.revokeObjectURL(scaledUrl);
+                }
+              }
+            } catch {
+              // Keep original decoded image if downscale fails
+            } finally {
+              releaseCanvas(downCanvas);
+            }
+          }
+
+          const newItem: PhotoSlotItem = {
+            id: `photo_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+            file: safeFile,
+            objectUrl: workingUrl,
+            img: workingImg,
+            processedImg: null, // null = use original img (not stale copy)
+            processedUrl: null,
+            copies: photos.length === 0 && newItems.length === 0 ? targetPhotoCount : 1,
+            zoom: 100,
+            rotation: 0,
+            isFlippedH: false,
+            panOffset: { x: 0, y: 0 },
+            isBgRemoved: false,
+            isRemovingBg: false,
+            isJointPhoto: false,
+            brightness: 0,
+            contrast: 0,
+            saturation: 0,
+          };
+          newItems.push(newItem);
+        } catch {
+          if (tempUrl) {
+            try { URL.revokeObjectURL(tempUrl); } catch {}
+          }
+          const isHeic =
+            /\.heic$|\.heif$/i.test(f.name || '') || /heic|heif/i.test(f.type || '');
+          if (isHeic) {
+            heicDecodeFailed = true;
+          } else {
+            genericFailedCount += 1;
+          }
+        }
       }
-    } catch (err) {
-      showToast('One or more images could not be loaded. Please try again.', 'error');
     } finally {
       setIsLoadingPhotos(false);
+    }
+
+    if (heicDecodeFailed) {
+      showToast(
+        'HEIC photo could not decode in this browser — please use JPEG/PNG or try Safari/Gallery',
+        'error'
+      );
+    } else if (genericFailedCount > 0) {
+      showToast('One or more images could not be loaded. Please try again.', 'error');
     }
 
     if (newItems.length > 0) {
@@ -634,6 +761,10 @@ export default function PassportPhotoSheet() {
         if (toRemove.objectUrl) {
           URL.revokeObjectURL(toRemove.objectUrl);
           revoked.add(toRemove.objectUrl);
+        }
+        if (toRemove.processedUrl && !revoked.has(toRemove.processedUrl)) {
+          URL.revokeObjectURL(toRemove.processedUrl);
+          revoked.add(toRemove.processedUrl);
         }
         if (toRemove.aiGeneratedUrl && !revoked.has(toRemove.aiGeneratedUrl)) {
           URL.revokeObjectURL(toRemove.aiGeneratedUrl);
@@ -704,9 +835,11 @@ export default function PassportPhotoSheet() {
     showToast('1/2 Initializing AI portrait segmentation...', 'info');
     let blobUrl: string | null = null;
     try {
-      const resultBlob = await removeBackground(photo.file, {
+      // Pass a clean <=1024px in-memory Blob instead of a raw 48MP mobile file
+      const safeInputBlob = await prepareFastAiUploadBlob(photo, 1024, 0.92);
+      const resultBlob = await removeBackground(safeInputBlob, {
         ...bgRemoverConfig,
-        progress: (key, current, total) => {
+        progress: (_key, current, total) => {
           if (total > 0) {
             const pct = Math.round((current / total) * 100);
             if (pct % 30 === 0) showToast(`Removing background... ${pct}%`, 'info');
@@ -715,26 +848,33 @@ export default function PassportPhotoSheet() {
       });
       showToast('2/2 Rendering transparent HD portrait...', 'info');
       blobUrl = URL.createObjectURL(resultBlob);
-      const transparentImg = new Image();
-      transparentImg.onload = () => {
-        // Revoke blob URL after image is loaded to free memory
-        if (blobUrl) URL.revokeObjectURL(blobUrl);
-        updatePhoto(photo.id, (p) => ({
+      const transparentImg = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const imgEl = new Image();
+        imgEl.onload = () => resolve(imgEl);
+        imgEl.onerror = () => reject(new Error('Could not decode transparent portrait'));
+        imgEl.src = blobUrl!;
+      });
+      await transparentImg.decode().catch(() => {});
+
+      const retainedUrl = blobUrl;
+      blobUrl = null; // Owned by PhotoSlotItem state until removePhoto/unmount
+      updatePhoto(photo.id, (p) => {
+        if (p.processedUrl && p.processedUrl !== retainedUrl) {
+          try { URL.revokeObjectURL(p.processedUrl); } catch {}
+        }
+        return {
           ...p,
           processedImg: transparentImg,
+          processedUrl: retainedUrl,
           isBgRemoved: true,
           isRemovingBg: false,
-        }));
-        showToast('✓ AI Background removed successfully!', 'success');
-      };
-      transparentImg.onerror = () => {
-        if (blobUrl) URL.revokeObjectURL(blobUrl);
-        updatePhoto(photo.id, (p) => ({ ...p, isRemovingBg: false }));
-        showToast('Background removal failed. You can still adjust layout.', 'error');
-      };
-      transparentImg.src = blobUrl;
+        };
+      });
+      showToast('✓ AI Background removed successfully!', 'success');
     } catch (err) {
-      if (blobUrl) URL.revokeObjectURL(blobUrl);
+      if (blobUrl) {
+        try { URL.revokeObjectURL(blobUrl); } catch {}
+      }
       console.error('[PassportSheet] BG removal failed:', err);
       showToast('Background removal could not run. You can still apply border and adjust layout.', 'error');
       updatePhoto(photo.id, (p) => ({ ...p, isRemovingBg: false }));
@@ -872,8 +1012,14 @@ export default function PassportPhotoSheet() {
     try {
       // 100x smaller fast upload (~70-95 KB instead of 8-15 MB raw camera file!)
       const fastBlob = await prepareFastAiUploadBlob(photo, 960, 0.86);
+      const uploadExt =
+        fastBlob.type === 'image/png'
+          ? 'png'
+          : fastBlob.type === 'image/webp'
+          ? 'webp'
+          : 'jpg';
       const fd = new FormData();
-      fd.append('file', fastBlob, 'portrait_fast.jpg');
+      fd.append('file', fastBlob, `portrait_fast.${uploadExt}`);
       fd.append('attire', chosenAttire);
       fd.append('bg_preset', chosenBg);
       fd.append('bg_hex', targetHex);
@@ -887,12 +1033,25 @@ export default function PassportPhotoSheet() {
       const res = await apiFetch('/api/passport-ai/generate', {
         method: 'POST',
         body: fd,
-        timeoutMs: 55000,
+        timeoutMs: 95000,
       });
 
       if (!res.ok) {
-        const errData = await res.json().catch(() => ({ detail: 'AI Studio request failed.' }));
-        throw new Error(errData.detail || `Server returned ${res.status}`);
+        const errData = await res.json().catch(() => null);
+        const errMsg =
+          (errData && (errData.detail || errData.error || errData.message)) ||
+          `Server returned ${res.status}`;
+        throw new Error(String(errMsg));
+      }
+
+      const contentType = (res.headers.get('content-type') || '').toLowerCase();
+      if (!contentType.startsWith('image/')) {
+        const bodySnippet = await res.text().catch(() => '');
+        throw new Error(
+          bodySnippet
+            ? `Unexpected AI Studio response: ${bodySnippet.slice(0, 120)}`
+            : 'AI Studio did not return an image. Please try again.'
+        );
       }
 
       const blob = await res.blob();
@@ -910,6 +1069,7 @@ export default function PassportPhotoSheet() {
         };
         imgEl.src = newUrl;
       });
+      await loadedAiImg.decode().catch(() => {});
 
       const outfitShort =
         chosenAttire === 'keep_original'
@@ -1015,7 +1175,7 @@ export default function PassportPhotoSheet() {
       const canvas = document.createElement('canvas');
       canvas.width = targetW;
       canvas.height = targetH;
-      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      const ctx = canvas.getContext('2d');
       if (!ctx) return canvas;
 
       // 1. Fill Background
@@ -1037,12 +1197,17 @@ export default function PassportPhotoSheet() {
         ctx.rotate((photo.rotation * Math.PI) / 180);
         ctx.scale((photo.zoom / 100) * (photo.isFlippedH ? -1 : 1), photo.zoom / 100);
 
-        // Build combined CSS filter (brightness + contrast + saturation)
-        const filters: string[] = [];
-        if (photo.brightness !== 0) filters.push(`brightness(${100 + photo.brightness}%)`);
-        if (photo.contrast !== 0) filters.push(`contrast(${100 + photo.contrast}%)`);
-        if (photo.saturation !== 0) filters.push(`saturate(${100 + photo.saturation}%)`);
-        if (filters.length > 0) ctx.filter = filters.join(' ');
+        // Build combined CSS filter (with software fallback for iOS Safari < 17.4)
+        const hasPhotoFilter =
+          photo.brightness !== 0 || photo.contrast !== 0 || photo.saturation !== 0;
+        const canUseNativeFilter = hasPhotoFilter && supportsCanvasFilter();
+        if (canUseNativeFilter) {
+          const filters: string[] = [];
+          if (photo.brightness !== 0) filters.push(`brightness(${100 + photo.brightness}%)`);
+          if (photo.contrast !== 0) filters.push(`contrast(${100 + photo.contrast}%)`);
+          if (photo.saturation !== 0) filters.push(`saturate(${100 + photo.saturation}%)`);
+          if (filters.length > 0) ctx.filter = filters.join(' ');
+        }
 
         const imgW = activeImg.naturalWidth || activeImg.width || 1;
         const imgH = activeImg.naturalHeight || activeImg.height || 1;
@@ -1060,6 +1225,14 @@ export default function PassportPhotoSheet() {
 
         ctx.drawImage(activeImg, -drawW / 2, -drawH / 2, drawW, drawH);
         ctx.restore();
+
+        if (hasPhotoFilter && !canUseNativeFilter) {
+          applyBasicPhotoFilterFallback(ctx, targetW, targetH, {
+            brightness: photo.brightness,
+            contrast: photo.contrast,
+            saturation: photo.saturation,
+          });
+        }
       }
 
       // 3. Candidate Name & Date of Photo (DOP) Banner
@@ -1119,12 +1292,17 @@ export default function PassportPhotoSheet() {
     ]
   );
 
-  // Render a Specific Sheet Page to Canvas (Zero Cut-off Guarantee)
+  // Render a Specific Sheet Page to Canvas (Zero Cut-off Guarantee + Mobile 12MP Clamp)
   const renderSheetPageCanvas = useCallback(
     (sheetIndex = 0, dpi = 300): HTMLCanvasElement => {
-      const dpmm = dpi / 25.4;
-      const sheetW = Math.round(activePaper.wMm * dpmm);
-      const sheetH = Math.round(activePaper.hMm * dpmm);
+      const rawDpmm = dpi / 25.4;
+      const rawSheetW = Math.round(activePaper.wMm * rawDpmm);
+      const rawSheetH = Math.round(activePaper.hMm * rawDpmm);
+      const clamped = clampCanvasDimensions(rawSheetW, rawSheetH);
+      const effectiveDpi = dpi * clamped.scale;
+      const dpmm = effectiveDpi / 25.4;
+      const sheetW = clamped.width;
+      const sheetH = clamped.height;
 
       const canvas = document.createElement('canvas');
       canvas.width = sheetW;
@@ -1154,96 +1332,101 @@ export default function PassportPhotoSheet() {
       const pagePhotos = allQueuedPhotos.slice(startIndex, startIndex + slotsPerSheet);
 
       const renderedTileMap = new Map<string, HTMLCanvasElement>();
-      for (const p of photos) {
-        renderedTileMap.set(p.id, renderSinglePhotoTile(p, dpi));
-      }
+      try {
+        for (const p of photos) {
+          renderedTileMap.set(p.id, renderSinglePhotoTile(p, effectiveDpi));
+        }
 
-      const defaultTile = renderedTileMap.get(photos[0].id)!;
-      const tileW = defaultTile.width;
-      const tileH = defaultTile.height;
+        const defaultTile = renderedTileMap.get(photos[0].id)!;
+        const tileW = defaultTile.width;
+        const tileH = defaultTile.height;
 
-      const gapPx = Math.round(gapMm * dpmm);
-      const marginPx = noMargins ? 0 : Math.round(marginMm * dpmm);
+        const gapPx = Math.round(gapMm * dpmm);
+        const marginPx = noMargins ? 0 : Math.round(marginMm * dpmm);
 
-      const totalGridW = gridCols * tileW + (gridCols - 1) * gapPx;
-      const totalGridH = gridRows * tileH + (gridRows - 1) * gapPx;
+        const totalGridW = gridCols * tileW + (gridCols - 1) * gapPx;
+        const totalGridH = gridRows * tileH + (gridRows - 1) * gapPx;
 
-      let scaleFactor = 1.0;
-      const availW = sheetW - 2 * marginPx;
-      const availH = sheetH - 2 * marginPx;
+        let scaleFactor = 1.0;
+        const availW = sheetW - 2 * marginPx;
+        const availH = sheetH - 2 * marginPx;
 
-      if (totalGridW > availW || totalGridH > availH) {
-        scaleFactor = Math.min(availW / totalGridW, availH / totalGridH);
-      }
+        if (totalGridW > availW || totalGridH > availH) {
+          scaleFactor = Math.min(availW / totalGridW, availH / totalGridH);
+        }
 
-      ctx.save();
-      const scaledGridW = totalGridW * scaleFactor;
-      const scaledGridH = totalGridH * scaleFactor;
-      const startX = Math.round((sheetW - scaledGridW) / 2);
-      const startY = Math.round((sheetH - scaledGridH) / 2);
+        ctx.save();
+        const scaledGridW = totalGridW * scaleFactor;
+        const scaledGridH = totalGridH * scaleFactor;
+        const startX = Math.round((sheetW - scaledGridW) / 2);
+        const startY = Math.round((sheetH - scaledGridH) / 2);
 
-      ctx.translate(startX, startY);
-      ctx.scale(scaleFactor, scaleFactor);
+        ctx.translate(startX, startY);
+        ctx.scale(scaleFactor, scaleFactor);
 
-      let placed = 0;
-      for (let r = 0; r < gridRows; r++) {
-        for (let c = 0; c < gridCols; c++) {
-          if (placed >= slotsPerSheet) break;
+        let placed = 0;
+        for (let r = 0; r < gridRows; r++) {
+          for (let c = 0; c < gridCols; c++) {
+            if (placed >= slotsPerSheet) break;
 
-          const photoItem = pagePhotos[placed] || null;
-          const px = c * (tileW + gapPx);
-          const py = r * (tileH + gapPx);
+            const photoItem = pagePhotos[placed] || null;
+            const px = c * (tileW + gapPx);
+            const py = r * (tileH + gapPx);
 
-          if (photoItem) {
-            const tileCanvas = renderedTileMap.get(photoItem.id) || defaultTile;
-            ctx.drawImage(tileCanvas, px, py);
-          } else {
-            ctx.strokeStyle = '#e2e8f0';
-            ctx.lineWidth = Math.max(1, Math.round(dpmm * 0.2));
-            ctx.setLineDash([Math.round(dpmm * 1.5), Math.round(dpmm * 1.5)]);
-            ctx.strokeRect(px, py, tileW, tileH);
-            ctx.setLineDash([]);
+            if (photoItem) {
+              const tileCanvas = renderedTileMap.get(photoItem.id) || defaultTile;
+              ctx.drawImage(tileCanvas, px, py);
+            } else {
+              ctx.strokeStyle = '#e2e8f0';
+              ctx.lineWidth = Math.max(1, Math.round(dpmm * 0.2));
+              ctx.setLineDash([Math.round(dpmm * 1.5), Math.round(dpmm * 1.5)]);
+              ctx.strokeRect(px, py, tileW, tileH);
+              ctx.setLineDash([]);
+            }
+
+            placed++;
+          }
+        }
+
+        if (hasCutGuides && gapPx > 0 && pagePhotos.length > 1) {
+          ctx.strokeStyle = '#94a3b8';
+          ctx.lineWidth = Math.max(1, Math.round(dpmm * 0.22));
+          ctx.setLineDash([Math.round(dpmm * 1.5), Math.round(dpmm * 1.5)]);
+
+          for (let c = 1; c < gridCols; c++) {
+            const cutX = c * tileW + (c - 0.5) * gapPx;
+            ctx.beginPath();
+            ctx.moveTo(cutX, 0);
+            ctx.lineTo(cutX, totalGridH);
+            ctx.stroke();
           }
 
-          placed++;
-        }
-      }
+          for (let r = 1; r < gridRows; r++) {
+            const cutY = r * tileH + (r - 0.5) * gapPx;
+            ctx.beginPath();
+            ctx.moveTo(0, cutY);
+            ctx.lineTo(totalGridW, cutY);
+            ctx.stroke();
+          }
 
-      if (hasCutGuides && gapPx > 0 && pagePhotos.length > 1) {
-        ctx.strokeStyle = '#94a3b8';
-        ctx.lineWidth = Math.max(1, Math.round(dpmm * 0.22));
-        ctx.setLineDash([Math.round(dpmm * 1.5), Math.round(dpmm * 1.5)]);
-
-        for (let c = 1; c < gridCols; c++) {
-          const cutX = c * tileW + (c - 0.5) * gapPx;
-          ctx.beginPath();
-          ctx.moveTo(cutX, 0);
-          ctx.lineTo(cutX, totalGridH);
-          ctx.stroke();
+          ctx.setLineDash([]);
         }
 
-        for (let r = 1; r < gridRows; r++) {
-          const cutY = r * tileH + (r - 0.5) * gapPx;
-          ctx.beginPath();
-          ctx.moveTo(0, cutY);
-          ctx.lineTo(totalGridW, cutY);
-          ctx.stroke();
+        ctx.restore();
+
+        // Sheet Numbering & Studio Footer in non-print margin (Crisp Studio Branding)
+        const bottomSpace = sheetH - (startY + scaledGridH);
+        if (marginPx >= 8 || bottomSpace >= 22) {
+          ctx.fillStyle = '#94a3b8';
+          ctx.font = `600 ${Math.max(9, Math.round(dpmm * 2.3))}px sans-serif`;
+          ctx.textAlign = 'center';
+          const footerY = Math.min(sheetH - 8, Math.max(sheetH - (marginPx ? marginPx / 2 : 12), startY + scaledGridH + Math.round(dpmm * 4.2)));
+          const studioNote = studioWatermark.trim() ? `${studioWatermark.trim()} • ` : '';
+          ctx.fillText(`${studioNote}Sheet ${sheetIndex + 1} of ${totalSheetsRequired} • 100% Actual Size (${exportDpi} DPI)`, sheetW / 2, footerY);
         }
-
-        ctx.setLineDash([]);
-      }
-
-      ctx.restore();
-
-      // Sheet Numbering & Studio Footer in non-print margin (Crisp Studio Branding)
-      const bottomSpace = sheetH - (startY + scaledGridH);
-      if (marginPx >= 8 || bottomSpace >= 22) {
-        ctx.fillStyle = '#94a3b8';
-        ctx.font = `600 ${Math.max(9, Math.round(dpmm * 2.3))}px sans-serif`;
-        ctx.textAlign = 'center';
-        const footerY = Math.min(sheetH - 8, Math.max(sheetH - (marginPx ? marginPx / 2 : 12), startY + scaledGridH + Math.round(dpmm * 4.2)));
-        const studioNote = studioWatermark.trim() ? `${studioWatermark.trim()} • ` : '';
-        ctx.fillText(`${studioNote}Sheet ${sheetIndex + 1} of ${totalSheetsRequired} • 100% Actual Size (${exportDpi} DPI)`, sheetW / 2, footerY);
+      } finally {
+        renderedTileMap.forEach((tc) => releaseCanvas(tc));
+        renderedTileMap.clear();
       }
 
       return canvas;
@@ -1265,114 +1448,126 @@ export default function PassportPhotoSheet() {
     ]
   );
 
-  // Live Screen Preview
+  // Live Screen Preview (skipped while Crop Modal is open to eliminate touch-drag re-raster storm)
   useEffect(() => {
-    if (!previewCanvasRef.current) return;
+    if (!previewCanvasRef.current || isCropModalOpen) return;
     const previewDpi = 96;
     const rendered = renderSheetPageCanvas(activeSheetIndex, previewDpi);
-
-    const targetCanvas = previewCanvasRef.current;
-    targetCanvas.width = rendered.width;
-    targetCanvas.height = rendered.height;
-    const tctx = targetCanvas.getContext('2d');
-    if (tctx) {
-      tctx.drawImage(rendered, 0, 0);
+    try {
+      const targetCanvas = previewCanvasRef.current;
+      targetCanvas.width = rendered.width;
+      targetCanvas.height = rendered.height;
+      const tctx = targetCanvas.getContext('2d');
+      if (tctx) {
+        tctx.drawImage(rendered, 0, 0);
+      }
+    } finally {
+      releaseCanvas(rendered);
     }
-  }, [renderSheetPageCanvas, activeSheetIndex]);
+  }, [renderSheetPageCanvas, activeSheetIndex, isCropModalOpen]);
 
-  // Direct Browser Print (100% Actual Size)
-  const handlePrint = () => {
-    if (!photos.length) return;
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) {
-      showToast('Pop-up was blocked. Please allow pop-ups to print directly.', 'error');
-      return;
+  // Direct Browser Print (100% Actual Size, hidden-iframe mobile-safe)
+  const handlePrint = async () => {
+    if (!photos.length || isGenerating) return;
+    setIsGenerating(true);
+    try {
+      const pagesHtml: string[] = [];
+      for (let i = 0; i < totalSheetsRequired; i++) {
+        const pageCanvas = renderSheetPageCanvas(i, exportDpi);
+        try {
+          const dataUrl = pageCanvas.toDataURL('image/jpeg', 0.96);
+          pagesHtml.push(`
+            <div class="page">
+              <img src="${dataUrl}" />
+            </div>
+          `);
+        } finally {
+          releaseCanvas(pageCanvas);
+        }
+      }
+
+      const title = `Passport Photo Print Sheet (${paperSizeId.toUpperCase()})`;
+      const html = `
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <title>${title}</title>
+            <style>
+              @page {
+                size: ${activePaper.wMm}mm ${activePaper.hMm}mm;
+                margin: 0;
+              }
+              body {
+                margin: 0;
+                padding: 0;
+                background: #fff;
+              }
+              .page {
+                page-break-after: always;
+                break-after: page;
+                width: ${activePaper.wMm}mm;
+                height: ${activePaper.hMm}mm;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+              }
+              .page:last-child {
+                page-break-after: avoid;
+                break-after: avoid;
+              }
+              img {
+                width: 100%;
+                height: 100%;
+                object-fit: contain;
+                display: block;
+              }
+            </style>
+          </head>
+          <body>
+            ${pagesHtml.join('')}
+          </body>
+        </html>
+      `;
+      const printed = await printHtmlDocument(html, title);
+      if (!printed) {
+        showToast('Unable to open print dialog on this browser. Please download the PDF or JPG sheet.', 'error');
+      }
+    } catch (e) {
+      console.error(e);
+      showToast('Print preparation failed. Please try downloading the PDF or JPG sheet.', 'error');
+    } finally {
+      setIsGenerating(false);
     }
-
-    const pagesHtml: string[] = [];
-    for (let i = 0; i < totalSheetsRequired; i++) {
-      const pageCanvas = renderSheetPageCanvas(i, exportDpi);
-      const dataUrl = pageCanvas.toDataURL('image/jpeg', 0.96);
-      pagesHtml.push(`
-        <div class="page">
-          <img src="${dataUrl}" />
-        </div>
-      `);
-    }
-
-    printWindow.document.write(`
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title>Passport Photo Print Sheet (${paperSizeId.toUpperCase()})</title>
-          <style>
-            @page {
-              size: ${activePaper.wMm}mm ${activePaper.hMm}mm;
-              margin: 0;
-            }
-            body {
-              margin: 0;
-              padding: 0;
-              background: #fff;
-            }
-            .page {
-              page-break-after: always;
-              width: ${activePaper.wMm}mm;
-              height: ${activePaper.hMm}mm;
-              display: flex;
-              align-items: center;
-              justify-content: center;
-            }
-            img {
-              width: 100%;
-              height: 100%;
-              object-fit: contain;
-              display: block;
-            }
-          </style>
-        </head>
-        <body>
-          ${pagesHtml.join('')}
-          <script>
-            window.onload = function() {
-              window.print();
-              window.close();
-            };
-          </script>
-        </body>
-      </html>
-    `);
-    printWindow.document.close();
   };
 
-  const handleDownloadCurrentSheet = (format: 'png' | 'jpeg') => {
-    if (!photos.length) return;
+  const handleDownloadCurrentSheet = async (format: 'png' | 'jpeg') => {
+    if (!photos.length || isGenerating) return;
     setIsGenerating(true);
-    setTimeout(() => {
-      try {
-        const canvas = renderSheetPageCanvas(activeSheetIndex, exportDpi);
-        const mime = format === 'png' ? 'image/png' : 'image/jpeg';
-        const quality = format === 'jpeg' ? 0.96 : undefined;
-
-        canvas.toBlob((blob) => {
-          if (!blob) return;
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = `passport_sheet_${paperSizeId}_sheet${activeSheetIndex + 1}_of_${totalSheetsRequired}.${format === 'png' ? 'png' : 'jpg'}`;
-          a.click();
-          URL.revokeObjectURL(url);
-          setIsGenerating(false);
-        }, mime, quality);
-      } catch (e) {
-        console.error(e);
-        setIsGenerating(false);
+    let canvas: HTMLCanvasElement | null = null;
+    try {
+      canvas = renderSheetPageCanvas(activeSheetIndex, exportDpi);
+      const mime = format === 'png' ? 'image/png' : 'image/jpeg';
+      const quality = format === 'jpeg' ? 0.96 : undefined;
+      const blob = await safeCanvasToBlob(canvas, mime, quality);
+      if (!blob) {
+        showToast('Could not generate photo sheet image. Try lowering DPI to 300.', 'error');
+        return;
       }
-    }, 40);
+      triggerBlobDownload(
+        blob,
+        `passport_sheet_${paperSizeId}_sheet${activeSheetIndex + 1}_of_${totalSheetsRequired}.${format === 'png' ? 'png' : 'jpg'}`
+      );
+    } catch (e) {
+      console.error(e);
+      showToast('Failed to export photo sheet image. Try lowering DPI to 300.', 'error');
+    } finally {
+      releaseCanvas(canvas);
+      setIsGenerating(false);
+    }
   };
 
   const handleDownloadAllSheetsPdf = async () => {
-    if (!photos.length) return;
+    if (!photos.length || isGenerating) return;
     setIsGenerating(true);
     try {
       const pdf = await PDFDocument.create();
@@ -1382,24 +1577,20 @@ export default function PassportPhotoSheet() {
 
       for (let i = 0; i < totalSheetsRequired; i++) {
         const pageCanvas = renderSheetPageCanvas(i, exportDpi);
-        const pngBlob = await new Promise<Blob | null>((res) => pageCanvas.toBlob(res, 'image/png'));
-        if (!pngBlob) continue;
-
-        const arrayBuffer = await pngBlob.arrayBuffer();
-        const embeddedImg = await pdf.embedPng(new Uint8Array(arrayBuffer));
-        const page = pdf.addPage([pageW, pageH]);
-        page.drawImage(embeddedImg, { x: 0, y: 0, width: pageW, height: pageH });
+        try {
+          const pngBlob = await safeCanvasToBlob(pageCanvas, 'image/png');
+          const arrayBuffer = await pngBlob.arrayBuffer();
+          const embeddedImg = await pdf.embedPng(new Uint8Array(arrayBuffer));
+          const page = pdf.addPage([pageW, pageH]);
+          page.drawImage(embeddedImg, { x: 0, y: 0, width: pageW, height: pageH });
+        } finally {
+          releaseCanvas(pageCanvas);
+        }
       }
 
       const pdfBytes = await pdf.save();
       const pdfBlob = new Blob([toArrayBufferBytes(pdfBytes)], { type: 'application/pdf' });
-      const url = URL.createObjectURL(pdfBlob);
-
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `passport_photo_sheets_${paperSizeId}_${targetPhotoCount}photos.pdf`;
-      a.click();
-      URL.revokeObjectURL(url);
+      triggerBlobDownload(pdfBlob, `passport_photo_sheets_${paperSizeId}_${targetPhotoCount}photos.pdf`);
     } catch (e) {
       console.error(e);
       showToast('Failed to generate PDF. Please download as PNG or JPG.', 'error');
@@ -1409,30 +1600,26 @@ export default function PassportPhotoSheet() {
   };
 
   const handleDownloadAllSheetsZip = async (format: 'png' | 'jpeg') => {
-    if (!photos.length) return;
+    if (!photos.length || isGenerating) return;
     setIsGenerating(true);
     try {
       const zip = new JSZip();
-      // Bug fix: was always using PNG — now correctly uses the requested format
       const mime = format === 'png' ? 'image/png' : 'image/jpeg';
       const quality = format === 'jpeg' ? 0.95 : undefined;
       const ext = format === 'png' ? 'png' : 'jpg';
 
       for (let i = 0; i < totalSheetsRequired; i++) {
         const canvas = renderSheetPageCanvas(i, exportDpi);
-        const blob = await new Promise<Blob | null>((res) => canvas.toBlob(res, mime, quality));
-        if (blob) {
+        try {
+          const blob = await safeCanvasToBlob(canvas, mime, quality);
           zip.file(`passport_sheet_${paperSizeId}_page_${i + 1}.${ext}`, blob);
+        } finally {
+          releaseCanvas(canvas);
         }
       }
 
       const zipBlob = await zip.generateAsync({ type: 'blob' });
-      const url = URL.createObjectURL(zipBlob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `passport_sheets_${paperSizeId}_${targetPhotoCount}photos_${ext}.zip`;
-      a.click();
-      URL.revokeObjectURL(url);
+      triggerBlobDownload(zipBlob, `passport_sheets_${paperSizeId}_${targetPhotoCount}photos_${ext}.zip`);
     } catch (e) {
       console.error(e);
       showToast('Failed to generate ZIP package.', 'error');
@@ -1441,36 +1628,41 @@ export default function PassportPhotoSheet() {
     }
   };
 
-  const handleDownloadSinglePhoto = (format: 'png' | 'jpeg') => {
+  const handleDownloadSinglePhoto = async (format: 'png' | 'jpeg') => {
     if (!currentPhoto) return;
-    const tile = renderSinglePhotoTile(currentPhoto, exportDpi);
-    const mime = format === 'png' ? 'image/png' : 'image/jpeg';
-    const quality = format === 'jpeg' ? 0.98 : undefined;
-
-    tile.toBlob((blob) => {
-      if (!blob) return;
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `single_passport_photo_${basePhotoWidthMm}x${basePhotoHeightMm}mm.${format === 'png' ? 'png' : 'jpg'}`;
-      a.click();
-      URL.revokeObjectURL(url);
-    }, mime, quality);
+    let tile: HTMLCanvasElement | null = null;
+    try {
+      tile = renderSinglePhotoTile(currentPhoto, exportDpi);
+      const mime = format === 'png' ? 'image/png' : 'image/jpeg';
+      const quality = format === 'jpeg' ? 0.98 : undefined;
+      const blob = await safeCanvasToBlob(tile, mime, quality);
+      triggerBlobDownload(
+        blob,
+        `single_passport_photo_${basePhotoWidthMm}x${basePhotoHeightMm}mm.${format === 'png' ? 'png' : 'jpg'}`
+      );
+    } catch (e) {
+      console.error(e);
+      showToast('Failed to export single photo. Try lowering DPI.', 'error');
+    } finally {
+      releaseCanvas(tile);
+    }
   };
 
   // Dedicated Govt Portal Photo Downloader (Guaranteed 20 - 50 KB JPEG)
   const handleDownloadGovtPortalPhoto = async () => {
-    if (!currentPhoto) return;
+    if (!currentPhoto || isGenerating) return;
     setIsGenerating(true);
+    let tile: HTMLCanvasElement | null = null;
+    let adjTile: HTMLCanvasElement | null = null;
     try {
-      const tile = renderSinglePhotoTile(currentPhoto, 300);
+      tile = renderSinglePhotoTile(currentPhoto, 300);
       let low = 0.20;
       let high = 0.95;
       let bestBlob: Blob | null = null;
 
       for (let iter = 0; iter < 7; iter++) {
         const mid = (low + high) / 2;
-        const blob = await new Promise<Blob | null>((res) => tile.toBlob(res, 'image/jpeg', mid));
+        const blob = await new Promise<Blob | null>((res) => tile!.toBlob(res, 'image/jpeg', mid));
         if (!blob) break;
         const kb = blob.size / 1024;
         bestBlob = blob;
@@ -1487,8 +1679,8 @@ export default function PassportPhotoSheet() {
       if (bestBlob && (bestBlob.size / 1024 < 20 || bestBlob.size / 1024 > 50)) {
         const kb = bestBlob.size / 1024;
         const adjustedDpi = kb < 20 ? 380 : 220;
-        const adjTile = renderSinglePhotoTile(currentPhoto, adjustedDpi);
-        const retryBlob = await new Promise<Blob | null>((res) => adjTile.toBlob(res, 'image/jpeg', 0.82));
+        adjTile = renderSinglePhotoTile(currentPhoto, adjustedDpi);
+        const retryBlob = await new Promise<Blob | null>((res) => adjTile!.toBlob(res, 'image/jpeg', 0.82));
         if (retryBlob && retryBlob.size / 1024 >= 18 && retryBlob.size / 1024 <= 50) {
           bestBlob = retryBlob;
         }
@@ -1496,19 +1688,22 @@ export default function PassportPhotoSheet() {
 
       if (bestBlob) {
         const sizeKb = Math.round(bestBlob.size / 1024);
-        const url = URL.createObjectURL(bestBlob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `sarkari_photo_${basePhotoWidthMm}x${basePhotoHeightMm}mm_${sizeKb}KB.jpg`;
-        a.click();
-        URL.revokeObjectURL(url);
+        triggerBlobDownload(
+          bestBlob,
+          `sarkari_photo_${basePhotoWidthMm}x${basePhotoHeightMm}mm_${sizeKb}KB.jpg`
+        );
         showToast(`✅ Sarkari Photo exported: ${sizeKb} KB (Passes SSC/UPSC 20–50 KB validation!)`, 'success');
+      } else {
+        showToast('Could not compress portal photo. Downloading standard photo...', 'info');
+        await handleDownloadSinglePhoto('jpeg');
       }
     } catch (e) {
       console.error(e);
       showToast('Auto-compression reached fallback. Downloading standard photo...', 'info');
-      handleDownloadSinglePhoto('jpeg');
+      await handleDownloadSinglePhoto('jpeg');
     } finally {
+      releaseCanvas(adjTile);
+      releaseCanvas(tile);
       setIsGenerating(false);
     }
   };
@@ -1539,9 +1734,9 @@ export default function PassportPhotoSheet() {
           if (e.target.files) addFilesToSession(Array.from(e.target.files));
           e.target.value = '';
         }}
-        accept="image/png, image/jpeg, image/jpg, image/webp"
+        accept="image/*"
         multiple
-        className="hidden"
+        className="sr-only"
       />
 
       {/* ─── Toast Notification (replaces browser alert) ─── */}
@@ -1552,7 +1747,7 @@ export default function PassportPhotoSheet() {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={prefersReduced ? undefined : { opacity: 0, y: -10, scale: 0.96 }}
             transition={{ duration: 0.22 }}
-            className={`fixed top-5 right-5 z-[9999] flex items-center gap-3 px-5 py-3 rounded-2xl shadow-2xl text-sm font-semibold max-w-sm border border-white/15 backdrop-blur-md ${
+            className={`fixed top-5 left-4 right-4 sm:left-auto sm:right-5 z-[9999] flex items-center gap-3 px-5 py-3 rounded-2xl shadow-2xl text-sm font-semibold sm:max-w-sm border border-white/15 backdrop-blur-md ${
               toastMsg.type === 'error'
                 ? 'bg-rose-600 text-white'
                 : toastMsg.type === 'success'
@@ -1847,7 +2042,7 @@ export default function PassportPhotoSheet() {
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={prefersReduced ? undefined : { opacity: 0, scale: 0.96, y: 12 }}
               transition={{ duration: 0.22 }}
-              className="relative w-full max-w-4xl pms-glass-panel rounded-3xl overflow-hidden flex flex-col max-h-[92vh]"
+              className="relative w-full max-w-4xl pms-glass-panel rounded-3xl overflow-hidden flex flex-col max-h-[92dvh]"
               style={{ backgroundColor: 'var(--pms-white)' }}
             >
               <PearlScanOverlay
@@ -1928,40 +2123,40 @@ export default function PassportPhotoSheet() {
                 {/* Left Live Viewport */}
                 <div className="md:col-span-7 flex flex-col items-center justify-center">
                   <div
-                    className="relative w-full max-w-sm h-80 bg-slate-950 rounded-2xl overflow-hidden flex items-center justify-center select-none cursor-grab active:cursor-grabbing border border-[var(--pms-border)] shadow-inner touch-none"
-                    onMouseDown={(e) => {
+                    className="relative w-full max-w-sm h-56 sm:h-80 bg-slate-950 rounded-2xl overflow-hidden flex items-center justify-center select-none cursor-grab active:cursor-grabbing border border-[var(--pms-border)] shadow-inner touch-none"
+                    onPointerDown={(e) => {
+                      if (activePointerIdRef.current !== null) return;
+                      activePointerIdRef.current = e.pointerId;
                       isDraggingRef.current = true;
+                      try {
+                        e.currentTarget.setPointerCapture(e.pointerId);
+                      } catch {}
                       dragStartRef.current = {
                         x: e.clientX - currentPhoto.panOffset.x,
                         y: e.clientY - currentPhoto.panOffset.y,
                       };
                     }}
-                    onMouseMove={(e) => {
-                      if (!isDraggingRef.current) return;
+                    onPointerMove={(e) => {
+                      if (!isDraggingRef.current || activePointerIdRef.current !== e.pointerId) return;
                       const newX = e.clientX - dragStartRef.current.x;
                       const newY = e.clientY - dragStartRef.current.y;
                       updatePhoto(currentPhoto.id, (p) => ({ ...p, panOffset: { x: newX, y: newY } }));
                     }}
-                    onMouseUp={() => { isDraggingRef.current = false; }}
-                    onMouseLeave={() => { isDraggingRef.current = false; }}
-                    // Touch support for mobile devices
-                    onTouchStart={(e) => {
-                      isDraggingRef.current = true;
-                      const t = e.touches[0];
-                      dragStartRef.current = {
-                        x: t.clientX - currentPhoto.panOffset.x,
-                        y: t.clientY - currentPhoto.panOffset.y,
-                      };
+                    onPointerUp={(e) => {
+                      if (activePointerIdRef.current !== e.pointerId) return;
+                      isDraggingRef.current = false;
+                      activePointerIdRef.current = null;
+                      try {
+                        if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+                          e.currentTarget.releasePointerCapture(e.pointerId);
+                        }
+                      } catch {}
                     }}
-                    onTouchMove={(e) => {
-                      if (!isDraggingRef.current) return;
-                      e.preventDefault();
-                      const t = e.touches[0];
-                      const newX = t.clientX - dragStartRef.current.x;
-                      const newY = t.clientY - dragStartRef.current.y;
-                      updatePhoto(currentPhoto.id, (p) => ({ ...p, panOffset: { x: newX, y: newY } }));
+                    onPointerCancel={(e) => {
+                      if (activePointerIdRef.current !== e.pointerId) return;
+                      isDraggingRef.current = false;
+                      activePointerIdRef.current = null;
                     }}
-                    onTouchEnd={() => { isDraggingRef.current = false; }}
                   >
                     {/* Photo Card Frame — matches exact passport aspect ratio & covers identically to canvas */}
                     {(() => {
@@ -2093,6 +2288,9 @@ export default function PassportPhotoSheet() {
                           onMouseLeave={() => setIsComparingOriginal(false)}
                           onTouchStart={() => setIsComparingOriginal(true)}
                           onTouchEnd={() => setIsComparingOriginal(false)}
+                          onTouchCancel={() => setIsComparingOriginal(false)}
+                          onPointerCancel={() => setIsComparingOriginal(false)}
+                          onContextMenu={(e) => e.preventDefault()}
                           className="text-[11px] font-bold px-2 py-0.5 rounded-md border border-[var(--pms-border)] bg-[var(--pms-pearl)] text-[var(--pms-ink)] select-none cursor-pointer"
                         >
                           👁 Hold to Compare
@@ -2662,8 +2860,9 @@ export default function PassportPhotoSheet() {
             {photos.length === 0 ? (
               <FileDropzone
                 onDrop={addFilesToSession}
+                onDropRejected={(msg) => showToast(msg, 'error')}
                 multiple={true}
-                accept={{ 'image/*': ['.jpg', '.jpeg', '.png', '.webp'] }}
+                accept={{ 'image/*': [] }}
                 title="Select or drop portrait photo"
                 subtitle="Passport photo, phone portrait selfie, or scan"
                 className="p-8"
@@ -3875,7 +4074,7 @@ export default function PassportPhotoSheet() {
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={prefersReduced ? undefined : { opacity: 0, scale: 0.96, y: 12 }}
               transition={{ duration: 0.2 }}
-              className="w-full max-w-5xl pms-glass-panel rounded-3xl overflow-hidden flex flex-col max-h-[92vh]"
+              className="w-full max-w-5xl pms-glass-panel rounded-3xl overflow-hidden flex flex-col max-h-[92dvh]"
               style={{ backgroundColor: 'var(--pms-white)' }}
             >
               <div className="flex items-center justify-between p-4 border-b border-[var(--pms-border)]">

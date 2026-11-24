@@ -10,7 +10,8 @@ import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { dataUrlToBytes } from '../lib/utils';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
-import { toArrayBufferBytes } from '../lib/blobUrl';
+import { toArrayBufferBytes, triggerBlobDownload } from '../lib/blobUrl';
+import { clampPdfScale, releaseCanvas, safeCanvasToDataUrl } from '../lib/safeCanvas';
 import { AnimatedNumber, PearlProcessCard, PearlScanOverlay, PearlStageSwitch } from '../components/pearl/PearlMotion';
 
 // Initialize pdf.js worker
@@ -91,20 +92,27 @@ export default function PDFToJPG() {
       const thumbs: PageThumb[] = [];
       for (let i = 1; i <= pdf.numPages; i++) {
         const page = await pdf.getPage(i);
-        const vp = page.getViewport({ scale: 0.35 });
+        const baseVp = page.getViewport({ scale: 1.0 });
+        const thumbScale = clampPdfScale(baseVp.width, baseVp.height, 0.35);
+        const vp = page.getViewport({ scale: thumbScale });
         const canvas = document.createElement('canvas');
-        canvas.width = vp.width;
-        canvas.height = vp.height;
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-          await page.render({ canvasContext: ctx, viewport: vp, canvas }).promise;
-          thumbs.push({
-            pageNum: i,
-            thumbUrl: canvas.toDataURL('image/jpeg', 0.8),
-            selected: true,
-            width: Math.round(vp.width / 0.35),
-            height: Math.round(vp.height / 0.35),
-          });
+        try {
+          canvas.width = Math.max(1, Math.round(vp.width));
+          canvas.height = Math.max(1, Math.round(vp.height));
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            await page.render({ canvasContext: ctx, viewport: vp, canvas }).promise;
+            thumbs.push({
+              pageNum: i,
+              thumbUrl: safeCanvasToDataUrl(canvas, 'image/jpeg', 0.8),
+              selected: true,
+              width: Math.round(baseVp.width),
+              height: Math.round(baseVp.height),
+            });
+          }
+        } finally {
+          releaseCanvas(canvas);
+          page.cleanup();
         }
       }
       setPages(thumbs);
@@ -172,44 +180,49 @@ export default function PDFToJPG() {
         setProcessProgress({ current: idx + 1, total: selectedPages.length });
 
         const page = await pdfDocRef.current.getPage(item.pageNum);
-        const vp = page.getViewport({ scale });
+        const baseVp = page.getViewport({ scale: 1.0 });
+        const safeScale = clampPdfScale(baseVp.width, baseVp.height, scale);
+        const vp = page.getViewport({ scale: safeScale });
         const canvas = document.createElement('canvas');
-        canvas.width = vp.width;
-        canvas.height = vp.height;
-        const ctx = canvas.getContext('2d')!;
+        try {
+          canvas.width = Math.max(1, Math.round(vp.width));
+          canvas.height = Math.max(1, Math.round(vp.height));
+          const ctx = canvas.getContext('2d');
+          if (!ctx) throw new Error('Canvas context unavailable');
 
-        // White background for transparent PDF layers
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, vp.width, vp.height);
+          // White background for transparent PDF layers
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-        await page.render({ canvasContext: ctx, viewport: vp, canvas }).promise;
+          await page.render({ canvasContext: ctx, viewport: vp, canvas }).promise;
 
-        let blob: Blob;
-        let dataUrl: string;
+          let blob: Blob;
+          let dataUrl: string;
 
-        if (format === 'tiff') {
-          const imgData = ctx.getImageData(0, 0, Math.round(vp.width), Math.round(vp.height));
-          const tiffBuf = (UTIF as any).encodeImage(imgData.data, Math.round(vp.width), Math.round(vp.height));
-          blob = new Blob([tiffBuf], { type: 'image/tiff' });
-          dataUrl = canvas.toDataURL('image/jpeg', 0.85);
-        } else {
-          dataUrl = canvas.toDataURL(mime, format === 'png' ? undefined : quality);
-          const bytes = dataUrlToBytes(dataUrl);
-          blob = new Blob([toArrayBufferBytes(bytes)], { type: mime });
+          if (format === 'tiff') {
+            const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const tiffBuf = (UTIF as any).encodeImage(imgData.data, canvas.width, canvas.height);
+            blob = new Blob([tiffBuf], { type: 'image/tiff' });
+            dataUrl = safeCanvasToDataUrl(canvas, 'image/jpeg', 0.85);
+          } else {
+            dataUrl = safeCanvasToDataUrl(canvas, mime, format === 'png' ? undefined : quality);
+            const bytes = dataUrlToBytes(dataUrl);
+            blob = new Blob([toArrayBufferBytes(bytes)], { type: mime });
+          }
+
+          outputList.push({
+            pageNum: item.pageNum,
+            name: `${baseName}_page_${item.pageNum}.${ext}`,
+            dataUrl,
+            blob,
+            sizeKb: Math.round(blob.size / 1024),
+            width: canvas.width,
+            height: canvas.height,
+          });
+        } finally {
+          releaseCanvas(canvas);
+          page.cleanup();
         }
-
-        outputList.push({
-          pageNum: item.pageNum,
-          name: `${baseName}_page_${item.pageNum}.${ext}`,
-          dataUrl,
-          blob,
-          sizeKb: Math.round(blob.size / 1024),
-          width: Math.round(vp.width),
-          height: Math.round(vp.height),
-        });
-
-        canvas.width = 0;
-        canvas.height = 0;
       }
       setConvertedImages(outputList);
     } catch (e: any) {
@@ -230,14 +243,7 @@ export default function PDFToJPG() {
       }
       const zipBlob = await zip.generateAsync({ type: 'blob' });
       const baseName = file.name.replace(/\.[^/.]+$/, '');
-      const url = URL.createObjectURL(zipBlob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${baseName}_images_${format.toUpperCase()}.zip`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      triggerBlobDownload(zipBlob, `${baseName}_images_${format.toUpperCase()}.zip`);
     } catch (err) {
       console.error('ZIP failed:', err);
       alert('Failed to generate ZIP archive.');
@@ -369,14 +375,7 @@ export default function PDFToJPG() {
                       </span>
                       <button
                         type="button"
-                        onClick={() => {
-                          const dlUrl = URL.createObjectURL(img.blob);
-                          const a = document.createElement('a');
-                          a.href = dlUrl;
-                          a.download = img.name;
-                          a.click();
-                          URL.revokeObjectURL(dlUrl);
-                        }}
+                        onClick={() => triggerBlobDownload(img.blob, img.name)}
                         className="pms-btn-primary inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold rounded-lg shrink-0 cursor-pointer"
                       >
                         <Download className="w-3.5 h-3.5" /> Save

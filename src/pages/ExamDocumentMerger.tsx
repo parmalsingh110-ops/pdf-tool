@@ -7,6 +7,8 @@ import { motion, AnimatePresence, useReducedMotion } from 'motion/react';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 import { AnimatedNumber, PearlScanOverlay, PearlSpinner } from '../components/pearl/PearlMotion';
 import { safeRevokeUrl, toArrayBufferBytes, useAutoRevokeUrl, useAutoRevokeUrls } from '../lib/blobUrl';
+import { ACCEPT_PDF_AND_IMAGES, isPdfFile } from '../lib/fileAccept';
+import { clampCanvasDimensions, clampPdfScale, releaseCanvas } from '../lib/safeCanvas';
 
 interface DocItem {
   id: string;
@@ -56,7 +58,7 @@ export default function ExamDocumentMerger() {
     if (files.length === 0) return;
 
     const newItems: DocItem[] = files.map((file, idx) => {
-      const isPdfFile = file.type === 'application/pdf' || file.name.endsWith('.pdf');
+      const isPdf = isPdfFile(file);
       const suggestedLabel = COMMON_LABELS[Math.min(docs.length + idx, COMMON_LABELS.length - 1)];
 
       return {
@@ -64,8 +66,8 @@ export default function ExamDocumentMerger() {
         file,
         label: suggestedLabel,
         sizeKb: Math.round(file.size / 1024),
-        type: isPdfFile ? 'pdf' : 'image',
-        previewUrl: !isPdfFile ? URL.createObjectURL(file) : undefined,
+        type: isPdf ? 'pdf' : 'image',
+        previewUrl: !isPdf ? URL.createObjectURL(file) : undefined,
       };
     });
 
@@ -111,19 +113,19 @@ export default function ExamDocumentMerger() {
     setMergedPdfUrl(null);
     setProgressMsg('Initializing PDF compiler...');
 
+    // Extract all pages from all items into rendered image canvases
+    interface ExtractedPage {
+      canvas: HTMLCanvasElement;
+      label: string;
+    }
+    const extractedPages: ExtractedPage[] = [];
+
     try {
       const pdfjsLib = await import('pdfjs-dist');
       if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
         const workerModule = await import('pdfjs-dist/build/pdf.worker.min.mjs?url');
         pdfjsLib.GlobalWorkerOptions.workerSrc = workerModule.default;
       }
-
-      // Extract all pages from all items into rendered image canvases
-      interface ExtractedPage {
-        canvas: HTMLCanvasElement;
-        label: string;
-      }
-      const extractedPages: ExtractedPage[] = [];
 
       for (let i = 0; i < docs.length; i++) {
         const item = docs[i];
@@ -140,12 +142,16 @@ export default function ExamDocumentMerger() {
               img.src = objectUrl;
             });
 
+            const { width, height } = clampCanvasDimensions(img.naturalWidth || img.width, img.naturalHeight || img.height);
             const canvas = document.createElement('canvas');
-            canvas.width = img.width;
-            canvas.height = img.height;
+            canvas.width = width;
+            canvas.height = height;
             const ctx = canvas.getContext('2d');
-            if (!ctx) throw new Error('Unable to initialize canvas context.');
-            ctx.drawImage(img, 0, 0);
+            if (!ctx) {
+              releaseCanvas(canvas);
+              throw new Error('Unable to initialize canvas context.');
+            }
+            ctx.drawImage(img, 0, 0, width, height);
             extractedPages.push({ canvas, label: item.label });
           } finally {
             safeRevokeUrl(objectUrl);
@@ -158,12 +164,20 @@ export default function ExamDocumentMerger() {
 
           for (let p = 1; p <= pdfDoc.numPages; p++) {
             const page = await pdfDoc.getPage(p);
-            const viewport = page.getViewport({ scale: 1.5 });
+            const baseVp = page.getViewport({ scale: 1.0 });
+            const safeScale = clampPdfScale(baseVp.width, baseVp.height, 1.5);
+            const viewport = page.getViewport({ scale: safeScale });
             const canvas = document.createElement('canvas');
-            canvas.width = viewport.width;
-            canvas.height = viewport.height;
-            const ctx = canvas.getContext('2d')!;
+            canvas.width = Math.max(1, Math.round(viewport.width));
+            canvas.height = Math.max(1, Math.round(viewport.height));
+            const ctx = canvas.getContext('2d');
+            if (!ctx) {
+              releaseCanvas(canvas);
+              page.cleanup();
+              throw new Error('Unable to initialize canvas context.');
+            }
             await page.render({ canvasContext: ctx, viewport, canvas } as any).promise;
+            page.cleanup();
             extractedPages.push({ canvas, label: `${item.label} (Pg ${p})` });
           }
         }
@@ -185,17 +199,21 @@ export default function ExamDocumentMerger() {
         for (const pg of extractedPages) {
           // Downscale if quality is very tight and canvas is huge
           let c = pg.canvas;
+          let tempScaled: HTMLCanvasElement | null = null;
           if (quality < 0.5 && c.width > 1200) {
             const scaleDown = 1200 / c.width;
+            const clampedScaled = clampCanvasDimensions(1200, Math.round(c.height * scaleDown));
             const scaled = document.createElement('canvas');
-            scaled.width = 1200;
-            scaled.height = Math.round(c.height * scaleDown);
+            scaled.width = clampedScaled.width;
+            scaled.height = clampedScaled.height;
             const sCtx = scaled.getContext('2d')!;
             sCtx.drawImage(c, 0, 0, scaled.width, scaled.height);
             c = scaled;
+            tempScaled = scaled;
           }
 
           const jpegDataUrl = c.toDataURL('image/jpeg', quality);
+          if (tempScaled) releaseCanvas(tempScaled);
           const base64Data = jpegDataUrl.split(',')[1];
           const imgBytes = Uint8Array.from(atob(base64Data), (ch) => ch.charCodeAt(0));
 
@@ -239,6 +257,9 @@ export default function ExamDocumentMerger() {
       console.error('Error merging documents:', err);
       alert('Error bundling documents. Please check file formats.');
     } finally {
+      for (const pg of extractedPages) {
+        releaseCanvas(pg.canvas);
+      }
       setIsProcessing(false);
       setProgressMsg('');
     }
@@ -316,7 +337,7 @@ export default function ExamDocumentMerger() {
           <input
             type="file"
             multiple
-            accept="application/pdf,image/*"
+            accept={ACCEPT_PDF_AND_IMAGES}
             onChange={handleFileUpload}
             className="hidden"
           />

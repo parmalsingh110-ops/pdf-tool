@@ -7,6 +7,7 @@ import * as pdfjsLib from 'pdfjs-dist';
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { createWorker } from 'tesseract.js';
 import { extractTextRegions, isVisionAiEnabled } from './advancedVisionEngine';
+import { clampPdfScale, releaseCanvas, safeCanvasToDataUrl } from './safeCanvas';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
@@ -18,6 +19,8 @@ export interface PageAnalysis {
   hasText: boolean;
   embeddedTextCount: number;
   imageDataUrl?: string;
+  /** Actual render scale used for `imageDataUrl` (may be clamped below 2.5 on mobile) */
+  ocrScale?: number;
   width: number;
   height: number;
   /** Left margin (pts) — smallest X of any text item on the page */
@@ -179,20 +182,26 @@ export async function analysePDF(
     if (rightMargin === 0)       rightMargin = vp.width - 50;
 
     let imageDataUrl: string | undefined;
+    let ocrScale: number | undefined;
     if (isScanned) {
-      const scale = 2.5;
+      const scale = clampPdfScale(vp.width, vp.height, 2.5);
       const rv = page.getViewport({ scale });
       const canvas = document.createElement('canvas');
       canvas.width = Math.round(rv.width);
       canvas.height = Math.round(rv.height);
-      const ctx = canvas.getContext('2d')!;
-      await page.render({ canvasContext: ctx, viewport: rv, canvas }).promise;
-      imageDataUrl = canvas.toDataURL('image/png');
+      try {
+        const ctx = canvas.getContext('2d')!;
+        await page.render({ canvasContext: ctx, viewport: rv, canvas }).promise;
+        imageDataUrl = safeCanvasToDataUrl(canvas, 'image/png');
+        ocrScale = scale;
+      } finally {
+        releaseCanvas(canvas);
+      }
     }
 
     results.push({
       pageIndex: i - 1, isScanned, hasText: chars >= 10,
-      embeddedTextCount: chars, imageDataUrl,
+      embeddedTextCount: chars, imageDataUrl, ocrScale,
       width: vp.width, height: vp.height,
       leftMargin, rightMargin,
     });
@@ -452,11 +461,12 @@ export async function ocrScannedPages(
           for (const line of para.lines ?? []) {
             // Collect whole line as one run (better than word-by-word for layout)
             if (!line.text?.trim()) continue;
+            const pageScale = pa.ocrScale ?? OCR_SCALE;
             const bbox = line.bbox;
-            const x = bbox.x0 / OCR_SCALE;
-            const y = bbox.y0 / OCR_SCALE;
-            const w = (bbox.x1 - bbox.x0) / OCR_SCALE;
-            const h = (bbox.y1 - bbox.y0) / OCR_SCALE;
+            const x = bbox.x0 / pageScale;
+            const y = bbox.y0 / pageScale;
+            const w = (bbox.x1 - bbox.x0) / pageScale;
+            const h = (bbox.y1 - bbox.y0) / pageScale;
             runs.push({
               text: line.text.trim(),
               x, y, w, h,
@@ -761,14 +771,20 @@ export async function runOCRPipeline(
       if (!pa.imageDataUrl) {
          onProgress?.(`Rendering digital page ${pi + 1} for OCR analysis…`, 45 + (pi / pageAnalyses.length) * 10);
          const page = await pdf.getPage(pi + 1);
-         const scale = 2.5; // Must match OCR_SCALE = 2.5 in ocrScannedPages
+         const baseVp = page.getViewport({ scale: 1 });
+         const scale = clampPdfScale(baseVp.width, baseVp.height, 2.5);
          const rv = page.getViewport({ scale });
          const canvas = document.createElement('canvas');
          canvas.width = Math.round(rv.width);
          canvas.height = Math.round(rv.height);
-         const ctx = canvas.getContext('2d')!;
-         await page.render({ canvasContext: ctx, viewport: rv, canvas }).promise;
-         pa.imageDataUrl = canvas.toDataURL('image/jpeg', 0.9);
+         try {
+           const ctx = canvas.getContext('2d')!;
+           await page.render({ canvasContext: ctx, viewport: rv, canvas }).promise;
+           pa.imageDataUrl = safeCanvasToDataUrl(canvas, 'image/jpeg', 0.9);
+           pa.ocrScale = scale;
+         } finally {
+           releaseCanvas(canvas);
+         }
       }
     }
 

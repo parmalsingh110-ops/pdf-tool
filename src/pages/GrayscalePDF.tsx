@@ -26,7 +26,9 @@ import { useSEO } from '../hooks/useSEO';
 import { apiFetch } from '../lib/api';
 import { dataUrlToBytes } from '../lib/utils';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
-import { toArrayBufferBytes, useAutoRevokeUrl } from '../lib/blobUrl';
+import { toArrayBufferBytes, triggerBlobDownload, useAutoRevokeUrl } from '../lib/blobUrl';
+import { printPdfBlob } from '../lib/printHelper';
+import { clampPdfScale, releaseCanvas } from '../lib/safeCanvas';
 import { AnimatedNumber, PearlScanOverlay } from '../components/pearl/PearlMotion';
 import {
   type GrayscaleProMode,
@@ -87,6 +89,7 @@ export default function GrayscalePDF() {
 
   const pdfDocRef = useRef<pdfjsLib.PDFDocumentProxy | null>(null);
   const originalImgDataRef = useRef<ImageData | null>(null);
+  const grayscaleBlobRef = useRef<Blob | null>(null);
   const prefersReduced = useReducedMotion();
 
   const renderPageForPreview = useCallback(async (pageNum: number) => {
@@ -95,20 +98,24 @@ export default function GrayscalePDF() {
     setIsLoadingPage(true);
     try {
       const page = await pdf.getPage(pageNum);
-      const vp = page.getViewport({ scale: 1.25 });
+      const baseVp = page.getViewport({ scale: 1.0 });
+      const safeScale = clampPdfScale(baseVp.width, baseVp.height, 1.25);
+      const vp = page.getViewport({ scale: safeScale });
       const canvas = document.createElement('canvas');
       canvas.width = vp.width;
       canvas.height = vp.height;
-      const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      await page.render({ canvasContext: ctx, viewport: vp, canvas } as any).promise;
-      page.cleanup();
+      try {
+        const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        await page.render({ canvasContext: ctx, viewport: vp, canvas } as any).promise;
 
-      originalImgDataRef.current = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      setPreviewBeforeUrl(canvas.toDataURL('image/jpeg', 0.88));
-      canvas.width = 0;
-      canvas.height = 0;
+        originalImgDataRef.current = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        setPreviewBeforeUrl(canvas.toDataURL('image/jpeg', 0.88));
+      } finally {
+        releaseCanvas(canvas);
+        page.cleanup();
+      }
     } catch (err) {
       console.error('[GrayscalePDF] Preview render error:', err);
     } finally {
@@ -141,11 +148,13 @@ export default function GrayscalePDF() {
       const outCanvas = document.createElement('canvas');
       outCanvas.width = output.width;
       outCanvas.height = output.height;
-      outCanvas.getContext('2d')!.putImageData(output, 0, 0);
-      setPreviewAfterUrl(outCanvas.toDataURL('image/jpeg', 0.9));
-      setInkStats(ink);
-      outCanvas.width = 0;
-      outCanvas.height = 0;
+      try {
+        outCanvas.getContext('2d')!.putImageData(output, 0, 0);
+        setPreviewAfterUrl(outCanvas.toDataURL('image/jpeg', 0.9));
+        setInkStats(ink);
+      } finally {
+        releaseCanvas(outCanvas);
+      }
     }, 50);
 
     return () => clearTimeout(timer);
@@ -203,6 +212,7 @@ export default function GrayscalePDF() {
           const res = await apiFetch('/convert/grayscale', { method: 'POST', body: fd, timeoutMs: 75000 });
           if (res.ok) {
             const blob = await res.blob();
+            grayscaleBlobRef.current = blob;
             setGrayscaleUrl(URL.createObjectURL(blob));
             setUsedVectorOutput(true);
             setProgressPercent(100);
@@ -231,36 +241,39 @@ export default function GrayscalePDF() {
         setProgressPercent(Math.round(12 + ((i + 1) / targetPages.length) * 80));
 
         const page = await pdfjsDoc.getPage(pNum);
-        const vp = page.getViewport({ scale: exportScale });
+        const baseVp = page.getViewport({ scale: 1.0 });
+        const safeScale = clampPdfScale(baseVp.width, baseVp.height, exportScale);
+        const vp = page.getViewport({ scale: safeScale });
         const canvas = document.createElement('canvas');
         canvas.width = vp.width;
         canvas.height = vp.height;
-        const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        await page.render({ canvasContext: ctx, viewport: vp, canvas } as any).promise;
+        try {
+          const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          await page.render({ canvasContext: ctx, viewport: vp, canvas } as any).promise;
 
-        const srcData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const { output } = applyGrayscaleProToImageData(srcData, {
-          mode: effectiveMode,
-          channelMix: engine === 'vector_gray' ? 'rec709' : channelMix,
-          contrast: engine === 'vector_gray' ? 0 : contrast,
-          brightness: engine === 'vector_gray' ? Math.round(vectorEcoPct * 0.7) : brightness,
-          threshold,
-          shadowRemoval: engine === 'vector_gray' ? 0 : shadowRemoval,
-        });
-        ctx.putImageData(output, 0, 0);
+          const srcData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const { output } = applyGrayscaleProToImageData(srcData, {
+            mode: effectiveMode,
+            channelMix: engine === 'vector_gray' ? 'rec709' : channelMix,
+            contrast: engine === 'vector_gray' ? 0 : contrast,
+            brightness: engine === 'vector_gray' ? Math.round(vectorEcoPct * 0.7) : brightness,
+            threshold,
+            shadowRemoval: engine === 'vector_gray' ? 0 : shadowRemoval,
+          });
+          ctx.putImageData(output, 0, 0);
 
-        const imgBytes = dataUrlToBytes(canvas.toDataURL('image/jpeg', 0.9));
-        const embeddedImg = await newPdfDoc.embedJpg(imgBytes);
-        const origW = vp.width / exportScale;
-        const origH = vp.height / exportScale;
-        const newPage = newPdfDoc.addPage([origW, origH]);
-        newPage.drawImage(embeddedImg, { x: 0, y: 0, width: origW, height: origH });
-
-        canvas.width = 0;
-        canvas.height = 0;
-        page.cleanup();
+          const imgBytes = dataUrlToBytes(canvas.toDataURL('image/jpeg', 0.9));
+          const embeddedImg = await newPdfDoc.embedJpg(imgBytes);
+          const origW = baseVp.width;
+          const origH = baseVp.height;
+          const newPage = newPdfDoc.addPage([origW, origH]);
+          newPage.drawImage(embeddedImg, { x: 0, y: 0, width: origW, height: origH });
+        } finally {
+          releaseCanvas(canvas);
+          page.cleanup();
+        }
         if (i % 2 === 1) await new Promise((r) => setTimeout(r, 0));
       }
 
@@ -268,6 +281,7 @@ export default function GrayscalePDF() {
       setProgressText('Finalizing monochrome PDF...');
       const pdfBytes = toArrayBufferBytes(await newPdfDoc.save());
       const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+      grayscaleBlobRef.current = blob;
       setGrayscaleUrl(URL.createObjectURL(blob));
       setProgressPercent(100);
       setProgressText('Completed!');
@@ -619,20 +633,25 @@ export default function GrayscalePDF() {
                       : `All selected pages transformed with ${filterMode.replace('_', ' ')} profile.`}
                   </p>
                   <div className="flex flex-wrap items-center justify-center gap-3">
-                    <a
-                      href={grayscaleUrl}
-                      download={`grayscale_${file.name}`}
-                      className="pms-btn-primary inline-flex items-center gap-2 px-7 py-3.5 font-bold rounded-2xl text-sm"
-                    >
-                      <Download className="w-4 h-4" /> Download Grayscale PDF
-                    </a>
                     <button
                       type="button"
-                      onClick={() => {
-                        const w = window.open(grayscaleUrl, '_blank');
-                        w?.addEventListener('load', () => {
-                          try { w.print(); } catch {}
-                        });
+                      onClick={async () => {
+                        const blob =
+                          grayscaleBlobRef.current ||
+                          (await fetch(grayscaleUrl).then((r) => r.blob()));
+                        triggerBlobDownload(blob, `grayscale_${file.name}`);
+                      }}
+                      className="pms-btn-primary inline-flex items-center gap-2 px-7 py-3.5 font-bold rounded-2xl text-sm cursor-pointer"
+                    >
+                      <Download className="w-4 h-4" /> Download Grayscale PDF
+                    </button>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const blob =
+                          grayscaleBlobRef.current ||
+                          (await fetch(grayscaleUrl).then((r) => r.blob()));
+                        await printPdfBlob(blob, `grayscale_${file.name}`);
                       }}
                       className="inline-flex items-center gap-2 px-5 py-3.5 bg-white dark:bg-slate-900 border border-[var(--pms-border)] font-bold rounded-2xl text-sm cursor-pointer"
                     >

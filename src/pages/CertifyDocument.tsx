@@ -11,6 +11,7 @@ import * as Zga from 'zgapdfsigner';
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 import { useSEO } from '../hooks/useSEO';
 import { toArrayBufferBytes, useAutoRevokeUrl } from '../lib/blobUrl';
+import { sha256Hex } from '../lib/safeCrypto';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 import { PearlScanOverlay, PearlStageSwitch } from '../components/pearl/PearlMotion';
 
@@ -79,10 +80,7 @@ export default function CertifyDocument() {
       const pdfBuffer = await pdfFile.arrayBuffer();
 
       // Compute SHA-256 Checksum
-      const hashBuf = await window.crypto.subtle.digest('SHA-256', pdfBuffer);
-      const sha256Hex = Array.from(new Uint8Array(hashBuf))
-        .map(b => b.toString(16).padStart(2, '0'))
-        .join('');
+      const sha256Digest = await sha256Hex(pdfBuffer);
 
       const certSerial = `CERT-${Math.random().toString(36).substring(2, 10).toUpperCase()}`;
       const nowIso = new Date().toISOString();
@@ -108,7 +106,7 @@ export default function CertifyDocument() {
         const blob = new Blob([signedPdfBytes], { type: 'application/pdf' });
         setCertifiedUrl(URL.createObjectURL(blob));
         setAuditInfo({
-          sha256: sha256Hex,
+          sha256: sha256Digest,
           serial: certSerial,
           timestamp: new Date().toLocaleString(),
         });
@@ -176,7 +174,7 @@ export default function CertifyDocument() {
         color: rgb(0.3, 0.35, 0.45),
       });
 
-      lastPage.drawText(`SHA-256 Digest: ${sha256Hex.substring(0, 48)}...`, {
+      lastPage.drawText(`SHA-256 Digest: ${sha256Digest.substring(0, 48)}...`, {
         x: stampX + 20,
         y: stampY + stampH - 60,
         size: 6.5,
@@ -191,7 +189,7 @@ export default function CertifyDocument() {
         `CertSerial:${certSerial}`,
         `Signer:${signerName}`,
         `Org:${organization}`,
-        `SHA256:${sha256Hex}`,
+        `SHA256:${sha256Digest}`,
         `Timestamp:${nowIso}`,
       ]);
 
@@ -199,7 +197,7 @@ export default function CertifyDocument() {
       const blob = new Blob([certifiedBytes], { type: 'application/pdf' });
       setCertifiedUrl(URL.createObjectURL(blob));
       setAuditInfo({
-        sha256: sha256Hex,
+        sha256: sha256Digest,
         serial: certSerial,
         timestamp: new Date().toLocaleString(),
       });

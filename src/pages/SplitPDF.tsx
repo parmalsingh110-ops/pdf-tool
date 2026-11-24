@@ -10,7 +10,7 @@ import '../lib/pdfWorker';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { useToast } from '../components/Toast';
-import { toArrayBufferBytes } from '../lib/blobUrl';
+import { toArrayBufferBytes, triggerBlobDownload } from '../lib/blobUrl';
 import { loadPdfDocumentSafely } from '../lib/pdfLoad';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 import { AnimatedNumber, PearlScanOverlay, PearlStageSwitch } from '../components/pearl/PearlMotion';
@@ -362,23 +362,30 @@ export default function SplitPDF() {
         zip.file(item.name, blob);
       }
       const zipBlob = await zip.generateAsync({ type: 'blob' });
-      const zipUrl = URL.createObjectURL(zipBlob);
-      const a = document.createElement('a');
-      a.href = zipUrl;
       const baseName = file?.name.replace(/\.pdf$/i, '') || 'split_document';
-      a.download = `${baseName}_pages.zip`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      setTimeout(() => URL.revokeObjectURL(zipUrl), 2000);
+      triggerBlobDownload(zipBlob, `${baseName}_pages.zip`);
     } catch (e) {
       console.error('ZIP creation error, falling back:', e);
       splitUrls.forEach((item, i) => {
         setTimeout(() => {
-          const a = document.createElement('a');
-          a.href = item.url;
-          a.download = item.name;
-          a.click();
+          fetch(item.url)
+            .then((r) => r.blob())
+            .then((blob) => triggerBlobDownload(blob, item.name))
+            .catch(() => {
+              const a = document.createElement('a');
+              a.href = item.url;
+              a.download = item.name;
+              a.rel = 'noopener';
+              a.style.display = 'none';
+              document.body.appendChild(a);
+              try {
+                a.click();
+              } finally {
+                setTimeout(() => {
+                  a.remove();
+                }, 250);
+              }
+            });
         }, i * 300);
       });
     } finally {

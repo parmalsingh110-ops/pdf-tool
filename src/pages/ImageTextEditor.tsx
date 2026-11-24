@@ -19,15 +19,14 @@ import { extractTextRegions, isVisionAiEnabled, sourceUrlToBase64 } from '../lib
 import { useSEO } from '../hooks/useSEO';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 import { AnimatedNumber, PearlScanOverlay } from '../components/pearl/PearlMotion';
+import { ACCEPT_IMAGES, isPdfFile } from '../lib/fileAccept';
+import { clampPdfScale, releaseCanvas, safeCanvasToBlob } from '../lib/safeCanvas';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
 /** File picker + dropzone: raster images and PDF (first page → PNG for OCR). */
 const IMAGE_AND_PDF_ACCEPT: Record<string, string[]> = {
-  'image/png': ['.png'],
-  'image/jpeg': ['.jpg', '.jpeg'],
-  'image/webp': ['.webp'],
-  'image/gif': ['.gif'],
+  'image/*': ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.heic', '.heif', '.avif'],
   'application/pdf': ['.pdf'],
 };
 
@@ -35,19 +34,23 @@ async function pdfFirstPageToPngUrl(file: File, scale = 2): Promise<{ url: strin
   const buf = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buf) }).promise;
   const page = await pdf.getPage(1);
-  const viewport = page.getViewport({ scale });
+  const baseVp = page.getViewport({ scale: 1 });
+  const safeScale = clampPdfScale(baseVp.width, baseVp.height, scale);
+  const viewport = page.getViewport({ scale: safeScale });
   const canvas = document.createElement('canvas');
-  canvas.width = viewport.width;
-  canvas.height = viewport.height;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) throw new Error('Canvas not available');
-  await page.render({ canvasContext: ctx, viewport, canvas }).promise;
-  const blob = await new Promise<Blob | null>((resolve) =>
-    canvas.toBlob((b) => resolve(b), 'image/png'),
-  );
-  if (!blob) throw new Error('Could not rasterize PDF page');
-  const url = URL.createObjectURL(blob);
-  return { url, w: canvas.width, h: canvas.height };
+  try {
+    canvas.width = Math.round(viewport.width);
+    canvas.height = Math.round(viewport.height);
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('Canvas not available');
+    await page.render({ canvasContext: ctx, viewport, canvas }).promise;
+    const blob = await safeCanvasToBlob(canvas, 'image/png');
+    const url = URL.createObjectURL(blob);
+    return { url, w: canvas.width, h: canvas.height };
+  } finally {
+    releaseCanvas(canvas);
+    page.cleanup();
+  }
 }
 
 type Bbox = { x0: number; y0: number; x1: number; y1: number };
@@ -264,7 +267,7 @@ export default function ImageTextEditor() {
     setFile(f);
     setRasterBusy(true);
 
-    const isPdf = f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf');
+    const isPdf = isPdfFile(f);
     let createdUrl: string | null = null;
 
     try {
@@ -753,7 +756,7 @@ export default function ImageTextEditor() {
                   ref={fileInputRef}
                   type="file"
                   className="hidden"
-                  accept="image/png,image/jpeg,image/webp,image/gif,.pdf,application/pdf"
+                  accept={`${ACCEPT_IMAGES},.pdf,application/pdf`}
                   onChange={(e) => {
                     const next = e.target.files?.[0];
                     if (next) void processFile(next);
@@ -1024,17 +1027,24 @@ export default function ImageTextEditor() {
                 <div
                   ref={previewBoxRef}
                   className={`relative rounded-lg border border-gray-300 dark:border-slate-700 bg-white overflow-hidden shadow-md shrink-0 ${
-                    toolMode === 'draw' ? 'cursor-crosshair' : ''
+                    toolMode === 'draw' ? 'cursor-crosshair touch-none select-none' : ''
                   }`}
                   style={{ width: viewW, height: viewH }}
-                  onMouseDown={(e) => {
+                  onPointerDown={(e) => {
                     if (toolMode !== 'draw' || !previewBoxRef.current) return;
+                    if (e.pointerType === 'mouse' && e.button !== 0) return;
+                    e.preventDefault();
+                    try {
+                      e.currentTarget.setPointerCapture(e.pointerId);
+                    } catch {
+                      // Ignore capture failures
+                    }
                     const r = previewBoxRef.current.getBoundingClientRect();
                     drawStartRef.current = { x: e.clientX - r.left, y: e.clientY - r.top };
                     const p = drawStartRef.current;
                     setDrawRectDisp({ x: p.x, y: p.y, w: 0, h: 0 });
                   }}
-                  onMouseMove={(e) => {
+                  onPointerMove={(e) => {
                     if (toolMode !== 'draw' || !drawStartRef.current || !previewBoxRef.current) return;
                     const r = previewBoxRef.current.getBoundingClientRect();
                     const x = e.clientX - r.left;
@@ -1047,7 +1057,14 @@ export default function ImageTextEditor() {
                       h: Math.abs(y - s.y),
                     });
                   }}
-                  onMouseUp={(e) => {
+                  onPointerUp={(e) => {
+                    try {
+                      if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+                        e.currentTarget.releasePointerCapture(e.pointerId);
+                      }
+                    } catch {
+                      // Ignore
+                    }
                     const start = drawStartRef.current;
                     if (toolMode !== 'draw' || !natural || !previewBoxRef.current || !start) {
                       drawStartRef.current = null;
@@ -1098,7 +1115,14 @@ export default function ImageTextEditor() {
                     setSelectedId(newW.id);
                     setToolMode('select');
                   }}
-                  onMouseLeave={() => {
+                  onPointerCancel={(e) => {
+                    try {
+                      if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+                        e.currentTarget.releasePointerCapture(e.pointerId);
+                      }
+                    } catch {
+                      // Ignore
+                    }
                     if (toolMode === 'draw' && drawStartRef.current) {
                       drawStartRef.current = null;
                       setDrawRectDisp(null);

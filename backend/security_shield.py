@@ -54,7 +54,7 @@ _default_heavy_conc = "1" if is_low_memory_runtime() else "2"
 LANE_HEAVY_CONCURRENCY: int = max(1, int(os.environ.get("LANE_HEAVY_CONCURRENCY", _default_heavy_conc)))
 
 MAX_VIRTUAL_QUEUE_DEPTH: int = max(8, int(os.environ.get("MAX_VIRTUAL_QUEUE_DEPTH", "45")))
-MAX_PER_IP_ACTIVE_JOBS: int = max(2, int(os.environ.get("MAX_PER_IP_ACTIVE_JOBS", "6")))
+MAX_PER_IP_ACTIVE_JOBS: int = max(2, int(os.environ.get("MAX_PER_IP_ACTIVE_JOBS", "14")))
 QUEUE_WAIT_TIMEOUT_SEC: float = float(os.environ.get("QUEUE_WAIT_TIMEOUT_SEC", "55.0"))
 
 # Office ZIP / Decompression Bomb safety thresholds

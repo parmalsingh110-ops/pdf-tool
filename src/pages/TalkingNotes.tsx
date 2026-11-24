@@ -21,8 +21,8 @@ import FileDropzone from '../components/FileDropzone';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 import { AnimatedNumber, PearlScanOverlay } from '../components/pearl/PearlMotion';
 import ToolSEOSection from '../components/ToolSEOSection';
-import { toArrayBufferBytes } from '../lib/blobUrl';
-import { downloadBlob } from '../lib/utils';
+import { toArrayBufferBytes, triggerBlobDownload } from '../lib/blobUrl';
+import { isPdfFile } from '../lib/fileAccept';
 import { apiFetch } from '../lib/api';
 import {
   generateSecretToken,
@@ -80,7 +80,26 @@ export default function TalkingNotes() {
   const [activeAnnotationId, setActiveAnnotationId] = useState<string | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
-  const recordTimerRef = useRef<any>(null);
+  const recordTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const recordingSecondsRef = useRef<number>(0);
+  const annotationsRef = useRef<AudioAnnotation[]>(annotations);
+  annotationsRef.current = annotations;
+
+  useEffect(() => {
+    return () => {
+      if (recordTimerRef.current) clearInterval(recordTimerRef.current);
+      try {
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+          mediaRecorderRef.current.stop();
+        }
+      } catch {}
+      annotationsRef.current.forEach((a) => {
+        if (a.audioUrl && a.audioUrl.startsWith('blob:')) {
+          try { URL.revokeObjectURL(a.audioUrl); } catch {}
+        }
+      });
+    };
+  }, []);
 
   // Canvas Preview
   const prefersReduced = useReducedMotion();
@@ -134,7 +153,15 @@ export default function TalkingNotes() {
         const rawBuf = await res.arrayBuffer();
         const { buffer: plainBuf } = await decryptBytesWithKey(rawBuf, scannedAudioKey);
         if (cancelled) return;
-        objUrl = URL.createObjectURL(new Blob([plainBuf], { type: 'audio/webm' }));
+        const head = new Uint8Array(plainBuf.slice(0, 12));
+        const isMp4 =
+          head.length >= 8 &&
+          head[4] === 0x66 && head[5] === 0x74 && head[6] === 0x79 && head[7] === 0x70;
+        const isOgg =
+          head.length >= 4 &&
+          head[0] === 0x4f && head[1] === 0x67 && head[2] === 0x67 && head[3] === 0x53;
+        const detectedAudioMime = isMp4 ? 'audio/mp4' : isOgg ? 'audio/ogg' : 'audio/webm';
+        objUrl = URL.createObjectURL(new Blob([plainBuf], { type: detectedAudioMime }));
         setScannedAudioBlobUrl(objUrl);
       } catch (err: any) {
         if (!cancelled) {
@@ -152,7 +179,7 @@ export default function TalkingNotes() {
   }, [scannedNoteId, scannedNoteRoom, scannedAudioToken, scannedAudioKey]);
 
   const handleFileUpload = async (file: File) => {
-    if (file.type !== 'application/pdf') {
+    if (!isPdfFile(file)) {
       alert('Please select a PDF document.');
       return;
     }
@@ -204,26 +231,42 @@ export default function TalkingNotes() {
 
   // Start Voice Recording
   const startRecording = async (annoId: string) => {
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+      alert('Voice recording requires HTTPS and a browser with microphone recording support.');
+      return;
+    }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream);
+      const preferredMimes = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg'];
+      const selectedMime =
+        typeof MediaRecorder.isTypeSupported === 'function'
+          ? preferredMimes.find((m) => MediaRecorder.isTypeSupported(m)) || ''
+          : '';
+      const recorder = selectedMime
+        ? new MediaRecorder(stream, { mimeType: selectedMime })
+        : new MediaRecorder(stream);
       mediaRecorderRef.current = recorder;
       audioChunksRef.current = [];
+      recordingSecondsRef.current = 0;
 
       recorder.ondataavailable = (e) => {
         if (e.data.size > 0) audioChunksRef.current.push(e.data);
       };
 
       recorder.onstop = () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        const finalMime = recorder.mimeType || selectedMime || 'audio/webm';
+        const audioBlob = new Blob(audioChunksRef.current, { type: finalMime });
         const audioUrl = URL.createObjectURL(audioBlob);
+        const recordedDuration = recordingSecondsRef.current;
 
         setAnnotations((prev) =>
-          prev.map((a) =>
-            a.id === annoId
-              ? { ...a, audioBlob, audioUrl, duration: recordingSeconds }
-              : a
-          )
+          prev.map((a) => {
+            if (a.id !== annoId) return a;
+            if (a.audioUrl && a.audioUrl.startsWith('blob:')) {
+              try { URL.revokeObjectURL(a.audioUrl); } catch {}
+            }
+            return { ...a, audioBlob, audioUrl, duration: recordedDuration };
+          })
         );
 
         stream.getTracks().forEach((track) => track.stop());
@@ -234,8 +277,10 @@ export default function TalkingNotes() {
       setActiveAnnotationId(annoId);
       setRecordingSeconds(0);
 
+      if (recordTimerRef.current) clearInterval(recordTimerRef.current);
       recordTimerRef.current = setInterval(() => {
-        setRecordingSeconds((s) => s + 1);
+        recordingSecondsRef.current += 1;
+        setRecordingSeconds(recordingSecondsRef.current);
       }, 1000);
     } catch (err) {
       console.error(err);
@@ -246,8 +291,13 @@ export default function TalkingNotes() {
   // Stop Recording
   const stopRecording = () => {
     if (mediaRecorderRef.current && isRecording) {
-      mediaRecorderRef.current.stop();
-      clearInterval(recordTimerRef.current);
+      if (mediaRecorderRef.current.state !== 'inactive') {
+        mediaRecorderRef.current.stop();
+      }
+      if (recordTimerRef.current) {
+        clearInterval(recordTimerRef.current);
+        recordTimerRef.current = null;
+      }
       setIsRecording(false);
       setActiveAnnotationId(null);
     }
@@ -268,7 +318,13 @@ export default function TalkingNotes() {
   };
 
   const handleRemoveAnnotation = (id: string) => {
-    setAnnotations(annotations.filter((a) => a.id !== id));
+    setAnnotations((prev) => {
+      const target = prev.find((a) => a.id === id);
+      if (target?.audioUrl && target.audioUrl.startsWith('blob:')) {
+        try { URL.revokeObjectURL(target.audioUrl); } catch {}
+      }
+      return prev.filter((a) => a.id !== id);
+    });
   };
 
   // Generate Talking Notes PDF with embedded QR Code Stamp
@@ -288,12 +344,14 @@ export default function TalkingNotes() {
           try {
             const audioBuffer = await anno.audioBlob.arrayBuffer();
             const audioBytes = new Uint8Array(audioBuffer);
+            const audioMime = anno.audioBlob.type || 'audio/webm';
+            const audioExt = audioMime.includes('mp4') ? 'm4a' : audioMime.includes('ogg') ? 'ogg' : 'webm';
             const safeLabel = (anno.label || 'voice_note').replace(/[^a-zA-Z0-9_-]/g, '_');
             await doc.attach(
               audioBytes,
-              `Voice_Note_Page_${anno.pageNum}_${safeLabel}.webm`,
+              `Voice_Note_Page_${anno.pageNum}_${safeLabel}.${audioExt}`,
               {
-                mimeType: 'audio/webm',
+                mimeType: audioMime,
                 description: `Voice Note for Page ${anno.pageNum}: ${anno.label || 'Talking Note'}`,
                 creationDate: new Date(),
                 modificationDate: new Date(),
@@ -435,7 +493,7 @@ export default function TalkingNotes() {
 
       const outBytes = await doc.save();
       const blob = new Blob([toArrayBufferBytes(outBytes)], { type: 'application/pdf' });
-      downloadBlob(blob, `TalkingNotes_${fileName}`);
+      triggerBlobDownload(blob, `TalkingNotes_${fileName}`);
     } catch (err) {
       console.error(err);
       alert('Error creating Talking Notes PDF.');

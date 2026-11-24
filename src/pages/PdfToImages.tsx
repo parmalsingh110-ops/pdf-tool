@@ -8,7 +8,8 @@ import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
-import { useAutoRevokeUrl } from '../lib/blobUrl';
+import { triggerDataUrlDownload, useAutoRevokeUrl } from '../lib/blobUrl';
+import { clampCanvasDimensions, clampPdfScale, releaseCanvas, safeCanvasToBlob, safeCanvasToDataUrl } from '../lib/safeCanvas';
 import { AnimatedNumber, PearlScanOverlay, PearlStageSwitch } from '../components/pearl/PearlMotion';
 
 interface RenderedImage {
@@ -93,41 +94,41 @@ export default function PdfToImages() {
         setProgressPercent(Math.round(5 + (i / pagesToRender) * 85));
 
         const page = await pdf.getPage(i);
-        const vp = page.getViewport({ scale: scaleFactor });
+        const baseVp = page.getViewport({ scale: 1.0 });
+        const safeScale = clampPdfScale(baseVp.width, baseVp.height, scaleFactor);
+        const vp = page.getViewport({ scale: safeScale });
 
         const canvas = document.createElement('canvas');
-        canvas.width = vp.width;
-        canvas.height = vp.height;
-        const ctx = canvas.getContext('2d')!;
+        try {
+          canvas.width = Math.max(1, Math.round(vp.width));
+          canvas.height = Math.max(1, Math.round(vp.height));
+          const ctx = canvas.getContext('2d');
+          if (!ctx) throw new Error('Canvas context unavailable');
 
-        if (format === 'jpeg') {
-          ctx.fillStyle = '#ffffff';
-          ctx.fillRect(0, 0, canvas.width, canvas.height);
-        }
+          if (format === 'jpeg') {
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+          }
 
-        await page.render({ canvasContext: ctx, viewport: vp, canvas } as any).promise;
+          await page.render({ canvasContext: ctx, viewport: vp, canvas } as any).promise;
 
-        const blob = await new Promise<Blob | null>((res) =>
-          canvas.toBlob((b) => res(b), mime, quality)
-        );
-
-        if (blob) {
-          const dataUrl = canvas.toDataURL(mime, quality);
+          const q = format === 'png' ? undefined : quality;
+          const blob = await safeCanvasToBlob(canvas, mime, q);
+          const dataUrl = safeCanvasToDataUrl(canvas, mime, q);
           renderedList.push({
             pageNumber: i,
             dataUrl,
             blob,
-            width: vp.width,
-            height: vp.height,
+            width: canvas.width,
+            height: canvas.height,
           });
 
           const arrBuf = await blob.arrayBuffer();
           zip.file(`page_${String(i).padStart(3, '0')}.${ext}`, arrBuf);
+        } finally {
+          releaseCanvas(canvas);
+          page.cleanup();
         }
-
-        canvas.width = 0;
-        canvas.height = 0;
-        page.cleanup();
       }
 
       setProgressMsg('Packing ZIP archive for batch download...');
@@ -148,6 +149,9 @@ export default function PdfToImages() {
 
   const copyToClipboard = async (img: RenderedImage, idx: number) => {
     try {
+      if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') {
+        throw new Error('Image clipboard is not supported in this browser context');
+      }
       if (format === 'png') {
         await navigator.clipboard.write([
           new ClipboardItem({ 'image/png': img.blob }),
@@ -156,19 +160,25 @@ export default function PdfToImages() {
         // Convert to PNG for clipboard API compatibility
         const imgEl = new Image();
         imgEl.src = img.dataUrl;
-        await new Promise((r) => { imgEl.onload = r; });
+        await new Promise<void>((resolve, reject) => {
+          imgEl.onload = () => resolve();
+          imgEl.onerror = () => reject(new Error('Image load failed'));
+        });
         const c = document.createElement('canvas');
-        c.width = imgEl.width;
-        c.height = imgEl.height;
-        const ctx = c.getContext('2d')!;
-        ctx.drawImage(imgEl, 0, 0);
-        c.toBlob(async (b) => {
-          if (b) {
-            await navigator.clipboard.write([
-              new ClipboardItem({ 'image/png': b }),
-            ]);
-          }
-        }, 'image/png');
+        try {
+          const clamped = clampCanvasDimensions(imgEl.naturalWidth || imgEl.width, imgEl.naturalHeight || imgEl.height);
+          c.width = clamped.width;
+          c.height = clamped.height;
+          const ctx = c.getContext('2d');
+          if (!ctx) throw new Error('Canvas unavailable');
+          ctx.drawImage(imgEl, 0, 0, c.width, c.height);
+          const pngBlob = await safeCanvasToBlob(c, 'image/png');
+          await navigator.clipboard.write([
+            new ClipboardItem({ 'image/png': pngBlob }),
+          ]);
+        } finally {
+          releaseCanvas(c);
+        }
       }
 
       setCopiedIdx(idx);
@@ -183,12 +193,7 @@ export default function PdfToImages() {
     if (!file) return;
     const ext = format === 'jpeg' ? 'jpg' : format;
     const baseName = file.name.replace(/\.[^/.]+$/, '');
-    const a = document.createElement('a');
-    a.href = img.dataUrl;
-    a.download = `${baseName}_page_${img.pageNumber}.${ext}`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+    triggerDataUrlDownload(img.dataUrl, `${baseName}_page_${img.pageNumber}.${ext}`);
   };
 
   const resetAll = () => {

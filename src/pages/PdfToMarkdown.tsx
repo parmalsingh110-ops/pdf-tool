@@ -12,6 +12,7 @@ import { PearlStageSwitch, PearlScanOverlay, AnimatedNumber } from '../component
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { triggerBlobDownload } from '../lib/blobUrl';
+import { copyTextToClipboard } from '../lib/clipboard';
 
 export default function PdfToMarkdown() {
   useSEO(
@@ -107,10 +108,12 @@ export default function PdfToMarkdown() {
     }
   };
 
-  const copyMarkdown = () => {
-    navigator.clipboard.writeText(markdown);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  const copyMarkdown = async () => {
+    const ok = await copyTextToClipboard(markdown);
+    if (ok) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
   };
 
   const downloadFile = () => {

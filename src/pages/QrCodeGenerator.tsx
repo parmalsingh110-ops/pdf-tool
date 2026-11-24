@@ -28,6 +28,8 @@ import { useSEO } from '../hooks/useSEO';
 import { usePageSEO } from '../lib/usePageSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
 import { escapeHtml } from '../lib/utils';
+import { triggerBlobDownload, triggerDataUrlDownload } from '../lib/blobUrl';
+import { printHtmlDocument } from '../lib/printHelper';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 import { AnimatedNumber, PearlScanOverlay } from '../components/pearl/PearlMotion';
 
@@ -274,19 +276,19 @@ export default function QrCodeGenerator() {
   // ── Download PNG ──────────────────────────────────────────────────────────
   const handleDownloadPng = useCallback(() => {
     if (!canvasRef.current) return;
-    const a = document.createElement('a');
-    a.href = canvasRef.current.toDataURL('image/png');
-    a.download = `${mode === 'qr' ? 'qrcode' : 'barcode'}_${Date.now()}.png`;
-    a.click();
+    triggerDataUrlDownload(
+      canvasRef.current.toDataURL('image/png'),
+      `${mode === 'qr' ? 'qrcode' : 'barcode'}_${Date.now()}.png`
+    );
   }, [mode]);
 
   // ── Download JPEG ─────────────────────────────────────────────────────────
   const handleDownloadJpeg = useCallback(() => {
     if (!canvasRef.current) return;
-    const a = document.createElement('a');
-    a.href = canvasRef.current.toDataURL('image/jpeg', 0.95);
-    a.download = `${mode === 'qr' ? 'qrcode' : 'barcode'}_${Date.now()}.jpg`;
-    a.click();
+    triggerDataUrlDownload(
+      canvasRef.current.toDataURL('image/jpeg', 0.95),
+      `${mode === 'qr' ? 'qrcode' : 'barcode'}_${Date.now()}.jpg`
+    );
   }, [mode]);
 
   // ── Download SVG (Vector for professional printing / signage) ────────────
@@ -323,12 +325,7 @@ export default function QrCodeGenerator() {
       }
 
       const blob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${mode === 'qr' ? 'qrcode' : 'barcode'}_vector.svg`;
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 5000);
+      triggerBlobDownload(blob, `${mode === 'qr' ? 'qrcode' : 'barcode'}_vector.svg`);
     } catch (e) {
       console.error(e);
       alert('Could not export SVG. Please try PNG download.');
@@ -369,14 +366,9 @@ export default function QrCodeGenerator() {
 
   // ── 1-Click Print Standee / Sticker Sheet ─────────────────────────────────
   const handlePrintStickerSheet = useCallback(
-    (isSheet: boolean) => {
+    async (isSheet: boolean) => {
       if (!canvasRef.current) return;
       const dataUrl = canvasRef.current.toDataURL('image/png');
-      const win = window.open('', '_blank');
-      if (!win) {
-        alert('Please allow popups to open the print layout.');
-        return;
-      }
 
       const totalStickers = isSheet ? printCols * printRows : 1;
       const safeTitle = printLabelTitle ? escapeHtml(printLabelTitle) : '';
@@ -392,11 +384,12 @@ export default function QrCodeGenerator() {
         )
         .join('');
 
-      win.document.write(`
+      const title = isSheet ? 'A4 Sticker Label Sheet' : 'Counter Standee Print';
+      const html = `
         <!DOCTYPE html>
         <html>
           <head>
-            <title>${isSheet ? 'A4 Sticker Label Sheet' : 'Counter Standee Print'}</title>
+            <title>${title}</title>
             <style>
               @page {
                 size: ${isSheet ? 'A4 portrait' : 'A5 portrait'};
@@ -494,17 +487,13 @@ export default function QrCodeGenerator() {
           </head>
           <body>
             ${isSheet ? `<div class="sheet-grid">${stickersHtml}</div>` : `<div class="single-card">${stickersHtml}</div>`}
-            <script>
-              window.onload = function() {
-                window.focus();
-                setTimeout(function() { window.print(); }, 200);
-                window.onafterprint = function() { window.close(); };
-              };
-            <\/script>
           </body>
         </html>
-      `);
-      win.document.close();
+      `;
+      const ok = await printHtmlDocument(html, title);
+      if (!ok) {
+        alert('Unable to open print layout on this browser. Please download the PNG/SVG instead.');
+      }
       setShowPrintModal(false);
     },
     [printCols, printRows, printLabelTitle, mode, qrType, barcodeFormat]

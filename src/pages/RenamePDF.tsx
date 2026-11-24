@@ -9,7 +9,7 @@ import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
 import { useToast } from '../components/Toast';
-import { useAutoRevokeUrl } from '../lib/blobUrl';
+import { triggerBlobDownload } from '../lib/blobUrl';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 import { AnimatedNumber, PearlScanOverlay, PearlStageSwitch } from '../components/pearl/PearlMotion';
 
@@ -40,15 +40,11 @@ export default function RenamePDF() {
   const [matchMode, setMatchMode] = useState<'invoice' | 'date' | 'firstLine' | 'customRegex'>('firstLine');
   const [customRegex, setCustomRegex] = useState<string>('INV-[0-9]+');
 
-  const [zipUrl, setZipUrl] = useState<string | null>(null);
-
   const toast = useToast();
   const prefersReduced = useReducedMotion();
-  useAutoRevokeUrl(zipUrl);
 
   const handleDrop = async (acceptedFiles: File[]) => {
     if (!acceptedFiles.length) return;
-    setZipUrl(null);
 
     const newItems: FileItem[] = acceptedFiles.map((f, i) => ({
       id: `${Date.now()}-${i}-${f.name}`,
@@ -157,12 +153,7 @@ export default function RenamePDF() {
 
   const downloadSingle = (item: FileItem) => {
     const newName = computeNewName(item);
-    const url = URL.createObjectURL(item.file);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = newName;
-    a.click();
-    URL.revokeObjectURL(url);
+    triggerBlobDownload(item.file, newName);
   };
 
   const downloadAllZip = async () => {
@@ -177,13 +168,7 @@ export default function RenamePDF() {
       }
 
       const zipBlob = await zip.generateAsync({ type: 'blob' });
-      const url = URL.createObjectURL(zipBlob);
-      setZipUrl(url);
-
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `renamed_documents_${Date.now()}.zip`;
-      a.click();
+      triggerBlobDownload(zipBlob, `renamed_documents_${Date.now()}.zip`);
       toast.success(`Successfully downloaded ${files.length} renamed documents as ZIP!`);
     } catch {
       toast.error('Error creating ZIP bundle');

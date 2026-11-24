@@ -109,6 +109,219 @@ function luminance(r: number, g: number, b: number): number {
   return 0.299 * r + 0.587 * g + 0.114 * b;
 }
 
+/* ─── iOS <17.4 Canvas ctx.filter feature detection & software fallbacks ─── */
+
+let _supportsCanvasFilter: boolean | null = null;
+
+/**
+ * Runtime detection for real `CanvasRenderingContext2D.filter` support.
+ * Older iOS Safari (<17.4) either lacks `ctx.filter` or silently ignores it as a no-op;
+ * this test draws a white 2×2 pixel through `brightness(0%)` and verifies it darkens.
+ */
+export function supportsCanvasFilter(): boolean {
+  if (_supportsCanvasFilter !== null) return _supportsCanvasFilter;
+  if (typeof document === 'undefined') {
+    _supportsCanvasFilter = false;
+    return false;
+  }
+  try {
+    const c = document.createElement('canvas');
+    c.width = 2;
+    c.height = 2;
+    const ctx = c.getContext('2d', { willReadFrequently: true });
+    if (!ctx || !('filter' in ctx)) {
+      c.width = 0;
+      c.height = 0;
+      _supportsCanvasFilter = false;
+      return false;
+    }
+    ctx.filter = 'brightness(0%)';
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, 2, 2);
+    const px = ctx.getImageData(0, 0, 1, 1).data;
+    c.width = 0;
+    c.height = 0;
+    _supportsCanvasFilter = px[0] < 10 && px[1] < 10 && px[2] < 10;
+    return _supportsCanvasFilter;
+  } catch {
+    _supportsCanvasFilter = false;
+    return false;
+  }
+}
+
+/**
+ * Separable 2-pass RGBA sliding-window box blur on raw `ImageData.data`.
+ * Used as a fast O(W*H) software fallback when `ctx.filter = 'blur(...)'` is unsupported (iOS <17.4).
+ * Returns a new `Uint8ClampedArray` without mutating the input buffer.
+ */
+export function applyBoxBlurImageData(
+  data: Uint8ClampedArray,
+  width: number,
+  height: number,
+  radius: number
+): Uint8ClampedArray {
+  const len = width * height * 4;
+  if (width <= 0 || height <= 0 || radius <= 0 || data.length < len) {
+    return new Uint8ClampedArray(data);
+  }
+
+  const r = Math.max(1, Math.min(Math.round(radius), Math.max(width, height) - 1));
+  const horiz = new Uint8ClampedArray(len);
+  const out = new Uint8ClampedArray(len);
+
+  // Horizontal pass
+  for (let y = 0; y < height; y++) {
+    const rowBase = y * width;
+    let sumR = 0;
+    let sumG = 0;
+    let sumB = 0;
+    let sumA = 0;
+
+    const initRight = Math.min(r, width - 1);
+    for (let x = 0; x <= initRight; x++) {
+      const p = (rowBase + x) * 4;
+      sumR += data[p];
+      sumG += data[p + 1];
+      sumB += data[p + 2];
+      sumA += data[p + 3];
+    }
+
+    for (let x = 0; x < width; x++) {
+      const left = Math.max(0, x - r);
+      const right = Math.min(width - 1, x + r);
+      const count = right - left + 1;
+      const dstIdx = (rowBase + x) * 4;
+      horiz[dstIdx] = Math.round(sumR / count);
+      horiz[dstIdx + 1] = Math.round(sumG / count);
+      horiz[dstIdx + 2] = Math.round(sumB / count);
+      horiz[dstIdx + 3] = Math.round(sumA / count);
+
+      const addX = x + r + 1;
+      if (addX < width) {
+        const ap = (rowBase + addX) * 4;
+        sumR += data[ap];
+        sumG += data[ap + 1];
+        sumB += data[ap + 2];
+        sumA += data[ap + 3];
+      }
+      const remX = x - r;
+      if (remX >= 0) {
+        const rp = (rowBase + remX) * 4;
+        sumR -= data[rp];
+        sumG -= data[rp + 1];
+        sumB -= data[rp + 2];
+        sumA -= data[rp + 3];
+      }
+    }
+  }
+
+  // Vertical pass
+  for (let x = 0; x < width; x++) {
+    let sumR = 0;
+    let sumG = 0;
+    let sumB = 0;
+    let sumA = 0;
+
+    const initBottom = Math.min(r, height - 1);
+    for (let y = 0; y <= initBottom; y++) {
+      const p = (y * width + x) * 4;
+      sumR += horiz[p];
+      sumG += horiz[p + 1];
+      sumB += horiz[p + 2];
+      sumA += horiz[p + 3];
+    }
+
+    for (let y = 0; y < height; y++) {
+      const top = Math.max(0, y - r);
+      const bottom = Math.min(height - 1, y + r);
+      const count = bottom - top + 1;
+      const dstIdx = (y * width + x) * 4;
+      out[dstIdx] = Math.round(sumR / count);
+      out[dstIdx + 1] = Math.round(sumG / count);
+      out[dstIdx + 2] = Math.round(sumB / count);
+      out[dstIdx + 3] = Math.round(sumA / count);
+
+      const addY = y + r + 1;
+      if (addY < height) {
+        const ap = (addY * width + x) * 4;
+        sumR += horiz[ap];
+        sumG += horiz[ap + 1];
+        sumB += horiz[ap + 2];
+        sumA += horiz[ap + 3];
+      }
+      const remY = y - r;
+      if (remY >= 0) {
+        const rp = (remY * width + x) * 4;
+        sumR -= horiz[rp];
+        sumG -= horiz[rp + 1];
+        sumB -= horiz[rp + 2];
+        sumA -= horiz[rp + 3];
+      }
+    }
+  }
+
+  return out;
+}
+
+/**
+ * Software pixel fallback for basic CSS `brightness`, `contrast`, and `saturate` canvas filters
+ * (used when `!supportsCanvasFilter()`, e.g. iOS Safari < 17.4).
+ * Parameters use `-100..+100` offsets matching `brightness(${100 + brightness}%)`.
+ */
+export function applyBasicPhotoFilterFallback(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  options: { brightness?: number; contrast?: number; saturation?: number }
+): void {
+  const brightness = options.brightness ?? 0;
+  const contrast = options.contrast ?? 0;
+  const saturation = options.saturation ?? 0;
+
+  if (
+    width <= 0 ||
+    height <= 0 ||
+    (brightness === 0 && contrast === 0 && saturation === 0)
+  ) {
+    return;
+  }
+
+  const imgData = ctx.getImageData(0, 0, width, height);
+  const d = imgData.data;
+  const bFactor = Math.max(0, (100 + brightness) / 100);
+  const cFactor = Math.max(0, (100 + contrast) / 100);
+  const sFactor = Math.max(0, (100 + saturation) / 100);
+
+  for (let i = 0; i < d.length; i += 4) {
+    let r = d[i];
+    let g = d[i + 1];
+    let b = d[i + 2];
+
+    if (brightness !== 0) {
+      r *= bFactor;
+      g *= bFactor;
+      b *= bFactor;
+    }
+    if (contrast !== 0) {
+      r = (r - 128) * cFactor + 128;
+      g = (g - 128) * cFactor + 128;
+      b = (b - 128) * cFactor + 128;
+    }
+    if (saturation !== 0) {
+      const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+      r = lum + (r - lum) * sFactor;
+      g = lum + (g - lum) * sFactor;
+      b = lum + (b - lum) * sFactor;
+    }
+
+    d[i] = clamp(r);
+    d[i + 1] = clamp(g);
+    d[i + 2] = clamp(b);
+  }
+
+  ctx.putImageData(imgData, 0, 0);
+}
+
 /* ─── main pipeline ─── */
 
 /**
@@ -259,18 +472,28 @@ export function applyAdjustments(
 function applyClarityInPlace(canvas: HTMLCanvasElement, amount: number) {
   const w = canvas.width, h = canvas.height;
   const ctx = canvas.getContext('2d')!;
-
-  // Create blurred copy
-  const blur = document.createElement('canvas');
-  blur.width = w; blur.height = h;
-  const bctx = blur.getContext('2d')!;
-  bctx.filter = `blur(${Math.abs(amount) * 8 + 2}px)`;
-  bctx.drawImage(canvas, 0, 0);
-  bctx.filter = 'none';
-
   const origData = ctx.getImageData(0, 0, w, h);
-  const blurData = bctx.getImageData(0, 0, w, h);
-  const od = origData.data, bd = blurData.data;
+  const od = origData.data;
+
+  const blurPx = Math.abs(amount) * 8 + 2;
+  let bd: Uint8ClampedArray;
+  if (supportsCanvasFilter()) {
+    const blur = document.createElement('canvas');
+    blur.width = w; blur.height = h;
+    try {
+      const bctx = blur.getContext('2d')!;
+      bctx.filter = `blur(${blurPx}px)`;
+      bctx.drawImage(canvas, 0, 0);
+      bctx.filter = 'none';
+      bd = bctx.getImageData(0, 0, w, h).data;
+    } finally {
+      blur.width = 0;
+      blur.height = 0;
+    }
+  } else {
+    bd = applyBoxBlurImageData(od, w, h, Math.max(1, Math.round(blurPx)));
+  }
+
   const str = amount * 0.7;
 
   for (let i = 0; i < od.length; i += 4) {
@@ -290,17 +513,26 @@ function applyClarityInPlace(canvas: HTMLCanvasElement, amount: number) {
 function applyTextureInPlace(canvas: HTMLCanvasElement, amount: number) {
   const w = canvas.width, h = canvas.height;
   const ctx = canvas.getContext('2d')!;
-
-  const blur = document.createElement('canvas');
-  blur.width = w; blur.height = h;
-  const bctx = blur.getContext('2d')!;
-  bctx.filter = 'blur(1.5px)';
-  bctx.drawImage(canvas, 0, 0);
-  bctx.filter = 'none';
-
   const origData = ctx.getImageData(0, 0, w, h);
-  const blurData = bctx.getImageData(0, 0, w, h);
-  const od = origData.data, bd = blurData.data;
+  const od = origData.data;
+
+  let bd: Uint8ClampedArray;
+  if (supportsCanvasFilter()) {
+    const blur = document.createElement('canvas');
+    blur.width = w; blur.height = h;
+    try {
+      const bctx = blur.getContext('2d')!;
+      bctx.filter = 'blur(1.5px)';
+      bctx.drawImage(canvas, 0, 0);
+      bctx.filter = 'none';
+      bd = bctx.getImageData(0, 0, w, h).data;
+    } finally {
+      blur.width = 0;
+      blur.height = 0;
+    }
+  } else {
+    bd = applyBoxBlurImageData(od, w, h, 2);
+  }
 
   for (let i = 0; i < od.length; i += 4) {
     od[i]     = clamp(od[i]     + (od[i]     - bd[i])     * amount * 0.6);

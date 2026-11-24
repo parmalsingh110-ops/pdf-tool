@@ -37,6 +37,7 @@ import img2pdf
 import numpy as np
 from PIL import Image, ImageOps
 
+from image_utils import IMAGE_EXTENSIONS as _IMG_UTILS_EXTENSIONS, is_image_bytes, safe_open_image
 from ocr_engine import (
     OCRWord,
     clean_image_for_ocr,
@@ -63,7 +64,7 @@ _DEV_LETTER_RE = re.compile(r"[\u0904-\u0939\u093E-\u094D\u0958-\u0963\u0972-\u0
 _LATIN_RUN_RE = re.compile(r"([\u0900-\u097F\u0980-\u09FF]+|[^\u0900-\u097F\u0980-\u09FF]+)")
 _PURE_NUM_RE = re.compile(r"^[+-]?(?:[1-9]\d*|0)(?:\.\d+)?$")
 
-IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".tif", ".tiff", ".bmp"}
+IMAGE_EXTENSIONS = set(_IMG_UTILS_EXTENSIONS)
 
 
 # ---------------------------------------------------------------------------
@@ -191,53 +192,67 @@ class PageBlueprint:
 
 def is_image_upload(filename: Optional[str], raw_bytes: bytes) -> bool:
     """Detect whether uploaded bytes represent a raster image rather than a PDF."""
-    ext = Path(filename or "").suffix.lower()
-    if ext in IMAGE_EXTENSIONS:
-        return True
-    if raw_bytes.startswith((b"\xff\xd8\xff", b"\x89PNG\r\n\x1a\n", b"RIFF", b"BM", b"II*\x00", b"MM\x00*")):
-        return True
-    return False
+    return is_image_bytes(raw_bytes, filename)
 
 
 def normalize_input_to_pdf(raw_bytes: bytes, filename: Optional[str], out_pdf: Path) -> tuple[Path, bool]:
     """
-    Ensure converter input is a PDF on disk. Converts JPG/PNG/WebP/TIFF (including
-    multi-page TIFFs and EXIF-rotated phone scans) cleanly to an A4-scaled PDF using
-    lossless `img2pdf` framing (avoids PyMuPDF `insert_image` blank-stream edge bugs).
+    Ensure converter input is a PDF on disk. Converts JPG/PNG/WebP/HEIC/AVIF/TIFF/MPO
+    (including multi-page TIFFs and EXIF-rotated high-MP phone scans) cleanly to an A4-scaled
+    PDF using `img2pdf` framing with max_dim=3200 cap and JPEG q92 encoding.
+    Only iterates `n_frames` for multi-page TIFF (never MPO depth-map frames!).
     Returns (pdf_path, was_image).
     """
     if not is_image_upload(filename, raw_bytes):
         out_pdf.write_bytes(raw_bytes)
         return out_pdf, False
 
+    max_dim = 3200
     frame_streams: list[bytes] = []
     pil_img = Image.open(io.BytesIO(raw_bytes))
-    n_frames = getattr(pil_img, "n_frames", 1)
+    is_tiff = (pil_img.format or "").upper() == "TIFF"
+    n_frames = getattr(pil_img, "n_frames", 1) if is_tiff else 1
     first_landscape = False
 
-    for frame_idx in range(n_frames):
-        if n_frames > 1:
-            pil_img.seek(frame_idx)
-        frame = ImageOps.exif_transpose(pil_img)
-        if frame.mode not in ("RGB", "L"):
-            bg = Image.new("RGB", frame.size, (255, 255, 255))
-            if frame.mode == "RGBA":
-                bg.paste(frame, mask=frame.split()[3])
-            else:
-                bg.paste(frame.convert("RGB"))
-            frame = bg
-        elif frame.mode == "L":
-            frame = frame.convert("RGB")
-
+    if n_frames <= 1:
+        pil_img.close()
+        frame, _ = safe_open_image(raw_bytes, max_dim=max_dim, flatten_alpha_bg=(255, 255, 255))
         w_px, h_px = frame.size
-        if w_px < 8 or h_px < 8:
-            continue
-        if frame_idx == 0 and w_px > h_px:
-            first_landscape = True
+        if w_px >= 8 and h_px >= 8:
+            first_landscape = w_px > h_px
+            buf = io.BytesIO()
+            frame.save(buf, format="JPEG", quality=92)
+            frame_streams.append(buf.getvalue())
+    else:
+        for frame_idx in range(n_frames):
+            pil_img.seek(frame_idx)
+            frame = ImageOps.exif_transpose(pil_img) or pil_img
+            has_alpha = frame.mode in ("RGBA", "LA", "PA") or (frame.mode == "P" and "transparency" in frame.info)
+            if has_alpha:
+                rgba = frame.convert("RGBA")
+                bg = Image.new("RGB", rgba.size, (255, 255, 255))
+                bg.paste(rgba, mask=rgba.split()[3])
+                frame = bg
+            elif frame.mode != "RGB":
+                frame = frame.convert("RGB")
 
-        buf = io.BytesIO()
-        frame.save(buf, format="PNG", optimize=False)
-        frame_streams.append(buf.getvalue())
+            w_px, h_px = frame.size
+            if w_px < 8 or h_px < 8:
+                continue
+            if max(w_px, h_px) > max_dim:
+                scale = max_dim / float(max(w_px, h_px))
+                frame = frame.resize(
+                    (max(8, int(round(w_px * scale))), max(8, int(round(h_px * scale)))),
+                    Image.Resampling.LANCZOS,
+                )
+                w_px, h_px = frame.size
+            if frame_idx == 0 and w_px > h_px:
+                first_landscape = True
+
+            buf = io.BytesIO()
+            frame.save(buf, format="JPEG", quality=92)
+            frame_streams.append(buf.getvalue())
+        pil_img.close()
 
     if not frame_streams:
         raise ValueError("Uploaded image contains no valid frames.")

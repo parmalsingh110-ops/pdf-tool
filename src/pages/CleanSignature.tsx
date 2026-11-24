@@ -6,7 +6,9 @@ import { useSEO } from '../hooks/useSEO';
 import ToolSEOSection from '../components/ToolSEOSection';
 import { PDFDocument } from 'pdf-lib';
 import { dataUrlToBytes } from '../lib/utils';
-import { toArrayBufferBytes } from '../lib/blobUrl';
+import { toArrayBufferBytes, triggerBlobDownload, triggerDataUrlDownload } from '../lib/blobUrl';
+import { ACCEPT_IMAGES } from '../lib/fileAccept';
+import { clampCanvasDimensions, releaseCanvas } from '../lib/safeCanvas';
 import { encodeCanvasExactByteTarget } from '../lib/imageByteBudget';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 import { AnimatedNumber, PearlScanOverlay } from '../components/pearl/PearlMotion';
@@ -72,15 +74,25 @@ export default function CleanSignature() {
     img.crossOrigin = 'anonymous';
     img.onerror = () => setIsProcessing(false);
     img.onload = async () => {
+      let canvas: HTMLCanvasElement | null = null;
+      let cropCanvas: HTMLCanvasElement | null = null;
       try {
+        await img.decode().catch(() => {});
         sourceImgRef.current = img;
 
-        // Handle rotation
+        // Handle rotation & clamp huge phone photos so mobile browsers never OOM
+        const natW = img.naturalWidth || img.width;
+        const natH = img.naturalHeight || img.height;
         const isRotated = rotation % 180 !== 0;
-        const srcW = isRotated ? img.height : img.width;
-        const srcH = isRotated ? img.width : img.height;
+        const rawW = isRotated ? natH : natW;
+        const rawH = isRotated ? natW : natH;
+        const clamped = clampCanvasDimensions(rawW, rawH);
+        const srcW = clamped.width;
+        const srcH = clamped.height;
+        const drawImgW = natW * clamped.scale;
+        const drawImgH = natH * clamped.scale;
 
-        const canvas = document.createElement('canvas');
+        canvas = document.createElement('canvas');
         canvas.width = srcW;
         canvas.height = srcH;
         const ctx = canvas.getContext('2d', { willReadFrequently: true });
@@ -90,7 +102,7 @@ export default function CleanSignature() {
         ctx.save();
         ctx.translate(srcW / 2, srcH / 2);
         ctx.rotate((rotation * Math.PI) / 180);
-        ctx.drawImage(img, -img.width / 2, -img.height / 2);
+        ctx.drawImage(img, -drawImgW / 2, -drawImgH / 2, drawImgW, drawImgH);
         ctx.restore();
 
         const imgData = ctx.getImageData(0, 0, srcW, srcH);
@@ -178,7 +190,7 @@ export default function CleanSignature() {
           const cropW = Math.min(srcW - cropX, maxX - minX + pad * 2);
           const cropH = Math.min(srcH - cropY, maxY - minY + pad * 2);
 
-          const cropCanvas = document.createElement('canvas');
+          cropCanvas = document.createElement('canvas');
           cropCanvas.width = cropW;
           cropCanvas.height = cropH;
           const cropCtx = cropCanvas.getContext('2d');
@@ -219,6 +231,8 @@ export default function CleanSignature() {
         setFileSizeKb(Math.max(1, Math.round(outBytes / 1024)));
         setPreviewUrl(dataUrl);
       } finally {
+        releaseCanvas(cropCanvas);
+        releaseCanvas(canvas);
         setIsProcessing(false);
       }
     };
@@ -233,19 +247,14 @@ export default function CleanSignature() {
     if (!previewUrl) return;
 
     if (format === 'png' || format === 'jpg') {
-      const a = document.createElement('a');
-      a.href = previewUrl;
-      a.download = `clean_signature_${makeTransparent ? 'transparent' : 'white_bg'}.${format}`;
-      a.click();
+      triggerDataUrlDownload(
+        previewUrl,
+        `clean_signature_${makeTransparent ? 'transparent' : 'white_bg'}.${format}`
+      );
     } else if (format === 'svg') {
       const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 200" width="100%" height="100%"><image href="${previewUrl}" width="500" height="200" /></svg>`;
       const blob = new Blob([svg], { type: 'image/svg+xml' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'signature_vector.svg';
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 10000);
+      triggerBlobDownload(blob, 'signature_vector.svg');
     } else if (format === 'pdf') {
       setIsProcessing(true);
       try {
@@ -270,12 +279,7 @@ export default function CleanSignature() {
 
         const pdfBytes = toArrayBufferBytes(await pdfDoc.save());
         const blob = new Blob([pdfBytes], { type: 'application/pdf' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'clean_signature.pdf';
-        a.click();
-        setTimeout(() => URL.revokeObjectURL(url), 10000);
+        triggerBlobDownload(blob, 'clean_signature.pdf');
       } finally {
         setIsProcessing(false);
       }
@@ -312,7 +316,7 @@ export default function CleanSignature() {
             <span className="mt-5 px-6 py-2.5 rounded-full text-xs font-bold pms-btn-primary">
               Select Signature Photo
             </span>
-            <input type="file" accept="image/*" onChange={handleUpload} className="hidden" />
+            <input type="file" accept={ACCEPT_IMAGES} onChange={handleUpload} className="sr-only" />
           </label>
 
           <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-3 text-left text-xs">

@@ -11,6 +11,7 @@ import { AnimatedNumber, PearlScanOverlay, PearlStageSwitch } from '../component
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { triggerBlobDownload } from '../lib/blobUrl';
+import { sha256Hex } from '../lib/safeCrypto';
 
 interface ValidationResult {
   hasSignature: boolean;
@@ -41,12 +42,6 @@ export default function ValidateSignatures() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [result, setResult] = useState<ValidationResult | null>(null);
 
-  const bufferToHex = (buffer: ArrayBuffer) => {
-    return Array.from(new Uint8Array(buffer))
-      .map(b => b.toString(16).padStart(2, '0'))
-      .join('');
-  };
-
   const handleDrop = async (acceptedFiles: File[]) => {
     if (acceptedFiles.length > 0) {
       const f = acceptedFiles[0];
@@ -62,8 +57,7 @@ export default function ValidateSignatures() {
       const arrayBuffer = await f.arrayBuffer();
 
       // Step 1: Compute SHA-256 Checksum
-      const hashBuf = await window.crypto.subtle.digest('SHA-256', arrayBuffer);
-      const sha256Hex = bufferToHex(hashBuf);
+      const sha256Digest = await sha256Hex(arrayBuffer);
 
       // Step 2: Binary stream scan for signature dictionaries & PDF headers
       const uint8 = new Uint8Array(arrayBuffer);
@@ -155,7 +149,7 @@ export default function ValidateSignatures() {
         signerName,
         reason,
         signingTime,
-        sha256: sha256Hex,
+        sha256: sha256Digest,
         integrityStatus,
         fileSize: f.size,
         pdfVersion,

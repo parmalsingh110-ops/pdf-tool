@@ -462,8 +462,8 @@ function SelectionFrameOverlay({
   boxH: number;
   showHandles: boolean;
   prefersReduced: boolean | null;
-  onStartResize: (handle: ResizeHandleDir, clientX: number, clientY: number) => void;
-  onStartDrag?: (clientX: number, clientY: number) => void;
+  onStartResize: (handle: ResizeHandleDir, clientX: number, clientY: number, pointerId?: number) => void;
+  onStartDrag?: (clientX: number, clientY: number, pointerId?: number) => void;
   onDelete: () => void;
 }) {
   const isSpacious = boxW >= 72 && boxH >= 26;
@@ -499,23 +499,23 @@ function SelectionFrameOverlay({
         <>
           <div
             title="Drag border to move"
-            className="pointer-events-auto absolute -top-[2px] left-[4px] right-[4px] h-[4px] cursor-grab active:cursor-grabbing z-10"
-            onMouseDown={e => { e.stopPropagation(); onStartDrag(e.clientX, e.clientY); }}
+            className="pointer-events-auto touch-none absolute -top-[2px] left-[4px] right-[4px] h-[4px] cursor-grab active:cursor-grabbing z-10"
+            onPointerDown={e => { if (e.pointerType === 'mouse' && e.button !== 0) return; e.stopPropagation(); e.preventDefault(); onStartDrag(e.clientX, e.clientY, e.pointerId); }}
           />
           <div
             title="Drag border to move"
-            className="pointer-events-auto absolute -bottom-[2px] left-[4px] right-[4px] h-[4px] cursor-grab active:cursor-grabbing z-10"
-            onMouseDown={e => { e.stopPropagation(); onStartDrag(e.clientX, e.clientY); }}
+            className="pointer-events-auto touch-none absolute -bottom-[2px] left-[4px] right-[4px] h-[4px] cursor-grab active:cursor-grabbing z-10"
+            onPointerDown={e => { if (e.pointerType === 'mouse' && e.button !== 0) return; e.stopPropagation(); e.preventDefault(); onStartDrag(e.clientX, e.clientY, e.pointerId); }}
           />
           <div
             title="Drag border to move"
-            className="pointer-events-auto absolute top-[4px] bottom-[4px] -left-[2px] w-[4px] cursor-grab active:cursor-grabbing z-10"
-            onMouseDown={e => { e.stopPropagation(); onStartDrag(e.clientX, e.clientY); }}
+            className="pointer-events-auto touch-none absolute top-[4px] bottom-[4px] -left-[2px] w-[4px] cursor-grab active:cursor-grabbing z-10"
+            onPointerDown={e => { if (e.pointerType === 'mouse' && e.button !== 0) return; e.stopPropagation(); e.preventDefault(); onStartDrag(e.clientX, e.clientY, e.pointerId); }}
           />
           <div
             title="Drag border to move"
-            className="pointer-events-auto absolute top-[4px] bottom-[4px] -right-[2px] w-[4px] cursor-grab active:cursor-grabbing z-10"
-            onMouseDown={e => { e.stopPropagation(); onStartDrag(e.clientX, e.clientY); }}
+            className="pointer-events-auto touch-none absolute top-[4px] bottom-[4px] -right-[2px] w-[4px] cursor-grab active:cursor-grabbing z-10"
+            onPointerDown={e => { if (e.pointerType === 'mouse' && e.button !== 0) return; e.stopPropagation(); e.preventDefault(); onStartDrag(e.clientX, e.clientY, e.pointerId); }}
           />
         </>
       )}
@@ -529,7 +529,7 @@ function SelectionFrameOverlay({
             e.stopPropagation();
             onDelete();
           }}
-          onMouseDown={e => e.stopPropagation()}
+          onPointerDown={e => e.stopPropagation()}
           className="pointer-events-auto absolute -top-2.5 -right-2.5 bg-red-500 hover:bg-red-600 text-white rounded-full p-0.5 shadow-sm transition-colors z-30"
         >
           <X className="w-3 h-3" />
@@ -545,10 +545,12 @@ function SelectionFrameOverlay({
               title={c.title}
               whileHover={prefersReduced ? undefined : { scale: 1.5 }}
               whileTap={prefersReduced ? undefined : { scale: 0.95 }}
-              className={`pointer-events-auto absolute ${c.posClass} ${cornerSizeClass} rounded-full bg-white border-[1.25px] border-blue-600 shadow-[0_1px_2px_rgba(37,99,235,0.3)] ${c.cursorClass} z-20 hover:bg-blue-600 transition-colors`}
-              onMouseDown={e => {
+              className={`pointer-events-auto touch-none absolute ${c.posClass} ${cornerSizeClass} rounded-full bg-white border-[1.25px] border-blue-600 shadow-[0_1px_2px_rgba(37,99,235,0.3)] ${c.cursorClass} z-20 hover:bg-blue-600 transition-colors`}
+              onPointerDown={e => {
+                if (e.pointerType === 'mouse' && e.button !== 0) return;
                 e.stopPropagation();
-                onStartResize(c.dir, e.clientX, e.clientY);
+                e.preventDefault();
+                onStartResize(c.dir, e.clientX, e.clientY, e.pointerId);
               }}
             />
           ))}
@@ -558,10 +560,12 @@ function SelectionFrameOverlay({
             <div
               key={edge.dir}
               title={edge.title}
-              className={`pointer-events-auto absolute ${edge.posClass} rounded-full bg-white border-[1.25px] border-blue-600 shadow-[0_1px_2px_rgba(37,99,235,0.25)] z-20 hover:bg-blue-600 transition-colors`}
-              onMouseDown={e => {
+              className={`pointer-events-auto touch-none absolute ${edge.posClass} rounded-full bg-white border-[1.25px] border-blue-600 shadow-[0_1px_2px_rgba(37,99,235,0.25)] z-20 hover:bg-blue-600 transition-colors`}
+              onPointerDown={e => {
+                if (e.pointerType === 'mouse' && e.button !== 0) return;
                 e.stopPropagation();
-                onStartResize(edge.dir, e.clientX, e.clientY);
+                e.preventDefault();
+                onStartResize(edge.dir, e.clientX, e.clientY, e.pointerId);
               }}
             />
           ))}
@@ -1776,8 +1780,9 @@ export default function AdvancedEditor() {
     }));
   };
 
-  const handleOverlayMouseDown = (e: React.MouseEvent) => {
+  const handleOverlayPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!overlayRef.current) return;
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
 
     const rect = overlayRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left;
@@ -1793,6 +1798,7 @@ export default function AdvancedEditor() {
       if (clickedAnn) {
         setSelectedId(clickedAnn.id);
         if (!clickedAnn.lockPosition) {
+          try { e.currentTarget.setPointerCapture(e.pointerId); } catch {}
           setIsDragging(true);
           setDragTarget(clickedAnn.id);
           setDragOffset({ x: x - clickedAnn.x, y: y - clickedAnn.y });
@@ -1834,15 +1840,21 @@ export default function AdvancedEditor() {
       setSelectedId(newAnnotation.id);
       setActiveTool(null);
     } else if (activeTool === 'freehand') {
+      e.preventDefault();
+      try { e.currentTarget.setPointerCapture(e.pointerId); } catch {}
       setIsDrawing(true);
       setFreehandPoints([{ x, y }]);
     } else if (activeTool === 'eraser') {
       // Eraser drag begins
+      e.preventDefault();
+      try { e.currentTarget.setPointerCapture(e.pointerId); } catch {}
       isErasingRef.current = true;
       lastErasedRef.current = new Set();
       pushUndo();
       eraseAtPoint(x, y);
     } else if (['highlight', 'link', 'table', 'underline', 'strikethrough', 'magic_erase'].includes(activeTool!)) {
+      e.preventDefault();
+      try { e.currentTarget.setPointerCapture(e.pointerId); } catch {}
       setIsDrawing(true);
       setStartPos({ x, y });
       setCurrentRect({ x, y, w: 0, h: 0 });
@@ -1852,7 +1864,7 @@ export default function AdvancedEditor() {
     }
   };
 
-  const handleOverlayMouseMove = (e: React.MouseEvent) => {
+  const handleOverlayPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!overlayRef.current) return;
 
     const rect = overlayRef.current.getBoundingClientRect();
@@ -1975,7 +1987,7 @@ export default function AdvancedEditor() {
     });
   };
 
-  const handleOverlayMouseUp = () => {
+  const handleOverlayPointerUp = () => {
     // End eraser drag
     if (isErasingRef.current) {
       isErasingRef.current = false;
@@ -3883,16 +3895,16 @@ export default function AdvancedEditor() {
                 {/* Interactive Overlay */}
                 <div
                   ref={overlayRef}
-                  className={`absolute top-0 left-0 w-full h-full z-10 ${
+                  className={`absolute top-0 left-0 w-full h-full z-10 touch-none ${
                     activeTool === 'select' ? 'cursor-default' :
                     activeTool === 'eraser' ? 'cursor-none' :
                     activeTool === 'freehand' ? 'cursor-crosshair' :
                     activeTool ? 'cursor-crosshair' :
                     isDragging ? 'cursor-grabbing' : ''
                   }`}
-                  onMouseDown={handleOverlayMouseDown}
-                  onMouseMove={(e) => {
-                    handleOverlayMouseMove(e);
+                  onPointerDown={handleOverlayPointerDown}
+                  onPointerMove={(e) => {
+                    handleOverlayPointerMove(e);
                     if (resizeAnnRef.current) {
                       const r = resizeAnnRef.current;
                       const dx = e.clientX - r.startX;
@@ -3913,12 +3925,42 @@ export default function AdvancedEditor() {
                       updateAnnotation(r.id, { width: newW, height: newH, x: newX, y: newY });
                     }
                   }}
-                  onMouseUp={() => {
-                    handleOverlayMouseUp();
+                  onPointerUp={(e) => {
+                    try {
+                      if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+                        e.currentTarget.releasePointerCapture(e.pointerId);
+                      }
+                    } catch {}
+                    handleOverlayPointerUp();
                     setFreehandPoints([]);
                     if (resizeAnnRef.current) resizeAnnRef.current = null;
                   }}
-                  onMouseLeave={() => {
+                  onPointerCancel={(e) => {
+                    try {
+                      if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+                        e.currentTarget.releasePointerCapture(e.pointerId);
+                      }
+                    } catch {}
+                    handleOverlayPointerUp();
+                    setFreehandPoints([]);
+                    setEraserPos(null);
+                    if (isErasingRef.current) {
+                      isErasingRef.current = false;
+                      lastErasedRef.current = new Set();
+                    }
+                    if (resizeAnnRef.current) resizeAnnRef.current = null;
+                    if (isDragging) {
+                      setIsDragging(false);
+                      setDragTarget(null);
+                      setActiveGuides({ vertical: null, horizontal: null });
+                    }
+                    setIsDrawing(false);
+                    setCurrentRect(null);
+                  }}
+                  onPointerLeave={(e) => {
+                    try {
+                      if (e.currentTarget.hasPointerCapture(e.pointerId)) return;
+                    } catch {}
                     setEraserPos(null);
                     // Only finalize eraser on leave; DON'T cancel rect drawings
                     if (isErasingRef.current) {
@@ -3935,8 +3977,11 @@ export default function AdvancedEditor() {
                     const resolvedFontCss = ann.fontCssFamily || pdfFontToCss(ann.originalFontName);
                     const displayBox = getAnnotationDisplayBox(ann, scale, pageViewport?.width, resolvedFontCss);
                     const isSelected = selectedId === ann.id && activeTool !== 'eraser';
-                    const startDragFromHandle = (clientX: number, clientY: number) => {
+                    const startDragFromHandle = (clientX: number, clientY: number, pointerId?: number) => {
                       if (ann.lockPosition || activeTool === 'eraser') return;
+                      if (pointerId !== undefined) {
+                        try { overlayRef.current?.setPointerCapture(pointerId); } catch {}
+                      }
                       setSelectedId(ann.id);
                       setIsDragging(true);
                       setDragTarget(ann.id);
@@ -3949,9 +3994,12 @@ export default function AdvancedEditor() {
                     <div
                       key={ann.id}
                       onClick={(e) => { if (activeTool === 'eraser') return; e.stopPropagation(); setSelectedId(ann.id); }}
-                      onMouseDown={(e) => {
+                      onPointerDown={(e) => {
+                        if (e.pointerType === 'mouse' && e.button !== 0) return;
                         if (activeTool === 'eraser') {
                           e.stopPropagation();
+                          e.preventDefault();
+                          try { overlayRef.current?.setPointerCapture(e.pointerId); } catch {}
                           if (!isErasingRef.current) { isErasingRef.current = true; pushUndo(); }
                           deleteAnnotation(ann.id);
                           return;
@@ -3959,11 +4007,12 @@ export default function AdvancedEditor() {
                         if (!activeTool || activeTool === 'select') {
                           if (!ann.lockPosition) {
                             e.stopPropagation();
-                            startDragFromHandle(e.clientX, e.clientY);
+                            e.preventDefault();
+                            startDragFromHandle(e.clientX, e.clientY, e.pointerId);
                           }
                         }
                       }}
-                      className={`absolute group ${activeTool === 'eraser' ? 'cursor-none' : ''
+                      className={`absolute group touch-none ${activeTool === 'eraser' ? 'cursor-none' : ''
                         } ${!activeTool && ann.type !== 'freehand' ? 'cursor-move' : activeTool !== 'eraser' ? 'cursor-pointer' : ''}`}
                       style={{
                         left: ann.x,
@@ -4023,7 +4072,7 @@ export default function AdvancedEditor() {
                             onFocus={(e) => { e.currentTarget.scrollTop = 0; }}
                             onScroll={(e) => { if (e.currentTarget.scrollTop !== 0) e.currentTarget.scrollTop = 0; }}
                             onClick={(e) => e.stopPropagation()}
-                            onMouseDown={(e) => e.stopPropagation()}
+                            onPointerDown={(e) => e.stopPropagation()}
                             onKeyDown={(e) => {
                               e.stopPropagation();
                               // Only Escape cancels now. Enter inserts newline.
@@ -4050,6 +4099,7 @@ export default function AdvancedEditor() {
                                 onChange={(e) => updateTableData(ann.id, ri, ci, e.target.value)}
                                 className="border border-gray-300 text-[10px] p-0.5 outline-none focus:bg-indigo-50"
                                 onClick={(e) => e.stopPropagation()}
+                                onPointerDown={(e) => e.stopPropagation()}
                               />
                             ))
                           ))}
@@ -4070,7 +4120,10 @@ export default function AdvancedEditor() {
                           boxH={displayBox.height}
                           showHandles={ann.type === 'text' || ann.type === 'image' || ann.type === 'signature'}
                           prefersReduced={prefersReduced}
-                          onStartResize={(handle, clientX, clientY) => {
+                          onStartResize={(handle, clientX, clientY, pointerId) => {
+                            if (pointerId !== undefined) {
+                              try { overlayRef.current?.setPointerCapture(pointerId); } catch {}
+                            }
                             resizeAnnRef.current = {
                               id: ann.id,
                               handle,
@@ -4165,7 +4218,8 @@ export default function AdvancedEditor() {
                                 zIndex: 12,
                               }}
                               className="border border-dashed border-transparent hover:border-emerald-500 hover:bg-emerald-500/10 cursor-pointer rounded-xs transition-colors group"
-                              onMouseDown={e => {
+                              onPointerDown={e => {
+                                if (e.pointerType === 'mouse' && e.button !== 0) return;
                                 e.stopPropagation();
                                 promoteDetectedObject(obj);
                               }}
@@ -4202,7 +4256,8 @@ export default function AdvancedEditor() {
                                 zIndex: 11,
                               }}
                               className="border border-dashed border-violet-400/35 hover:border-violet-600 hover:bg-violet-500/10 cursor-text rounded-xs transition-colors"
-                              onMouseDown={e => {
+                              onPointerDown={e => {
+                                if (e.pointerType === 'mouse' && e.button !== 0) return;
                                 e.stopPropagation();
                                 activateFormField(ff);
                               }}
@@ -4275,6 +4330,19 @@ export default function AdvancedEditor() {
                             const el = e.currentTarget as HTMLElement;
                             el.style.outline = '1px solid transparent';
                             el.style.backgroundColor = 'transparent';
+                          }}
+                          onPointerDown={e => {
+                            if (e.pointerType === 'mouse' && e.button !== 0) return;
+                            e.stopPropagation();
+                            if (e.pointerType !== 'mouse') {
+                              pushUndo();
+                              const textAnn = buildTextAnnotationFromBlock(block, 'tb');
+                              setAnnotations(prev => [...prev, textAnn]);
+                              setSelectedId(textAnn.id);
+                              if (!continuousSelect) {
+                                setActiveTool(null);
+                              }
+                            }
                           }}
                           onMouseDown={e => {
                             // Single click: create text annotation with exact matched font & scale

@@ -9,6 +9,7 @@ import { PDFDocument } from 'pdf-lib';
 import FileDropzone from '../components/FileDropzone';
 import { useSEO } from '../hooks/useSEO';
 import { toArrayBufferBytes, useAutoRevokeUrl } from '../lib/blobUrl';
+import { clampCanvasDimensions, clampPdfScale, releaseCanvas, safeCanvasToBlob } from '../lib/safeCanvas';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 import { AnimatedNumber, PearlScanOverlay, PearlStageSwitch } from '../components/pearl/PearlMotion';
 
@@ -48,20 +49,26 @@ export default function ConvertToTiff() {
       for (let p = 1; p <= pdf.numPages; p++) {
         setProgress(`Rendering page ${p} of ${pdf.numPages} at ${Math.round(scale * 100)}%…`);
         const page = await pdf.getPage(p);
-        const vp = page.getViewport({ scale });
+        const baseVp = page.getViewport({ scale: 1.0 });
+        const safeScale = clampPdfScale(baseVp.width, baseVp.height, scale);
+        const vp = page.getViewport({ scale: safeScale });
         const canvas = document.createElement('canvas');
-        canvas.width = vp.width;
-        canvas.height = vp.height;
-        const ctx = canvas.getContext('2d')!;
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        await page.render({ canvasContext: ctx, viewport: vp, canvas }).promise;
+        try {
+          canvas.width = Math.max(1, Math.round(vp.width));
+          canvas.height = Math.max(1, Math.round(vp.height));
+          const ctx = canvas.getContext('2d');
+          if (!ctx) throw new Error('Canvas context unavailable');
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          await page.render({ canvasContext: ctx, viewport: vp, canvas }).promise;
 
-        const imgData = ctx.getImageData(0, 0, vp.width, vp.height);
-        const tiffBytes = UTIF.encodeImage(imgData.data, vp.width, vp.height);
-        zip.file(`page_${p}.tiff`, new Uint8Array(tiffBytes));
-        canvas.width = 0;
-        canvas.height = 0;
+          const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const tiffBytes = UTIF.encodeImage(imgData.data, canvas.width, canvas.height);
+          zip.file(`page_${p}.tiff`, new Uint8Array(tiffBytes));
+        } finally {
+          releaseCanvas(canvas);
+          page.cleanup();
+        }
       }
 
       setProgress('Creating TIFF archive…');
@@ -99,24 +106,45 @@ export default function ConvertToTiff() {
 
         if (!w || !h) continue;
 
+        const { width: cw, height: ch, clamped } = clampCanvasDimensions(w, h);
         const canvas = document.createElement('canvas');
-        canvas.width = w;
-        canvas.height = h;
-        const ctx = canvas.getContext('2d')!;
-        const imageData = ctx.createImageData(w, h);
-        imageData.data.set(rgba);
-        ctx.putImageData(imageData, 0, 0);
+        try {
+          canvas.width = cw;
+          canvas.height = ch;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) throw new Error('Canvas context unavailable');
+          const imageData = ctx.createImageData(cw, ch);
+          if (!clamped) {
+            imageData.data.set(rgba);
+          } else {
+            const dst = imageData.data;
+            const xRatio = w / cw;
+            const yRatio = h / ch;
+            for (let y = 0; y < ch; y++) {
+              const srcY = Math.min(h - 1, Math.floor(y * yRatio));
+              const srcRowOffset = srcY * w;
+              const dstRowOffset = y * cw;
+              for (let x = 0; x < cw; x++) {
+                const srcX = Math.min(w - 1, Math.floor(x * xRatio));
+                const sIdx = (srcRowOffset + srcX) * 4;
+                const dIdx = (dstRowOffset + x) * 4;
+                dst[dIdx] = rgba[sIdx];
+                dst[dIdx + 1] = rgba[sIdx + 1];
+                dst[dIdx + 2] = rgba[sIdx + 2];
+                dst[dIdx + 3] = rgba[sIdx + 3];
+              }
+            }
+          }
+          ctx.putImageData(imageData, 0, 0);
 
-        const pngBlob = await new Promise<Blob | null>(res => canvas.toBlob(res, 'image/png'));
-        if (!pngBlob) continue;
-
-        const pngBytes = await pngBlob.arrayBuffer();
-        const emb = await pdfDoc.embedPng(pngBytes);
-        const page = pdfDoc.addPage([emb.width, emb.height]);
-        page.drawImage(emb, { x: 0, y: 0, width: emb.width, height: emb.height });
-
-        canvas.width = 0;
-        canvas.height = 0;
+          const pngBlob = await safeCanvasToBlob(canvas, 'image/png');
+          const pngBytes = await pngBlob.arrayBuffer();
+          const emb = await pdfDoc.embedPng(pngBytes);
+          const page = pdfDoc.addPage([emb.width, emb.height]);
+          page.drawImage(emb, { x: 0, y: 0, width: emb.width, height: emb.height });
+        } finally {
+          releaseCanvas(canvas);
+        }
       }
 
       setProgress('Finalizing PDF…');

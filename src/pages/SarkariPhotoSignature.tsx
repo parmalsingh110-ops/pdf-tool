@@ -7,7 +7,9 @@ import ToolSEOSection from '../components/ToolSEOSection';
 import { PDFDocument } from 'pdf-lib';
 import { dataUrlToBytes } from '../lib/utils';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
-import { toArrayBufferBytes, triggerBlobDownload, useAutoRevokeUrl } from '../lib/blobUrl';
+import { toArrayBufferBytes, triggerBlobDownload, triggerDataUrlDownload, useAutoRevokeUrl } from '../lib/blobUrl';
+import { ACCEPT_IMAGES } from '../lib/fileAccept';
+import { releaseCanvas } from '../lib/safeCanvas';
 import { encodeCanvasExactByteTarget } from '../lib/imageByteBudget';
 import { AnimatedNumber, PearlScanOverlay } from '../components/pearl/PearlMotion';
 
@@ -97,6 +99,7 @@ export default function SarkariPhotoSignature() {
           img.onerror = () => resolve(null);
           img.src = photoUrl;
         });
+        if (photoImg) await photoImg.decode().catch(() => {});
       }
 
       // Load sign image
@@ -109,6 +112,7 @@ export default function SarkariPhotoSignature() {
           img.onerror = () => resolve(null);
           img.src = signUrl;
         });
+        if (signImg) await signImg.decode().catch(() => {});
       }
 
       // Dimensions depending on layout mode
@@ -347,10 +351,10 @@ export default function SarkariPhotoSignature() {
     if (!previewDataUrl) return;
 
     if (format === 'jpg') {
-      const a = document.createElement('a');
-      a.href = previewDataUrl;
-      a.download = `sarkari_photo_signature_${candidateName.replace(/\s+/g, '_') || 'exam'}.jpg`;
-      a.click();
+      triggerDataUrlDownload(
+        previewDataUrl,
+        `sarkari_photo_signature_${candidateName.replace(/\s+/g, '_') || 'exam'}.jpg`
+      );
     } else if (format === 'png') {
       let pngDataUrl = lastRenderedCanvasRef.current?.toDataURL('image/png');
       if (!pngDataUrl) {
@@ -362,11 +366,12 @@ export default function SarkariPhotoSignature() {
         c.height = img.naturalHeight;
         c.getContext('2d')?.drawImage(img, 0, 0);
         pngDataUrl = c.toDataURL('image/png');
+        releaseCanvas(c);
       }
-      const a = document.createElement('a');
-      a.href = pngDataUrl;
-      a.download = `sarkari_photo_signature_${candidateName.replace(/\s+/g, '_') || 'exam'}.png`;
-      a.click();
+      triggerDataUrlDownload(
+        pngDataUrl,
+        `sarkari_photo_signature_${candidateName.replace(/\s+/g, '_') || 'exam'}.png`
+      );
     } else if (format === 'pdf') {
       setIsProcessing(true);
       try {
@@ -429,7 +434,7 @@ export default function SarkariPhotoSignature() {
                   {photoFile ? photoFile.name : 'Upload Candidate Photo'}
                 </span>
                 <span className="text-[10px] mt-0.5" style={{ color: 'var(--pms-subtle-text)' }}>JPG / PNG</span>
-                <input type="file" accept="image/*" onChange={handlePhotoUpload} className="hidden" />
+                <input type="file" accept={ACCEPT_IMAGES} onChange={handlePhotoUpload} className="sr-only" />
               </label>
             </div>
 
@@ -449,7 +454,7 @@ export default function SarkariPhotoSignature() {
                   {signFile ? signFile.name : 'Upload Candidate Sign'}
                 </span>
                 <span className="text-[10px] mt-0.5" style={{ color: 'var(--pms-subtle-text)' }}>JPG / PNG</span>
-                <input type="file" accept="image/*" onChange={handleSignUpload} className="hidden" />
+                <input type="file" accept={ACCEPT_IMAGES} onChange={handleSignUpload} className="sr-only" />
               </label>
             </div>
           </div>

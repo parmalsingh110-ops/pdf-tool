@@ -8,6 +8,7 @@ import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 import { AnimatedNumber } from '../components/pearl/PearlMotion';
+import { copyTextToClipboard } from '../lib/clipboard';
 
 export default function PasswordStrength() {
   useSEO(
@@ -175,10 +176,12 @@ export default function PasswordStrength() {
     setPassword(res);
   };
 
-  const copyPassword = () => {
-    navigator.clipboard.writeText(password);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  const copyPassword = async () => {
+    const ok = await copyTextToClipboard(password);
+    if (ok) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
   };
 
   return (

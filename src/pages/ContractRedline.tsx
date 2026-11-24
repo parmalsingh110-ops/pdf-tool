@@ -28,6 +28,8 @@ import ToolSEOSection from '../components/ToolSEOSection';
 import { apiFetch } from '../lib/api';
 import { toArrayBufferBytes } from '../lib/blobUrl';
 import { downloadBlob } from '../lib/utils';
+import { sha256Hex } from '../lib/safeCrypto';
+import { copyTextToClipboard } from '../lib/clipboard';
 
 function cleanWinAnsi(str: string): string {
   if (!str) return '';
@@ -131,11 +133,7 @@ const LOCAL_TRAP_PATTERNS = [
 ];
 
 async function sha256Short(buf: ArrayBuffer): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', buf);
-  return Array.from(new Uint8Array(digest))
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('')
-    .slice(0, 32);
+  return (await sha256Hex(buf)).slice(0, 32);
 }
 
 export default function ContractRedline() {
@@ -313,10 +311,12 @@ export default function ContractRedline() {
     };
   }, [currentPage, rightTab, file, isAuditing]);
 
-  const handleCopyProposal = (text: string, id: string) => {
-    navigator.clipboard.writeText(text);
-    setCopiedId(id);
-    setTimeout(() => setCopiedId(null), 2500);
+  const handleCopyProposal = async (text: string, id: string) => {
+    const ok = await copyTextToClipboard(text);
+    if (ok) {
+      setCopiedId(id);
+      setTimeout(() => setCopiedId(null), 2500);
+    }
   };
 
   // ── Export Redlined PDF with Executive Summary Sheet + Exact Clause Highlighting ──

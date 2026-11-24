@@ -72,28 +72,124 @@ export function useAutoRevokeUrls(
 }
 
 /**
- * Triggers a browser file download for a Blob and revokes the temporary object URL after
- * the browser has started reading the download stream.
+ * Narrows a Uint8Array to ArrayBuffer-backed bytes expected by TypeScript 5.8+ DOM
+ * APIs (`Blob`, `File`, `crypto.subtle`), copying only if backed by a SharedArrayBuffer.
  */
-export function triggerBlobDownload(blob: Blob, filename: string, revokeDelayMs = 15000): void {
+export function toArrayBufferBytes(bytes: Uint8Array): Uint8Array<ArrayBuffer> {
+  if (typeof ArrayBuffer !== 'undefined' && bytes.buffer instanceof ArrayBuffer) {
+    return bytes as Uint8Array<ArrayBuffer>;
+  }
+  return new Uint8Array(bytes);
+}
+
+/**
+ * Convert a data: URL or base64 string to Uint8Array without fetch()
+ * (avoids CSP connect-src block on data: scheme and giant data: anchor failures).
+ */
+export function dataUrlToBytes(dataUrl: string): Uint8Array<ArrayBuffer> {
+  const commaIndex = dataUrl.indexOf(',');
+  if (commaIndex !== -1 && dataUrl.startsWith('data:')) {
+    const header = dataUrl.slice(0, commaIndex).toLowerCase();
+    const payload = dataUrl.slice(commaIndex + 1);
+    if (!header.includes(';base64')) {
+      return toArrayBufferBytes(new TextEncoder().encode(decodeURIComponent(payload)));
+    }
+    const binary = atob(payload);
+    const len = binary.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return bytes;
+  }
+  const base64 = commaIndex !== -1 ? dataUrl.slice(commaIndex + 1) : dataUrl;
+  const binary = atob(base64);
+  const len = binary.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
+function triggerAnchorBlobDownload(blob: Blob, filename: string, revokeDelayMs: number): void {
+  if (typeof document === 'undefined' || !document.body) return;
   const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = filename;
-  link.style.display = 'none';
-  document.body.appendChild(link);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.rel = 'noopener';
+  a.style.display = 'none';
+  document.body.appendChild(a);
   try {
-    link.click();
+    a.click();
   } finally {
-    document.body.removeChild(link);
+    setTimeout(() => {
+      try {
+        if (a.parentNode) a.parentNode.removeChild(a);
+      } catch {
+        // Ignore
+      }
+    }, 250);
     setTimeout(() => {
       try {
         URL.revokeObjectURL(url);
       } catch {
         // Ignore
       }
-    }, revokeDelayMs);
+    }, Math.max(15_000, revokeDelayMs));
   }
+}
+
+/**
+ * Triggers a mobile-safe browser file download for a Blob.
+ * - On Android in-app WebViews (WhatsApp, Instagram, Telegram, Facebook, Line, wv),
+ *   uses Web Share API file sharing when supported (falling back to anchor click on Abort/error).
+ * - On standard browsers, appends an invisible anchor with `rel="noopener"`, defers DOM removal
+ *   by 250ms, and defers `URL.revokeObjectURL` by at least 15s (default 60s) so slow mobile
+ *   download managers never lose the blob stream mid-save.
+ */
+export function triggerBlobDownload(blob: Blob, filename: string, revokeDelayMs = 60_000): void {
+  const ua = typeof navigator !== 'undefined' ? navigator.userAgent || '' : '';
+  const isInAppWebView = /(wv|FBAN|FBAV|Instagram|WhatsApp|Telegram|Line)/i.test(ua);
+
+  if (
+    isInAppWebView &&
+    typeof navigator !== 'undefined' &&
+    typeof navigator.share === 'function' &&
+    typeof navigator.canShare === 'function' &&
+    typeof File !== 'undefined'
+  ) {
+    try {
+      const file = new File([blob], filename, {
+        type: blob.type || 'application/octet-stream',
+      });
+      if (navigator.canShare({ files: [file] })) {
+        navigator
+          .share({ files: [file], title: filename })
+          .catch(() => {
+            triggerAnchorBlobDownload(blob, filename, revokeDelayMs);
+          });
+        return;
+      }
+    } catch {
+      // Fall through to standard anchor download
+    }
+  }
+
+  triggerAnchorBlobDownload(blob, filename, revokeDelayMs);
+}
+
+/**
+ * Converts a `data:` URL to a Blob and downloads it via `triggerBlobDownload`,
+ * preventing Chrome/Safari mobile download crashes on multi-megabyte `data:` hrefs.
+ */
+export function triggerDataUrlDownload(dataUrl: string, filename: string): void {
+  const mimeMatch = /^data:([^;,]+)/i.exec(dataUrl);
+  const mime = mimeMatch ? mimeMatch[1].trim() : 'application/octet-stream';
+  const bytes = dataUrlToBytes(dataUrl);
+  const blob = new Blob([toArrayBufferBytes(bytes)], { type: mime });
+  triggerBlobDownload(blob, filename);
 }
 
 /**
@@ -106,15 +202,4 @@ export function safeRevokeUrl(url: string | null | undefined): void {
   } catch {
     // Ignore
   }
-}
-
-/**
- * Narrows a Uint8Array to ArrayBuffer-backed bytes expected by TypeScript 5.9 DOM
- * APIs (`Blob`, `File`, `crypto.subtle`), copying only if backed by a SharedArrayBuffer.
- */
-export function toArrayBufferBytes(bytes: Uint8Array): Uint8Array<ArrayBuffer> {
-  if (typeof ArrayBuffer !== 'undefined' && bytes.buffer instanceof ArrayBuffer) {
-    return bytes as Uint8Array<ArrayBuffer>;
-  }
-  return new Uint8Array(bytes);
 }

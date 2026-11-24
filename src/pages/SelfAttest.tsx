@@ -22,6 +22,8 @@ import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 import { AnimatedNumber, PearlScanOverlay } from '../components/pearl/PearlMotion';
 import { toArrayBufferBytes } from '../lib/blobUrl';
 import { dataUrlToBytes, downloadBlob } from '../lib/utils';
+import { clampCanvasDimensions, releaseCanvas } from '../lib/safeCanvas';
+import { ACCEPT_IMAGES } from '../lib/fileAccept';
 
 type AttestPhrase = 'Self Attested' | 'Self Attested with Date' | 'True Copy' | 'Verified from Original' | 'custom';
 type StampPosition = 'bottom_right' | 'bottom_left' | 'bottom_center' | 'custom';
@@ -87,15 +89,29 @@ export default function SelfAttest() {
     ctx.lineJoin = 'round';
   }, [inkColor, hasPdfLoaded]);
 
+  const getSigCoords = (
+    e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>,
+    canvas: HTMLCanvasElement
+  ) => {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = rect.width > 0 ? canvas.width / rect.width : 1;
+    const scaleY = rect.height > 0 ? canvas.height / rect.height : 1;
+    const clientX = 'touches' in e ? (e.touches[0]?.clientX ?? 0) : e.clientX;
+    const clientY = 'touches' in e ? (e.touches[0]?.clientY ?? 0) : e.clientY;
+    return {
+      x: (clientX - rect.left) * scaleX,
+      y: (clientY - rect.top) * scaleY,
+    };
+  };
+
   const startDrawing = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
+    if ('touches' in e && e.touches.length === 0) return;
     const canvas = sigCanvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const rect = canvas.getBoundingClientRect();
-    const x = 'touches' in e ? e.touches[0].clientX - rect.left : e.clientX - rect.left;
-    const y = 'touches' in e ? e.touches[0].clientY - rect.top : e.clientY - rect.top;
+    const { x, y } = getSigCoords(e, canvas);
 
     ctx.beginPath();
     ctx.moveTo(x, y);
@@ -104,14 +120,13 @@ export default function SelfAttest() {
 
   const draw = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
     if (!isDrawing) return;
+    if ('touches' in e && e.touches.length === 0) return;
     const canvas = sigCanvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const rect = canvas.getBoundingClientRect();
-    const x = 'touches' in e ? e.touches[0].clientX - rect.left : e.clientX - rect.left;
-    const y = 'touches' in e ? e.touches[0].clientY - rect.top : e.clientY - rect.top;
+    const { x, y } = getSigCoords(e, canvas);
 
     ctx.lineTo(x, y);
     ctx.stroke();
@@ -144,23 +159,28 @@ export default function SelfAttest() {
     reader.onload = (ev) => {
       const img = new Image();
       img.onload = () => {
+        const { width, height } = clampCanvasDimensions(img.naturalWidth, img.naturalHeight);
         const c = document.createElement('canvas');
-        c.width = img.naturalWidth;
-        c.height = img.naturalHeight;
-        const ctx = c.getContext('2d');
-        if (!ctx) return;
-        ctx.drawImage(img, 0, 0);
+        try {
+          c.width = width;
+          c.height = height;
+          const ctx = c.getContext('2d');
+          if (!ctx) return;
+          ctx.drawImage(img, 0, 0, width, height);
 
-        // Auto remove white background for transparency
-        const imgData = ctx.getImageData(0, 0, c.width, c.height);
-        const data = imgData.data;
-        for (let i = 0; i < data.length; i += 4) {
-          const avg = (data[i] + data[i + 1] + data[i + 2]) / 3;
-          if (avg > 200) data[i + 3] = 0; // Transparent white
+          // Auto remove white background for transparency
+          const imgData = ctx.getImageData(0, 0, c.width, c.height);
+          const data = imgData.data;
+          for (let i = 0; i < data.length; i += 4) {
+            const avg = (data[i] + data[i + 1] + data[i + 2]) / 3;
+            if (avg > 200) data[i + 3] = 0; // Transparent white
+          }
+          ctx.putImageData(imgData, 0, 0);
+          setSigPngDataUrl(c.toDataURL('image/png'));
+          setHasSignature(true);
+        } finally {
+          releaseCanvas(c);
         }
-        ctx.putImageData(imgData, 0, 0);
-        setSigPngDataUrl(c.toDataURL('image/png'));
-        setHasSignature(true);
       };
       img.src = ev.target?.result as string;
     };
@@ -291,6 +311,7 @@ export default function SelfAttest() {
         if (isMounted) {
           setPreviewDataUrl(canvas.toDataURL('image/jpeg', 0.90));
         }
+        releaseCanvas(canvas);
       } catch (err) {
         console.error('Error rendering self-attest preview:', err);
       }
@@ -370,6 +391,7 @@ export default function SelfAttest() {
       sCtx.fillText(`Date: ${signDate}`, 200, 165);
 
       const stampPngBytes = dataUrlToBytes(stampCanvas.toDataURL('image/png'));
+      releaseCanvas(stampCanvas);
       const stampPdfImg = await pdfDoc.embedPng(stampPngBytes);
 
       // Embed stamp on designated pages
@@ -526,6 +548,7 @@ export default function SelfAttest() {
                     onTouchStart={startDrawing}
                     onTouchMove={draw}
                     onTouchEnd={stopDrawing}
+                    onTouchCancel={stopDrawing}
                     className="w-full h-28 cursor-crosshair block touch-none"
                   />
                 </div>
@@ -533,7 +556,7 @@ export default function SelfAttest() {
                   <span>Sign with mouse or touchscreen</span>
                   <label className="text-[var(--pms-blue)] hover:underline cursor-pointer font-semibold">
                     Upload Sig Image
-                    <input type="file" accept="image/*" onChange={handleUploadSigImage} className="hidden" />
+                    <input type="file" accept={ACCEPT_IMAGES} onChange={handleUploadSigImage} className="hidden" />
                   </label>
                 </div>
               </div>

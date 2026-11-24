@@ -43,6 +43,7 @@ export const OCR_LANGUAGE_OPTIONS: OcrLanguageOption[] = [
 ];
 
 export function getStoredOcrLang(): string {
+  if (typeof window === 'undefined') return 'auto';
   try {
     const saved = localStorage.getItem(OCR_LANGUAGE_STORAGE_KEY);
     if (saved && OCR_LANGUAGE_OPTIONS.some((o) => o.code === saved)) {
@@ -55,6 +56,7 @@ export function getStoredOcrLang(): string {
 }
 
 export function setStoredOcrLang(lang: string): void {
+  if (typeof window === 'undefined') return;
   try {
     localStorage.setItem(OCR_LANGUAGE_STORAGE_KEY, lang || 'auto');
   } catch {

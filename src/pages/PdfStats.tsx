@@ -20,6 +20,7 @@ import FileDropzone from '../components/FileDropzone';
 import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { triggerBlobDownload } from '../lib/blobUrl';
+import { copyTextToClipboard } from '../lib/clipboard';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 import { AnimatedNumber, PearlScanOverlay, PearlStageSwitch } from '../components/pearl/PearlMotion';
 
@@ -178,7 +179,7 @@ export default function PdfStats() {
     }
   };
 
-  const copySummary = () => {
+  const copySummary = async () => {
     if (!stats || !file) return;
     const summary = `PDF Statistics Report: ${file.name}
 Total Pages: ${stats.pages}
@@ -190,9 +191,11 @@ Readability Level: ${stats.readabilityLevel} (Flesch Score: ${stats.fleschScore}
 Average Words Per Page: ${stats.avgWordsPerPage}
 File Size: ${stats.fileSizeMB} MB`;
 
-    navigator.clipboard.writeText(summary);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    const ok = await copyTextToClipboard(summary);
+    if (ok) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
   };
 
   const exportCsv = () => {

@@ -22,6 +22,10 @@ import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 import { PearlScanOverlay } from '../components/pearl/PearlMotion';
 import ToolSEOSection from '../components/ToolSEOSection';
 import { toArrayBufferBytes } from '../lib/blobUrl';
+import { copyTextToClipboard } from '../lib/clipboard';
+import { isPdfFile } from '../lib/fileAccept';
+import { printHtmlDocument } from '../lib/printHelper';
+import { clampPdfScale, releaseCanvas } from '../lib/safeCanvas';
 import { escapeHtml } from '../lib/utils';
 
 interface DestructionCert {
@@ -79,7 +83,7 @@ export default function ZeroTracePrint() {
 
   // Load File strictly in RAM
   const handleFileUpload = async (file: File) => {
-    if (file.type !== 'application/pdf') {
+    if (!isPdfFile(file)) {
       alert('Please upload a PDF document.');
       return;
     }
@@ -117,7 +121,9 @@ export default function ZeroTracePrint() {
       const page = await pdfDoc.getPage(currentPage);
       if (isCancelled) return;
 
-      const viewport = page.getViewport({ scale: zoomScale });
+      const baseVp = page.getViewport({ scale: 1.0 });
+      const safeScale = clampPdfScale(baseVp.width, baseVp.height, zoomScale);
+      const viewport = page.getViewport({ scale: safeScale });
       const canvas = canvasRef.current;
       if (!canvas) return;
 
@@ -200,25 +206,25 @@ export default function ZeroTracePrint() {
 
       for (let p = 1; p <= numPages; p++) {
         const page = await pdfDoc.getPage(p);
-        const viewport = page.getViewport({ scale: 2.0 }); // 200 DPI crisp print
+        const baseVp = page.getViewport({ scale: 1.0 });
+        const safeScale = clampPdfScale(baseVp.width, baseVp.height, 2.0);
+        const viewport = page.getViewport({ scale: safeScale }); // Crisp print, mobile-safe
         const canvas = document.createElement('canvas');
         canvas.width = viewport.width;
         canvas.height = viewport.height;
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-          await page.render({ canvasContext: ctx, viewport, canvas } as any).promise;
-          pageImages.push(canvas.toDataURL('image/jpeg', 0.95));
+        try {
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            await page.render({ canvasContext: ctx, viewport, canvas } as any).promise;
+            pageImages.push(canvas.toDataURL('image/jpeg', 0.95));
+          }
+        } finally {
+          releaseCanvas(canvas);
+          page.cleanup();
         }
       }
 
-      const printWin = window.open('', '_blank');
-      if (!printWin) {
-        alert('Please allow popups to open the confidential print dialog.');
-        setIsPrinting(false);
-        return;
-      }
-
-      printWin.document.write(`
+      const html = `
         <!DOCTYPE html>
         <html>
           <head>
@@ -233,17 +239,14 @@ export default function ZeroTracePrint() {
           </head>
           <body>
             ${pageImages.map((src) => `<div class="page-item"><img src="${src}" /></div>`).join('')}
-            <script>
-              window.onload = function() {
-                window.focus();
-                window.print();
-                window.onafterprint = function() { window.close(); };
-              };
-            </script>
           </body>
         </html>
-      `);
-      printWin.document.close();
+      `;
+      const printed = await printHtmlDocument(html, `Confidential Print - ${fileName}`);
+      if (!printed) {
+        alert('Unable to open the confidential print dialog on this browser.');
+        return;
+      }
 
       // Trigger automatic cryptographic memory wipe after sending to printer
       setTimeout(() => {
@@ -439,10 +442,12 @@ export default function ZeroTracePrint() {
                 <div className="p-2 rounded bg-white/80 dark:bg-slate-950/75 border border-[var(--pms-border)] text-[10px] break-all text-emerald-600 dark:text-emerald-400 flex items-center justify-between gap-2">
                   <span>{certificate.hash}</span>
                   <button
-                    onClick={() => {
-                      navigator.clipboard.writeText(certificate.hash);
-                      setCopiedHash(true);
-                      setTimeout(() => setCopiedHash(false), 2000);
+                    onClick={async () => {
+                      const ok = await copyTextToClipboard(certificate.hash);
+                      if (ok) {
+                        setCopiedHash(true);
+                        setTimeout(() => setCopiedHash(false), 2000);
+                      }
                     }}
                     className="p-1 text-[var(--pms-muted)] hover:text-[var(--pms-ink)] shrink-0"
                   >

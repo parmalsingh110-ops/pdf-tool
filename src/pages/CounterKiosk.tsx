@@ -23,6 +23,10 @@ import PearlAuroraBackground from '../components/pearl/PearlAuroraBackground';
 import { AnimatedNumber } from '../components/pearl/PearlMotion';
 import ToolSEOSection from '../components/ToolSEOSection';
 import { apiFetch } from '../lib/api';
+import { copyTextToClipboard } from '../lib/clipboard';
+import { ACCEPT_PDF_AND_IMAGES, inferMimeFromFile, isPdfFile } from '../lib/fileAccept';
+import { printHtmlDocument, printPdfBlob } from '../lib/printHelper';
+import { escapeHtml } from '../lib/utils';
 import {
   generateSecretToken,
   encryptBytesWithKey,
@@ -310,15 +314,50 @@ export default function CounterKiosk() {
     } catch {}
   };
 
+  useEffect(() => {
+    const onFsChange = () => {
+      const doc = document as Document & { webkitFullscreenElement?: Element | null };
+      setIsFullscreen(Boolean(document.fullscreenElement || doc.webkitFullscreenElement));
+    };
+    document.addEventListener('fullscreenchange', onFsChange);
+    document.addEventListener('webkitfullscreenchange', onFsChange as EventListener);
+    return () => {
+      document.removeEventListener('fullscreenchange', onFsChange);
+      document.removeEventListener('webkitfullscreenchange', onFsChange as EventListener);
+    };
+  }, []);
+
   const toggleFullscreen = () => {
-    if (!document.fullscreenElement) {
-      document.documentElement.requestFullscreen();
-      setIsFullscreen(true);
-    } else {
-      if (document.exitFullscreen) {
-        document.exitFullscreen();
-        setIsFullscreen(false);
+    try {
+      const docEl = document.documentElement as HTMLElement & {
+        webkitRequestFullscreen?: () => Promise<void> | void;
+      };
+      const doc = document as Document & {
+        webkitFullscreenElement?: Element | null;
+        webkitExitFullscreen?: () => Promise<void> | void;
+      };
+      const isCurrentlyFull = Boolean(document.fullscreenElement || doc.webkitFullscreenElement);
+      if (!isCurrentlyFull) {
+        const req = docEl.requestFullscreen?.bind(docEl) || docEl.webkitRequestFullscreen?.bind(docEl);
+        if (!req) {
+          alert('Fullscreen mode is not supported on this browser.');
+          return;
+        }
+        Promise.resolve(req())
+          .then(() => setIsFullscreen(true))
+          .catch(() => {});
+      } else {
+        const exit = document.exitFullscreen?.bind(document) || doc.webkitExitFullscreen?.bind(doc);
+        if (exit) {
+          Promise.resolve(exit())
+            .then(() => setIsFullscreen(false))
+            .catch(() => setIsFullscreen(false));
+        } else {
+          setIsFullscreen(false);
+        }
       }
+    } catch {
+      setIsFullscreen(false);
     }
   };
 
@@ -328,7 +367,7 @@ export default function CounterKiosk() {
     queueUrlsRef.current.add(nextBlobUrl);
     setFileDataUrl(nextBlobUrl);
 
-    if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
+    if (isPdfFile(file)) {
       try {
         const buf = await file.arrayBuffer();
         const doc = await pdfjsLib.getDocument({ data: new Uint8Array(buf) }).promise;
@@ -394,7 +433,7 @@ export default function CounterKiosk() {
             }
             payloadBlob = new Blob([encBuf], { type: 'application/octet-stream' });
             encMeta = await encryptJsonWithKey(
-              { name: uploadedFile.name, type: uploadedFile.type || 'application/pdf', size: uploadedFile.size },
+              { name: uploadedFile.name, type: inferMimeFromFile(uploadedFile, 'application/pdf'), size: uploadedFile.size },
               stationE2eeKey
             );
             uploadFileName = 'sealed_doc.bin';
@@ -427,29 +466,35 @@ export default function CounterKiosk() {
     setCopies(1);
   };
 
-  const handleShopkeeperPrint = (job: KioskJob) => {
+  const handleShopkeeperPrint = async (job: KioskJob) => {
     try {
-      if (job.fileDataUrl.startsWith('data:') || job.fileDataUrl.startsWith('blob:')) {
-        let blobUrl = job.fileDataUrl;
-        let transient = false;
-        if (job.fileDataUrl.startsWith('data:')) {
-          const parts = job.fileDataUrl.split(';base64,');
-          const mime = parts[0]?.split(':')[1] || 'application/pdf';
-          const raw = atob(parts[1] || '');
-          const arr = new Uint8Array(raw.length);
-          for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
-          blobUrl = URL.createObjectURL(new Blob([arr], { type: mime }));
-          transient = true;
-        }
-        window.open(blobUrl, '_blank');
-        if (transient) {
-          setTimeout(() => { try { URL.revokeObjectURL(blobUrl); } catch {} }, 60000);
-        }
-      } else {
-        window.open(job.fileDataUrl, '_blank');
+      let blob: Blob | null = null;
+      if (job.fileDataUrl.startsWith('data:')) {
+        const parts = job.fileDataUrl.split(';base64,');
+        const mime = parts[0]?.split(':')[1] || 'application/pdf';
+        const raw = atob(parts[1] || '');
+        const arr = new Uint8Array(raw.length);
+        for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+        blob = new Blob([arr], { type: mime });
+      } else if (job.fileDataUrl) {
+        const res = await fetch(job.fileDataUrl);
+        if (res.ok) blob = await res.blob();
       }
-    } catch {
-      window.open(job.fileDataUrl, '_blank');
+
+      if (blob) {
+        const isImg =
+          blob.type.startsWith('image/') ||
+          /\.(jpe?g|png|webp|gif|bmp)$/i.test(job.fileName);
+        if (isImg) {
+          const imgHtml = `<!DOCTYPE html><html><head><title>${escapeHtml(job.fileName)}</title><style>@page{size:auto;margin:6mm;}body{margin:0;display:flex;align-items:center;justify-content:center;min-height:96vh;background:#fff;}img{max-width:100%;max-height:96vh;object-fit:contain;}</style></head><body><img src="${job.fileDataUrl}" /></body></html>`;
+          await printHtmlDocument(imgHtml, job.fileName);
+        } else {
+          await printPdfBlob(blob, job.fileName || 'kiosk_document.pdf');
+        }
+      }
+    } catch (err) {
+      console.error('[CounterKiosk] Print failed:', err);
+      alert('Could not open print dialog for this document.');
     }
     const updated = queue.map((j) => (j.id === job.id ? { ...j, status: 'printed' as const } : j));
     saveQueue(updated);
@@ -559,8 +604,8 @@ export default function CounterKiosk() {
                 type="file"
                 ref={fileInputRef}
                 onChange={(e) => e.target.files?.[0] && handleFileChange(e.target.files[0])}
-                accept="application/pdf,image/*"
-                className="hidden"
+                accept={ACCEPT_PDF_AND_IMAGES}
+                className="sr-only"
               />
               <div className="w-14 h-14 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mx-auto mb-3 group-hover:scale-110 transition-transform">
                 <Upload className="w-7 h-7" />
@@ -805,11 +850,13 @@ export default function CounterKiosk() {
                 </div>
                 <button
                   type="button"
-                  onClick={() => {
+                  onClick={async () => {
                     const pairUrl = `${window.location.origin}/counter-kiosk?station=${stationId}&mode=kiosk${stationE2eeKey ? `#k=${stationE2eeKey}` : ''}`;
-                    navigator.clipboard.writeText(pairUrl).catch(() => {});
-                    setCopiedTabletLink(true);
-                    setTimeout(() => setCopiedTabletLink(false), 2000);
+                    const ok = await copyTextToClipboard(pairUrl);
+                    if (ok) {
+                      setCopiedTabletLink(true);
+                      setTimeout(() => setCopiedTabletLink(false), 2000);
+                    }
                   }}
                   className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold pms-glass-panel hover:border-emerald-500/40 transition-colors cursor-pointer"
                   style={{ color: 'var(--pms-ink)' }}

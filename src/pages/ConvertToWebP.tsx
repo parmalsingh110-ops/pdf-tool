@@ -1,9 +1,10 @@
 import { useState, useMemo } from 'react';
 import { motion, AnimatePresence, useReducedMotion } from 'motion/react';
-import { FileImage, Download, Loader2 } from 'lucide-react';
+import { FileImage, Download, Loader2, AlertTriangle } from 'lucide-react';
 import FileDropzone from '../components/FileDropzone';
 import { useSEO } from '../hooks/useSEO';
 import { useAutoRevokeUrl } from '../lib/blobUrl';
+import { clampCanvasDimensions, releaseCanvas, safeCanvasToBlob, supportsCanvasWebp } from '../lib/safeCanvas';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 import { AnimatedNumber, PearlScanOverlay } from '../components/pearl/PearlMotion';
 
@@ -15,6 +16,9 @@ export default function ConvertToWebP() {
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [resultSize, setResultSize] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const webpSupported = useMemo(() => supportsCanvasWebp(), []);
 
   const previewUrl = useMemo(() => {
     if (!file) return null;
@@ -30,38 +34,49 @@ export default function ConvertToWebP() {
       setFile(files[0]);
       setResultUrl(null);
       setResultSize(null);
+      setErrorMsg(null);
     }
   };
 
   const handleProcess = async () => {
     if (!file) return;
+    if (!webpSupported) {
+      setErrorMsg('This browser (such as iOS Safari) does not support native WebP canvas encoding. Please use Chrome, Firefox, or Edge to generate genuine WebP files.');
+      return;
+    }
     setBusy(true);
+    setErrorMsg(null);
+    const objUrl = URL.createObjectURL(file);
+    const canvas = document.createElement('canvas');
     try {
       const img = new Image();
       img.crossOrigin = 'anonymous';
-      img.src = URL.createObjectURL(file);
+      img.src = objUrl;
       await new Promise<void>((res, rej) => {
         img.onload = () => res();
         img.onerror = () => rej(new Error('Image load failed'));
       });
 
-      const canvas = document.createElement('canvas');
-      canvas.width = img.naturalWidth;
-      canvas.height = img.naturalHeight;
+      const clamped = clampCanvasDimensions(img.naturalWidth, img.naturalHeight);
+      canvas.width = clamped.width;
+      canvas.height = clamped.height;
       const ctx = canvas.getContext('2d');
       if (!ctx) throw new Error('Failed to get context');
-      ctx.drawImage(img, 0, 0);
-      URL.revokeObjectURL(img.src);
+      ctx.drawImage(img, 0, 0, clamped.width, clamped.height);
 
-      const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(b => resolve(b), 'image/webp', quality / 100));
-      if (!blob) throw new Error('Conversion failed');
+      const blob = await safeCanvasToBlob(canvas, 'image/webp', quality / 100);
+      if (blob.type !== 'image/webp') {
+        throw new Error('Your browser does not support WebP encoding and returned a non-WebP image instead.');
+      }
 
       const url = URL.createObjectURL(blob);
       setResultUrl(url);
       setResultSize(blob.size);
     } catch (e: any) {
-      alert(e?.message || 'Conversion failed.');
+      setErrorMsg(e?.message || 'Conversion failed.');
     } finally {
+      URL.revokeObjectURL(objUrl);
+      releaseCanvas(canvas);
       setBusy(false);
     }
   };
@@ -78,6 +93,18 @@ export default function ConvertToWebP() {
       tone="emerald"
       trustNote="100% browser canvas encoding · Instant before & after comparison"
     >
+      {!webpSupported && (
+        <div className="max-w-3xl mx-auto mb-5 p-4 rounded-2xl border border-amber-300 dark:border-amber-700/70 bg-amber-50/90 dark:bg-amber-950/40 text-amber-900 dark:text-amber-200 text-xs sm:text-sm flex items-start gap-3">
+          <AlertTriangle className="w-5 h-5 shrink-0 text-amber-600 dark:text-amber-400 mt-0.5" />
+          <div>
+            <p className="font-bold">WebP canvas encoding is not supported in this browser</p>
+            <p className="mt-0.5 opacity-90">
+              Safari on iOS/iPadOS cannot natively encode WebP images in the browser (it silently falls back to PNG). To create genuine <code className="font-mono">.webp</code> files, please open this tool in Chrome, Edge, or Firefox.
+            </p>
+          </div>
+        </div>
+      )}
+
       {!file ? (
         <motion.div
           initial={prefersReduced ? false : { opacity: 0, y: 10 }}
@@ -89,8 +116,8 @@ export default function ConvertToWebP() {
             onDrop={handleDrop}
             multiple={false}
             title="Select image file"
-            subtitle="or drop PNG, JPG, JPEG image here"
-            accept={{ 'image/*': ['.png', '.jpg', '.jpeg'] }}
+            subtitle="or drop PNG, JPG, JPEG, HEIC, AVIF image here"
+            accept={{ 'image/*': ['.png', '.jpg', '.jpeg', '.heic', '.heif', '.avif'] }}
           />
         </motion.div>
       ) : (
@@ -179,12 +206,19 @@ export default function ConvertToWebP() {
             </div>
           </div>
 
+          {errorMsg && (
+            <div className="p-3.5 rounded-2xl border border-rose-200 dark:border-rose-800/70 bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 text-xs sm:text-sm font-medium flex items-start gap-2.5">
+              <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+              <span>{errorMsg}</span>
+            </div>
+          )}
+
           <div className="flex flex-wrap gap-3">
             <motion.button
-              whileHover={prefersReduced || busy ? undefined : { scale: 1.01 }}
-              whileTap={prefersReduced || busy ? undefined : { scale: 0.985 }}
+              whileHover={prefersReduced || busy || !webpSupported ? undefined : { scale: 1.01 }}
+              whileTap={prefersReduced || busy || !webpSupported ? undefined : { scale: 0.985 }}
               onClick={handleProcess}
-              disabled={busy}
+              disabled={busy || !webpSupported}
               className="flex-1 pms-btn-primary py-3.5 px-6 font-bold rounded-2xl disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer"
             >
               {busy ? <Loader2 className="w-5 h-5 animate-spin" /> : <FileImage className="w-5 h-5" />}

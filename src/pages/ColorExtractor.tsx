@@ -8,6 +8,8 @@ import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 import { AnimatedNumber, PearlScanOverlay } from '../components/pearl/PearlMotion';
+import { copyTextToClipboard } from '../lib/clipboard';
+import { releaseCanvas } from '../lib/safeCanvas';
 
 interface ColorSwatch {
   hex: string;
@@ -66,26 +68,31 @@ export default function ColorExtractor() {
         const page = await pdf.getPage(p);
         const vp = page.getViewport({ scale: 0.5 });
         const canvas = document.createElement('canvas');
-        canvas.width = vp.width;
-        canvas.height = vp.height;
-        const ctx = canvas.getContext('2d')!;
-        await page.render({ canvasContext: ctx, viewport: vp, canvas }).promise;
+        try {
+          canvas.width = vp.width;
+          canvas.height = vp.height;
+          const ctx = canvas.getContext('2d')!;
+          await page.render({ canvasContext: ctx, viewport: vp, canvas }).promise;
 
-        const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const d = imgData.data;
+          const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const d = imgData.data;
 
-        for (let i = 0; i < d.length; i += 16) {
-          const r = Math.round(d[i] / 16) * 16;
-          const g = Math.round(d[i + 1] / 16) * 16;
-          const b = Math.round(d[i + 2] / 16) * 16;
-          const a = d[i + 3];
+          for (let i = 0; i < d.length; i += 16) {
+            const r = Math.round(d[i] / 16) * 16;
+            const g = Math.round(d[i + 1] / 16) * 16;
+            const b = Math.round(d[i + 2] / 16) * 16;
+            const a = d[i + 3];
 
-          if (a < 128) continue;
-          if (r > 240 && g > 240 && b > 240) continue;
+            if (a < 128) continue;
+            if (r > 240 && g > 240 && b > 240) continue;
 
-          const hex = `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
-          colorCounts.set(hex, (colorCounts.get(hex) || 0) + 1);
-          totalSamples++;
+            const hex = `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+            colorCounts.set(hex, (colorCounts.get(hex) || 0) + 1);
+            totalSamples++;
+          }
+        } finally {
+          releaseCanvas(canvas);
+          page.cleanup();
         }
       }
 
@@ -116,17 +123,21 @@ export default function ColorExtractor() {
     }
   };
 
-  const copyHex = (hex: string) => {
-    navigator.clipboard.writeText(hex);
-    setCopiedHex(hex);
-    setTimeout(() => setCopiedHex(null), 2000);
+  const copyHex = async (hex: string) => {
+    const ok = await copyTextToClipboard(hex);
+    if (ok) {
+      setCopiedHex(hex);
+      setTimeout(() => setCopiedHex(null), 2000);
+    }
   };
 
-  const copyCssVars = () => {
+  const copyCssVars = async () => {
     const css = `:root {\n` + colors.map((c, i) => `  --pdf-color-${i + 1}: ${c.hex}; /* ${c.percentage}% */`).join('\n') + `\n}`;
-    navigator.clipboard.writeText(css);
-    setCopiedHex('css');
-    setTimeout(() => setCopiedHex(null), 2000);
+    const ok = await copyTextToClipboard(css);
+    if (ok) {
+      setCopiedHex('css');
+      setTimeout(() => setCopiedHex(null), 2000);
+    }
   };
 
   const reset = () => {

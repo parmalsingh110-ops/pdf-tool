@@ -9,7 +9,9 @@ import {
   PDFRawStream,
   PDFString,
 } from 'pdf-lib';
-import { toArrayBufferBytes } from './blobUrl';
+import { dataUrlToBytes, toArrayBufferBytes } from './blobUrl';
+import { clampPdfScale, releaseCanvas, safeCanvasToDataUrl } from './safeCanvas';
+import { sha256Hex } from './safeCrypto';
 
 export interface CleanroomOptions {
   mode: 'structural' | 'paranoid_raster';
@@ -60,11 +62,7 @@ const STEGO_UNICODE_RE = /[\u200B-\u200F\u202A-\u202E\u2060-\u206F\uFEFF\uFE00-\
 const SUSPICIOUS_URI_RE = /(canary|pixel|webhook|track|collect|beacon|analytics|oast|burp|interact\.sh|bit\.ly|tinyurl|grabify|iplogger)/i;
 
 export async function computeBufferSha256(buffer: ArrayBuffer | Uint8Array): Promise<string> {
-  const data = buffer instanceof Uint8Array ? toArrayBufferBytes(buffer) : buffer;
-  const digest = await crypto.subtle.digest('SHA-256', data);
-  return Array.from(new Uint8Array(digest))
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('');
+  return sha256Hex(buffer);
 }
 
 async function runWebStreamCodec(bytes: Uint8Array, kind: 'deflate', dir: 'decompress' | 'compress'): Promise<Uint8Array | null> {
@@ -314,50 +312,50 @@ export async function executeCleanroomSanitization(
     for (let p = 1; p <= srcPdf.numPages; p++) {
       const page = await srcPdf.getPage(p);
       const baseVp = page.getViewport({ scale: 1.0 });
-      const renderVp = page.getViewport({ scale: 2.3 }); // ~166 DPI crisp sovereign flattening
+      const safeScale = clampPdfScale(baseVp.width, baseVp.height, 2.3);
+      const renderVp = page.getViewport({ scale: safeScale }); // ~166 DPI crisp sovereign flattening (mobile-clamped)
 
       const canvas = document.createElement('canvas');
       canvas.width = Math.round(renderVp.width);
       canvas.height = Math.round(renderVp.height);
-      const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      await page.render({ canvasContext: ctx, canvas, viewport: renderVp }).promise;
+      let jpgArr: Uint8Array;
+      try {
+        const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        await page.render({ canvasContext: ctx, canvas, viewport: renderVp }).promise;
 
-      const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      const px = imgData.data;
+        const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const px = imgData.data;
 
-      if (options.suppressPrinterDots) {
-        // Suppress periodic laser printer MIC yellow micro-dots (faint R/G >= 238, dipped Blue 175..244 on paper background)
-        for (let idx = 0; idx < px.length; idx += 4) {
-          const r = px[idx];
-          const g = px[idx + 1];
-          const b = px[idx + 2];
-          if (r >= 238 && g >= 238 && b >= 165 && b <= 244 && Math.abs(r - g) <= 14 && r - b >= 10) {
-            px[idx] = 255;
-            px[idx + 1] = 255;
-            px[idx + 2] = 255;
-            printerDotsSuppressed++;
-          } else {
-            // Scrub LSB steganography parity noise on near-white paper pixels
-            if (r >= 250 && g >= 250 && b >= 250) {
+        if (options.suppressPrinterDots) {
+          // Suppress periodic laser printer MIC yellow micro-dots (faint R/G >= 238, dipped Blue 175..244 on paper background)
+          for (let idx = 0; idx < px.length; idx += 4) {
+            const r = px[idx];
+            const g = px[idx + 1];
+            const b = px[idx + 2];
+            if (r >= 238 && g >= 238 && b >= 165 && b <= 244 && Math.abs(r - g) <= 14 && r - b >= 10) {
               px[idx] = 255;
               px[idx + 1] = 255;
               px[idx + 2] = 255;
+              printerDotsSuppressed++;
+            } else {
+              // Scrub LSB steganography parity noise on near-white paper pixels
+              if (r >= 250 && g >= 250 && b >= 250) {
+                px[idx] = 255;
+                px[idx + 1] = 255;
+                px[idx + 2] = 255;
+              }
             }
           }
+          ctx.putImageData(imgData, 0, 0);
         }
-        ctx.putImageData(imgData, 0, 0);
+
+        const jpgDataUrl = safeCanvasToDataUrl(canvas, 'image/jpeg', 0.92);
+        jpgArr = dataUrlToBytes(jpgDataUrl);
+      } finally {
+        releaseCanvas(canvas);
       }
-
-      const jpgDataUrl = canvas.toDataURL('image/jpeg', 0.92);
-      const rawB64 = jpgDataUrl.split(',')[1] || '';
-      const binStr = atob(rawB64);
-      const jpgArr = new Uint8Array(binStr.length);
-      for (let j = 0; j < binStr.length; j++) jpgArr[j] = binStr.charCodeAt(j);
-
-      canvas.width = 0;
-      canvas.height = 0;
 
       const embeddedJpg = await newPdf.embedJpg(jpgArr);
       const outPage = newPdf.addPage([baseVp.width, baseVp.height]);

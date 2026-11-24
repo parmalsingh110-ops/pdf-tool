@@ -10,6 +10,9 @@
  * 3. Real document scanner & photocopy shop filters (CamScanner Pro / Xerox look).
  */
 
+import { applyBoxBlurImageData, supportsCanvasFilter } from './photoAdjustments';
+import { releaseCanvas } from './safeCanvas';
+
 export interface Point {
   x: number; // percentage 0 - 100
   y: number; // percentage 0 - 100
@@ -132,6 +135,7 @@ export function detectIdCard12Points(
   ctx.drawImage(img, 0, 0, w, h);
   const imgData = ctx.getImageData(0, 0, w, h);
   const d = imgData.data;
+  releaseCanvas(cv);
 
   // 1. Compute Grayscale, Luminance and Color Channels
   const gray = new Uint8Array(w * h);
@@ -468,6 +472,7 @@ export function warpAndCropCard(
   srcCtx.drawImage(img, 0, 0, rawW, rawH);
   const srcImgData = srcCtx.getImageData(0, 0, rawW, rawH);
   const srcData = srcImgData.data;
+  releaseCanvas(srcCv);
 
   const dstImgData = outCtx.createImageData(outW, outH);
   const dstData = dstImgData.data;
@@ -785,19 +790,28 @@ export function applyScannerFilter(
 
   ctx.putImageData(imageData, 0, 0);
 
-  // Unsharp Mask (Sharpen text, barcodes & digits)
-  const off = document.createElement('canvas');
-  off.width = w;
-  off.height = h;
-  const offCtx = off.getContext('2d')!;
-  offCtx.filter = 'blur(1.6px)';
-  offCtx.drawImage(canvas, 0, 0);
-  offCtx.filter = 'none';
-
+  // Unsharp Mask (Sharpen text, barcodes & digits) — with iOS <17.4 software box-blur fallback
   const sharpImg = ctx.getImageData(0, 0, w, h);
-  const blurImg = offCtx.getImageData(0, 0, w, h);
   const sd = sharpImg.data;
-  const bd = blurImg.data;
+  let bd: Uint8ClampedArray;
+
+  if (supportsCanvasFilter()) {
+    const off = document.createElement('canvas');
+    off.width = w;
+    off.height = h;
+    try {
+      const offCtx = off.getContext('2d')!;
+      offCtx.filter = 'blur(1.6px)';
+      offCtx.drawImage(canvas, 0, 0);
+      offCtx.filter = 'none';
+      bd = offCtx.getImageData(0, 0, w, h).data;
+    } finally {
+      releaseCanvas(off);
+    }
+  } else {
+    bd = applyBoxBlurImageData(sd, w, h, 2);
+  }
+
   const sharpAmount = 0.65;
 
   for (let i = 0; i < sd.length; i += 4) {

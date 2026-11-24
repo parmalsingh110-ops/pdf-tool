@@ -10,6 +10,7 @@ import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 import PearlAuroraBackground from '../components/pearl/PearlAuroraBackground';
 import ToolMicroPreview from '../components/pearl/ToolMicroPreview';
 import { AnimatedNumber, PearlProcessCard } from '../components/pearl/PearlMotion';
+import { clampPdfScale, releaseCanvas } from '../lib/safeCanvas';
 
 export default function PdfPresenter() {
   useSEO('Pdf Presenter Online Free | PDF Media Suite', 'Free online Pdf Presenter tool. No signup or installation required.');
@@ -33,15 +34,21 @@ export default function PdfPresenter() {
       const imgs: string[] = [];
       for (let i = 1; i <= pdf.numPages; i++) {
         const page = await pdf.getPage(i);
-        const vp = page.getViewport({ scale: 2.5 });
+        const baseVp = page.getViewport({ scale: 1 });
+        const safeScale = clampPdfScale(baseVp.width, baseVp.height, 2.5);
+        const vp = page.getViewport({ scale: safeScale });
         const canvas = document.createElement('canvas');
         canvas.width = vp.width; canvas.height = vp.height;
-        const ctx = canvas.getContext('2d')!;
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        await page.render({ canvasContext: ctx, viewport: vp, canvas }).promise;
-        imgs.push(canvas.toDataURL('image/jpeg', 0.9));
-        canvas.width = 0; canvas.height = 0;
+        try {
+          const ctx = canvas.getContext('2d')!;
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          await page.render({ canvasContext: ctx, viewport: vp, canvas }).promise;
+          imgs.push(canvas.toDataURL('image/jpeg', 0.9));
+        } finally {
+          releaseCanvas(canvas);
+          page.cleanup();
+        }
       }
       setPages(imgs);
     } catch (e: any) { alert(e?.message || 'Failed to load'); }
@@ -52,18 +59,48 @@ export default function PdfPresenter() {
   const prev = useCallback(() => setCurrentPage(p => Math.max(0, p - 1)), []);
 
   const toggleFullscreen = useCallback(() => {
-    if (!containerRef.current) return;
-    if (!document.fullscreenElement) {
-      containerRef.current.requestFullscreen().then(() => setIsFullscreen(true)).catch(() => {});
+    const el = containerRef.current as (HTMLDivElement & {
+      webkitRequestFullscreen?: () => Promise<void> | void;
+    }) | null;
+    if (!el) return;
+    const doc = document as Document & {
+      webkitFullscreenElement?: Element | null;
+      webkitExitFullscreen?: () => Promise<void> | void;
+    };
+    const isNativeFull = Boolean(document.fullscreenElement || doc.webkitFullscreenElement);
+    if (!isNativeFull && !isFullscreen) {
+      const req = el.requestFullscreen?.bind(el) || el.webkitRequestFullscreen?.bind(el);
+      if (req) {
+        Promise.resolve(req())
+          .then(() => setIsFullscreen(true))
+          .catch(() => setIsFullscreen(true));
+      } else {
+        // iPhone Safari fallback: use fixed fullscreen stage overlay
+        setIsFullscreen(true);
+      }
     } else {
-      document.exitFullscreen().then(() => setIsFullscreen(false)).catch(() => {});
+      const exit = document.exitFullscreen?.bind(document) || doc.webkitExitFullscreen?.bind(document);
+      if (isNativeFull && exit) {
+        Promise.resolve(exit())
+          .then(() => setIsFullscreen(false))
+          .catch(() => setIsFullscreen(false));
+      } else {
+        setIsFullscreen(false);
+      }
     }
-  }, []);
+  }, [isFullscreen]);
 
   useEffect(() => {
-    const handler = () => setIsFullscreen(!!document.fullscreenElement);
+    const handler = () => {
+      const doc = document as Document & { webkitFullscreenElement?: Element | null };
+      setIsFullscreen(Boolean(document.fullscreenElement || doc.webkitFullscreenElement));
+    };
     document.addEventListener('fullscreenchange', handler);
-    return () => document.removeEventListener('fullscreenchange', handler);
+    document.addEventListener('webkitfullscreenchange', handler as EventListener);
+    return () => {
+      document.removeEventListener('fullscreenchange', handler);
+      document.removeEventListener('webkitfullscreenchange', handler as EventListener);
+    };
   }, []);
 
   useEffect(() => {
@@ -72,7 +109,15 @@ export default function PdfPresenter() {
       if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') { e.preventDefault(); next(); }
       else if (e.key === 'ArrowLeft' || e.key === 'PageUp') { e.preventDefault(); prev(); }
       else if (e.key === 'f' || e.key === 'F11') { e.preventDefault(); toggleFullscreen(); }
-      else if (e.key === 'Escape' && isFullscreen) { document.exitFullscreen(); }
+      else if (e.key === 'Escape' && isFullscreen) {
+        const doc = document as Document & { webkitExitFullscreen?: () => Promise<void> | void };
+        const exit = document.exitFullscreen?.bind(document) || doc.webkitExitFullscreen?.bind(document);
+        if (document.fullscreenElement && exit) {
+          Promise.resolve(exit()).catch(() => setIsFullscreen(false));
+        } else {
+          setIsFullscreen(false);
+        }
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);

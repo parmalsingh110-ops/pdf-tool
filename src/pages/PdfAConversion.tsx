@@ -12,6 +12,8 @@ import { usePageSEO } from '../lib/usePageSEO';
 import { useSEO } from '../hooks/useSEO';
 import { dataUrlToBytes } from '../lib/utils';
 import { toArrayBufferBytes, useAutoRevokeUrl } from '../lib/blobUrl';
+import { sha256Hex } from '../lib/safeCrypto';
+import { clampPdfScale, releaseCanvas } from '../lib/safeCanvas';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 import { AnimatedNumber, PearlScanOverlay, PearlStageSwitch } from '../components/pearl/PearlMotion';
 
@@ -133,29 +135,33 @@ export default function PdfAConversion() {
         for (let i = 1; i <= srcPdf.numPages; i++) {
           setProgressMsg(`Processing page ${i} of ${srcPdf.numPages}...`);
           const page = await srcPdf.getPage(i);
-          const vp = page.getViewport({ scale: 2.0 }); // High resolution 2x
-          const canvas = document.createElement('canvas');
-          canvas.width = vp.width;
-          canvas.height = vp.height;
-          const ctx = canvas.getContext('2d')!;
-          ctx.fillStyle = '#ffffff';
-          ctx.fillRect(0, 0, canvas.width, canvas.height);
-          await page.render({ canvasContext: ctx, viewport: vp, canvas }).promise;
-
-          const imgData = canvas.toDataURL('image/jpeg', 0.94);
-          const imgBytes = dataUrlToBytes(imgData);
-          const embeddedImg = await pdfDoc.embedJpg(imgBytes);
-
           const origVp = page.getViewport({ scale: 1.0 });
-          const newPage = pdfDoc.addPage([origVp.width, origVp.height]);
-          newPage.drawImage(embeddedImg, {
-            x: 0,
-            y: 0,
-            width: origVp.width,
-            height: origVp.height
-          });
-          canvas.width = 0;
-          canvas.height = 0;
+          const safeScale = clampPdfScale(origVp.width, origVp.height, 2.0);
+          const vp = page.getViewport({ scale: safeScale });
+          const canvas = document.createElement('canvas');
+          try {
+            canvas.width = Math.round(vp.width);
+            canvas.height = Math.round(vp.height);
+            const ctx = canvas.getContext('2d')!;
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            await page.render({ canvasContext: ctx, viewport: vp, canvas }).promise;
+
+            const imgData = canvas.toDataURL('image/jpeg', 0.94);
+            const imgBytes = dataUrlToBytes(imgData);
+            const embeddedImg = await pdfDoc.embedJpg(imgBytes);
+
+            const newPage = pdfDoc.addPage([origVp.width, origVp.height]);
+            newPage.drawImage(embeddedImg, {
+              x: 0,
+              y: 0,
+              width: origVp.width,
+              height: origVp.height
+            });
+          } finally {
+            releaseCanvas(canvas);
+            page.cleanup();
+          }
         }
       } else {
         setProgressMsg('Sanitizing PDF streams & removing interactive scripts...');
@@ -230,9 +236,7 @@ export default function PdfAConversion() {
       // Generate Certificate of Conformance PDF if toggled
       if (includeCertificate) {
         try {
-          const hashBuffer = await crypto.subtle.digest('SHA-256', finalPdfBytes);
-          const hashArray = Array.from(new Uint8Array(hashBuffer));
-          const sha256Hex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+          const sha256Digest = await sha256Hex(finalPdfBytes);
 
           const certDoc = await PDFDocument.create();
           const certPage = certDoc.addPage([595.28, 841.89]); // A4
@@ -321,7 +325,7 @@ export default function PdfAConversion() {
             color: rgb(0.2, 0.25, 0.3),
           });
           curY -= 16;
-          certPage.drawText(sha256Hex, {
+          certPage.drawText(sha256Digest, {
             x: 50,
             y: curY,
             size: 7.5,

@@ -24,6 +24,7 @@ import { useSEO } from '../hooks/useSEO';
 import { dataUrlToBytes } from '../lib/utils';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 import { toArrayBufferBytes, useAutoRevokeUrl } from '../lib/blobUrl';
+import { clampPdfScale, releaseCanvas } from '../lib/safeCanvas';
 import { AnimatedNumber, PearlScanOverlay } from '../components/pearl/PearlMotion';
 import {
   type DarkModeTheme,
@@ -123,20 +124,24 @@ export default function InvertColorsPDF() {
     setIsLoadingPage(true);
     try {
       const page = await pdf.getPage(pageNum);
-      const vp = page.getViewport({ scale: 1.2 });
+      const baseVp = page.getViewport({ scale: 1.0 });
+      const safeScale = clampPdfScale(baseVp.width, baseVp.height, 1.2);
+      const vp = page.getViewport({ scale: safeScale });
       const canvas = document.createElement('canvas');
-      canvas.width = vp.width;
-      canvas.height = vp.height;
-      const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      await page.render({ canvasContext: ctx, viewport: vp, canvas } as any).promise;
-      page.cleanup();
+      try {
+        canvas.width = Math.max(1, Math.round(vp.width));
+        canvas.height = Math.max(1, Math.round(vp.height));
+        const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        await page.render({ canvasContext: ctx, viewport: vp, canvas } as any).promise;
 
-      originalImgDataRef.current = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      setPreviewBeforeUrl(canvas.toDataURL('image/jpeg', 0.86));
-      canvas.width = 0;
-      canvas.height = 0;
+        originalImgDataRef.current = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        setPreviewBeforeUrl(canvas.toDataURL('image/jpeg', 0.86));
+      } finally {
+        releaseCanvas(canvas);
+        page.cleanup();
+      }
     } catch (err) {
       console.error('[InvertColorsPDF] Preview error:', err);
     } finally {
@@ -150,12 +155,14 @@ export default function InvertColorsPDF() {
     const t = setTimeout(() => {
       const out = applyDarkModeToImageData(src, { theme, preservePhotos, contrast, brightness });
       const c = document.createElement('canvas');
-      c.width = out.width;
-      c.height = out.height;
-      c.getContext('2d')!.putImageData(out, 0, 0);
-      setPreviewAfterUrl(c.toDataURL('image/jpeg', 0.9));
-      c.width = 0;
-      c.height = 0;
+      try {
+        c.width = out.width;
+        c.height = out.height;
+        c.getContext('2d')!.putImageData(out, 0, 0);
+        setPreviewAfterUrl(c.toDataURL('image/jpeg', 0.9));
+      } finally {
+        releaseCanvas(c);
+      }
     }, 45);
     return () => clearTimeout(t);
   }, [previewBeforeUrl, theme, preservePhotos, contrast, brightness]);
@@ -203,29 +210,32 @@ export default function InvertColorsPDF() {
         setProgressPercent(Math.round(10 + ((i + 1) / targetPages.length) * 82));
 
         const page = await pdfjsDoc.getPage(pNum);
-        const vp = page.getViewport({ scale: exportScale });
+        const baseVp = page.getViewport({ scale: 1.0 });
+        const safeScale = clampPdfScale(baseVp.width, baseVp.height, exportScale);
+        const vp = page.getViewport({ scale: safeScale });
         const canvas = document.createElement('canvas');
-        canvas.width = vp.width;
-        canvas.height = vp.height;
-        const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        await page.render({ canvasContext: ctx, viewport: vp, canvas } as any).promise;
+        try {
+          canvas.width = Math.max(1, Math.round(vp.width));
+          canvas.height = Math.max(1, Math.round(vp.height));
+          const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          await page.render({ canvasContext: ctx, viewport: vp, canvas } as any).promise;
 
-        const srcData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const outData = applyDarkModeToImageData(srcData, { theme, preservePhotos, contrast, brightness });
-        ctx.putImageData(outData, 0, 0);
+          const srcData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const outData = applyDarkModeToImageData(srcData, { theme, preservePhotos, contrast, brightness });
+          ctx.putImageData(outData, 0, 0);
 
-        const imgBytes = dataUrlToBytes(canvas.toDataURL('image/jpeg', 0.9));
-        const embeddedImg = await newPdfDoc.embedJpg(imgBytes);
-        const origW = vp.width / exportScale;
-        const origH = vp.height / exportScale;
-        const newPage = newPdfDoc.addPage([origW, origH]);
-        newPage.drawImage(embeddedImg, { x: 0, y: 0, width: origW, height: origH });
-
-        canvas.width = 0;
-        canvas.height = 0;
-        page.cleanup();
+          const imgBytes = dataUrlToBytes(canvas.toDataURL('image/jpeg', 0.9));
+          const embeddedImg = await newPdfDoc.embedJpg(imgBytes);
+          const origW = baseVp.width;
+          const origH = baseVp.height;
+          const newPage = newPdfDoc.addPage([origW, origH]);
+          newPage.drawImage(embeddedImg, { x: 0, y: 0, width: origW, height: origH });
+        } finally {
+          releaseCanvas(canvas);
+          page.cleanup();
+        }
         if (i % 2 === 1) await new Promise((r) => setTimeout(r, 0));
       }
 

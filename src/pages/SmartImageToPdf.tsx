@@ -5,6 +5,8 @@ import { PDFDocument } from 'pdf-lib';
 import FileDropzone from '../components/FileDropzone';
 import { useSEO } from '../hooks/useSEO';
 import { toArrayBufferBytes, useAutoRevokeUrl } from '../lib/blobUrl';
+import { clampCanvasDimensions, releaseCanvas, safeCanvasToBlob } from '../lib/safeCanvas';
+import { ACCEPT_IMAGES } from '../lib/fileAccept';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 import { AnimatedNumber, PearlScanOverlay, PearlStageSwitch } from '../components/pearl/PearlMotion';
 
@@ -86,22 +88,32 @@ export default function SmartImageToPdf() {
           img.onerror = () => rej();
         });
 
-        // Render with rotation
+        // Render with rotation & device-safe canvas clamping
         const isRotated = item.rotation % 180 !== 0;
-        const w = isRotated ? img.naturalHeight : img.naturalWidth;
-        const h = isRotated ? img.naturalWidth : img.naturalHeight;
+        const rawW = isRotated ? img.naturalHeight : img.naturalWidth;
+        const rawH = isRotated ? img.naturalWidth : img.naturalHeight;
+        const { width: w, height: h, scale: canvasScale } = clampCanvasDimensions(rawW, rawH);
 
         const canvas = document.createElement('canvas');
-        canvas.width = w;
-        canvas.height = h;
-        const ctx = canvas.getContext('2d')!;
-        ctx.translate(w / 2, h / 2);
-        ctx.rotate((item.rotation * Math.PI) / 180);
-        ctx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
+        let imgBytes: Uint8Array;
+        try {
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) throw new Error('Canvas context unavailable');
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, w, h);
+          ctx.translate(w / 2, h / 2);
+          ctx.rotate((item.rotation * Math.PI) / 180);
+          const drawSrcW = img.naturalWidth * canvasScale;
+          const drawSrcH = img.naturalHeight * canvasScale;
+          ctx.drawImage(img, -drawSrcW / 2, -drawSrcH / 2, drawSrcW, drawSrcH);
 
-        const imgBlob = await new Promise<Blob | null>((res) => canvas.toBlob((b) => res(b), 'image/jpeg', quality / 100));
-        if (!imgBlob) continue;
-        const imgBytes = new Uint8Array(await imgBlob.arrayBuffer());
+          const imgBlob = await safeCanvasToBlob(canvas, 'image/jpeg', quality / 100);
+          imgBytes = new Uint8Array(await imgBlob.arrayBuffer());
+        } finally {
+          releaseCanvas(canvas);
+        }
         const pdfImage = await pdfDoc.embedJpg(imgBytes);
 
         let pageW: number, pageH: number;
@@ -121,9 +133,6 @@ export default function SmartImageToPdf() {
         const x = margin + (availW - drawW) / 2;
         const y = margin + (availH - drawH) / 2;
         page.drawImage(pdfImage, { x, y, width: drawW, height: drawH });
-
-        canvas.width = 0;
-        canvas.height = 0;
       }
 
       const pdfBytes = toArrayBufferBytes(await pdfDoc.save());
@@ -152,7 +161,7 @@ export default function SmartImageToPdf() {
             <FileDropzone
               onDrop={addImageFiles}
               multiple={true}
-              accept={{ 'image/*': ['.jpg', '.jpeg', '.png', '.webp'] }}
+              accept={{ 'image/*': ['.jpg', '.jpeg', '.png', '.webp', '.heic', '.heif', '.avif'] }}
               title="Select images"
               subtitle="JPG, PNG, WebP — multiple allowed"
             />
@@ -172,7 +181,7 @@ export default function SmartImageToPdf() {
               <div className="flex gap-2 flex-wrap">
                 <label className="px-4 py-2 bg-[var(--pms-soft-blue)] text-[var(--pms-blue)] border border-sky-200 dark:border-sky-800 rounded-xl font-bold text-xs cursor-pointer hover:opacity-90 transition-opacity inline-flex items-center gap-1.5">
                   <Plus className="w-3.5 h-3.5" /> Add more
-                  <input type="file" accept="image/*" multiple className="hidden" onChange={handleFiles} />
+                  <input type="file" accept={ACCEPT_IMAGES} multiple className="hidden" onChange={handleFiles} />
                 </label>
                 <button
                   onClick={() => {
@@ -207,7 +216,7 @@ export default function SmartImageToPdf() {
                       {idx + 1}. {item.file.name}
                     </span>
                   </div>
-                  <div className="absolute top-1.5 right-1.5 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <div className="absolute top-1.5 right-1.5 flex gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
                     <button
                       onClick={() => rotateImage(item.id)}
                       className="p-1.5 bg-white/95 dark:bg-slate-800/95 rounded-full shadow text-gray-700 dark:text-slate-200 hover:text-sky-600 dark:hover:text-sky-400 cursor-pointer"
@@ -226,7 +235,7 @@ export default function SmartImageToPdf() {
                   {idx > 0 && (
                     <button
                       onClick={() => moveImage(idx, idx - 1)}
-                      className="absolute top-1.5 left-1.5 px-1.5 py-0.5 bg-white/95 dark:bg-slate-800/95 rounded-full shadow opacity-0 group-hover:opacity-100 text-gray-700 dark:text-slate-200 hover:text-sky-600 text-xs font-bold cursor-pointer"
+                      className="absolute top-1.5 left-1.5 px-1.5 py-0.5 bg-white/95 dark:bg-slate-800/95 rounded-full shadow opacity-100 sm:opacity-0 sm:group-hover:opacity-100 text-gray-700 dark:text-slate-200 hover:text-sky-600 text-xs font-bold cursor-pointer"
                       title="Move earlier"
                     >
                       ↑
@@ -235,7 +244,7 @@ export default function SmartImageToPdf() {
                   {idx < images.length - 1 && (
                     <button
                       onClick={() => moveImage(idx, idx + 1)}
-                      className="absolute bottom-10 left-1.5 px-1.5 py-0.5 bg-white/95 dark:bg-slate-800/95 rounded-full shadow opacity-0 group-hover:opacity-100 text-gray-700 dark:text-slate-200 hover:text-sky-600 text-xs font-bold cursor-pointer"
+                      className="absolute bottom-10 left-1.5 px-1.5 py-0.5 bg-white/95 dark:bg-slate-800/95 rounded-full shadow opacity-100 sm:opacity-0 sm:group-hover:opacity-100 text-gray-700 dark:text-slate-200 hover:text-sky-600 text-xs font-bold cursor-pointer"
                       title="Move later"
                     >
                       ↓

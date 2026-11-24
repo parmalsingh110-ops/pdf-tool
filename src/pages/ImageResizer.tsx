@@ -9,13 +9,12 @@ import { useSEO } from '../hooks/useSEO';
 import { dataUrlToBytes } from '../lib/utils';
 import ToolWorkspaceShell from '../components/pearl/ToolWorkspaceShell';
 import { AnimatedNumber, PearlScanOverlay } from '../components/pearl/PearlMotion';
-import { toArrayBufferBytes } from '../lib/blobUrl';
+import { toArrayBufferBytes, triggerBlobDownload } from '../lib/blobUrl';
+import { clampCanvasDimensions, releaseCanvas, safeCanvasToBlob } from '../lib/safeCanvas';
+import { ACCEPT_IMAGES } from '../lib/fileAccept';
 
 const RESIZER_IMAGE_ACCEPT: Record<string, string[]> = {
-  'image/png': ['.png'],
-  'image/jpeg': ['.jpg', '.jpeg'],
-  'image/webp': ['.webp'],
-  'image/gif': ['.gif'],
+  'image/*': ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.heic', '.heif', '.avif'],
 };
 
 type Unit = 'px' | 'mm' | 'cm' | 'in';
@@ -269,42 +268,49 @@ export default function ImageResizer() {
       }
 
       const canvas = document.createElement('canvas');
-      canvas.width = cutoutImg.naturalWidth;
-      canvas.height = cutoutImg.naturalHeight;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) throw new Error('Canvas unavailable');
+      let outW = 0;
+      let outH = 0;
+      let outBlob: Blob;
+      try {
+        const clamped = clampCanvasDimensions(cutoutImg.naturalWidth, cutoutImg.naturalHeight);
+        canvas.width = clamped.width;
+        canvas.height = clamped.height;
+        outW = clamped.width;
+        outH = clamped.height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) throw new Error('Canvas unavailable');
 
-      if (bgImageFile && bgImageUrl) {
-        const bgImg = await new Promise<HTMLImageElement>((resolve, reject) => {
-          const i = new Image();
-          i.onload = () => resolve(i);
-          i.onerror = reject;
-          i.src = bgImageUrl;
-        });
-        const cw = canvas.width;
-        const ch = canvas.height;
-        const bw = bgImg.naturalWidth;
-        const bh = bgImg.naturalHeight;
-        const scale = Math.max(cw / bw, ch / bh);
-        const dw = bw * scale;
-        const dh = bh * scale;
-        ctx.drawImage(bgImg, (cw - dw) / 2, (ch - dh) / 2, dw, dh);
-      } else {
-        ctx.fillStyle = bgFillColor;
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        if (bgImageFile && bgImageUrl) {
+          const bgImg = await new Promise<HTMLImageElement>((resolve, reject) => {
+            const i = new Image();
+            i.onload = () => resolve(i);
+            i.onerror = reject;
+            i.src = bgImageUrl;
+          });
+          const cw = canvas.width;
+          const ch = canvas.height;
+          const bw = bgImg.naturalWidth;
+          const bh = bgImg.naturalHeight;
+          const scale = Math.max(cw / bw, ch / bh);
+          const dw = bw * scale;
+          const dh = bh * scale;
+          ctx.drawImage(bgImg, (cw - dw) / 2, (ch - dh) / 2, dw, dh);
+        } else {
+          ctx.fillStyle = bgFillColor;
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+        }
+        ctx.drawImage(cutoutImg, 0, 0, canvas.width, canvas.height);
+        outBlob = await safeCanvasToBlob(canvas, 'image/png', 1);
+      } finally {
+        URL.revokeObjectURL(cutoutUrl);
+        releaseCanvas(canvas);
       }
-      ctx.drawImage(cutoutImg, 0, 0);
-      URL.revokeObjectURL(cutoutUrl);
 
-      const outBlob = await new Promise<Blob | null>((resolve) =>
-        canvas.toBlob((b) => resolve(b), 'image/png', 1),
-      );
-      if (!outBlob) throw new Error('Export failed');
       const outUrl = URL.createObjectURL(outBlob);
       if (editPreviewUrl) URL.revokeObjectURL(editPreviewUrl);
       setEditPreviewUrl(outUrl);
-      setNatural({ w: canvas.width, h: canvas.height });
-      syncInputsFromNatural(canvas.width, canvas.height);
+      setNatural({ w: outW, h: outH });
+      syncInputsFromNatural(outW, outH);
     } catch (e) {
       console.error(e);
       setBgError(e instanceof Error ? e.message : 'Background step failed.');
@@ -415,7 +421,7 @@ export default function ImageResizer() {
     wPx: number,
     hPx: number,
     sourceFile: File | null,
-  ): Promise<{ blob: Blob; note: string | null }> => {
+  ): Promise<{ blob: Blob; note: string | null; w: number; h: number }> => {
     if (!canvasRef.current) throw new Error('No canvas');
     const img = new Image();
     img.crossOrigin = 'anonymous';
@@ -429,39 +435,41 @@ export default function ImageResizer() {
     const ctx = canvas.getContext('2d');
     if (!ctx) throw new Error('No canvas context');
 
-    canvas.width = wPx;
-    canvas.height = hPx;
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = 'high';
-    ctx.drawImage(img, 0, 0, wPx, hPx);
+    const clamped = clampCanvasDimensions(wPx, hPx);
+    try {
+      canvas.width = clamped.width;
+      canvas.height = clamped.height;
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(img, 0, 0, clamped.width, clamped.height);
 
-    const maxBytes = targetBytes();
-    let mime = resolveMimeForFile(sourceFile);
+      const maxBytes = targetBytes();
+      let mime = resolveMimeForFile(sourceFile);
 
-    let userNote: string | null = null;
-    let blob: Blob | null = null;
+      let userNote: string | null = null;
+      let blob: Blob;
 
-    if (maxBytes) {
-      if (mime !== 'image/jpeg' && mime !== 'image/webp' && mime !== 'image/png') {
-        mime = 'image/jpeg';
-      }
-      const enc = await encodeCanvasExactByteTarget(canvas, mime as RasterMime, maxBytes, {
-        allowGrow: true,
-      });
-      blob = enc.blob;
-      userNote = enc.note ?? null;
-    } else {
-      blob = await new Promise<Blob | null>((resolve) => {
-        if (mime === 'image/png') {
-          canvas.toBlob((b) => resolve(b), mime);
-        } else {
-          canvas.toBlob((b) => resolve(b), mime, 0.92);
+      if (maxBytes) {
+        if (mime !== 'image/jpeg' && mime !== 'image/webp' && mime !== 'image/png') {
+          mime = 'image/jpeg';
         }
-      });
-    }
+        const enc = await encodeCanvasExactByteTarget(canvas, mime as RasterMime, maxBytes, {
+          allowGrow: true,
+        });
+        blob = enc.blob;
+        userNote = enc.note ?? null;
+      } else {
+        blob = await safeCanvasToBlob(canvas, mime, mime === 'image/png' ? undefined : 0.92);
+      }
 
-    if (!blob) throw new Error('Export failed');
-    return { blob, note: userNote };
+      if (!userNote && clamped.clamped) {
+        userNote = `Output capped to ${clamped.width}×${clamped.height}px to stay within browser canvas memory limits.`;
+      }
+
+      return { blob, note: userNote, w: clamped.width, h: clamped.height };
+    } finally {
+      releaseCanvas(canvas);
+    }
   };
 
   const exportImage = async () => {
@@ -476,13 +484,13 @@ export default function ImageResizer() {
     setBusy(true);
     setNote(null);
     try {
-      const { blob, note: n } = await renderUrlToBlob(activePreviewUrl, wPx, hPx, file);
+      const { blob, note: n, w, h } = await renderUrlToBlob(activePreviewUrl, wPx, hPx, file);
       setNote(n);
 
       if (resultUrl) URL.revokeObjectURL(resultUrl);
       const out = URL.createObjectURL(blob);
       setResultUrl(out);
-      setResultMeta({ w: wPx, h: hPx, bytes: blob.size });
+      setResultMeta({ w, h, bytes: blob.size });
     } catch (e) {
       console.error(e);
       alert('Resize/export failed.');
@@ -539,11 +547,7 @@ export default function ImageResizer() {
       }
 
       const zipped = await zip.generateAsync({ type: 'blob' });
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(zipped);
-      a.download = 'resized-batch.zip';
-      a.click();
-      URL.revokeObjectURL(a.href);
+      triggerBlobDownload(zipped, 'resized-batch.zip');
     } catch (e) {
       console.error(e);
       alert('Batch ZIP failed.');
@@ -585,7 +589,7 @@ export default function ImageResizer() {
         ref={fileInputRef}
         type="file"
         className="hidden"
-        accept="image/png,image/jpeg,image/webp,image/gif,.png,.jpg,.jpeg,.webp,.gif"
+        accept={ACCEPT_IMAGES}
         onChange={(e) => {
           const f = e.target.files?.[0];
           if (f) handleImageFile(f);
@@ -881,7 +885,7 @@ export default function ImageResizer() {
                             ref={bgImageInputRef}
                             type="file"
                             className="hidden"
-                            accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp"
+                            accept={ACCEPT_IMAGES}
                             onChange={(e) => {
                               const f = e.target.files?.[0];
                               if (bgImageUrl) URL.revokeObjectURL(bgImageUrl);
@@ -1009,7 +1013,7 @@ export default function ImageResizer() {
                 type="file"
                 className="hidden"
                 multiple
-                accept="image/png,image/jpeg,image/webp,image/gif"
+                accept={ACCEPT_IMAGES}
                 onChange={(e) => {
                   const list = e.target.files ? Array.from(e.target.files) : [];
                   if (list.length) setBatchQueue((q) => [...q, ...list]);

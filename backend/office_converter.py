@@ -678,18 +678,33 @@ def _extract_docx_paragraph_images(para, doc_part) -> list[bytes]:
 
 
 def _normalize_image_for_office(img_bytes: bytes) -> Optional[tuple[bytes, int, int]]:
-    """Convert any embedded image (including WMF/WebP/TIFF/CMYK) into clean PNG/JPEG bytes + (w, h)."""
+    """Convert any embedded image (including WMF/WebP/TIFF/HEIC/MPO/CMYK) into clean PNG/JPEG bytes + (w, h)."""
     try:
-        from PIL import Image
+        import image_utils  # noqa: F401 - ensures pillow-heif & truncated-image tolerance are active
+        from PIL import Image, ImageOps
+
         im = Image.open(io.BytesIO(img_bytes))
+        fmt = (im.format or "").upper()
+        try:
+            exif = im.getexif()
+            orientation = exif.get(274) if exif else None
+        except Exception:
+            orientation = None
+
+        transposed = ImageOps.exif_transpose(im)
+        if transposed is not None:
+            im = transposed
+
         w, h = im.size
         if w <= 0 or h <= 0:
             return None
-        fmt = (im.format or "").upper()
-        if fmt in ("PNG", "JPEG", "JPG") and im.mode in ("RGB", "RGBA", "L"):
+        if fmt in ("PNG", "JPEG", "JPG") and im.mode in ("RGB", "RGBA", "L") and orientation in (None, 1):
             return (img_bytes, w, h)
         buf = io.BytesIO()
-        if im.mode in ("RGBA", "LA", "PA"):
+        has_alpha = im.mode in ("RGBA", "LA", "PA") or (im.mode == "P" and "transparency" in im.info)
+        if fmt in ("JPEG", "JPG", "MPO") and not has_alpha:
+            im.convert("RGB").save(buf, format="JPEG", quality=92)
+        elif has_alpha:
             im.convert("RGBA").save(buf, format="PNG")
         else:
             im.convert("RGB").save(buf, format="PNG")
