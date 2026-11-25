@@ -157,7 +157,8 @@ const TOOLS_CATALOG = [
 
 // Map core PDF tool paths directly to built-in Studio Viewer tools (zero website redirect!)
 const STUDIO_IN_VIEWER_MAP = {
-  '/edit': 'markup',
+  '/edit': 'edit-text',
+  '/search-replace': 'replace',
   '/compress': 'compress',
   '/target-compress': 'compress',
   '/merge': 'merge',
@@ -173,21 +174,27 @@ const STUDIO_IN_VIEWER_MAP = {
   '/bates-numbering': 'pagenums',
   '/redact': 'pii',
   '/masked-aadhaar': 'pii',
-  '/remove-text': 'markup',
+  '/remove-text': 'edit-text',
   '/highlight-text': 'markup',
   '/self-attest': 'sign',
   '/certify-document': 'sign',
   '/pdf-to-word': 'word',
   '/pdf-to-excel': 'excel',
   '/pdf-to-ppt': 'ppt',
+  '/searchable-pdf': 'ocr',
   '/pdf-to-jpg': 'pdf2img',
   '/jpg-to-pdf': 'img2pdf',
+  '/extract-tables': 'tables',
+  '/extract-images': 'extractimgs',
   '/extract-text': 'text',
   '/pdf-to-markdown': 'text',
   '/grayscale-pdf': 'inksaver',
   '/ink-saver': 'inksaver',
   '/flatten-pdf': 'flatten',
   '/remove-metadata': 'flatten',
+  '/unlock': 'flatten',
+  '/pdf-repair': 'flatten',
+  '/doc-forensics': 'flatten',
 };
 
 let activeTabPdfUrl = '';
@@ -494,8 +501,8 @@ async function handleFileDrop(file) {
   if (!file) return;
   const name = file.name.toLowerCase();
 
-  // Open PDFs & Images directly inside the built-in Studio PDF Viewer (zero website redirect!)
-  if (name.endsWith('.pdf') || /\.(jpg|jpeg|png|webp|bmp|gif)$/.test(name)) {
+  // Open PDFs, Images, AND Office files (.docx/.xlsx/.pptx) directly inside the built-in Studio PDF Viewer!
+  if (name.endsWith('.pdf') || /\.(jpg|jpeg|png|webp|bmp|gif|docx?|xlsx?|pptx?)$/.test(name)) {
     try {
       if (window.PMSStudioDB) {
         const localId = await window.PMSStudioDB.savePendingStudioFile(file);

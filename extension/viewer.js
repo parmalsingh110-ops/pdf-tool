@@ -14,10 +14,138 @@ const JSZip = window.JSZip;
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = chrome.runtime.getURL('vendor/pdf.worker.min.mjs');
 const STANDARD_FONTS_URL = chrome.runtime.getURL('vendor/standard_fonts/');
-const CLOUD_API_POOL = [
+const DEFAULT_API_POOL = [
+  'http://localhost:8000',
+  'http://127.0.0.1:8000',
   'https://pmsbacknew.onrender.com',
   'https://pdfmediasuite.onrender.com',
 ];
+
+const API_NODE_HEALTH = new Map(); // url -> { ok: boolean, latency: number, cooldownUntil: number }
+
+function getCustomApiUrl() {
+  try {
+    return (localStorage.getItem('pms_ext_backend_url') || '').trim().replace(/\/+$/, '');
+  } catch {
+    return '';
+  }
+}
+
+function getCandidateApiUrls() {
+  const custom = getCustomApiUrl();
+  if (custom) return [custom, ...DEFAULT_API_POOL.filter((u) => u !== custom)];
+  return [...DEFAULT_API_POOL];
+}
+
+function updateEngineBadge(kind, label) {
+  const dot = $('engine-dot');
+  const lbl = $('engine-label');
+  if (dot) {
+    dot.className = `engine-dot ${kind}`;
+  }
+  if (lbl) lbl.textContent = label;
+}
+
+async function probeBackendNodes() {
+  const candidates = getCandidateApiUrls();
+  for (const base of candidates) {
+    const isLocal = base.includes('localhost') || base.includes('127.0.0.1');
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), isLocal ? 1200 : 12000);
+    const t0 = performance.now();
+    try {
+      const res = await fetch(`${base}/health`, { method: 'GET', signal: ctrl.signal });
+      clearTimeout(t);
+      if (res.ok) {
+        API_NODE_HEALTH.set(base, { ok: true, latency: Math.round(performance.now() - t0), cooldownUntil: 0 });
+        state.activeBackendUrl = base;
+        updateEngineBadge('online', isLocal ? 'Local HD Ready' : 'Cloud HD Ready');
+        return base;
+      }
+    } catch {
+      clearTimeout(t);
+      API_NODE_HEALTH.set(base, {
+        ok: false,
+        latency: 99999,
+        cooldownUntil: Date.now() + (isLocal ? 60000 : 12000),
+      });
+    }
+  }
+  state.activeBackendUrl = '';
+  updateEngineBadge('local', 'Local Studio');
+  return '';
+}
+
+async function studioApiFetch(endpoint, { method = 'POST', body = null, timeoutMs = 95000, maxRetries = 2, onStatus = null } = {}) {
+  const now = Date.now();
+  const candidates = getCandidateApiUrls().filter((u) => {
+    const h = API_NODE_HEALTH.get(u);
+    if (!h) return true;
+    // Skip dead localhost immediately so cloud calls have zero local wait
+    if ((u.includes('localhost') || u.includes('127.0.0.1')) && now < h.cooldownUntil) return false;
+    return true;
+  });
+  // Put known-healthy active backend first
+  if (state.activeBackendUrl && candidates.includes(state.activeBackendUrl)) {
+    candidates.splice(candidates.indexOf(state.activeBackendUrl), 1);
+    candidates.unshift(state.activeBackendUrl);
+  }
+
+  let lastErr = null;
+  for (const base of candidates) {
+    const isLocal = base.includes('localhost') || base.includes('127.0.0.1');
+    const perNodeTimeout = isLocal ? Math.min(timeoutMs, 15000) : timeoutMs;
+    const tries = isLocal ? 1 : maxRetries + 1;
+
+    for (let attempt = 0; attempt < tries; attempt++) {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), perNodeTimeout);
+      try {
+        if (attempt > 0 && onStatus) onStatus('Waking Cloud HD Engine (please wait a moment)…');
+        const res = await fetch(`${base}${endpoint}`, { method, body, signal: ctrl.signal });
+        clearTimeout(timer);
+
+        if ((res.status === 429 || res.status === 502 || res.status === 503 || res.status === 504) && attempt + 1 < tries) {
+          const retrySec = Number(res.headers.get('Retry-After') || 0);
+          const waitMs = retrySec > 0 ? Math.min(8000, retrySec * 1000) : 1800 * (attempt + 1);
+          if (onStatus) onStatus('Server busy / waking up — retrying automatically…');
+          await new Promise((r) => setTimeout(r, waitMs));
+          continue;
+        }
+
+        if (res.ok) {
+          state.activeBackendUrl = base;
+          API_NODE_HEALTH.set(base, { ok: true, latency: 200, cooldownUntil: 0 });
+          updateEngineBadge('online', isLocal ? 'Local HD Ready' : 'Cloud HD Ready');
+          return res;
+        }
+
+        // Read backend JSON detail if 4xx/5xx
+        let errDetail = `HTTP ${res.status}`;
+        try {
+          const j = await res.clone().json();
+          if (j?.detail) errDetail = String(j.detail);
+        } catch {}
+        lastErr = new Error(errDetail);
+        if (res.status >= 400 && res.status < 500 && res.status !== 429) {
+          throw lastErr; // Client validation error (e.g. "No tables found") — don't try next node
+        }
+        break;
+      } catch (err) {
+        clearTimeout(timer);
+        lastErr = err;
+        if (err && !/AbortError|Failed to fetch|NetworkError|Load failed/i.test(String(err.name + ' ' + err.message))) {
+          throw err;
+        }
+        if (isLocal) {
+          API_NODE_HEALTH.set(base, { ok: false, latency: 99999, cooldownUntil: Date.now() + 60000 });
+          break;
+        }
+      }
+    }
+  }
+  throw lastErr || new Error('Backend engine unreachable');
+}
 
 // ─── STUDIO STATE ──────────────────────────────────────────────────────────
 const state = {
@@ -35,15 +163,22 @@ const state = {
   })(),                    // 'light' | 'dark' | 'sepia' | 'night-invert'
   loadingTask: null,
   printing: false,
-  toolMode: 'select',      // 'select' | 'highlight' | 'text' | 'draw' | 'whiteout' | 'redact'
-  annotColor: '#facc15',
+  activeBackendUrl: '',
+  toolMode: 'select',      // 'select' | 'edit-text' | 'highlight' | 'text' | 'draw' | 'whiteout' | 'redact'
+  annotColor: '#17172f',
   annotSize: 14,
+  annotFontFamily: 'sans', // 'sans' | 'serif' | 'mono'
+  annotBold: false,
+  annotItalic: false,
   annotations: {},         // { [pageNum]: Array<AnnotationObj> }
+  textEdits: {},           // { [pageNum]: { [lineId]: InlineEditObj } }
+  activeInlineLineId: null,
+  pageEditableLines: new Map(), // pageNum -> Array<DetectedLineObj>
   selectedAnnotId: null,
-  undoStack: [],           // Array<{ bytes: Uint8Array, annotations: string }>
+  undoStack: [],           // Array<{ bytes: Uint8Array, annotations: string, textEdits: string }>
   redoStack: [],
   isDirty: false,
-  pageShells: new Map(),   // pageNum -> { shell, canvas, textLayer, annotLayer, renderedScale, widthPt, heightPt }
+  pageShells: new Map(),   // pageNum -> { shell, canvas, textLayer, inlineEditLayer, annotLayer, renderedScale, widthPt, heightPt }
   pageObserver: null,
   thumbObserver: null,
   searchQuery: '',
@@ -55,7 +190,7 @@ const state = {
   uploadedSigDataUrl: '',
   activeStampLabel: 'SELF-ATTESTED',
   activeStampColor: '#1d4ed8',
-  sigInkColor: '#0f172a',
+  sigInkColor: '#17172f',
   sigTab: 'draw',
 };
 
@@ -141,31 +276,41 @@ const TOOL_SVGS = {
   pii: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>',
   inksaver: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>',
   flatten: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>',
+  'edit-text': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>',
+  replace: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>',
+  ocr: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><line x1="7" y1="12" x2="17" y2="12"/></svg>',
+  tables: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="9" x2="9" y2="21"/></svg>',
+  extractimgs: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>',
 };
 
 const STUDIO_TOOLS = [
-  { id: 'markup',    cat: 'Edit & Sign',       tone: 'tone-red',     name: 'Edit Text, Highlight & Draw', desc: 'Add text, highlights, freehand ink & whiteout on pages', tag: 'Live' },
-  { id: 'sign',      cat: 'Edit & Sign',       tone: 'tone-violet',  name: 'Sign & Self-Attest PDF',      desc: 'Draw/type/upload signature or add official stamps',      tag: 'Popular' },
-  { id: 'insertimg', cat: 'Edit & Sign',       tone: 'tone-blue',    name: 'Insert Photo / Logo on Page', desc: 'Place & resize any image, seal or QR on current page',   tag: null },
-  { id: 'watermark', cat: 'Edit & Sign',       tone: 'tone-blue',    name: 'Add Watermark',               desc: 'Diagonal or horizontal custom text watermark on pages',  tag: null },
-  { id: 'pagenums',  cat: 'Edit & Sign',       tone: 'tone-amber',   name: 'Page Numbers & Bates Stamp',  desc: 'Insert Page 1 of N or legal Bates numbering',            tag: null },
+  { id: 'edit-text',   cat: 'Edit & Sign',       tone: 'tone-red',     name: 'Edit Existing PDF Text',      desc: 'Click any line in the PDF to modify or delete text in-place', tag: 'Inline' },
+  { id: 'replace',     cat: 'Edit & Sign',       tone: 'tone-violet',  name: 'Find & Replace Text',         desc: 'Search & replace words, names, or dates across all pages',    tag: 'Fast' },
+  { id: 'markup',      cat: 'Edit & Sign',       tone: 'tone-amber',   name: 'Add Text, Highlight & Draw',  desc: 'Add new text boxes, highlights, ink & seamless whiteout',     tag: 'Live' },
+  { id: 'sign',        cat: 'Edit & Sign',       tone: 'tone-violet',  name: 'Sign & Self-Attest PDF',      desc: 'Draw/type/upload signature or add official stamps',           tag: 'Popular' },
+  { id: 'insertimg',   cat: 'Edit & Sign',       tone: 'tone-blue',    name: 'Insert Photo / Logo on Page', desc: 'Place & resize any image, seal or QR on current page',        tag: null },
+  { id: 'watermark',   cat: 'Edit & Sign',       tone: 'tone-blue',    name: 'Add Watermark',               desc: 'Diagonal or horizontal custom text watermark on pages',       tag: null },
+  { id: 'pagenums',    cat: 'Edit & Sign',       tone: 'tone-amber',   name: 'Page Numbers & Bates Stamp',  desc: 'Insert Page 1 of N or legal Bates numbering',                 tag: null },
 
-  { id: 'compress',  cat: 'Optimize & Pages',  tone: 'tone-amber',   name: 'Compress / Target KB Size',   desc: 'Shrink PDF to exact KB (100KB, 200KB, 500KB) locally',   tag: 'KB/MB' },
-  { id: 'merge',     cat: 'Optimize & Pages',  tone: 'tone-blue',    name: 'Merge PDFs Here',             desc: 'Combine more PDF files before or after this document',   tag: 'Instant' },
-  { id: 'split',     cat: 'Optimize & Pages',  tone: 'tone-red',     name: 'Split & Extract Pages',       desc: 'Extract ranges (e.g. 1-3, 5) or split all into ZIP',     tag: null },
-  { id: 'organize',  cat: 'Optimize & Pages',  tone: 'tone-violet',  name: 'Organize & Remove Blanks',    desc: 'Reverse order, delete range, or auto-remove blank pages', tag: 'Smart' },
-  { id: 'rotate',    cat: 'Optimize & Pages',  tone: 'tone-emerald', name: 'Rotate Pages',                desc: 'Rotate current, odd, even or all pages 90° / 180°',      tag: null },
+  { id: 'compress',    cat: 'Optimize & Pages',  tone: 'tone-amber',   name: 'Compress / Target KB Size',   desc: 'Vector lossless or exact KB (100KB, 200KB, 500KB) compress',  tag: 'KB/MB' },
+  { id: 'merge',       cat: 'Optimize & Pages',  tone: 'tone-blue',    name: 'Merge PDFs Here',             desc: 'Combine more PDF files before or after this document',        tag: 'Instant' },
+  { id: 'split',       cat: 'Optimize & Pages',  tone: 'tone-red',     name: 'Split & Extract Pages',       desc: 'Extract ranges (e.g. 1-3, 5) or split all into ZIP',          tag: null },
+  { id: 'organize',    cat: 'Optimize & Pages',  tone: 'tone-violet',  name: 'Organize & Remove Blanks',    desc: 'Reverse order, delete range, or auto-remove blank pages',     tag: 'Smart' },
+  { id: 'rotate',      cat: 'Optimize & Pages',  tone: 'tone-emerald', name: 'Rotate Pages',                desc: 'Rotate current, odd, even or all pages 90° / 180°',           tag: null },
 
-  { id: 'word',      cat: 'Convert & Export',  tone: 'tone-blue',    name: 'PDF → Word (.docx)',          desc: 'Convert & download editable Word document right here',   tag: 'HD' },
-  { id: 'excel',     cat: 'Convert & Export',  tone: 'tone-emerald', name: 'PDF → Excel (.xlsx)',         desc: 'Extract tables into clean Excel / CSV spreadsheet',      tag: 'Tables' },
-  { id: 'ppt',       cat: 'Convert & Export',  tone: 'tone-amber',   name: 'PDF → PowerPoint (.pptx)',    desc: 'Convert PDF pages into presentation slides here',        tag: null },
-  { id: 'pdf2img',   cat: 'Convert & Export',  tone: 'tone-violet',  name: 'PDF → JPG / PNG (300 DPI)',   desc: 'Save current page or all pages as crisp HD images ZIP',  tag: '300 DPI' },
-  { id: 'img2pdf',   cat: 'Convert & Export',  tone: 'tone-emerald', name: 'Append Images as Pages',      desc: 'Add JPG/PNG/WebP photos as new PDF pages',               tag: null },
-  { id: 'text',      cat: 'Convert & Export',  tone: 'tone-blue',    name: 'Extract Text & Markdown',     desc: 'Copy or download full Unicode text / clean Markdown',    tag: null },
+  { id: 'word',        cat: 'Convert & Export',  tone: 'tone-blue',    name: 'PDF → Word (.docx)',          desc: 'Convert & download editable Word document right here',        tag: 'HD AI' },
+  { id: 'excel',       cat: 'Convert & Export',  tone: 'tone-emerald', name: 'PDF → Excel (.xlsx)',         desc: 'Extract tables into clean Excel spreadsheet',                 tag: 'Tables' },
+  { id: 'ppt',         cat: 'Convert & Export',  tone: 'tone-amber',   name: 'PDF → PowerPoint (.pptx)',    desc: 'Convert PDF pages into editable presentation slides',         tag: null },
+  { id: 'ocr',         cat: 'Convert & Export',  tone: 'tone-violet',  name: 'OCR — Make Searchable',       desc: 'Recognize text in scanned PDFs (English + Hindi + Auto)',     tag: 'OCR' },
+  { id: 'tables',      cat: 'Convert & Export',  tone: 'tone-emerald', name: 'Extract Tables (.xlsx)',      desc: 'Pull structured tables directly into Excel workbook',         tag: null },
+  { id: 'extractimgs', cat: 'Convert & Export',  tone: 'tone-blue',    name: 'Extract Embedded Images',     desc: 'Download all embedded photos & figures as a ZIP',             tag: null },
+  { id: 'pdf2img',     cat: 'Convert & Export',  tone: 'tone-violet',  name: 'PDF → JPG / PNG (300 DPI)',   desc: 'Save current page or all pages as crisp HD images ZIP',       tag: '300 DPI' },
+  { id: 'img2pdf',     cat: 'Convert & Export',  tone: 'tone-emerald', name: 'Append Images / Office Docs', desc: 'Add JPG/PNG/Word/Excel/PPT files as new PDF pages',           tag: null },
+  { id: 'text',        cat: 'Convert & Export',  tone: 'tone-blue',    name: 'Extract Text & Markdown',     desc: 'Copy or download full Unicode text / clean Markdown',         tag: null },
 
-  { id: 'pii',       cat: 'Print & Security',  tone: 'tone-red',     name: 'Auto Aadhaar & PII Redactor', desc: 'Find & mask Aadhaar (XXXX-XXXX-1234), PAN, phone, email', tag: 'UIDAI' },
-  { id: 'inksaver',  cat: 'Print & Security',  tone: 'tone-emerald', name: 'Grayscale & Xerox Ink-Saver', desc: 'Convert to crisp B&W or eco light-toner print mode',     tag: 'Eco' },
-  { id: 'flatten',   cat: 'Print & Security',  tone: 'tone-violet',  name: 'Flatten & Scrub Metadata',    desc: 'Lock form fields/annotations & erase hidden tracking',   tag: 'Safe' },
+  { id: 'pii',         cat: 'Print & Security',  tone: 'tone-red',     name: 'Auto Aadhaar & PII Redactor', desc: 'Find & mask Aadhaar (XXXX-XXXX-1234), PAN, phone, email',     tag: 'UIDAI' },
+  { id: 'inksaver',    cat: 'Print & Security',  tone: 'tone-emerald', name: 'Grayscale & Xerox Ink-Saver', desc: 'Vector grayscale or eco light-toner print mode',              tag: 'Eco' },
+  { id: 'flatten',     cat: 'Print & Security',  tone: 'tone-violet',  name: 'Repair, Scrub & Forensics™',  desc: 'Flatten forms, scrub metadata, repair PDF & tamper check',    tag: 'Pro' },
 ];
 
 // ─── UTILITIES ─────────────────────────────────────────────────────────────
@@ -293,6 +438,7 @@ function pushUndoSnapshot() {
   state.undoStack.push({
     bytes: new Uint8Array(state.pdfBytes),
     annotations: JSON.stringify(state.annotations),
+    textEdits: JSON.stringify(state.textEdits),
   });
   if (state.undoStack.length > 15) state.undoStack.shift();
   state.redoStack = [];
@@ -315,16 +461,19 @@ async function handleUndo() {
   state.redoStack.push({
     bytes: new Uint8Array(state.pdfBytes),
     annotations: JSON.stringify(state.annotations),
+    textEdits: JSON.stringify(state.textEdits),
   });
   const prev = state.undoStack.pop();
   const prevBytesMatch = bytesEqual(prev.bytes, state.pdfBytes);
 
   state.annotations = JSON.parse(prev.annotations || '{}');
+  state.textEdits = JSON.parse(prev.textEdits || '{}');
   syncUndoRedoButtons();
   if (!prevBytesMatch) {
     await loadPdfBytes(prev.bytes, state.fileName, { preserveHistory: true, preserveAnnots: true, keepZoom: true });
   } else {
     renderAllAnnotationOverlays();
+    renderAllInlineEditLayers();
   }
   showToast('↶ Undid last change');
 }
@@ -334,12 +483,15 @@ async function handleRedo() {
   state.undoStack.push({
     bytes: new Uint8Array(state.pdfBytes),
     annotations: JSON.stringify(state.annotations),
+    textEdits: JSON.stringify(state.textEdits),
   });
   const next = state.redoStack.pop();
   state.annotations = JSON.parse(next.annotations || '{}');
+  state.textEdits = JSON.parse(next.textEdits || '{}');
   syncUndoRedoButtons();
   if (bytesEqual(next.bytes, state.pdfBytes)) {
     renderAllAnnotationOverlays();
+    renderAllInlineEditLayers();
   } else {
     await loadPdfBytes(next.bytes, state.fileName, { preserveHistory: true, preserveAnnots: true, keepZoom: true });
   }
@@ -379,16 +531,34 @@ async function convertSingleImageFileToPdfBytes(fileOrBlob) {
   return await pdf.save();
 }
 
+async function convertOfficeFileToPdfBytes(file) {
+  const fd = new FormData();
+  fd.append('file', file, file.name || 'document.docx');
+  const res = await studioApiFetch('/convert/office-to-pdf', {
+    method: 'POST',
+    body: fd,
+    timeoutMs: 95000,
+    onStatus: (s) => { els.loadingText.textContent = s; },
+  });
+  return new Uint8Array(await res.arrayBuffer());
+}
+
 async function openFileObject(file) {
   if (!file) return;
-  showLoading(`Opening ${file.name}…`);
+  const fName = file.name || 'document.pdf';
+  showLoading(`Opening ${fName}…`);
   try {
-    const isImg = file.type.startsWith('image/') || /\.(jpe?g|png|webp|bmp|gif)$/i.test(file.name);
+    const isImg = (file.type && file.type.startsWith('image/')) || /\.(jpe?g|png|webp|bmp|gif)$/i.test(fName);
+    const isOffice = /\.(docx?|xlsx?|pptx?|odt|ods|odp)$/i.test(fName);
     let bytes;
-    let outName = file.name;
+    let outName = fName;
     if (isImg) {
       bytes = await convertSingleImageFileToPdfBytes(file);
-      outName = sanitizePdfFilename(file.name, '', '.pdf');
+      outName = sanitizePdfFilename(fName, '', '.pdf');
+    } else if (isOffice) {
+      els.loadingText.textContent = `Converting ${fName} to PDF via HD Engine…`;
+      bytes = await convertOfficeFileToPdfBytes(file);
+      outName = sanitizePdfFilename(fName, '', '.pdf');
     } else {
       bytes = new Uint8Array(await file.arrayBuffer());
     }
@@ -467,7 +637,16 @@ async function loadPdfBytes(uint8, filename = 'document.pdf', opts = {}) {
     }
     if (!canLoadWithPdfLib) {
       els.loadingText.textContent = 'Unlocking encrypted PDF streams…';
-      workingBytes = await unlockPdfDocToCleanBytes(pdfDoc);
+      // Try lossless vector decryption via backend /unlock-pdf first; fallback to high-DPI local unlock if offline!
+      let unlockedLosslessly = null;
+      try {
+        const fd = new FormData();
+        fd.append('file', new Blob([uint8], { type: 'application/pdf' }), filename || 'document.pdf');
+        fd.append('password', opts.password || '');
+        const uRes = await studioApiFetch('/unlock-pdf', { method: 'POST', body: fd, timeoutMs: 25000, maxRetries: 1 });
+        unlockedLosslessly = new Uint8Array(await uRes.arrayBuffer());
+      } catch {}
+      workingBytes = unlockedLosslessly || (await unlockPdfDocToCleanBytes(pdfDoc));
     }
 
     state.pdfBytes = workingBytes;
@@ -479,9 +658,12 @@ async function loadPdfBytes(uint8, filename = 'document.pdf', opts = {}) {
     state.searchHits = [];
     state.searchCursor = -1;
     state.pageRenderLocks = new Map();
+    state.pageEditableLines = new Map();
 
     if (!opts.preserveAnnots) {
       state.annotations = {};
+      state.textEdits = {};
+      state.activeInlineLineId = null;
       state.selectedAnnotId = null;
     }
     if (!opts.preserveHistory) {
@@ -632,19 +814,33 @@ async function buildStageAndThumbnails() {
 
     const textLayer = document.createElement('div');
     textLayer.className = 'textLayer';
+    // Double-click any word in Select mode to jump straight into True Inline PDF Text Editing!
+    textLayer.addEventListener('dblclick', (ev) => {
+      if (state.toolMode === 'select') {
+        ev.preventDefault();
+        window.getSelection?.()?.removeAllRanges?.();
+        setToolMode('edit-text');
+        void activateNearestInlineLine(p, ev.clientX, ev.clientY);
+      }
+    });
+
+    const inlineEditLayer = document.createElement('div');
+    inlineEditLayer.className = 'inline-edit-layer';
+    inlineEditLayer.dataset.page = String(p);
 
     const annotLayer = document.createElement('div');
     annotLayer.className = 'annot-layer';
     annotLayer.dataset.page = String(p);
     bindPageAnnotationEvents(annotLayer, p);
 
-    shell.append(canvas, textLayer, annotLayer);
+    shell.append(canvas, textLayer, inlineEditLayer, annotLayer);
     stageFrag.appendChild(shell);
 
     state.pageShells.set(p, {
       shell,
       canvas,
       textLayer,
+      inlineEditLayer,
       annotLayer,
       renderedScale: 0,
       rendering: false,
@@ -780,6 +976,7 @@ async function renderMainPage(pageNum) {
       entry.renderedScale = state.scale;
       syncThumbFromMainCanvas(pageNum);
       renderPageAnnotationOverlay(pageNum);
+      void renderInlineEditLayer(pageNum);
       if (state.searchQuery) highlightSearchOnPage(pageNum);
     });
   } catch (err) {
@@ -925,6 +1122,315 @@ function escapeHtml(s) {
     .replace(/"/g, '&quot;');
 }
 
+// ─── TRUE INLINE EXISTING-PDF TEXT EDITOR ENGINE ───────────────────────────
+function classifyPdfFontStyle(rawFontName = '') {
+  const low = String(rawFontName || '').toLowerCase();
+  const clean = low.replace('sans-serif', '').replace('sans serif', '');
+  const bold = /bold|black|heavy|demi|semibold|-bd|bd$/i.test(low);
+  const italic = /italic|oblique|-it|it$/i.test(low);
+  let family = 'sans';
+  if (/times|serif|georgia|garamond|cambria|palatino|roman|minion/i.test(clean)) family = 'serif';
+  else if (/courier|mono|consolas|menlo|code/i.test(clean)) family = 'mono';
+  return { family, bold, italic };
+}
+
+function cssFontStackFor(family) {
+  if (family === 'serif') return '"Times New Roman", Georgia, serif';
+  if (family === 'mono') return '"Courier New", Menlo, monospace';
+  return 'Helvetica, Arial, sans-serif';
+}
+
+async function extractEditableLinesForPage(pageNum) {
+  if (state.pageEditableLines.has(pageNum)) {
+    return state.pageEditableLines.get(pageNum);
+  }
+  if (!state.pdfDoc) return [];
+
+  const page = await state.pdfDoc.getPage(pageNum);
+  const vp1 = page.getViewport({ scale: 1 });
+  const pageH = vp1.height;
+  const pageW = vp1.width;
+  const tc = await page.getTextContent();
+  const styles = tc.styles || {};
+
+  // Convert PDF.js bottom-left items into top-left PDF point coordinates
+  const rawRuns = [];
+  for (const it of tc.items) {
+    const str = String(it.str ?? '');
+    if (!str.trim()) continue;
+    const tr = it.transform || [12, 0, 0, 12, 0, 0];
+    const fontH = Math.max(6, Math.hypot(tr[2], tr[3]) || Math.abs(it.height) || 11);
+    const x = tr[4];
+    const baselineFromBottom = tr[5];
+    const baselineTop = pageH - baselineFromBottom;
+    const y = Math.max(0, baselineTop - fontH * 0.86);
+    const w = Math.max(4, it.width || str.length * fontH * 0.52);
+    const h = Math.max(fontH * 1.14, 8);
+    const styleObj = styles[it.fontName] || {};
+    const fontHint = `${it.fontName || ''} ${styleObj.fontFamily || ''}`;
+    const parsed = classifyPdfFontStyle(fontHint);
+    rawRuns.push({
+      text: str,
+      x,
+      y,
+      w,
+      h,
+      baseline: baselineTop,
+      fontSize: Math.round(fontH * 10) / 10,
+      fontName: fontHint.trim() || 'Helvetica',
+      family: parsed.family,
+      bold: parsed.bold,
+      italic: parsed.italic,
+      color: '#111827',
+    });
+  }
+
+  // Sort top-to-bottom, then left-to-right, and merge adjacent runs on the same baseline
+  // while keeping horizontally separated columns (e.g. "No: ..." vs "Date: ...") independent!
+  rawRuns.sort((a, b) => (Math.abs(a.baseline - b.baseline) > 2.6 ? a.baseline - b.baseline : a.x - b.x));
+
+  const segments = [];
+  for (const r of rawRuns) {
+    const prev = segments[segments.length - 1];
+    if (
+      prev &&
+      Math.abs(r.baseline - prev.baseline) <= Math.max(2.6, prev.fontSize * 0.25) &&
+      r.x >= prev.x - 2 &&
+      r.x - (prev.x + prev.w) <= Math.max(12, prev.fontSize * 1.9)
+    ) {
+      const gap = r.x - (prev.x + prev.w);
+      const needsSpace = gap > prev.fontSize * 0.18 && !prev.origText.endsWith(' ') && !r.text.startsWith(' ');
+      prev.origText += (needsSpace ? ' ' : '') + r.text;
+      const rightEdge = Math.max(prev.x + prev.w, r.x + r.w);
+      prev.y = Math.min(prev.y, r.y);
+      prev.w = Math.min(pageW - prev.x, rightEdge - prev.x);
+      prev.h = Math.max(prev.h, r.h);
+    } else {
+      segments.push({
+        id: `ln_${pageNum}_${segments.length}`,
+        pageNum,
+        origText: r.text,
+        x: r.x,
+        y: r.y,
+        w: r.w,
+        h: r.h,
+        pageW,
+        pageH,
+        baseline: r.baseline,
+        fontSize: r.fontSize,
+        fontName: r.fontName,
+        family: r.family,
+        bold: r.bold,
+        italic: r.italic,
+        color: r.color,
+      });
+    }
+  }
+
+  state.pageEditableLines.set(pageNum, segments);
+
+  // Non-blocking backend enrichment (`/analyze/text-layout`) for exact ink hex colors & font names when online
+  if (state.activeBackendUrl && state.pdfBytes) {
+    void enrichLinesWithBackendLayout(pageNum, segments);
+  }
+
+  return segments;
+}
+
+async function enrichLinesWithBackendLayout(pageNum, segments) {
+  try {
+    const fd = new FormData();
+    fd.append('file', new Blob([state.pdfBytes], { type: 'application/pdf' }), state.fileName);
+    fd.append('page', String(pageNum - 1));
+    const res = await studioApiFetch('/analyze/text-layout', { method: 'POST', body: fd, timeoutMs: 12000, maxRetries: 0 });
+    const data = await res.json();
+    const spans = data?.spans || [];
+    if (!spans.length) return;
+    for (const seg of segments) {
+      const match = spans.find(
+        (sp) => Math.abs((sp.y ?? 0) - seg.y) < 6 && Math.abs((sp.x ?? 0) - seg.x) < 18
+      );
+      if (match) {
+        if (match.color) seg.color = match.color;
+        if (typeof match.bold === 'boolean') seg.bold = match.bold;
+        if (typeof match.italic === 'boolean') seg.italic = match.italic;
+        if (match.fontName) {
+          seg.fontName = match.fontName;
+          seg.family = classifyPdfFontStyle(match.fontName).family;
+        }
+        if (match.baseline) seg.baseline = match.baseline;
+      }
+    }
+  } catch {}
+}
+
+function renderAllInlineEditLayers() {
+  for (const pNum of state.pageShells.keys()) {
+    void renderInlineEditLayer(pNum);
+  }
+}
+
+async function renderInlineEditLayer(pageNum) {
+  const entry = state.pageShells.get(pageNum);
+  if (!entry || !entry.inlineEditLayer) return;
+  const layer = entry.inlineEditLayer;
+  const pageEdits = state.textEdits[pageNum] || {};
+  const isEditMode = state.toolMode === 'edit-text';
+
+  if (!isEditMode && Object.keys(pageEdits).length === 0) {
+    layer.innerHTML = '';
+    return;
+  }
+
+  const lines = await extractEditableLinesForPage(pageNum);
+  layer.innerHTML = '';
+
+  for (const seg of lines) {
+    const edit = pageEdits[seg.id];
+    if (!isEditMode && !edit) continue;
+
+    const isEditing = isEditMode && state.activeInlineLineId === seg.id;
+    const isDeleted = Boolean(edit?.deleted);
+    const currentText = edit ? edit.newText : seg.origText;
+    const effFamily = edit?.family || seg.family;
+    const effBold = edit?.bold ?? seg.bold;
+    const effItalic = edit?.italic ?? seg.italic;
+    const effColor = edit?.color || seg.color || '#111827';
+    const effSize = edit?.fontSize || seg.fontSize;
+
+    const box = document.createElement('div');
+    box.className = `pdf-editable-line${edit ? ' modified' : ''}${isEditing ? ' editing' : ''}${isDeleted ? ' deleted-line' : ''}`;
+    box.dataset.lid = seg.id;
+    box.style.left = `${(seg.x / seg.pageW) * 100}%`;
+    box.style.top = `${(seg.y / seg.pageH) * 100}%`;
+    box.style.minWidth = `${(seg.w / seg.pageW) * 100}%`;
+    box.style.minHeight = `${(seg.h / seg.pageH) * 100}%`;
+    box.title = isEditMode ? 'Click to edit or delete this PDF text in-place' : 'Edited text';
+
+    if (edit || isEditing) {
+      const span = document.createElement('span');
+      span.className = 'pdf-inline-editor';
+      span.contentEditable = isEditMode && !isDeleted ? 'true' : 'false';
+      span.spellcheck = false;
+      span.textContent = isDeleted ? '' : currentText;
+      span.style.fontFamily = cssFontStackFor(effFamily);
+      span.style.fontSize = `${Math.max(8, effSize * state.scale)}px`;
+      span.style.fontWeight = effBold ? '700' : '400';
+      span.style.fontStyle = effItalic ? 'italic' : 'normal';
+      span.style.color = effColor;
+
+      span.addEventListener('input', () => {
+        if (!state.textEdits[pageNum]) state.textEdits[pageNum] = {};
+        if (!state.textEdits[pageNum][seg.id]) {
+          pushUndoSnapshot();
+          state.textEdits[pageNum][seg.id] = {
+            ...seg,
+            newText: span.textContent || '',
+            deleted: false,
+          };
+        } else {
+          state.textEdits[pageNum][seg.id].newText = span.textContent || '';
+          state.textEdits[pageNum][seg.id].deleted = false;
+          markDirty(true);
+        }
+        box.classList.add('modified');
+      });
+
+      span.addEventListener('keydown', (ke) => {
+        if (ke.key === 'Enter' && !ke.shiftKey) {
+          ke.preventDefault();
+          span.blur();
+        }
+      });
+
+      box.appendChild(span);
+
+      if (isEditMode) {
+        const delBtn = document.createElement('button');
+        delBtn.className = 'pdf-line-del-btn';
+        delBtn.textContent = isDeleted ? '↺' : '✕';
+        delBtn.title = isDeleted ? 'Restore original text' : 'Erase this text line cleanly';
+        delBtn.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          pushUndoSnapshot();
+          if (isDeleted) {
+            delete state.textEdits[pageNum][seg.id];
+          } else {
+            if (!state.textEdits[pageNum]) state.textEdits[pageNum] = {};
+            state.textEdits[pageNum][seg.id] = { ...seg, newText: '', deleted: true };
+          }
+          void renderInlineEditLayer(pageNum);
+        });
+        box.appendChild(delBtn);
+      }
+    }
+
+    box.addEventListener('click', (ev) => {
+      if (!isEditMode || ev.target.closest('.pdf-line-del-btn')) return;
+      ev.stopPropagation();
+      if (state.activeInlineLineId === seg.id) return;
+      state.activeInlineLineId = seg.id;
+      // Sync subbar controls to this line's exact font/size/color!
+      state.annotFontFamily = effFamily;
+      state.annotBold = effBold;
+      state.annotItalic = effItalic;
+      state.annotSize = Math.round(effSize);
+      state.annotColor = effColor;
+      syncSubbarControlsFromState();
+      void renderInlineEditLayer(pageNum).then(() => {
+        const activeSpan = layer.querySelector(`[data-lid="${seg.id}"] .pdf-inline-editor`);
+        if (activeSpan) {
+          activeSpan.focus();
+          const range = document.createRange();
+          range.selectNodeContents(activeSpan);
+          range.collapse(false);
+          const sel = window.getSelection();
+          sel?.removeAllRanges();
+          sel?.addRange(range);
+        }
+      });
+    });
+
+    layer.appendChild(box);
+  }
+}
+
+async function activateNearestInlineLine(pageNum, clientX, clientY) {
+  const entry = state.pageShells.get(pageNum);
+  if (!entry) return;
+  const lines = await extractEditableLinesForPage(pageNum);
+  if (!lines.length) return;
+  const rect = entry.shell.getBoundingClientRect();
+  const px = ((clientX - rect.left) / rect.width) * entry.widthPt;
+  const py = ((clientY - rect.top) / rect.height) * entry.heightPt;
+  let best = null;
+  let bestDist = Infinity;
+  for (const seg of lines) {
+    const cx = Math.max(seg.x, Math.min(seg.x + seg.w, px));
+    const cy = Math.max(seg.y, Math.min(seg.y + seg.h, py));
+    const d = Math.hypot(px - cx, py - cy);
+    if (d < bestDist) {
+      bestDist = d;
+      best = seg;
+    }
+  }
+  if (best && bestDist < 36) {
+    state.activeInlineLineId = best.id;
+    await renderInlineEditLayer(pageNum);
+    const activeSpan = entry.inlineEditLayer.querySelector(`[data-lid="${best.id}"] .pdf-inline-editor`);
+    if (activeSpan) activeSpan.focus();
+  }
+}
+
+function syncSubbarControlsFromState() {
+  const ff = $('annot-font-family');
+  if (ff) ff.value = state.annotFontFamily || 'sans';
+  $('btn-fmt-bold')?.classList.toggle('active', Boolean(state.annotBold));
+  $('btn-fmt-italic')?.classList.toggle('active', Boolean(state.annotItalic));
+  els.annotSize.value = String(state.annotSize);
+  els.annotSizeVal.textContent = String(state.annotSize);
+}
+
 // ─── INTERACTIVE LIVE ANNOTATION & MARKUP ENGINE ──────────────────────────
 function setToolMode(mode) {
   // Clean up any leftover empty text boxes when leaving text mode
@@ -938,14 +1444,18 @@ function setToolMode(mode) {
   }
 
   state.toolMode = mode;
+  if (mode !== 'edit-text') state.activeInlineLineId = null;
+
   document.querySelectorAll('.mode-btn').forEach((b) => {
     b.classList.toggle('active', b.dataset.mode === mode);
   });
 
   const isDrawing = ['highlight', 'draw', 'whiteout', 'redact'].includes(mode);
   const isText = mode === 'text';
+  const isEditPdf = mode === 'edit-text';
   document.body.classList.toggle('annot-drawing', isDrawing);
   document.body.classList.toggle('annot-text-mode', isText);
+  document.body.classList.toggle('annot-edit-text', isEditPdf);
 
   if (mode === 'select') {
     els.annotSubbar.hidden = true;
@@ -954,11 +1464,12 @@ function setToolMode(mode) {
     els.annotSubbar.hidden = false;
     document.body.classList.add('has-subbar');
     const labels = {
-      highlight: ['Highlight', 'Drag across any area to highlight', '#facc15', 18, true, false],
-      text: ['Add Text', 'Click anywhere on a page to type', '#111827', 14, true, true],
-      draw: ['Freehand Ink', 'Draw smoothly with mouse or touch', '#2563eb', 3, true, true],
-      whiteout: ['Whiteout Erase', 'Drag a clean white cover box over text', '#ffffff', 16, false, false],
-      redact: ['Permanent Redact', 'Drag black box — text underneath is permanently destroyed on Save', '#000000', 16, false, false],
+      'edit-text': ['Edit PDF Text', 'Click any existing text line on the page to edit or delete it in-place', '#17172f', 12, true, true, true],
+      highlight: ['Highlight', 'Drag across any area to highlight', '#facc15', 18, true, false, false],
+      text: ['Add Text', 'Click anywhere on a page to add new text', '#17172f', 14, true, true, true],
+      draw: ['Freehand Ink', 'Draw smoothly with mouse or touch', '#0284c7', 3, true, true, false],
+      whiteout: ['Seamless Erase', 'Drag over unwanted text or marks to erase cleanly', '#ffffff', 16, false, false, false],
+      redact: ['Permanent Redact', 'Drag black box — underlying text is permanently destroyed on Save', '#000000', 16, false, false, false],
     };
     const cfg = labels[mode];
     if (cfg) {
@@ -971,11 +1482,16 @@ function setToolMode(mode) {
       $('annot-colors').hidden = !cfg[4];
       const swWrap = $('subbar-size-wrap');
       if (swWrap) swWrap.hidden = !cfg[5];
+      const typoWrap = $('subbar-typo-wrap');
+      if (typoWrap) typoWrap.hidden = !cfg[6];
+      syncSubbarControlsFromState();
       $('annot-colors').querySelectorAll('.swatch').forEach((sw) => {
         sw.classList.toggle('active', sw.dataset.color.toLowerCase() === cfg[2].toLowerCase());
       });
     }
   }
+
+  renderAllInlineEditLayers();
 }
 
 function addAnnotation(pageNum, annot) {
@@ -1011,8 +1527,11 @@ function bindPageAnnotationEvents(annotLayer, pageNum) {
         x: nx,
         y: ny,
         text: '',
-        color: state.annotColor === '#ffffff' ? '#111827' : state.annotColor,
+        color: state.annotColor === '#ffffff' ? '#17172f' : state.annotColor,
         fontSize: Math.max(8, Number(state.annotSize) || 14),
+        family: state.annotFontFamily || 'sans',
+        bold: Boolean(state.annotBold),
+        italic: Boolean(state.annotItalic),
       });
       setTimeout(() => {
         const el = annotLayer.querySelector(`[data-aid="${id}"] .annot-text-input`);
@@ -1172,9 +1691,11 @@ function renderPageAnnotationOverlay(pageNum) {
       txt.contentEditable = 'true';
       txt.spellcheck = false;
       txt.textContent = ann.text || '';
-      txt.style.color = ann.color || '#111827';
+      txt.style.color = ann.color || '#17172f';
+      txt.style.fontFamily = cssFontStackFor(ann.family || 'sans');
       txt.style.fontSize = `${Math.round((ann.fontSize || 14) * state.scale)}px`;
-      txt.style.fontWeight = '700';
+      txt.style.fontWeight = ann.bold ? '700' : '500';
+      txt.style.fontStyle = ann.italic ? 'italic' : 'normal';
       txt.addEventListener('input', () => {
         ann.text = txt.innerText.replace(/\n$/, '') || '';
         markDirty(true);
@@ -1276,15 +1797,15 @@ function renderPageAnnotationOverlay(pageNum) {
       wrap.appendChild(rz);
     }
 
-    // Drag to reposition
+    // Drag to reposition (toggles .selected in-place without wiping layer DOM!)
     wrap.addEventListener('pointerdown', (ev) => {
       if (ev.target.closest('.annot-del') || ev.target.closest('.annot-resize')) return;
       ev.stopPropagation();
       state.selectedAnnotId = ann.id;
-      renderPageAnnotationOverlay(pageNum);
+      document.querySelectorAll('.annot-item.selected').forEach((el) => el.classList.remove('selected'));
+      wrap.classList.add('selected');
 
-      const reWrap = layer.querySelector(`[data-aid="${ann.id}"]`);
-      if (!reWrap) return;
+      const reWrap = wrap;
       reWrap.setPointerCapture(ev.pointerId);
       const lRect = layer.getBoundingClientRect();
       const sx = ev.clientX;
@@ -1327,16 +1848,133 @@ function renderPageAnnotationOverlay(pageNum) {
   }
 }
 
-// ─── BAKE ALL ANNOTATIONS INTO CLEAN VECTOR PDF BYTES (`pdf-lib`) ──────────
+function hasPendingInlineTextEdits() {
+  return Object.values(state.textEdits).some((m) => m && Object.keys(m).length > 0);
+}
+
+async function pickStandardPdfLibFont(pdf, fontCache, family = 'sans', bold = false, italic = false) {
+  const key = `${family}_${bold ? 'b' : 'r'}_${italic ? 'i' : 'n'}`;
+  if (fontCache.has(key)) return fontCache.get(key);
+  let stdName = StandardFonts.Helvetica;
+  if (family === 'serif') {
+    stdName = bold && italic ? StandardFonts.TimesRomanBoldItalic
+      : bold ? StandardFonts.TimesRomanBold
+      : italic ? StandardFonts.TimesRomanItalic
+      : StandardFonts.TimesRoman;
+  } else if (family === 'mono') {
+    stdName = bold && italic ? StandardFonts.CourierBoldOblique
+      : bold ? StandardFonts.CourierBold
+      : italic ? StandardFonts.CourierOblique
+      : StandardFonts.Courier;
+  } else {
+    stdName = bold && italic ? StandardFonts.HelveticaBoldOblique
+      : bold ? StandardFonts.HelveticaBold
+      : italic ? StandardFonts.HelveticaOblique
+      : StandardFonts.Helvetica;
+  }
+  const f = await pdf.embedFont(stdName);
+  fontCache.set(key, f);
+  return f;
+}
+
+// ─── BAKE ALL INLINE TEXT EDITS + ANNOTATIONS INTO CLEAN VECTOR PDF BYTES ───
 async function buildExportPdfBytes() {
   if (!state.pdfBytes) throw new Error('No PDF loaded');
   const hasAnyAnnots = Object.values(state.annotations).some((arr) => arr && arr.length > 0);
-  if (!hasAnyAnnots) return new Uint8Array(state.pdfBytes);
+  const hasInlineEdits = hasPendingInlineTextEdits();
+  if (!hasAnyAnnots && !hasInlineEdits) return new Uint8Array(state.pdfBytes);
 
-  const pdf = await PDFDocument.load(state.pdfBytes, { ignoreEncryption: true });
-  const fontBold = await pdf.embedFont(StandardFonts.HelveticaBold);
+  let baseBytes = new Uint8Array(state.pdfBytes);
+  let inlineAppliedViaBackend = false;
+
+  // 1. If user modified existing PDF text lines, try true stream-level PyMuPDF `/edit-pdf` first!
+  if (hasInlineEdits) {
+    const actions = [];
+    for (const [pKey, mapObj] of Object.entries(state.textEdits)) {
+      const pageZeroIdx = Number(pKey) - 1;
+      for (const ed of Object.values(mapObj || {})) {
+        actions.push({
+          type: 'text',
+          page: pageZeroIdx,
+          x: ed.x,
+          y: ed.y,
+          w: Math.max(ed.w, (ed.newText || '').length * ed.fontSize * 0.55),
+          h: ed.h,
+          origX: ed.x,
+          origY: ed.y,
+          origW: ed.w,
+          origH: ed.h,
+          newText: ed.deleted ? '' : (ed.newText ?? ''),
+          fontSize: ed.fontSize,
+          fontName: ed.family === 'serif' ? 'Times' : ed.family === 'mono' ? 'Courier' : 'Helvetica',
+          bold: Boolean(ed.bold),
+          italic: Boolean(ed.italic),
+          color: ed.color || '#111827',
+          baseline: ed.baseline,
+        });
+      }
+    }
+    if (actions.length > 0) {
+      try {
+        const fd = new FormData();
+        fd.append('file', new Blob([baseBytes], { type: 'application/pdf' }), state.fileName);
+        fd.append('edits', JSON.stringify(actions));
+        const res = await studioApiFetch('/edit-pdf', { method: 'POST', body: fd, timeoutMs: 35000, maxRetries: 1 });
+        baseBytes = new Uint8Array(await res.arrayBuffer());
+        inlineAppliedViaBackend = true;
+      } catch {
+        inlineAppliedViaBackend = false;
+      }
+    }
+  }
+
+  if (inlineAppliedViaBackend && !hasAnyAnnots) {
+    return baseBytes;
+  }
+
+  const pdf = await PDFDocument.load(baseBytes, { ignoreEncryption: true });
+  const fontCache = new Map();
   const pages = pdf.getPages();
   const imgCache = new Map();
+
+  // Offline precision fallback for inline text edits when backend is unreachable
+  if (hasInlineEdits && !inlineAppliedViaBackend) {
+    for (const [pKey, mapObj] of Object.entries(state.textEdits)) {
+      const pIdx = Number(pKey) - 1;
+      if (pIdx < 0 || pIdx >= pages.length) continue;
+      const page = pages[pIdx];
+      const { height } = page.getSize();
+      for (const ed of Object.values(mapObj || {})) {
+        // Erase original text run cleanly
+        page.drawRectangle({
+          x: Math.max(0, ed.x - 1),
+          y: Math.max(0, height - (ed.y + ed.h) - 1),
+          width: ed.w + 2.5,
+          height: ed.h + 2,
+          color: rgb(1, 1, 1),
+        });
+        const newStr = ed.deleted ? '' : String(ed.newText ?? '');
+        if (!newStr.trim()) continue;
+        const c = hexToRgb01(ed.color || '#111827');
+        const ptSize = Math.max(6, Number(ed.fontSize) || 11);
+        const pdfBaseY = height - (ed.baseline || (ed.y + ptSize * 0.88));
+        if (!/[^\x20-\x7E\xA0-\xFF]/.test(newStr)) {
+          const f = await pickStandardPdfLibFont(pdf, fontCache, ed.family, ed.bold, ed.italic);
+          page.drawText(newStr, {
+            x: ed.x,
+            y: pdfBaseY,
+            size: ptSize,
+            font: f,
+            color: rgb(c.r, c.g, c.b),
+          });
+        } else {
+          const png = renderUnicodeTextToPngBytes(newStr, ed.color || '#111827', ptSize);
+          const emb = await pdf.embedPng(png.bytes);
+          page.drawImage(emb, { x: ed.x, y: pdfBaseY - 2, width: png.ptW, height: png.ptH });
+        }
+      }
+    }
+  }
 
   const embedDataUrl = async (dataUrl) => {
     if (imgCache.has(dataUrl)) return imgCache.get(dataUrl);
@@ -1378,10 +2016,17 @@ async function buildExportPdfBytes() {
         if (ann.type === 'highlight' && BlendMode) opts.blendMode = BlendMode.Multiply;
         page.drawRectangle(opts);
       } else if (ann.type === 'text' && (ann.text || '').trim()) {
-        const c = hexToRgb01(ann.color || '#111827');
+        const c = hexToRgb01(ann.color || '#17172f');
         const ptSize = Math.max(6, Number(ann.fontSize) || 14);
         const hasUnicode = /[^\x20-\x7E\xA0-\xFF]/.test(ann.text);
         if (!hasUnicode) {
+          const chosenFont = await pickStandardPdfLibFont(
+            pdf,
+            fontCache,
+            ann.family || 'sans',
+            Boolean(ann.bold),
+            Boolean(ann.italic)
+          );
           String(ann.text).split('\n').forEach((line, idx) => {
             if (!line) return;
             const o = m.toPdf(
@@ -1392,7 +2037,7 @@ async function buildExportPdfBytes() {
               x: o.x,
               y: o.y,
               size: ptSize,
-              font: fontBold,
+              font: chosenFont,
               color: rgb(c.r, c.g, c.b),
               rotate: degrees(m.rot),
             });
@@ -1539,7 +2184,10 @@ function buildImageAnnotation(pageNum, norm, { x = 0.3, y = 0.3, w = 0.32, maxH 
 }
 
 function hasLiveAnnotations() {
-  return Object.values(state.annotations).some((arr) => arr && arr.length > 0);
+  return (
+    Object.values(state.annotations).some((arr) => arr && arr.length > 0) ||
+    hasPendingInlineTextEdits()
+  );
 }
 
 // Raster-based tools read pages from pdf.js → bake live edits first so signatures/text are never lost
@@ -1612,6 +2260,8 @@ function renderUnicodeTextToPngBytes(text, color, fontSizePt) {
 async function applyAndReloadBytes(newBytes, successMsg) {
   pushUndoSnapshot();
   state.annotations = {};
+  state.textEdits = {};
+  state.activeInlineLineId = null;
   state.selectedAnnotId = null;
   await loadPdfBytes(new Uint8Array(newBytes), state.fileName, {
     preserveHistory: true,
@@ -2067,6 +2717,12 @@ function requireOpenPdf() {
 }
 
 function openStudioToolDrawer(toolId) {
+  if (toolId === 'edit-text') {
+    if (!requireOpenPdf()) return;
+    setToolMode('edit-text');
+    showToast('Click any text line on the PDF to edit or delete it directly!');
+    return;
+  }
   if (toolId === 'sign') {
     els.signModal.hidden = false;
     return;
@@ -2086,7 +2742,7 @@ function openStudioToolDrawer(toolId) {
   }
   if (toolId === 'markup') {
     setToolMode('highlight');
-    showToast('Use the top toolbar to Highlight, Add Text, Draw Ink, Erase or Redact!');
+    showToast('Use the top bar to Add Text, Highlight, Draw Ink, Erase or Redact!');
     return;
   }
 
@@ -2094,6 +2750,37 @@ function openStudioToolDrawer(toolId) {
   els.drawerTitle.textContent = toolMeta ? toolMeta.name : 'Tool';
   els.toolDrawer.hidden = false;
   const b = els.drawerBody;
+
+  // ── 0. FIND & REPLACE TEXT ACROSS PDF ──
+  if (toolId === 'replace') {
+    b.innerHTML = `
+      <div class="drawer-note">Search and replace names, dates, numbers, or phrases across all pages while preserving original font size &amp; layout.</div>
+      <label class="drawer-field">
+        <span>Find Text</span>
+        <input type="text" id="sr-find" placeholder="e.g. 10-11-2026">
+      </label>
+      <label class="drawer-field">
+        <span>Replace With (leave empty to erase)</span>
+        <input type="text" id="sr-replace" placeholder="e.g. 25-11-2026">
+      </label>
+      <button class="dock-action-btn full" id="btn-run-sr">Replace All in PDF</button>
+      <div id="sr-stat-box" class="result-stat-box" hidden></div>
+    `;
+    $('btn-run-sr').addEventListener('click', async () => {
+      if (!requireOpenPdf()) return;
+      const findTerm = $('sr-find').value;
+      const repTerm = $('sr-replace').value;
+      if (!findTerm.trim()) {
+        showToast('Enter text to find.', 'error');
+        return;
+      }
+      const cnt = await runSearchAndReplaceInViewer(findTerm, repTerm);
+      const st = $('sr-stat-box');
+      st.hidden = false;
+      st.textContent = cnt > 0 ? `✓ Replaced ${cnt} occurrence(s) across the document!` : `No matches found for "${findTerm}".`;
+    });
+    return;
+  }
 
   // ── 1. COMPRESS / TARGET KB ──
   if (toolId === 'compress') {
@@ -2640,13 +3327,23 @@ function openStudioToolDrawer(toolId) {
   if (toolId === 'inksaver') {
     b.innerHTML = `
       <div class="drawer-note">Optimize pages right inside the viewer before clicking Print!</div>
-      <button class="dock-action-btn full" id="btn-make-gray">⚫ Convert PDF to Crisp Grayscale</button>
-      <button class="dock-action-btn full secondary" id="btn-make-eco">🖨️ Xerox Eco Ink-Saver (Whiten Dark Scan BG)</button>
+      <button class="dock-action-btn full" id="btn-make-gray">Convert PDF to Crisp Grayscale</button>
+      <button class="dock-action-btn full secondary" id="btn-make-eco">Xerox Eco Ink-Saver (Whiten Dark Scan BG)</button>
     `;
     const runFilter = async (eco) => {
       if (!requireOpenPdf()) return;
       showLoading(eco ? 'Applying Xerox Eco Ink-Saver…' : 'Converting to Grayscale…');
       await ensureAnnotationsBaked(eco ? 'Applying Xerox Eco Ink-Saver…' : 'Converting to Grayscale…');
+      // Try lossless vector grayscale via backend first when not in scan-whitening Eco mode!
+      if (!eco) {
+        try {
+          const fd = new FormData();
+          fd.append('file', new Blob([state.pdfBytes], { type: 'application/pdf' }), state.fileName);
+          const gRes = await studioApiFetch('/convert/grayscale', { method: 'POST', body: fd, timeoutMs: 45000, maxRetries: 1 });
+          await applyAndReloadBytes(new Uint8Array(await gRes.arrayBuffer()), '✓ Converted to true vector Grayscale!');
+          return;
+        } catch {}
+      }
       const outPdf = await PDFDocument.create();
       for (let p = 1; p <= state.numPages; p++) {
         els.loadingText.textContent = `Processing page ${p} / ${state.numPages}…`;
@@ -2663,7 +3360,6 @@ function openStudioToolDrawer(toolId) {
         for (let i = 0; i < d.length; i += 4) {
           let lum = Math.round(0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]);
           if (eco) {
-            // Whiten gray scan paper (>185 -> 255) & lighten heavy black ink by 18% to save toner
             lum = lum > 188 ? 255 : Math.min(255, Math.round(32 + lum * 0.85));
           }
           d[i] = d[i + 1] = d[i + 2] = lum;
@@ -2683,12 +3379,15 @@ function openStudioToolDrawer(toolId) {
     return;
   }
 
-  // ── 12. FLATTEN & SCRUB METADATA ──
+  // ── 12. FLATTEN, REPAIR & DOCFORENSICS™ ──
   if (toolId === 'flatten') {
     b.innerHTML = `
-      <div class="drawer-note">Permanently bakes interactive forms/annotations and scrubs hidden Author, Producer, Creator, and tracking metadata.</div>
-      <button class="dock-action-btn full" id="btn-do-scrub">🧹 Scrub Metadata Only (Keep Vector Text)</button>
-      <button class="dock-action-btn full secondary" id="btn-do-flatten">🥞 Flatten All Forms &amp; Pages</button>
+      <div class="drawer-note">Scrub hidden tracking metadata, flatten form fields, repair damaged PDFs, or run AI DocForensics™ tamper inspection.</div>
+      <button class="dock-action-btn full" id="btn-do-scrub">Scrub Metadata Only (Keep Vector Text)</button>
+      <button class="dock-action-btn full secondary" id="btn-do-flatten">Flatten All Forms &amp; Annotations</button>
+      <button class="dock-action-btn full secondary" id="btn-do-repair">Repair Corrupted / Broken PDF Structure</button>
+      <button class="dock-action-btn full secondary" id="btn-do-forensics">Run DocForensics™ Tamper &amp; Forgery Check</button>
+      <div id="sec-result-box" class="result-stat-box" hidden></div>
     `;
     $('btn-do-scrub').addEventListener('click', () => void scrubMetadataInViewer());
     $('btn-do-flatten').addEventListener('click', async () => {
@@ -2699,10 +3398,135 @@ function openStudioToolDrawer(toolId) {
       clearPdfMetadataFields(pdf);
       await applyAndReloadBytes(await pdf.save(), '✓ Flattened & metadata scrubbed!');
     });
+    $('btn-do-repair').addEventListener('click', async () => {
+      if (!requireOpenPdf()) return;
+      showLoading('Repairing PDF XRef & stream tables…');
+      try {
+        const fd = new FormData();
+        fd.append('file', new Blob([await buildExportPdfBytes()], { type: 'application/pdf' }), state.fileName);
+        const rRes = await studioApiFetch('/repair-pdf', { method: 'POST', body: fd, timeoutMs: 45000, maxRetries: 1 });
+        await applyAndReloadBytes(new Uint8Array(await rRes.arrayBuffer()), '✓ PDF structure repaired & rebuilt!');
+      } catch {
+        const pdf = await PDFDocument.load(await buildExportPdfBytes(), { ignoreEncryption: true });
+        await applyAndReloadBytes(await pdf.save({ useObjectStreams: true }), '✓ Rebuilt clean PDF object streams!');
+      }
+    });
+    $('btn-do-forensics').addEventListener('click', async () => {
+      if (!requireOpenPdf()) return;
+      const box = $('sec-result-box');
+      box.hidden = false;
+      box.textContent = 'Running DocForensics™ XRef, font-splice & whiteout inspection…';
+      showLoading('Inspecting PDF authenticity…');
+      try {
+        const fd = new FormData();
+        fd.append('file', new Blob([await buildExportPdfBytes()], { type: 'application/pdf' }), state.fileName);
+        const fRes = await studioApiFetch('/analyze/forensics', { method: 'POST', body: fd, timeoutMs: 45000, maxRetries: 1 });
+        const report = await fRes.json();
+        const risk = report.risk_level || report.verdict || 'LOW';
+        const score = report.tamper_score ?? report.risk_score ?? 0;
+        const findings = (report.findings || report.signals || []).slice(0, 4).map((f) => `• ${escapeHtml(typeof f === 'string' ? f : f.title || f.detail || JSON.stringify(f))}`).join('<br>');
+        box.innerHTML = `<strong>Verdict: ${escapeHtml(String(risk).toUpperCase())}</strong> (Score: ${escapeHtml(String(score))})<div class="result-note">${findings || 'No suspicious whiteout overlays or spliced font anomalies detected.'}</div>`;
+        showToast('✓ DocForensics™ check complete!', 'success');
+      } catch (err) {
+        box.textContent = `Forensics check note: ${err.message}`;
+      } finally {
+        hideLoading();
+      }
+    });
     return;
   }
 
-  // ── 13–15. IN-VIEWER OFFICE CONVERTERS (WORD / EXCEL / PPT — ZERO WEBSITE REDIRECT!) ──
+  // ── 13. OCR — MAKE SCANNED PDF SEARCHABLE ──
+  if (toolId === 'ocr') {
+    b.innerHTML = `
+      <div class="drawer-note">Adds a crystal-clear selectable &amp; searchable text layer to scanned PDFs (supports English, Hindi/Devanagari &amp; Auto-Detect).</div>
+      <label class="drawer-field">
+        <span>Document Language</span>
+        <select id="ocr-lang">
+          <option value="auto">Auto-Detect (English + Hindi)</option>
+          <option value="eng">English Only (Fastest)</option>
+          <option value="eng+hin">English + Hindi (Devanagari)</option>
+        </select>
+      </label>
+      <button class="dock-action-btn full" id="btn-run-ocr">Run HD OCR &amp; Make Searchable</button>
+      <div id="ocr-status-box" class="result-stat-box" hidden></div>
+    `;
+    $('btn-run-ocr').addEventListener('click', async () => {
+      if (!requireOpenPdf()) return;
+      const st = $('ocr-status-box');
+      st.hidden = false;
+      st.textContent = 'Running Hybrid OCR engine on scanned pages…';
+      showLoading('Running OCR text recognition…');
+      try {
+        const fd = new FormData();
+        fd.append('file', new Blob([await buildExportPdfBytes()], { type: 'application/pdf' }), state.fileName);
+        fd.append('lang', $('ocr-lang').value);
+        fd.append('force_ocr', 'true');
+        const res = await studioApiFetch('/convert/make-searchable', {
+          method: 'POST',
+          body: fd,
+          timeoutMs: 120000,
+          onStatus: (msg) => { st.textContent = msg; els.loadingText.textContent = msg; },
+        });
+        const ocrBytes = new Uint8Array(await res.arrayBuffer());
+        await applyAndReloadBytes(ocrBytes, '✓ PDF is now 100% text-searchable & editable!');
+        st.textContent = '✓ Searchable OCR text layer embedded! You can now select, search, or Edit PDF text.';
+      } catch (err) {
+        hideLoading();
+        st.textContent = `OCR failed: ${err.message}`;
+        showToast(`OCR error: ${err.message}`, 'error');
+      }
+    });
+    return;
+  }
+
+  // ── 14 & 15. EXTRACT TABLES (.XLSX) & EXTRACT EMBEDDED IMAGES (.ZIP) ──
+  if (toolId === 'tables' || toolId === 'extractimgs') {
+    const isTbl = toolId === 'tables';
+    b.innerHTML = `
+      <div class="drawer-note">${isTbl ? 'Extracts all structured tables across pages into a clean multi-sheet Excel (.xlsx) workbook.' : 'Extracts all original embedded images and figures from this PDF as a ZIP archive.'}</div>
+      <button class="dock-action-btn full" id="btn-run-ext-asset">${isTbl ? 'Extract Tables to Excel (.xlsx)' : 'Extract Embedded Images (.zip)'}</button>
+      <div id="asset-status-box" class="result-stat-box" hidden></div>
+    `;
+    $('btn-run-ext-asset').addEventListener('click', async () => {
+      if (!requireOpenPdf()) return;
+      const st = $('asset-status-box');
+      st.hidden = false;
+      st.textContent = isTbl ? 'Detecting & extracting tables…' : 'Scanning PDF XRef streams for images…';
+      showLoading(st.textContent);
+      try {
+        const fd = new FormData();
+        fd.append('file', new Blob([await buildExportPdfBytes()], { type: 'application/pdf' }), state.fileName);
+        const endpoint = isTbl ? '/extract-tables' : '/extract-images';
+        const res = await studioApiFetch(endpoint, {
+          method: 'POST',
+          body: fd,
+          timeoutMs: 90000,
+          onStatus: (msg) => { st.textContent = msg; },
+        });
+        const blob = await res.blob();
+        const outExt = isTbl ? '.xlsx' : '.zip';
+        const outName = sanitizePdfFilename(state.fileName, isTbl ? '_tables' : '_images', outExt);
+        triggerDownload(blob, outName, blob.type);
+        st.textContent = `✓ Downloaded ${outName} (${formatBytes(blob.size)})!`;
+        showToast(`✓ Downloaded ${outName}!`, 'success');
+      } catch (err) {
+        if ( isTbl ) {
+          const fb = await buildOfflineOfficeFallback('excel');
+          triggerDownload(fb.blob, fb.name, fb.mime);
+          st.textContent = `✓ Exported text rows to ${fb.name}.`;
+        } else {
+          st.textContent = `${err.message}`;
+          showToast(err.message, 'error');
+        }
+      } finally {
+        hideLoading();
+      }
+    });
+    return;
+  }
+
+  // ── 16–18. IN-VIEWER OFFICE CONVERTERS (WORD / EXCEL / PPT — HD BACKEND + FALLBACK) ──
   if (toolId === 'word' || toolId === 'excel' || toolId === 'ppt') {
     const map = {
       word: { label: 'Word (.docx)', endpoint: '/convert/pdf-to-word', ext: '.docx', mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
@@ -2711,8 +3535,21 @@ function openStudioToolDrawer(toolId) {
     }[toolId];
 
     b.innerHTML = `
-      <div class="drawer-note">Converts <strong>${escapeHtml(state.fileName)}</strong> into an editable <strong>${map.label}</strong> and downloads it <strong>directly here</strong> without leaving this tab.</div>
-      <button class="dock-action-btn full" id="btn-conv-office">🚀 Convert &amp; Download ${map.label}</button>
+      <div class="drawer-note">Converts <strong>${escapeHtml(state.fileName)}</strong> into an editable <strong>${map.label}</strong> using the PDF Media Suite HD Layout Engine directly inside this viewer.</div>
+      ${toolId === 'word' ? `
+        <label class="drawer-field">
+          <span>Reconstruction Mode</span>
+          <select id="word-layer-mode">
+            <option value="clean_real">Clean Flowing Editable Word (.docx)</option>
+            <option value="layered_replica">Exact Visual Layout Replica (.docx)</option>
+          </select>
+        </label>
+        <label class="toggle-row" style="padding:4px 2px;">
+          <span>Force OCR (for scanned Hindi/English PDFs)</span>
+          <input type="checkbox" id="word-force-ocr">
+        </label>
+      ` : ''}
+      <button class="dock-action-btn full" id="btn-conv-office">Convert &amp; Download ${map.label}</button>
       <div id="conv-status-box" class="result-stat-box" hidden></div>
     `;
     $('btn-conv-office').addEventListener('click', async () => {
@@ -2725,32 +3562,37 @@ function openStudioToolDrawer(toolId) {
         const finalBytes = await buildExportPdfBytes();
         const fd = new FormData();
         fd.append('file', new Blob([finalBytes], { type: 'application/pdf' }), state.fileName);
+        if (toolId === 'word') {
+          fd.append('layer_mode', $('word-layer-mode')?.value || 'clean_real');
+          if ($('word-force-ocr')?.checked) fd.append('force_ocr', 'true');
+        }
 
         let convertedBlob = null;
-        for (const base of CLOUD_API_POOL) {
-          const ctrl = new AbortController();
-          const timer = setTimeout(() => ctrl.abort(), 38000);
-          try {
-            const res = await fetch(`${base}${map.endpoint}`, { method: 'POST', body: fd, signal: ctrl.signal });
-            if (res.ok) {
-              convertedBlob = await res.blob();
-              break;
-            }
-          } catch {} finally {
-            clearTimeout(timer);
-          }
+        try {
+          const res = await studioApiFetch(map.endpoint, {
+            method: 'POST',
+            body: fd,
+            timeoutMs: 110000,
+            maxRetries: 2,
+            onStatus: (msg) => {
+              statusBox.textContent = msg;
+              els.loadingText.textContent = msg;
+            },
+          });
+          convertedBlob = await res.blob();
+        } catch (apiErr) {
+          console.warn('[StudioViewer] Cloud converter fallback:', apiErr);
         }
 
         if (convertedBlob && convertedBlob.size > 128) {
           const outName = sanitizePdfFilename(state.fileName, '', map.ext);
           triggerDownload(convertedBlob, outName, map.mime);
-          statusBox.textContent = `✓ Downloaded ${outName} (${formatBytes(convertedBlob.size)})!`;
+          statusBox.textContent = `✓ Downloaded HD ${outName} (${formatBytes(convertedBlob.size)})!`;
           showToast(`✓ ${map.label} downloaded!`, 'success');
         } else {
-          // Offline local fallback for Word, Excel, AND PowerPoint so conversion always succeeds!
           const fallback = await buildOfflineOfficeFallback(toolId);
           triggerDownload(fallback.blob, fallback.name, fallback.mime);
-          statusBox.textContent = `✓ Downloaded ${fallback.name} (local conversion)!`;
+          statusBox.textContent = `✓ Downloaded ${fallback.name} (offline local mode — start backend or check internet for full HD ${map.ext})!`;
           showToast(`✓ Downloaded ${fallback.name}!`, 'success');
         }
       } catch (err) {
@@ -2824,19 +3666,93 @@ async function buildOfflineOfficeFallback(kind) {
   };
 }
 
-// ─── IN-VIEWER BINARY-SEARCH TARGET KB COMPRESSOR ──────────────────────────
+async function runSearchAndReplaceInViewer(searchTerm, replaceTerm) {
+  if (!requireOpenPdf()) return 0;
+  const term = String(searchTerm || '').trim();
+  if (!term) return 0;
+  showLoading(`Replacing "${term}"…`);
+  try {
+    await ensureAnnotationsBaked(`Replacing "${term}"…`);
+    // 1. Try backend PyMuPDF `/search-replace` first for crisp native font-matched redaction + insert!
+    try {
+      const fd = new FormData();
+      fd.append('file', new Blob([state.pdfBytes], { type: 'application/pdf' }), state.fileName);
+      fd.append('search_term', term);
+      fd.append('replace_term', String(replaceTerm ?? ''));
+      const res = await studioApiFetch('/search-replace', { method: 'POST', body: fd, timeoutMs: 45000, maxRetries: 1 });
+      const matchHdr = Number(res.headers.get('X-Match-Count') || '0');
+      const outBytes = new Uint8Array(await res.arrayBuffer());
+      await applyAndReloadBytes(outBytes, `✓ Replaced "${term}" across document!`);
+      return Math.max(1, matchHdr);
+    } catch {}
+
+    // 2. Local coordinate-accurate fallback across all pages!
+    let count = 0;
+    const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(escaped, 'gi');
+    for (let p = 1; p <= state.numPages; p++) {
+      const segs = await extractEditableLinesForPage(p);
+      for (const seg of segs) {
+        if (re.test(seg.origText)) {
+          re.lastIndex = 0;
+          if (!state.textEdits[p]) state.textEdits[p] = {};
+          state.textEdits[p][seg.id] = {
+            ...seg,
+            newText: seg.origText.replace(re, String(replaceTerm ?? '')),
+            deleted: false,
+          };
+          count++;
+        }
+      }
+    }
+    if (count === 0) {
+      hideLoading();
+      showToast(`No matches found for "${term}".`, 'error');
+      return 0;
+    }
+    const baked = await buildExportPdfBytes();
+    await applyAndReloadBytes(baked, `✓ Replaced ${count} text line(s)!`);
+    return count;
+  } catch (err) {
+    hideLoading();
+    showToast(`Replace failed: ${err.message}`, 'error');
+    return 0;
+  }
+}
+
+// ─── IN-VIEWER VECTOR + BINARY-SEARCH TARGET KB COMPRESSOR ──────────────────
 async function runInViewerCompression(mode, targetBytes, resultBox) {
   showLoading('Optimizing PDF size…');
   try {
     await ensureAnnotationsBaked('Optimizing PDF size…');
     const origSize = state.pdfBytes.byteLength;
 
-    // Pass 0: lossless structural re-save (keeps selectable vector text, often shrinks bloated PDFs)
-    let losslessBytes = null;
+    // Pass 0A: Try backend Ghostscript/PyMuPDF vector-preserving `/compress-pdf` first!
+    let backendBytes = null;
+    try {
+      const fd = new FormData();
+      fd.append('file', new Blob([state.pdfBytes], { type: 'application/pdf' }), state.fileName);
+      fd.append('quality', mode === 'strong' ? 'screen' : 'ebook');
+      fd.append('target_kb', mode === 'target' ? String(Math.max(15, Math.round(targetBytes / 1024))) : '0');
+      const res = await studioApiFetch('/compress-pdf', {
+        method: 'POST',
+        body: fd,
+        timeoutMs: 65000,
+        maxRetries: 1,
+        onStatus: (s) => { els.loadingText.textContent = s; },
+      });
+      backendBytes = new Uint8Array(await res.arrayBuffer());
+    } catch {}
+
+    // Pass 0B: lossless structural re-save
+    let losslessBytes = backendBytes;
     try {
       const doc = await PDFDocument.load(state.pdfBytes, { ignoreEncryption: true });
       clearPdfMetadataFields(doc);
-      losslessBytes = await doc.save({ useObjectStreams: true });
+      const localLossless = await doc.save({ useObjectStreams: true });
+      if (!losslessBytes || localLossless.byteLength < losslessBytes.byteLength) {
+        losslessBytes = localLossless;
+      }
     } catch {}
 
     const rasterCompressPass = async (scale, quality, gray = false) => {
@@ -3035,24 +3951,25 @@ function bindAllUiEvents() {
     }
   });
 
-  // Append images as full PDF pages
+  // Append images OR Office documents as full PDF pages
   els.appendImgPagesInput.addEventListener('change', async (e) => {
     const files = Array.from(e.target.files || []);
     e.target.value = '';
     if (!files.length || !state.pdfBytes) return;
-    showLoading(`Adding ${files.length} image page(s)…`);
+    showLoading(`Adding ${files.length} file(s) as pages…`);
     try {
       const pdf = await PDFDocument.load(await buildExportPdfBytes(), { ignoreEncryption: true });
       for (const f of files) {
-        const singleBytes = await convertSingleImageFileToPdfBytes(f);
-        const singleDoc = await PDFDocument.load(singleBytes);
-        const [cp] = await pdf.copyPages(singleDoc, [0]);
-        pdf.addPage(cp);
+        const isOff = /\.(docx?|xlsx?|pptx?|odt|ods|odp)$/i.test(f.name || '');
+        const singleBytes = isOff ? await convertOfficeFileToPdfBytes(f) : await convertSingleImageFileToPdfBytes(f);
+        const singleDoc = await PDFDocument.load(singleBytes, { ignoreEncryption: true });
+        const idxs = Array.from({ length: singleDoc.getPageCount() }, (_, i) => i);
+        (await pdf.copyPages(singleDoc, idxs)).forEach((cp) => pdf.addPage(cp));
       }
-      await applyAndReloadBytes(await pdf.save(), `✓ Appended ${files.length} image page(s)!`);
+      await applyAndReloadBytes(await pdf.save(), `✓ Appended ${files.length} document/image(s)!`);
     } catch (err) {
       hideLoading();
-      showToast(`Could not append image: ${err.message}`, 'error');
+      showToast(`Could not append file: ${err.message}`, 'error');
     }
   });
 
@@ -3135,14 +4052,43 @@ function bindAllUiEvents() {
     }, 140);
   }, { passive: false });
 
-  // Annotation mode buttons & subbar (also updates selected annotation live!)
+  // Annotation & Inline PDF Edit style controls (updates active inline edit OR selected annotation live!)
   const updateSelectedAnnotationStyle = () => {
+    // 1. Update active inline PDF text edit if one is focused/selected
+    if (state.toolMode === 'edit-text' && state.activeInlineLineId) {
+      const pNum = state.currentPage;
+      const segs = state.pageEditableLines.get(pNum) || [];
+      const seg = segs.find((s) => s.id === state.activeInlineLineId);
+      if (seg) {
+        if (!state.textEdits[pNum]) state.textEdits[pNum] = {};
+        if (!state.textEdits[pNum][seg.id]) {
+          pushUndoSnapshot();
+          state.textEdits[pNum][seg.id] = { ...seg, newText: seg.origText, deleted: false };
+        }
+        const ed = state.textEdits[pNum][seg.id];
+        ed.color = state.annotColor;
+        ed.fontSize = Math.max(6, Number(state.annotSize) || 12);
+        ed.family = state.annotFontFamily || 'sans';
+        ed.bold = Boolean(state.annotBold);
+        ed.italic = Boolean(state.annotItalic);
+        markDirty(true);
+        void renderInlineEditLayer(pNum);
+        return;
+      }
+    }
+
+    // 2. Otherwise update selected overlay annotation
     if (!state.selectedAnnotId) return;
     for (const [pKey, list] of Object.entries(state.annotations)) {
       const found = (list || []).find((a) => a.id === state.selectedAnnotId);
       if (found) {
         if (['highlight', 'text', 'draw'].includes(found.type)) found.color = state.annotColor;
-        if (found.type === 'text') found.fontSize = Math.max(8, Number(state.annotSize) || 14);
+        if (found.type === 'text') {
+          found.fontSize = Math.max(8, Number(state.annotSize) || 14);
+          found.family = state.annotFontFamily || 'sans';
+          found.bold = Boolean(state.annotBold);
+          found.italic = Boolean(state.annotItalic);
+        }
         if (found.type === 'draw') found.strokeWidth = Math.max(1.5, Number(state.annotSize) || 3);
         markDirty(true);
         renderPageAnnotationOverlay(Number(pKey));
@@ -3152,6 +4098,20 @@ function bindAllUiEvents() {
   };
   document.querySelectorAll('.mode-btn').forEach((btn) => {
     btn.addEventListener('click', () => setToolMode(btn.dataset.mode));
+  });
+  $('annot-font-family')?.addEventListener('change', (e) => {
+    state.annotFontFamily = e.target.value;
+    updateSelectedAnnotationStyle();
+  });
+  $('btn-fmt-bold')?.addEventListener('click', (e) => {
+    state.annotBold = !state.annotBold;
+    e.currentTarget.classList.toggle('active', state.annotBold);
+    updateSelectedAnnotationStyle();
+  });
+  $('btn-fmt-italic')?.addEventListener('click', (e) => {
+    state.annotItalic = !state.annotItalic;
+    e.currentTarget.classList.toggle('active', state.annotItalic);
+    updateSelectedAnnotationStyle();
   });
   $('annot-colors').querySelectorAll('.swatch').forEach((sw) => {
     sw.addEventListener('click', () => {
@@ -3205,9 +4165,9 @@ function bindAllUiEvents() {
     }
   });
 
-  // Theme cycle (Light -> Dark -> Sepia -> Night Invert PDF), remembered across sessions
+  // Theme cycle (Pearl Light -> Dark Aurora -> Sepia -> Night Invert PDF), remembered across sessions
   const themes = ['light', 'dark', 'sepia', 'night-invert'];
-  const themeLabels = { light: 'Light', dark: 'Dark', sepia: 'Sepia', 'night-invert': 'Night' };
+  const themeLabels = { light: 'Pearl', dark: 'Dark', sepia: 'Sepia', 'night-invert': 'Night' };
   const applyTheme = (t) => {
     state.theme = themes.includes(t) ? t : 'light';
     document.body.dataset.theme = state.theme;
@@ -3223,10 +4183,43 @@ function bindAllUiEvents() {
     showToast(`Switched to ${themeLabels[next]} theme`);
   });
 
-  // Search bar
+  // Backend Engine Pill (view status or set custom dev/cloud backend URL)
+  $('btn-engine-status')?.addEventListener('click', async () => {
+    const cur = getCustomApiUrl();
+    const active = state.activeBackendUrl || 'Local Browser Engine';
+    const next = window.prompt(
+      `Active Engine: ${active}\n\nOptional: Enter custom FastAPI backend URL (e.g. http://localhost:8000 or https://pmsbacknew.onrender.com), or leave empty for automatic discovery:`,
+      cur
+    );
+    if (next === null) return;
+    try {
+      if (next.trim()) localStorage.setItem('pms_ext_backend_url', next.trim().replace(/\/+$/, ''));
+      else localStorage.removeItem('pms_ext_backend_url');
+    } catch {}
+    API_NODE_HEALTH.clear();
+    updateEngineBadge('', 'Checking…');
+    const found = await probeBackendNodes();
+    showToast(found ? `✓ Connected to ${found}` : 'Using built-in Local Studio Engine');
+  });
+
+  // Search & Replace bar
   $('btn-find-toggle').addEventListener('click', () => {
     els.findBar.hidden = !els.findBar.hidden;
     if (!els.findBar.hidden) els.findInput.focus();
+  });
+  $('btn-toggle-replace')?.addEventListener('click', () => {
+    const row = $('find-replace-row');
+    if (!row) return;
+    row.hidden = !row.hidden;
+    if (!row.hidden) $('replace-input')?.focus();
+  });
+  $('btn-replace-all')?.addEventListener('click', async () => {
+    const f = els.findInput.value;
+    const r = $('replace-input')?.value ?? '';
+    await runSearchAndReplaceInViewer(f, r);
+  });
+  $('replace-input')?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') $('btn-replace-all')?.click();
   });
   $('btn-find-close').addEventListener('click', () => {
     els.findBar.hidden = true;
@@ -3351,8 +4344,16 @@ function bindAllUiEvents() {
       }
       return;
     }
+    if (mod && e.key.toLowerCase() === 'h') {
+      e.preventDefault();
+      els.findBar.hidden = false;
+      const rRow = $('find-replace-row');
+      if (rRow) rRow.hidden = false;
+      els.findInput.focus();
+      return;
+    }
     if (!mod && !inInput && !e.altKey && state.pdfBytes) {
-      const keyMap = { v: 'select', h: 'highlight', t: 'text', d: 'draw', w: 'whiteout', r: 'redact' };
+      const keyMap = { v: 'select', e: 'edit-text', h: 'highlight', t: 'text', d: 'draw', w: 'whiteout', r: 'redact' };
       const k = e.key.toLowerCase();
       if (keyMap[k]) {
         setToolMode(keyMap[k]);
@@ -3372,6 +4373,7 @@ async function bootStudioViewer() {
   renderDockTools();
   initSignatureModal();
   bindAllUiEvents();
+  void probeBackendNodes();
 
   const params = new URLSearchParams(window.location.search);
   const localId = params.get('localId');

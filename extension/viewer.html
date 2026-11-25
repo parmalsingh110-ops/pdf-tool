@@ -3,57 +3,74 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>PDF Studio Viewer — PDF Media Suite</title>
+  <title>PDF Media Suite — Studio PDF Viewer &amp; Editor</title>
   <link rel="stylesheet" href="viewer.css">
 </head>
 <body data-theme="light">
   <!-- Hidden File Inputs -->
-  <input type="file" id="open-pdf-input" accept="application/pdf,.pdf,image/*" hidden>
+  <input type="file" id="open-pdf-input" accept="application/pdf,.pdf,image/*,.doc,.docx,.xls,.xlsx,.ppt,.pptx" hidden>
   <input type="file" id="merge-pdf-input" accept="application/pdf,.pdf" multiple hidden>
   <input type="file" id="insert-img-input" accept="image/*" multiple hidden>
-  <input type="file" id="append-img-pages-input" accept="image/*" multiple hidden>
+  <input type="file" id="append-img-pages-input" accept="image/*,.doc,.docx,.xls,.xlsx,.ppt,.pptx" multiple hidden>
   <input type="file" id="sig-upload-input" accept="image/*" hidden>
 
-  <!-- ═══ TOP ACROBAT-STYLE COMMAND BAR ═══ -->
+  <!-- ═══ PEARL AURORA GLASS HEADER BAR ═══ -->
   <header class="topbar">
     <div class="topbar-left">
       <button class="tb-btn icon-only" id="btn-toggle-left" title="Toggle Pages &amp; Outline Sidebar">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/></svg>
       </button>
-      <div class="brand-chip" title="PDF Media Suite — Studio Viewer">
-        <img src="icons/icon32.png" alt="PDF Media Suite" class="brand-logo">
-        <span class="brand-badge">STUDIO</span>
+      <div class="brand-chip" title="PDF Media Suite — Pearl Aurora Studio">
+        <svg viewBox="0 0 512 512" class="brand-logo" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="PDF Media Suite Logo">
+          <defs>
+            <linearGradient id="pms-brand-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#e11d48" />
+              <stop offset="100%" stop-color="#2563eb" />
+            </linearGradient>
+          </defs>
+          <rect x="48" y="48" width="416" height="416" rx="96" fill="url(#pms-brand-gradient)" />
+          <path d="M176 160h120c58.6 0 104 37.8 104 96s-45.4 96-104 96h-48v64h-72V160Zm72 64v64h48c23.8 0 40-12.8 40-32s-16.2-32-40-32h-48Z" fill="#ffffff" />
+          <path d="M200 112h112l64 64v24H200z" fill="#ffffff" fill-opacity="0.28" />
+        </svg>
+        <div class="brand-titles">
+          <span class="brand-name">PDF Media Suite</span>
+          <span class="brand-badge">STUDIO</span>
+        </div>
       </div>
       <div class="doc-title-wrap">
         <input type="text" id="doc-filename" class="doc-filename" value="No Document Loaded" spellcheck="false" title="Click to rename output PDF">
         <span id="unsaved-dot" class="unsaved-pill" hidden>Edited</span>
       </div>
-      <button class="tb-btn subtle-btn" id="btn-open-file" title="Open a PDF or Image from computer (Ctrl+O)">
+      <button class="tb-btn subtle-btn" id="btn-open-file" title="Open PDF, Image, or Word/Excel/PPT file (Ctrl+O)">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
         <span>Open</span>
       </button>
     </div>
 
-    <!-- Center Live Annotation & Markup Pill Strip -->
+    <!-- Center Live PDF Inline Edit & Markup Pill Strip -->
     <div class="topbar-center">
-      <div class="tb-group mode-strip" role="toolbar" aria-label="Annotation tools">
-        <button class="tb-btn mode-btn active" data-mode="select" title="Select Text / Move Annotations (V)">
+      <div class="tb-group mode-strip" role="toolbar" aria-label="PDF Editing &amp; Annotation tools">
+        <button class="tb-btn mode-btn active" data-mode="select" title="Select Text / Double-Click Any Text Line to Edit (V)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 3 7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/><path d="m13 13 6 6"/></svg>
           <span>Select</span>
+        </button>
+        <button class="tb-btn mode-btn edit-hero-mode" data-mode="edit-text" title="Edit Existing PDF Text In-Place (E)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+          <span>Edit PDF</span>
+        </button>
+        <button class="tb-btn mode-btn" data-mode="text" title="Add New Text Box Anywhere (T)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/></svg>
+          <span>Add Text</span>
         </button>
         <button class="tb-btn mode-btn" data-mode="highlight" title="Highlight Area (H)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 11-6 6v3h9l3-3"/><path d="m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4"/></svg>
           <span>Highlight</span>
         </button>
-        <button class="tb-btn mode-btn" data-mode="text" title="Add Text Anywhere (T)">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/></svg>
-          <span>Text</span>
-        </button>
         <button class="tb-btn mode-btn" data-mode="draw" title="Freehand Ink Pen (D)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/><path d="M2 2l7.586 7.586"/></svg>
           <span>Draw</span>
         </button>
-        <button class="tb-btn mode-btn" data-mode="whiteout" title="Whiteout / Erase Cover (W)">
+        <button class="tb-btn mode-btn" data-mode="whiteout" title="Seamless Erase / Whiteout (W)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"/><path d="M22 21H7"/><path d="m5 11 9 9"/></svg>
           <span>Erase</span>
         </button>
@@ -81,12 +98,12 @@
       <button class="tb-btn icon-only" id="btn-redo" title="Redo (Ctrl+Y)" disabled>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 7v6h-6"/><path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3l3 2.7"/></svg>
       </button>
-      <button class="tb-btn icon-only" id="btn-find-toggle" title="Find in Document (Ctrl+F)">
+      <button class="tb-btn icon-only" id="btn-find-toggle" title="Find &amp; Replace in Document (Ctrl+F / Ctrl+H)">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
       </button>
-      <button class="tb-btn theme-btn" id="btn-theme-cycle" title="Switch Theme (Light / Dark / Sepia / Night)">
+      <button class="tb-btn theme-btn" id="btn-theme-cycle" title="Switch Theme (Light Pearl / Dark Aurora / Sepia / Night)">
         <svg id="theme-icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>
-        <span id="theme-btn-label">Light</span>
+        <span id="theme-btn-label">Pearl</span>
       </button>
       <button class="tb-btn" id="btn-print" title="Print PDF with all edits (Ctrl+P)">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
@@ -103,45 +120,66 @@
     </div>
   </header>
 
-  <!-- ═══ CONTEXTUAL ANNOTATION STYLE SUB-BAR ═══ -->
+  <!-- ═══ CONTEXTUAL INLINE EDIT & ANNOTATION STYLE SUB-BAR ═══ -->
   <div class="annot-subbar" id="annot-subbar" hidden>
-    <span class="subbar-label" id="subbar-mode-label">Highlight</span>
-    <div class="color-swatches" id="annot-colors">
-      <button class="swatch active" data-color="#facc15" style="background:#facc15" title="Yellow"></button>
-      <button class="swatch" data-color="#ef4444" style="background:#ef4444" title="Red"></button>
-      <button class="swatch" data-color="#22c55e" style="background:#22c55e" title="Green"></button>
-      <button class="swatch" data-color="#2563eb" style="background:#2563eb" title="Blue"></button>
-      <button class="swatch" data-color="#111827" style="background:#111827" title="Black"></button>
-      <button class="swatch" data-color="#7c3aed" style="background:#7c3aed" title="Purple"></button>
-      <input type="color" id="annot-custom-color" value="#ef4444" title="Custom Color">
+    <span class="subbar-label" id="subbar-mode-label">Edit PDF Text</span>
+
+    <!-- Typography Controls (shown in Edit PDF & Add Text modes) -->
+    <div class="typo-controls" id="subbar-typo-wrap" hidden>
+      <select id="annot-font-family" class="subbar-select" title="Font style">
+        <option value="sans">Sans (Helvetica)</option>
+        <option value="serif">Serif (Times)</option>
+        <option value="mono">Mono (Courier)</option>
+      </select>
+      <button class="tb-btn sm icon-only" id="btn-fmt-bold" title="Bold (Ctrl+B)"><strong>B</strong></button>
+      <button class="tb-btn sm icon-only" id="btn-fmt-italic" title="Italic (Ctrl+I)"><em>I</em></button>
     </div>
+
+    <div class="color-swatches" id="annot-colors">
+      <button class="swatch active" data-color="#17172f" style="background:#17172f" title="Ink Black"></button>
+      <button class="swatch" data-color="#e11d48" style="background:#e11d48" title="Rose Red"></button>
+      <button class="swatch" data-color="#0284c7" style="background:#0284c7" title="Ocean Blue"></button>
+      <button class="swatch" data-color="#059669" style="background:#059669" title="Emerald"></button>
+      <button class="swatch" data-color="#7c3aed" style="background:#7c3aed" title="Violet"></button>
+      <button class="swatch" data-color="#facc15" style="background:#facc15" title="Yellow Highlight"></button>
+      <input type="color" id="annot-custom-color" value="#e11d48" title="Custom Color">
+    </div>
+
     <label class="subbar-field" id="subbar-size-wrap">
       <span>Size</span>
-      <input type="range" id="annot-size" min="2" max="42" value="14">
-      <span id="annot-size-val">14</span>
+      <input type="range" id="annot-size" min="6" max="48" value="12">
+      <span id="annot-size-val">12</span>
     </label>
-    <span class="subbar-hint" id="subbar-hint">Click or drag directly on any PDF page</span>
-    <button class="tb-btn sm apply-bake-btn" id="btn-bake-annotations" title="Flatten active annotations into PDF bytes">✓ Apply to PDF</button>
+
+    <span class="subbar-hint" id="subbar-hint">Click any text line on the PDF to edit it directly</span>
+    <button class="tb-btn sm apply-bake-btn" id="btn-bake-annotations" title="Permanently commit edits into PDF">✓ Apply Changes</button>
     <button class="tb-btn sm ghost" id="btn-done-mode">Done (Esc)</button>
   </div>
 
-  <!-- ═══ FLOATING SEARCH BAR (Ctrl+F) ═══ -->
+  <!-- ═══ FLOATING SEARCH & REPLACE BAR (Ctrl+F / Ctrl+H) ═══ -->
   <div class="find-bar" id="find-bar" hidden>
-    <svg class="find-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-    <input type="text" id="find-input" placeholder="Find text in PDF…" autocomplete="off">
-    <span class="find-status" id="find-status">0 / 0</span>
-    <button class="tb-btn sm icon-only" id="btn-find-prev" title="Previous Match (Shift+Enter)">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="18 15 12 9 6 15"/></svg>
-    </button>
-    <button class="tb-btn sm icon-only" id="btn-find-next" title="Next Match (Enter)">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="6 9 12 15 18 9"/></svg>
-    </button>
-    <button class="tb-btn sm icon-only" id="btn-find-close" title="Close (Esc)">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-    </button>
+    <div class="find-row">
+      <svg class="find-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input type="text" id="find-input" placeholder="Find text in PDF…" autocomplete="off">
+      <span class="find-status" id="find-status">0 / 0</span>
+      <button class="tb-btn sm icon-only" id="btn-find-prev" title="Previous Match (Shift+Enter)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="18 15 12 9 6 15"/></svg>
+      </button>
+      <button class="tb-btn sm icon-only" id="btn-find-next" title="Next Match (Enter)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
+      <button class="tb-btn sm ghost" id="btn-toggle-replace" title="Toggle Replace Row (Ctrl+H)">Replace</button>
+      <button class="tb-btn sm icon-only" id="btn-find-close" title="Close (Esc)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="find-row replace-row" id="find-replace-row" hidden>
+      <input type="text" id="replace-input" placeholder="Replace with…" autocomplete="off">
+      <button class="tb-btn sm apply-bake-btn" id="btn-replace-all">Replace All</button>
+    </div>
   </div>
 
-  <!-- ═══ MAIN 3-PANE STUDIO WORKSPACE ═══ -->
+  <!-- ═══ MAIN 3-PANE PEARL AURORA STUDIO WORKSPACE ═══ -->
   <div class="workspace">
 
     <!-- LEFT SIDEBAR: THUMBNAILS, OUTLINE & INFO -->
@@ -183,22 +221,33 @@
       </div>
     </aside>
 
-    <!-- CENTER VIEWPORT: PDF PAGES + FLOATING ACROBAT CONTROL PILL -->
+    <!-- CENTER VIEWPORT: PEARL AURORA PAPER GRID + FLOATING HUD -->
     <div class="stage-column">
-      <main class="pdf-viewport" id="pdf-viewport">
+      <main class="pdf-viewport pms-paper-grid" id="pdf-viewport">
         <!-- Empty / Welcome Dropzone State -->
         <div class="empty-state" id="empty-state">
           <div class="empty-drop-card" id="empty-drop-card">
-            <img src="icons/icon128.png" alt="PDF Media Suite" class="empty-logo">
+            <span class="empty-pill">PEARL AURORA WORKSPACE · ZERO WATERMARKS</span>
+            <svg viewBox="0 0 512 512" class="empty-logo" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <defs>
+                <linearGradient id="pms-hero-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stop-color="#e11d48" />
+                  <stop offset="100%" stop-color="#2563eb" />
+                </linearGradient>
+              </defs>
+              <rect x="48" y="48" width="416" height="416" rx="96" fill="url(#pms-hero-grad)" />
+              <path d="M176 160h120c58.6 0 104 37.8 104 96s-45.4 96-104 96h-48v64h-72V160Zm72 64v64h48c23.8 0 40-12.8 40-32s-16.2-32-40-32h-48Z" fill="#ffffff" />
+              <path d="M200 112h112l64 64v24H200z" fill="#ffffff" fill-opacity="0.28" />
+            </svg>
             <h1>PDF Media Suite — Studio Viewer &amp; Editor</h1>
-            <p>Open, Read, Print, Edit, Sign, Compress, Merge, Split, Redact &amp; Convert PDFs <strong>100% right inside Chrome</strong> — powered by Mozilla PDF.js &amp; pdf-lib.</p>
+            <p>View, Print, <strong>Edit Existing PDF Text In-Place</strong>, Sign, Compress to Exact KB, Merge, Split, OCR &amp; Convert to Word/Excel/PPT right inside Chrome.</p>
             <div class="empty-cta-row">
               <button class="hero-open-btn" id="btn-hero-open">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-                <span>Choose PDF or Image File</span>
+                <span>Choose PDF, Image, or Office File</span>
               </button>
             </div>
-            <span class="empty-hint">or drag &amp; drop any <strong>.pdf, .jpg, .png, .webp</strong> anywhere in this window</span>
+            <span class="empty-hint">or drag &amp; drop any <strong>.pdf, .jpg, .png, .docx, .xlsx, .pptx</strong> anywhere here</span>
             <div id="file-url-tip" class="file-url-tip" hidden>
               <strong>Opening a local <code>file:///</code> PDF?</strong>
               <span>Either drop the file above, or enable <em>"Allow access to file URLs"</em> in <code>chrome://extensions</code> so local PDFs open automatically!</span>
@@ -211,7 +260,7 @@
         <div class="pages-stage" id="pages-stage"></div>
       </main>
 
-      <!-- Floating Acrobat-Style Page & Zoom Bar -->
+      <!-- Floating Pearl Aurora Page & Zoom HUD -->
       <div class="floating-hud" id="floating-hud">
         <div class="hud-group">
           <button class="hud-btn" id="btn-prev-page" title="Previous Page (↑)">
@@ -271,19 +320,23 @@
       </div>
     </div>
 
-    <!-- RIGHT SIDEBAR: ACROBAT-STYLE IN-VIEWER STUDIO TOOLS DOCK -->
+    <!-- RIGHT SIDEBAR: PEARL AURORA STUDIO TOOLS DOCK -->
     <aside class="right-dock" id="right-dock">
       <div class="dock-header">
-        <div>
-          <h2 class="dock-title">All PDF Tools</h2>
-          <p class="dock-sub">Instant in-viewer actions — no redirect</p>
+        <div class="dock-header-top">
+          <h2 class="dock-title">Studio PDF Tools</h2>
+          <button class="engine-pill" id="btn-engine-status" title="Click to view or configure HD Backend Engine URL">
+            <span class="engine-dot" id="engine-dot"></span>
+            <span id="engine-label">Checking…</span>
+          </button>
         </div>
+        <p class="dock-sub">Edit, optimize &amp; convert right inside this viewer</p>
       </div>
 
       <!-- Search Tools inside Viewer -->
       <div class="dock-search-wrap">
         <svg class="dock-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-        <input type="text" id="dock-search" placeholder="Search tools (compress, merge, sign, word…)" autocomplete="off">
+        <input type="text" id="dock-search" placeholder="Search tools (edit, replace, word, ocr, kb…)" autocomplete="off">
       </div>
 
       <!-- Tool List View -->
@@ -330,9 +383,9 @@
         <div class="sig-controls">
           <div class="sig-ink-colors">
             <span>Ink:</span>
-            <button class="swatch active" data-sigcolor="#0f172a" style="background:#0f172a" title="Black Ink"></button>
+            <button class="swatch active" data-sigcolor="#17172f" style="background:#17172f" title="Black Ink"></button>
             <button class="swatch" data-sigcolor="#1d4ed8" style="background:#1d4ed8" title="Blue Ballpoint Ink"></button>
-            <button class="swatch" data-sigcolor="#dc2626" style="background:#dc2626" title="Red Official Ink"></button>
+            <button class="swatch" data-sigcolor="#e11d48" style="background:#e11d48" title="Crimson Official Ink"></button>
           </div>
           <button class="tb-btn sm ghost" id="btn-clear-sig-pad">Clear Pad</button>
         </div>
@@ -348,10 +401,10 @@
       <div class="sig-pane" id="sig-pane-stamp" hidden>
         <div class="stamp-grid" id="stamp-grid">
           <button class="stamp-chip active" data-stamp="SELF-ATTESTED" data-scolor="#1d4ed8">SELF-ATTESTED + Date</button>
-          <button class="stamp-chip" data-stamp="APPROVED" data-scolor="#15803d">APPROVED</button>
-          <button class="stamp-chip" data-stamp="VERIFIED" data-scolor="#0369a1">VERIFIED</button>
-          <button class="stamp-chip" data-stamp="CONFIDENTIAL" data-scolor="#dc2626">CONFIDENTIAL</button>
-          <button class="stamp-chip" data-stamp="PAID" data-scolor="#15803d">PAID</button>
+          <button class="stamp-chip" data-stamp="APPROVED" data-scolor="#059669">APPROVED</button>
+          <button class="stamp-chip" data-stamp="VERIFIED" data-scolor="#0284c7">VERIFIED</button>
+          <button class="stamp-chip" data-stamp="CONFIDENTIAL" data-scolor="#e11d48">CONFIDENTIAL</button>
+          <button class="stamp-chip" data-stamp="PAID" data-scolor="#059669">PAID</button>
           <button class="stamp-chip" data-stamp="ORIGINAL" data-scolor="#7c3aed">TRUE COPY / ORIGINAL</button>
         </div>
         <label class="drawer-field" style="margin-top:10px;">
@@ -406,7 +459,7 @@
       <div class="modal-head">
         <h3>Password-Protected PDF</h3>
       </div>
-      <p class="modal-desc" id="password-modal-msg">This PDF is encrypted. Enter its password to open and unlock it locally.</p>
+      <p class="modal-desc" id="password-modal-msg">This PDF is encrypted. Enter its password to unlock it losslessly.</p>
       <input type="password" id="pdf-password-input" class="drawer-input" placeholder="Enter PDF password…">
       <div class="modal-foot" style="justify-content:flex-end;">
         <button class="tb-btn ghost" id="btn-cancel-password">Cancel</button>

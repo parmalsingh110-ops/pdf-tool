@@ -137,10 +137,11 @@ except Exception:
 # Disable /docs and /redoc in production (set ENABLE_DOCS=true to re-enable)
 ENABLE_DOCS: bool = os.environ.get("ENABLE_DOCS", "false").lower() == "true"
 
-# CORS: comma-separated list of allowed origins + regex for Render / LAN mobile testing
+# CORS: comma-separated list of allowed origins + regex for Render / LAN mobile testing / Official Browser Extensions
 _CORS_ORIGIN_REGEX_STR = (
     r"^https:\/\/([a-zA-Z0-9-]+\.)*(pdfmediasuite\.in|onrender\.com)$"
     r"|^http:\/\/(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)(:\d+)?$"
+    r"|^(chrome-extension|moz-extension):\/\/[a-zA-Z0-9_-]+$"
 )
 _CORS_ORIGIN_REGEX = re.compile(_CORS_ORIGIN_REGEX_STR)
 

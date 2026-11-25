@@ -2,37 +2,39 @@
 /* Features: PDF banner, recent panel, skeleton loader, animations, dark mode */
 
 :root {
-  --bg-primary: #ffffff;
-  --bg-secondary: #f8fafc;
-  --bg-hover: #f1f5f9;
-  --bg-active: #fef2f2;
-  --text-primary: #0f172a;
-  --text-secondary: #64748b;
-  --text-muted: #94a3b8;
-  --border-color: #e2e8f0;
-  --brand-red: #ef4444;
-  --brand-red-hover: #dc2626;
-  --brand-red-light: rgba(239, 68, 68, 0.1);
-  --accent-blue: #3b82f6;
-  --success-green: #22c55e;
-  --shadow-sm: 0 1px 3px rgba(0,0,0,0.08);
-  --shadow-md: 0 4px 12px rgba(0,0,0,0.12);
-  --radius: 10px;
-  --transition: 0.15s ease;
+  --bg-primary: #FAF9FF;
+  --bg-secondary: #FFFFFF;
+  --bg-hover: #F4F1FF;
+  --bg-active: #FFE4ED;
+  --text-primary: #17172F;
+  --text-secondary: #5B647A;
+  --text-muted: #7A8299;
+  --border-color: #E7E3F1;
+  --brand-red: #E11D48;
+  --brand-red-hover: #BE123C;
+  --brand-red-light: #FFE4ED;
+  --accent-blue: #0284C7;
+  --accent-violet: #7C3AED;
+  --success-green: #059669;
+  --shadow-sm: 0 2px 10px -2px rgba(23, 23, 47, 0.06), 0 1px 3px 0 rgba(124, 58, 237, 0.04);
+  --shadow-md: 0 10px 28px -10px rgba(23, 23, 47, 0.12), 0 2px 8px -2px rgba(124, 58, 237, 0.06);
+  --radius: 12px;
+  --transition: 0.16s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg-primary: #1c1c20;
-    --bg-secondary: #25252b;
-    --bg-hover: #303038;
-    --bg-active: #2a181c;
-    --text-primary: #f4f4f6;
-    --text-secondary: #b4b4be;
-    --text-muted: #7e7e8a;
-    --border-color: #32323c;
-    --shadow-sm: 0 1px 3px rgba(0,0,0,0.32);
-    --shadow-md: 0 4px 14px rgba(0,0,0,0.44);
+    --bg-primary: #0A0A14;
+    --bg-secondary: #131326;
+    --bg-hover: #1A1A34;
+    --bg-active: rgba(244, 63, 94, 0.17);
+    --text-primary: #F6F4FF;
+    --text-secondary: #B0B7CF;
+    --text-muted: #848CA8;
+    --border-color: rgba(167, 174, 198, 0.16);
+    --brand-red-light: rgba(244, 63, 94, 0.18);
+    --shadow-sm: 0 2px 10px -2px rgba(0, 0, 0, 0.42);
+    --shadow-md: 0 14px 34px -12px rgba(0, 0, 0, 0.56);
   }
 }
 
