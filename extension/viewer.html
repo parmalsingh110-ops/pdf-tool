@@ -6,7 +6,7 @@
   <title>PDF Studio Viewer — PDF Media Suite</title>
   <link rel="stylesheet" href="viewer.css">
 </head>
-<body data-theme="dark">
+<body data-theme="light">
   <!-- Hidden File Inputs -->
   <input type="file" id="open-pdf-input" accept="application/pdf,.pdf,image/*" hidden>
   <input type="file" id="merge-pdf-input" accept="application/pdf,.pdf" multiple hidden>
@@ -17,131 +17,128 @@
   <!-- ═══ TOP ACROBAT-STYLE COMMAND BAR ═══ -->
   <header class="topbar">
     <div class="topbar-left">
-      <button class="tb-btn icon-only" id="btn-toggle-left" title="Toggle Pages & Outline Sidebar">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/></svg>
+      <button class="tb-btn icon-only" id="btn-toggle-left" title="Toggle Pages &amp; Outline Sidebar">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/></svg>
       </button>
-      <div class="brand-chip">
+      <div class="brand-chip" title="PDF Media Suite — Studio Viewer">
         <img src="icons/icon32.png" alt="PDF Media Suite" class="brand-logo">
         <span class="brand-badge">STUDIO</span>
       </div>
       <div class="doc-title-wrap">
         <input type="text" id="doc-filename" class="doc-filename" value="No Document Loaded" spellcheck="false" title="Click to rename output PDF">
-        <span id="unsaved-dot" class="unsaved-pill" hidden>● Edited</span>
+        <span id="unsaved-dot" class="unsaved-pill" hidden>Edited</span>
       </div>
-      <button class="tb-btn" id="btn-open-file" title="Open a PDF or Image from computer (Ctrl+O)">
-        📂 <span>Open</span>
+      <button class="tb-btn subtle-btn" id="btn-open-file" title="Open a PDF or Image from computer (Ctrl+O)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+        <span>Open</span>
       </button>
     </div>
 
-    <!-- Page Navigation + Zoom -->
+    <!-- Center Live Annotation & Markup Pill Strip -->
     <div class="topbar-center">
-      <div class="tb-group">
-        <button class="tb-btn icon-only" id="btn-prev-page" title="Previous Page (↑)">◀</button>
-        <div class="page-jump">
-          <input type="number" id="page-num-input" min="1" value="1" aria-label="Page number">
-          <span>/</span>
-          <span id="page-count-label">0</span>
-        </div>
-        <button class="tb-btn icon-only" id="btn-next-page" title="Next Page (↓)">▶</button>
-      </div>
-
-      <div class="tb-divider"></div>
-
-      <div class="tb-group">
-        <button class="tb-btn icon-only" id="btn-zoom-out" title="Zoom Out (Ctrl+-)">−</button>
-        <select id="zoom-select" class="tb-select" aria-label="Zoom level">
-          <option value="fit-width">Fit Width</option>
-          <option value="fit-page">Fit Page</option>
-          <option value="0.5">50%</option>
-          <option value="0.75">75%</option>
-          <option value="1" selected>100%</option>
-          <option value="1.25">125%</option>
-          <option value="1.5">150%</option>
-          <option value="2">200%</option>
-          <option value="3">300%</option>
-        </select>
-        <button class="tb-btn icon-only" id="btn-zoom-in" title="Zoom In (Ctrl++)">+</button>
-      </div>
-
-      <div class="tb-divider"></div>
-
-      <!-- Live Annotation & Markup Mode Bar -->
       <div class="tb-group mode-strip" role="toolbar" aria-label="Annotation tools">
         <button class="tb-btn mode-btn active" data-mode="select" title="Select Text / Move Annotations (V)">
-          🖱️ <span>Select</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 3 7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/><path d="m13 13 6 6"/></svg>
+          <span>Select</span>
         </button>
         <button class="tb-btn mode-btn" data-mode="highlight" title="Highlight Area (H)">
-          🖍️ <span>Highlight</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 11-6 6v3h9l3-3"/><path d="m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4"/></svg>
+          <span>Highlight</span>
         </button>
         <button class="tb-btn mode-btn" data-mode="text" title="Add Text Anywhere (T)">
-          ✏️ <span>Text</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/></svg>
+          <span>Text</span>
         </button>
         <button class="tb-btn mode-btn" data-mode="draw" title="Freehand Ink Pen (D)">
-          🖊️ <span>Draw</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/><path d="M2 2l7.586 7.586"/></svg>
+          <span>Draw</span>
         </button>
         <button class="tb-btn mode-btn" data-mode="whiteout" title="Whiteout / Erase Cover (W)">
-          ⬜ <span>Erase</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"/><path d="M22 21H7"/><path d="m5 11 9 9"/></svg>
+          <span>Erase</span>
         </button>
-        <button class="tb-btn mode-btn" data-mode="redact" title="Blackout Redact Sensitive Info (R)">
-          ⬛ <span>Redact</span>
+        <button class="tb-btn mode-btn" data-mode="redact" title="Permanent Blackout Redact (R)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="3" y1="14" x2="21" y2="14"/></svg>
+          <span>Redact</span>
         </button>
-        <button class="tb-btn" id="btn-open-sign-modal" title="Add Handwritten Signature or Official Stamp (S)">
-          ✍️ <span>Sign</span>
+        <div class="strip-sep"></div>
+        <button class="tb-btn strip-action" id="btn-open-sign-modal" title="Add Handwritten Signature or Official Stamp (S)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 19.5v.5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8.5L18 5.5"/><path d="M8 18h1"/><path d="M18.4 9.6a2 2 0 1 1 3 3L17 17l-4 1 1-4Z"/></svg>
+          <span>Sign</span>
         </button>
-        <button class="tb-btn" id="btn-insert-image" title="Place Image / Photo / Stamp on Page">
-          🖼️ <span>Image</span>
+        <button class="tb-btn strip-action" id="btn-insert-image" title="Place Image / Photo / Stamp on Page">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+          <span>Image</span>
         </button>
       </div>
     </div>
 
     <!-- Right Primary Actions -->
     <div class="topbar-right">
-      <button class="tb-btn icon-only" id="btn-undo" title="Undo Last Edit (Ctrl+Z)" disabled>↶</button>
-      <button class="tb-btn icon-only" id="btn-redo" title="Redo (Ctrl+Y)" disabled>↷</button>
-      <button class="tb-btn icon-only" id="btn-rotate-quick" title="Rotate Current Page 90°">🔄</button>
-      <button class="tb-btn icon-only" id="btn-find-toggle" title="Find in Document (Ctrl+F)">🔍</button>
-      <button class="tb-btn icon-only" id="btn-theme-cycle" title="Switch Reading Theme (Dark / Light / Sepia)">🌓</button>
-      <button class="tb-btn" id="btn-print" title="Print PDF with all edits (Ctrl+P)">
-        🖨️ <span>Print</span>
+      <button class="tb-btn icon-only" id="btn-undo" title="Undo Last Edit (Ctrl+Z)" disabled>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/></svg>
       </button>
-      <button class="tb-btn primary-save" id="btn-save-pdf" title="Save & Download Edited PDF (Ctrl+S)">
-        💾 <span>Save PDF</span>
+      <button class="tb-btn icon-only" id="btn-redo" title="Redo (Ctrl+Y)" disabled>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 7v6h-6"/><path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3l3 2.7"/></svg>
+      </button>
+      <button class="tb-btn icon-only" id="btn-find-toggle" title="Find in Document (Ctrl+F)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      </button>
+      <button class="tb-btn theme-btn" id="btn-theme-cycle" title="Switch Theme (Light / Dark / Sepia / Night)">
+        <svg id="theme-icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>
+        <span id="theme-btn-label">Light</span>
+      </button>
+      <button class="tb-btn" id="btn-print" title="Print PDF with all edits (Ctrl+P)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+        <span>Print</span>
+      </button>
+      <button class="tb-btn primary-save" id="btn-save-pdf" title="Save &amp; Download Edited PDF (Ctrl+S)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        <span>Save PDF</span>
       </button>
       <button class="tb-btn accent-tools active" id="btn-toggle-right" title="Toggle All PDF Studio Tools">
-        🧰 <span>Tools</span>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/></svg>
+        <span>Tools</span>
       </button>
     </div>
   </header>
 
   <!-- ═══ CONTEXTUAL ANNOTATION STYLE SUB-BAR ═══ -->
   <div class="annot-subbar" id="annot-subbar" hidden>
-    <span class="subbar-label" id="subbar-mode-label">Highlight Tool</span>
+    <span class="subbar-label" id="subbar-mode-label">Highlight</span>
     <div class="color-swatches" id="annot-colors">
       <button class="swatch active" data-color="#facc15" style="background:#facc15" title="Yellow"></button>
       <button class="swatch" data-color="#ef4444" style="background:#ef4444" title="Red"></button>
       <button class="swatch" data-color="#22c55e" style="background:#22c55e" title="Green"></button>
-      <button class="swatch" data-color="#3b82f6" style="background:#3b82f6" title="Blue"></button>
+      <button class="swatch" data-color="#2563eb" style="background:#2563eb" title="Blue"></button>
       <button class="swatch" data-color="#111827" style="background:#111827" title="Black"></button>
       <button class="swatch" data-color="#7c3aed" style="background:#7c3aed" title="Purple"></button>
       <input type="color" id="annot-custom-color" value="#ef4444" title="Custom Color">
     </div>
-    <label class="subbar-field">
+    <label class="subbar-field" id="subbar-size-wrap">
       <span>Size</span>
       <input type="range" id="annot-size" min="2" max="42" value="14">
       <span id="annot-size-val">14</span>
     </label>
     <span class="subbar-hint" id="subbar-hint">Click or drag directly on any PDF page</span>
-    <button class="tb-btn sm" id="btn-bake-annotations" title="Flatten active annotations into PDF bytes">✓ Apply to PDF</button>
+    <button class="tb-btn sm apply-bake-btn" id="btn-bake-annotations" title="Flatten active annotations into PDF bytes">✓ Apply to PDF</button>
     <button class="tb-btn sm ghost" id="btn-done-mode">Done (Esc)</button>
   </div>
 
   <!-- ═══ FLOATING SEARCH BAR (Ctrl+F) ═══ -->
   <div class="find-bar" id="find-bar" hidden>
+    <svg class="find-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
     <input type="text" id="find-input" placeholder="Find text in PDF…" autocomplete="off">
     <span class="find-status" id="find-status">0 / 0</span>
-    <button class="tb-btn sm icon-only" id="btn-find-prev" title="Previous Match (Shift+Enter)">▲</button>
-    <button class="tb-btn sm icon-only" id="btn-find-next" title="Next Match (Enter)">▼</button>
-    <button class="tb-btn sm icon-only" id="btn-find-close" title="Close (Esc)">✕</button>
+    <button class="tb-btn sm icon-only" id="btn-find-prev" title="Previous Match (Shift+Enter)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="18 15 12 9 6 15"/></svg>
+    </button>
+    <button class="tb-btn sm icon-only" id="btn-find-next" title="Next Match (Enter)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="6 9 12 15 18 9"/></svg>
+    </button>
+    <button class="tb-btn sm icon-only" id="btn-find-close" title="Close (Esc)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+    </button>
   </div>
 
   <!-- ═══ MAIN 3-PANE STUDIO WORKSPACE ═══ -->
@@ -150,9 +147,18 @@
     <!-- LEFT SIDEBAR: THUMBNAILS, OUTLINE & INFO -->
     <aside class="left-sidebar" id="left-sidebar">
       <div class="sidebar-tabs">
-        <button class="side-tab active" data-ltab="thumbs">🖼️ Pages</button>
-        <button class="side-tab" data-ltab="outline">📑 Outline</button>
-        <button class="side-tab" data-ltab="info">ℹ️ Info</button>
+        <button class="side-tab active" data-ltab="thumbs">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="3" width="16" height="18" rx="2"/><line x1="8" y1="8" x2="16" y2="8"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+          <span>Pages</span>
+        </button>
+        <button class="side-tab" data-ltab="outline">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+          <span>Outline</span>
+        </button>
+        <button class="side-tab" data-ltab="info">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+          <span>Info</span>
+        </button>
       </div>
 
       <!-- Pages Thumbnail List -->
@@ -171,54 +177,113 @@
       <div class="side-pane" id="pane-info" hidden>
         <div class="info-card" id="doc-info-list"></div>
         <div class="info-actions">
-          <button class="dock-action-btn full" id="btn-scrub-metadata">🧹 Scrub Hidden Metadata</button>
-          <button class="dock-action-btn full secondary" id="btn-open-native-chrome" hidden>🌐 Open in Chrome Default Viewer</button>
+          <button class="dock-action-btn full" id="btn-scrub-metadata">Scrub Hidden Metadata</button>
+          <button class="dock-action-btn full secondary" id="btn-open-native-chrome" hidden>Open in Chrome Default Viewer</button>
         </div>
       </div>
     </aside>
 
-    <!-- CENTER VIEWPORT: PDF PAGES + EMPTY DROPZONE -->
-    <main class="pdf-viewport" id="pdf-viewport">
-      <!-- Empty / Welcome Dropzone State -->
-      <div class="empty-state" id="empty-state">
-        <div class="empty-drop-card" id="empty-drop-card">
-          <img src="icons/icon128.png" alt="PDF Media Suite" class="empty-logo">
-          <h1>PDF Media Suite — Built-in Studio Viewer</h1>
-          <p>Open, Read, Print, Edit, Sign, Compress, Merge, Split, Redact &amp; Convert PDFs <strong>100% right inside this tab</strong> — powered by open-source Mozilla PDF.js &amp; pdf-lib.</p>
-          <div class="empty-cta-row">
-            <button class="hero-open-btn" id="btn-hero-open">📂 Choose PDF or Image File</button>
+    <!-- CENTER VIEWPORT: PDF PAGES + FLOATING ACROBAT CONTROL PILL -->
+    <div class="stage-column">
+      <main class="pdf-viewport" id="pdf-viewport">
+        <!-- Empty / Welcome Dropzone State -->
+        <div class="empty-state" id="empty-state">
+          <div class="empty-drop-card" id="empty-drop-card">
+            <img src="icons/icon128.png" alt="PDF Media Suite" class="empty-logo">
+            <h1>PDF Media Suite — Studio Viewer &amp; Editor</h1>
+            <p>Open, Read, Print, Edit, Sign, Compress, Merge, Split, Redact &amp; Convert PDFs <strong>100% right inside Chrome</strong> — powered by Mozilla PDF.js &amp; pdf-lib.</p>
+            <div class="empty-cta-row">
+              <button class="hero-open-btn" id="btn-hero-open">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                <span>Choose PDF or Image File</span>
+              </button>
+            </div>
+            <span class="empty-hint">or drag &amp; drop any <strong>.pdf, .jpg, .png, .webp</strong> anywhere in this window</span>
+            <div id="file-url-tip" class="file-url-tip" hidden>
+              <strong>Opening a local <code>file:///</code> PDF?</strong>
+              <span>Either drop the file above, or enable <em>"Allow access to file URLs"</em> in <code>chrome://extensions</code> so local PDFs open automatically!</span>
+              <button class="tb-btn sm" id="btn-open-ext-settings">Open Extension Settings</button>
+            </div>
           </div>
-          <span class="empty-hint">or drag &amp; drop any <strong>.pdf, .jpg, .png, .webp</strong> anywhere in this window</span>
-          <div id="file-url-tip" class="file-url-tip" hidden>
-            <strong>Opening a local <code>file:///</code> PDF?</strong>
-            <span>Either drop the file above, or enable <em>"Allow access to file URLs"</em> in <code>chrome://extensions</code> so local PDFs open automatically!</span>
-            <button class="tb-btn sm" id="btn-open-ext-settings">⚙️ Open Extension Settings</button>
+        </div>
+
+        <!-- Rendered Pages Container -->
+        <div class="pages-stage" id="pages-stage"></div>
+      </main>
+
+      <!-- Floating Acrobat-Style Page & Zoom Bar -->
+      <div class="floating-hud" id="floating-hud">
+        <div class="hud-group">
+          <button class="hud-btn" id="btn-prev-page" title="Previous Page (↑)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="15 18 9 12 15 6"/></svg>
+          </button>
+          <div class="page-jump">
+            <input type="number" id="page-num-input" min="1" value="1" aria-label="Page number">
+            <span>/</span>
+            <span id="page-count-label">0</span>
           </div>
+          <button class="hud-btn" id="btn-next-page" title="Next Page (↓)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="9 18 15 12 9 6"/></svg>
+          </button>
+        </div>
+
+        <div class="hud-sep"></div>
+
+        <div class="hud-group">
+          <button class="hud-btn" id="btn-zoom-out" title="Zoom Out (Ctrl+-)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          </button>
+          <select id="zoom-select" class="hud-select" aria-label="Zoom level">
+            <option value="auto" selected>Auto Fit</option>
+            <option value="fit-width">Fit Width</option>
+            <option value="fit-page">Fit Page</option>
+            <option value="0.5">50%</option>
+            <option value="0.75">75%</option>
+            <option value="1">100%</option>
+            <option value="1.25">125%</option>
+            <option value="1.5">150%</option>
+            <option value="2">200%</option>
+            <option value="3">300%</option>
+          </select>
+          <button class="hud-btn" id="btn-zoom-in" title="Zoom In (Ctrl++)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          </button>
+        </div>
+
+        <div class="hud-sep"></div>
+
+        <div class="hud-group">
+          <button class="hud-btn" id="btn-two-page" title="Toggle Two-Page Spread View">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="9" height="16" rx="1.5"/><rect x="13" y="4" width="9" height="16" rx="1.5"/></svg>
+          </button>
+          <button class="hud-btn" id="btn-rotate-quick" title="Rotate Current Page 90°">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>
+          </button>
         </div>
       </div>
 
       <!-- Loading Spinner -->
       <div class="loading-overlay" id="loading-overlay" hidden>
-        <div class="spinner"></div>
-        <div class="loading-text" id="loading-text">Loading PDF…</div>
+        <div class="loading-card">
+          <div class="spinner"></div>
+          <div class="loading-text" id="loading-text">Loading PDF…</div>
+        </div>
       </div>
-
-      <!-- Rendered Pages Container -->
-      <div class="pages-stage" id="pages-stage"></div>
-    </main>
+    </div>
 
     <!-- RIGHT SIDEBAR: ACROBAT-STYLE IN-VIEWER STUDIO TOOLS DOCK -->
     <aside class="right-dock" id="right-dock">
       <div class="dock-header">
         <div>
-          <h2 class="dock-title">Studio PDF Tools</h2>
-          <p class="dock-sub">All tools work directly here — no tab redirect</p>
+          <h2 class="dock-title">All PDF Tools</h2>
+          <p class="dock-sub">Instant in-viewer actions — no redirect</p>
         </div>
       </div>
 
       <!-- Search Tools inside Viewer -->
       <div class="dock-search-wrap">
-        <input type="text" id="dock-search" placeholder="Filter tools (compress, merge, sign, word…)" autocomplete="off">
+        <svg class="dock-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input type="text" id="dock-search" placeholder="Search tools (compress, merge, sign, word…)" autocomplete="off">
       </div>
 
       <!-- Tool List View -->
@@ -226,7 +291,7 @@
         <!-- Populated by viewer.js -->
       </div>
 
-      <!-- Active Tool Inline Drawer (slides over dock when a tool is clicked) -->
+      <!-- Active Tool Inline Drawer -->
       <div class="tool-drawer" id="tool-drawer" hidden>
         <div class="drawer-header">
           <button class="tb-btn sm" id="btn-drawer-back">← All Tools</button>
@@ -237,8 +302,8 @@
 
       <!-- Auto-Intercept Preference Footer -->
       <div class="dock-footer">
-        <label class="toggle-row" title="Automatically open web & downloaded PDFs in this Studio Viewer">
-          <span>⚡ Auto-open PDFs in Studio</span>
+        <label class="toggle-row" title="Automatically open web &amp; downloaded PDFs in this Studio Viewer">
+          <span>Auto-open PDFs in Studio</span>
           <input type="checkbox" id="chk-auto-viewer" checked>
         </label>
       </div>
@@ -249,14 +314,14 @@
   <div class="modal-backdrop" id="sign-modal" hidden>
     <div class="modal-card">
       <div class="modal-head">
-        <h3>✍️ Create Signature or Official Stamp</h3>
-        <button class="tb-btn sm icon-only" id="btn-close-sign-modal">✕</button>
+        <h3>Create Signature or Official Stamp</h3>
+        <button class="tb-btn sm icon-only" id="btn-close-sign-modal" title="Close">✕</button>
       </div>
       <div class="modal-tabs">
-        <button class="m-tab active" data-stab="draw">🖊️ Draw Sign</button>
-        <button class="m-tab" data-stab="type">⌨️ Type Sign</button>
-        <button class="m-tab" data-stab="stamp">🏛️ Official Stamp</button>
-        <button class="m-tab" data-stab="upload">📤 Upload Image</button>
+        <button class="m-tab active" data-stab="draw">Draw Sign</button>
+        <button class="m-tab" data-stab="type">Type Sign</button>
+        <button class="m-tab" data-stab="stamp">Official Stamp</button>
+        <button class="m-tab" data-stab="upload">Upload Image</button>
       </div>
 
       <!-- Draw Tab -->
@@ -298,8 +363,8 @@
       <!-- Upload Tab -->
       <div class="sig-pane" id="sig-pane-upload" hidden>
         <div class="sig-upload-box" id="btn-trigger-sig-upload">
-          <span>📤 Click to pick signature photo (PNG / JPG)</span>
-          <small>Auto cleans white paper background into transparent ink!</small>
+          <strong>Click to pick signature photo (PNG / JPG)</strong>
+          <small>Auto-removes white paper background into clean transparent ink!</small>
         </div>
         <canvas id="sig-upload-preview" width="360" height="120" hidden></canvas>
       </div>
@@ -311,7 +376,7 @@
         </label>
         <div class="modal-foot-btns">
           <button class="tb-btn ghost" id="btn-cancel-sign">Cancel</button>
-          <button class="tb-btn primary-save" id="btn-place-sign">✓ Place on PDF</button>
+          <button class="tb-btn primary-save" id="btn-place-sign">Place on PDF</button>
         </div>
       </div>
     </div>
@@ -321,15 +386,15 @@
   <div class="modal-backdrop" id="text-modal" hidden>
     <div class="modal-card wide">
       <div class="modal-head">
-        <h3 id="text-modal-title">📃 Extracted PDF Text</h3>
+        <h3 id="text-modal-title">Extracted PDF Text</h3>
         <button class="tb-btn sm icon-only" id="btn-close-text-modal">✕</button>
       </div>
       <textarea id="extracted-text-area" class="extracted-textarea" readonly></textarea>
       <div class="modal-foot">
         <span id="extracted-stats" class="muted-note"></span>
         <div class="modal-foot-btns">
-          <button class="tb-btn" id="btn-copy-extracted">📋 Copy All</button>
-          <button class="tb-btn primary-save" id="btn-download-extracted">💾 Download File</button>
+          <button class="tb-btn" id="btn-copy-extracted">Copy All</button>
+          <button class="tb-btn primary-save" id="btn-download-extracted">Download File</button>
         </div>
       </div>
     </div>
@@ -339,13 +404,13 @@
   <div class="modal-backdrop" id="password-modal" hidden>
     <div class="modal-card narrow">
       <div class="modal-head">
-        <h3>🔒 Password-Protected PDF</h3>
+        <h3>Password-Protected PDF</h3>
       </div>
       <p class="modal-desc" id="password-modal-msg">This PDF is encrypted. Enter its password to open and unlock it locally.</p>
       <input type="password" id="pdf-password-input" class="drawer-input" placeholder="Enter PDF password…">
       <div class="modal-foot" style="justify-content:flex-end;">
         <button class="tb-btn ghost" id="btn-cancel-password">Cancel</button>
-        <button class="tb-btn primary-save" id="btn-submit-password">🔓 Unlock &amp; Open</button>
+        <button class="tb-btn primary-save" id="btn-submit-password">Unlock &amp; Open</button>
       </div>
     </div>
   </div>

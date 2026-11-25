@@ -9,7 +9,7 @@
 
 import * as pdfjsLib from './vendor/pdf.min.mjs';
 
-const { PDFDocument, rgb, degrees, StandardFonts } = window.PDFLib;
+const { PDFDocument, rgb, degrees, StandardFonts, BlendMode, LineCapStyle } = window.PDFLib;
 const JSZip = window.JSZip;
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = chrome.runtime.getURL('vendor/pdf.worker.min.mjs');
@@ -27,10 +27,14 @@ const state = {
   pdfDoc: null,            // Active pdfjsLib document proxy
   numPages: 0,
   currentPage: 1,
-  zoomMode: '1',           // 'fit-width' | 'fit-page' | numeric string
+  zoomMode: 'auto',        // 'auto' | 'fit-width' | 'fit-page' | numeric string
   scale: 1.15,
   twoPage: false,
-  theme: 'dark',           // 'dark' | 'light' | 'sepia' | 'night-invert'
+  theme: (() => {
+    try { return localStorage.getItem('pms_viewer_theme') || 'light'; } catch { return 'light'; }
+  })(),                    // 'light' | 'dark' | 'sepia' | 'night-invert'
+  loadingTask: null,
+  printing: false,
   toolMode: 'select',      // 'select' | 'highlight' | 'text' | 'draw' | 'whiteout' | 'redact'
   annotColor: '#facc15',
   annotSize: 14,
@@ -116,30 +120,52 @@ const els = {
   toast: $('studio-toast'),
 };
 
-// ─── 18 IN-VIEWER ACROBAT STUDIO TOOLS CATALOG ─────────────────────────────
+// ─── 19 IN-VIEWER ACROBAT STUDIO TOOLS CATALOG (CRISP VECTOR ICONS) ────────
+const TOOL_SVGS = {
+  markup: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>',
+  sign: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 19.5v.5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8.5L18 5.5"/><path d="M8 18h1"/><path d="M18.4 9.6a2 2 0 1 1 3 3L17 17l-4 1 1-4Z"/></svg>',
+  insertimg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>',
+  watermark: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/></svg>',
+  pagenums: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="9" x2="20" y2="9"/><line x1="4" y1="15" x2="20" y2="15"/><line x1="10" y1="3" x2="8" y2="21"/><line x1="16" y1="3" x2="14" y2="21"/></svg>',
+  compress: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>',
+  merge: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="2" width="13" height="16" rx="2"/><path d="M16 18v2a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h3"/></svg>',
+  split: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><line x1="20" y1="4" x2="8.12" y2="15.88"/><line x1="14.47" y1="14.48" x2="20" y2="20"/><line x1="8.12" y1="8.12" x2="12" y2="12"/></svg>',
+  organize: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>',
+  rotate: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>',
+  word: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>',
+  excel: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/></svg>',
+  ppt: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>',
+  pdf2img: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>',
+  img2pdf: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>',
+  text: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/></svg>',
+  pii: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>',
+  inksaver: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>',
+  flatten: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>',
+};
+
 const STUDIO_TOOLS = [
-  { id: 'markup',    cat: 'Edit & Sign',       icon: '✏️', name: 'Edit Text, Highlight & Draw', desc: 'Add text, highlights, freehand ink & whiteout on pages', tag: 'Live' },
-  { id: 'sign',      cat: 'Edit & Sign',       icon: '✍️', name: 'Sign & Self-Attest PDF',      desc: 'Draw/type/upload signature or add official stamps',      tag: 'Popular' },
-  { id: 'insertimg', cat: 'Edit & Sign',       icon: '🖼️', name: 'Insert Photo / Logo on Page', desc: 'Place & resize any image, seal or QR on current page',   tag: null },
-  { id: 'watermark', cat: 'Edit & Sign',       icon: '💧', name: 'Add Watermark',               desc: 'Diagonal or horizontal custom text watermark on pages',  tag: null },
-  { id: 'pagenums',  cat: 'Edit & Sign',       icon: '🔢', name: 'Page Numbers & Bates Stamp',  desc: 'Insert Page 1 of N or legal Bates numbering',            tag: null },
+  { id: 'markup',    cat: 'Edit & Sign',       tone: 'tone-red',     name: 'Edit Text, Highlight & Draw', desc: 'Add text, highlights, freehand ink & whiteout on pages', tag: 'Live' },
+  { id: 'sign',      cat: 'Edit & Sign',       tone: 'tone-violet',  name: 'Sign & Self-Attest PDF',      desc: 'Draw/type/upload signature or add official stamps',      tag: 'Popular' },
+  { id: 'insertimg', cat: 'Edit & Sign',       tone: 'tone-blue',    name: 'Insert Photo / Logo on Page', desc: 'Place & resize any image, seal or QR on current page',   tag: null },
+  { id: 'watermark', cat: 'Edit & Sign',       tone: 'tone-blue',    name: 'Add Watermark',               desc: 'Diagonal or horizontal custom text watermark on pages',  tag: null },
+  { id: 'pagenums',  cat: 'Edit & Sign',       tone: 'tone-amber',   name: 'Page Numbers & Bates Stamp',  desc: 'Insert Page 1 of N or legal Bates numbering',            tag: null },
 
-  { id: 'compress',  cat: 'Optimize & Pages',  icon: '⚡', name: 'Compress / Target KB Size',   desc: 'Shrink PDF to exact KB (100KB, 200KB, 500KB) locally',   tag: 'KB/MB' },
-  { id: 'merge',     cat: 'Optimize & Pages',  icon: '📑', name: 'Merge PDFs Here',             desc: 'Combine more PDF files before or after this document',   tag: 'Instant' },
-  { id: 'split',     cat: 'Optimize & Pages',  icon: '✂️', name: 'Split & Extract Pages',       desc: 'Extract ranges (e.g. 1-3, 5) or split all into ZIP',     tag: null },
-  { id: 'organize',  cat: 'Optimize & Pages',  icon: '🗂️', name: 'Organize & Remove Blanks',    desc: 'Reverse order, delete range, or auto-remove blank pages', tag: 'Smart' },
-  { id: 'rotate',    cat: 'Optimize & Pages',  icon: '🔄', name: 'Rotate Pages',                desc: 'Rotate current, odd, even or all pages 90° / 180°',      tag: null },
+  { id: 'compress',  cat: 'Optimize & Pages',  tone: 'tone-amber',   name: 'Compress / Target KB Size',   desc: 'Shrink PDF to exact KB (100KB, 200KB, 500KB) locally',   tag: 'KB/MB' },
+  { id: 'merge',     cat: 'Optimize & Pages',  tone: 'tone-blue',    name: 'Merge PDFs Here',             desc: 'Combine more PDF files before or after this document',   tag: 'Instant' },
+  { id: 'split',     cat: 'Optimize & Pages',  tone: 'tone-red',     name: 'Split & Extract Pages',       desc: 'Extract ranges (e.g. 1-3, 5) or split all into ZIP',     tag: null },
+  { id: 'organize',  cat: 'Optimize & Pages',  tone: 'tone-violet',  name: 'Organize & Remove Blanks',    desc: 'Reverse order, delete range, or auto-remove blank pages', tag: 'Smart' },
+  { id: 'rotate',    cat: 'Optimize & Pages',  tone: 'tone-emerald', name: 'Rotate Pages',                desc: 'Rotate current, odd, even or all pages 90° / 180°',      tag: null },
 
-  { id: 'word',      cat: 'Convert & Export',  icon: '📝', name: 'PDF → Word (.docx)',          desc: 'Convert & download editable Word document right here',   tag: 'HD AI' },
-  { id: 'excel',     cat: 'Convert & Export',  icon: '📊', name: 'PDF → Excel (.xlsx)',         desc: 'Extract tables into clean Excel / CSV spreadsheet',      tag: 'Tables' },
-  { id: 'ppt',       cat: 'Convert & Export',  icon: '📽️', name: 'PDF → PowerPoint (.pptx)',    desc: 'Convert PDF pages into presentation slides here',        tag: null },
-  { id: 'pdf2img',   cat: 'Convert & Export',  icon: '🎨', name: 'PDF → JPG / PNG (300 DPI)',   desc: 'Save current page or all pages as crisp HD images ZIP',  tag: '300 DPI' },
-  { id: 'img2pdf',   cat: 'Convert & Export',  icon: '➕', name: 'Append Images as Pages',      desc: 'Add JPG/PNG/WebP photos as new PDF pages',               tag: null },
-  { id: 'text',      cat: 'Convert & Export',  icon: '📃', name: 'Extract Text & Markdown',     desc: 'Copy or download full Unicode text / clean Markdown',    tag: null },
+  { id: 'word',      cat: 'Convert & Export',  tone: 'tone-blue',    name: 'PDF → Word (.docx)',          desc: 'Convert & download editable Word document right here',   tag: 'HD' },
+  { id: 'excel',     cat: 'Convert & Export',  tone: 'tone-emerald', name: 'PDF → Excel (.xlsx)',         desc: 'Extract tables into clean Excel / CSV spreadsheet',      tag: 'Tables' },
+  { id: 'ppt',       cat: 'Convert & Export',  tone: 'tone-amber',   name: 'PDF → PowerPoint (.pptx)',    desc: 'Convert PDF pages into presentation slides here',        tag: null },
+  { id: 'pdf2img',   cat: 'Convert & Export',  tone: 'tone-violet',  name: 'PDF → JPG / PNG (300 DPI)',   desc: 'Save current page or all pages as crisp HD images ZIP',  tag: '300 DPI' },
+  { id: 'img2pdf',   cat: 'Convert & Export',  tone: 'tone-emerald', name: 'Append Images as Pages',      desc: 'Add JPG/PNG/WebP photos as new PDF pages',               tag: null },
+  { id: 'text',      cat: 'Convert & Export',  tone: 'tone-blue',    name: 'Extract Text & Markdown',     desc: 'Copy or download full Unicode text / clean Markdown',    tag: null },
 
-  { id: 'pii',       cat: 'Print & Security',  icon: '⬛', name: 'Auto Aadhaar & PII Redactor', desc: 'Find & mask Aadhaar (XXXX-XXXX-1234), PAN, phone, email', tag: 'UIDAI' },
-  { id: 'inksaver',  cat: 'Print & Security',  icon: '🖨️', name: 'Grayscale & Xerox Ink-Saver', desc: 'Convert to crisp B&W or eco light-toner print mode',     tag: 'Eco' },
-  { id: 'flatten',   cat: 'Print & Security',  icon: '🧹', name: 'Flatten & Scrub Metadata',    desc: 'Lock form fields/annotations & erase hidden tracking',   tag: 'Safe' },
+  { id: 'pii',       cat: 'Print & Security',  tone: 'tone-red',     name: 'Auto Aadhaar & PII Redactor', desc: 'Find & mask Aadhaar (XXXX-XXXX-1234), PAN, phone, email', tag: 'UIDAI' },
+  { id: 'inksaver',  cat: 'Print & Security',  tone: 'tone-emerald', name: 'Grayscale & Xerox Ink-Saver', desc: 'Convert to crisp B&W or eco light-toner print mode',     tag: 'Eco' },
+  { id: 'flatten',   cat: 'Print & Security',  tone: 'tone-violet',  name: 'Flatten & Scrub Metadata',    desc: 'Lock form fields/annotations & erase hidden tracking',   tag: 'Safe' },
 ];
 
 // ─── UTILITIES ─────────────────────────────────────────────────────────────
@@ -162,6 +188,28 @@ function showLoading(label = 'Processing PDF…') {
 function hideLoading() {
   els.loadingOverlay.hidden = true;
 }
+
+function bytesEqual(a, b) {
+  if (!a || !b || a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+
+// Global safety net: any failing async tool action hides the spinner and tells the user why,
+// instead of leaving a stuck "Processing…" overlay.
+window.addEventListener('unhandledrejection', (ev) => {
+  const reason = ev.reason;
+  if (reason && (reason.name === 'RenderingCancelledException' || reason.name === 'AbortException')) return;
+  console.error('[StudioViewer] Unhandled error:', reason);
+  hideLoading();
+  showToast(`Action failed: ${reason?.message || reason || 'Unknown error'}`, 'error', 5500);
+});
+window.addEventListener('error', (ev) => {
+  if (!ev.error || /ResizeObserver/i.test(String(ev.message))) return;
+  console.error('[StudioViewer] Runtime error:', ev.error);
+  hideLoading();
+  showToast(`Something went wrong: ${ev.error.message || ev.message}`, 'error', 5500);
+});
 
 function formatBytes(bytes) {
   if (!bytes || bytes <= 0) return '0 B';
@@ -269,15 +317,12 @@ async function handleUndo() {
     annotations: JSON.stringify(state.annotations),
   });
   const prev = state.undoStack.pop();
-  const prevBytesMatch =
-    prev.bytes.length === state.pdfBytes.length &&
-    prev.bytes[0] === state.pdfBytes[0] &&
-    prev.bytes[prev.bytes.length - 1] === state.pdfBytes[state.pdfBytes.length - 1];
+  const prevBytesMatch = bytesEqual(prev.bytes, state.pdfBytes);
 
   state.annotations = JSON.parse(prev.annotations || '{}');
   syncUndoRedoButtons();
   if (!prevBytesMatch) {
-    await loadPdfBytes(prev.bytes, state.fileName, { preserveHistory: true, preserveAnnots: true });
+    await loadPdfBytes(prev.bytes, state.fileName, { preserveHistory: true, preserveAnnots: true, keepZoom: true });
   } else {
     renderAllAnnotationOverlays();
   }
@@ -293,7 +338,11 @@ async function handleRedo() {
   const next = state.redoStack.pop();
   state.annotations = JSON.parse(next.annotations || '{}');
   syncUndoRedoButtons();
-  await loadPdfBytes(next.bytes, state.fileName, { preserveHistory: true, preserveAnnots: true });
+  if (bytesEqual(next.bytes, state.pdfBytes)) {
+    renderAllAnnotationOverlays();
+  } else {
+    await loadPdfBytes(next.bytes, state.fileName, { preserveHistory: true, preserveAnnots: true, keepZoom: true });
+  }
   showToast('↷ Redid change');
 }
 
@@ -398,18 +447,38 @@ async function loadPdfBytes(uint8, filename = 'document.pdf', opts = {}) {
 
     const pdfDoc = await loadingTask.promise;
 
-    if (state.pdfDoc) {
-      try { await state.pdfDoc.destroy(); } catch {}
+    // PDF.js v6: cleanup happens via the LoadingTask (PDFDocumentProxy no longer exposes destroy())
+    const prevTask = state.loadingTask;
+    state.loadingTask = loadingTask;
+    if (prevTask && prevTask !== loadingTask) {
+      try { await prevTask.destroy(); } catch {}
     }
 
-    // If user unlocked an encrypted PDF with a password, re-save clean unencrypted working bytes via canvas/pdf-lib if needed
-    state.pdfBytes = new Uint8Array(uint8);
+    // Ensure working bytes are unencrypted so pdf-lib tools (Rotate, Merge, Sign, Save, Print) never fail!
+    let workingBytes = new Uint8Array(uint8);
+    let canLoadWithPdfLib = false;
+    if (!opts.password) {
+      try {
+        const probe = await PDFDocument.load(workingBytes, { ignoreEncryption: true });
+        canLoadWithPdfLib = !probe.isEncrypted;
+      } catch {
+        canLoadWithPdfLib = false;
+      }
+    }
+    if (!canLoadWithPdfLib) {
+      els.loadingText.textContent = 'Unlocking encrypted PDF streams…';
+      workingBytes = await unlockPdfDocToCleanBytes(pdfDoc);
+    }
+
+    state.pdfBytes = workingBytes;
     state.pdfDoc = pdfDoc;
     state.numPages = pdfDoc.numPages;
     state.fileName = filename || 'document.pdf';
-    state.currentPage = Math.min(Math.max(1, state.currentPage), state.numPages);
+    const isFreshOpen = !opts.preserveHistory && !opts.keepZoom;
+    state.currentPage = isFreshOpen ? 1 : Math.min(Math.max(1, state.currentPage), state.numPages);
     state.searchHits = [];
     state.searchCursor = -1;
+    state.pageRenderLocks = new Map();
 
     if (!opts.preserveAnnots) {
       state.annotations = {};
@@ -418,7 +487,7 @@ async function loadPdfBytes(uint8, filename = 'document.pdf', opts = {}) {
     if (!opts.preserveHistory) {
       state.undoStack = [];
       state.redoStack = [];
-      markDirty(false);
+      markDirty(Boolean(opts.password));
       syncUndoRedoButtons();
     }
 
@@ -430,12 +499,16 @@ async function loadPdfBytes(uint8, filename = 'document.pdf', opts = {}) {
     els.emptyState.hidden = true;
     els.passwordModal.hidden = true;
 
-    // Compute initial Fit-Width scale on first open
-    if (!opts.keepZoom && state.zoomMode === 'fit-width') {
-      await computeFitScale('fit-width');
+    // Compute initial Auto / Fit scale on open (keepZoom preserves the user's current zoom)
+    if (!opts.keepZoom && ['auto', 'fit-width', 'fit-page'].includes(state.zoomMode)) {
+      await computeFitScale(state.zoomMode);
     }
 
+    const restorePage = opts.preserveHistory || opts.keepZoom ? state.currentPage : 1;
     await buildStageAndThumbnails();
+    syncZoomSelect();
+    if (restorePage > 1) jumpToPageInstant(restorePage);
+    else els.viewport.scrollTop = 0;
     populateOutlineAndInfo();
     hideLoading();
   } catch (err) {
@@ -467,7 +540,43 @@ async function computeFitScale(mode) {
     state.scale = Math.max(0.35, Math.min(3.5, availW / vp1.width));
   } else if (mode === 'fit-page') {
     state.scale = Math.max(0.35, Math.min(3.5, Math.min(availW / vp1.width, availH / vp1.height)));
+  } else if (mode === 'auto') {
+    // Acrobat-like "Automatic": fit width but never blow small pages up beyond 130%
+    state.scale = Math.max(0.5, Math.min(1.3, availW / vp1.width));
   }
+}
+
+function syncZoomSelect() {
+  const sel = els.zoomSelect;
+  if (!sel) return;
+  const mode = state.zoomMode;
+  if (['auto', 'fit-width', 'fit-page'].includes(mode)) {
+    sel.value = mode;
+  } else {
+    const match = Array.from(sel.options).find((o) => Math.abs(Number(o.value) - state.scale) < 0.001);
+    if (match) {
+      sel.value = match.value;
+    } else {
+      let custom = sel.querySelector('option[data-custom]');
+      if (!custom) {
+        custom = document.createElement('option');
+        custom.dataset.custom = '1';
+        sel.appendChild(custom);
+      }
+      custom.value = String(state.scale);
+      custom.textContent = `${Math.round(state.scale * 100)}%`;
+      sel.value = custom.value;
+    }
+  }
+}
+
+function jumpToPageInstant(pageNum) {
+  const clamped = Math.max(1, Math.min(state.numPages, pageNum));
+  const entry = state.pageShells.get(clamped);
+  state.currentPage = clamped;
+  els.pageNumInput.value = String(clamped);
+  if (entry) els.viewport.scrollTop = Math.max(0, entry.shell.offsetTop - 16);
+  updateActiveThumbHighlight();
 }
 
 // ─── HIGH-DPI VIRTUALIZED STAGE & SELECTABLE TEXT LAYER ───────────────────
@@ -578,44 +687,101 @@ async function buildStageAndThumbnails() {
   els.thumbList.appendChild(thumbFrag);
 }
 
+// Serializes PDF.js page.render() calls per page number so main-view & thumbnail renders
+// never collide on the same PDFPageProxy (prevents blank thumbnails!).
+function withPageRenderLock(pageNum, taskFn) {
+  if (!state.pageRenderLocks) state.pageRenderLocks = new Map();
+  const prev = state.pageRenderLocks.get(pageNum) || Promise.resolve();
+  const next = prev.then(taskFn, taskFn);
+  state.pageRenderLocks.set(pageNum, next.catch(() => {}));
+  return next;
+}
+
+async function unlockPdfDocToCleanBytes(pdfDoc) {
+  const out = await PDFDocument.create();
+  for (let p = 1; p <= pdfDoc.numPages; p++) {
+    const page = await pdfDoc.getPage(p);
+    const vp1 = page.getViewport({ scale: 1 });
+    const vp = page.getViewport({ scale: 2.2 });
+    const c = document.createElement('canvas');
+    c.width = Math.round(vp.width);
+    c.height = Math.round(vp.height);
+    const g = c.getContext('2d', { alpha: false });
+    g.fillStyle = '#ffffff';
+    g.fillRect(0, 0, c.width, c.height);
+    await page.render({ canvasContext: g, viewport: vp }).promise;
+    const blob = await new Promise((r) => c.toBlob(r, 'image/jpeg', 0.93));
+    c.width = 0;
+    c.height = 0;
+    const emb = await out.embedJpg(new Uint8Array(await blob.arrayBuffer()));
+    const np = out.addPage([vp1.width, vp1.height]);
+    np.drawImage(emb, { x: 0, y: 0, width: vp1.width, height: vp1.height });
+  }
+  return await out.save();
+}
+
+function syncThumbFromMainCanvas(pageNum) {
+  const entry = state.pageShells.get(pageNum);
+  if (!entry || !entry.canvas || !entry.canvas.width) return false;
+  const thumbEl = els.thumbList.querySelector(`.thumb-item[data-page="${pageNum}"]`);
+  const tCanvas = thumbEl?.querySelector('.thumb-canvas');
+  if (!tCanvas) return false;
+  const targetW = 148;
+  const ratio = entry.canvas.height / entry.canvas.width;
+  tCanvas.width = targetW;
+  tCanvas.height = Math.max(24, Math.round(targetW * ratio));
+  const tctx = tCanvas.getContext('2d', { alpha: false });
+  tctx.fillStyle = '#ffffff';
+  tctx.fillRect(0, 0, tCanvas.width, tCanvas.height);
+  tctx.drawImage(entry.canvas, 0, 0, tCanvas.width, tCanvas.height);
+  tCanvas.dataset.painted = '1';
+  return true;
+}
+
 async function renderMainPage(pageNum) {
   const entry = state.pageShells.get(pageNum);
   if (!entry || !state.pdfDoc || entry.rendering || entry.renderedScale === state.scale) return;
   entry.rendering = true;
 
   try {
-    const page = await state.pdfDoc.getPage(pageNum);
-    const vp = page.getViewport({ scale: state.scale });
-    const baseVp = page.getViewport({ scale: 1 });
-    entry.widthPt = baseVp.width;
-    entry.heightPt = baseVp.height;
+    await withPageRenderLock(pageNum, async () => {
+      if (!state.pdfDoc) return;
+      const page = await state.pdfDoc.getPage(pageNum);
+      const vp = page.getViewport({ scale: state.scale });
+      const baseVp = page.getViewport({ scale: 1 });
+      entry.widthPt = baseVp.width;
+      entry.heightPt = baseVp.height;
 
-    const dpr = Math.min(window.devicePixelRatio || 1, 2.25);
-    entry.shell.style.width = `${Math.round(vp.width)}px`;
-    entry.shell.style.height = `${Math.round(vp.height)}px`;
+      const dpr = Math.min(window.devicePixelRatio || 1, 2.25);
+      entry.shell.style.width = `${Math.round(vp.width)}px`;
+      entry.shell.style.height = `${Math.round(vp.height)}px`;
 
-    entry.canvas.width = Math.round(vp.width * dpr);
-    entry.canvas.height = Math.round(vp.height * dpr);
-    entry.canvas.style.width = `${Math.round(vp.width)}px`;
-    entry.canvas.style.height = `${Math.round(vp.height)}px`;
+      entry.canvas.width = Math.round(vp.width * dpr);
+      entry.canvas.height = Math.round(vp.height * dpr);
+      entry.canvas.style.width = `${Math.round(vp.width)}px`;
+      entry.canvas.style.height = `${Math.round(vp.height)}px`;
 
-    const ctx = entry.canvas.getContext('2d', { alpha: false });
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    await page.render({ canvasContext: ctx, viewport: vp }).promise;
+      const ctx = entry.canvas.getContext('2d', { alpha: false });
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, vp.width, vp.height);
+      await page.render({ canvasContext: ctx, viewport: vp }).promise;
 
-    // Official Mozilla PDF.js v6.5 Selectable TextLayer
-    entry.textLayer.innerHTML = '';
-    entry.textLayer.style.setProperty('--total-scale-factor', String(vp.scale));
-    const tl = new pdfjsLib.TextLayer({
-      textContentSource: page.streamTextContent(),
-      container: entry.textLayer,
-      viewport: vp,
+      // Official Mozilla PDF.js v6.5 Selectable TextLayer
+      entry.textLayer.innerHTML = '';
+      entry.textLayer.style.setProperty('--total-scale-factor', String(vp.scale));
+      const tl = new pdfjsLib.TextLayer({
+        textContentSource: page.streamTextContent(),
+        container: entry.textLayer,
+        viewport: vp,
+      });
+      await tl.render();
+
+      entry.renderedScale = state.scale;
+      syncThumbFromMainCanvas(pageNum);
+      renderPageAnnotationOverlay(pageNum);
+      if (state.searchQuery) highlightSearchOnPage(pageNum);
     });
-    await tl.render();
-
-    entry.renderedScale = state.scale;
-    renderPageAnnotationOverlay(pageNum);
-    if (state.searchQuery) highlightSearchOnPage(pageNum);
   } catch (err) {
     console.warn(`[StudioViewer] Page ${pageNum} render skipped:`, err);
   } finally {
@@ -625,19 +791,30 @@ async function renderMainPage(pageNum) {
 
 async function renderThumb(pageNum, thumbEl) {
   if (!state.pdfDoc) return;
+  const canvas = thumbEl.querySelector('.thumb-canvas');
+  if (!canvas || canvas.dataset.painted === '1') return;
+  if (syncThumbFromMainCanvas(pageNum)) return;
+
   try {
-    const page = await state.pdfDoc.getPage(pageNum);
-    const vp1 = page.getViewport({ scale: 1 });
-    const targetW = 148;
-    const sc = targetW / vp1.width;
-    const vp = page.getViewport({ scale: sc });
-    const canvas = thumbEl.querySelector('.thumb-canvas');
-    if (!canvas) return;
-    canvas.width = Math.round(vp.width);
-    canvas.height = Math.round(vp.height);
-    const ctx = canvas.getContext('2d', { alpha: false });
-    await page.render({ canvasContext: ctx, viewport: vp }).promise;
-  } catch {}
+    await withPageRenderLock(pageNum, async () => {
+      if (!state.pdfDoc || canvas.dataset.painted === '1') return;
+      if (syncThumbFromMainCanvas(pageNum)) return;
+      const page = await state.pdfDoc.getPage(pageNum);
+      const vp1 = page.getViewport({ scale: 1 });
+      const targetW = 148;
+      const sc = targetW / vp1.width;
+      const vp = page.getViewport({ scale: sc });
+      canvas.width = Math.round(vp.width);
+      canvas.height = Math.round(vp.height);
+      const ctx = canvas.getContext('2d', { alpha: false });
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      await page.render({ canvasContext: ctx, viewport: vp }).promise;
+      canvas.dataset.painted = '1';
+    });
+  } catch (err) {
+    console.warn(`[StudioViewer] Thumb ${pageNum} render error:`, err);
+  }
 }
 
 function scrollToPage(pageNum) {
@@ -750,6 +927,16 @@ function escapeHtml(s) {
 
 // ─── INTERACTIVE LIVE ANNOTATION & MARKUP ENGINE ──────────────────────────
 function setToolMode(mode) {
+  // Clean up any leftover empty text boxes when leaving text mode
+  if (state.toolMode === 'text' && mode !== 'text') {
+    for (const pKey of Object.keys(state.annotations)) {
+      state.annotations[pKey] = (state.annotations[pKey] || []).filter(
+        (a) => a.type !== 'text' || (a.text || '').trim().length > 0
+      );
+    }
+    renderAllAnnotationOverlays();
+  }
+
   state.toolMode = mode;
   document.querySelectorAll('.mode-btn').forEach((b) => {
     b.classList.toggle('active', b.dataset.mode === mode);
@@ -767,11 +954,11 @@ function setToolMode(mode) {
     els.annotSubbar.hidden = false;
     document.body.classList.add('has-subbar');
     const labels = {
-      highlight: ['🖍️ Highlight', 'Drag across any area to highlight', '#facc15', 18],
-      text: ['✏️ Add Text', 'Click anywhere on a page to type', '#111827', 14],
-      draw: ['🖊️ Freehand Ink', 'Draw smoothly with mouse or touch', '#1d4ed8', 3],
-      whiteout: ['⬜ Whiteout Erase', 'Drag a clean white cover box over text', '#ffffff', 16],
-      redact: ['⬛ Blackout Redact', 'Drag permanent black box over sensitive PII', '#000000', 16],
+      highlight: ['Highlight', 'Drag across any area to highlight', '#facc15', 18, true, false],
+      text: ['Add Text', 'Click anywhere on a page to type', '#111827', 14, true, true],
+      draw: ['Freehand Ink', 'Draw smoothly with mouse or touch', '#2563eb', 3, true, true],
+      whiteout: ['Whiteout Erase', 'Drag a clean white cover box over text', '#ffffff', 16, false, false],
+      redact: ['Permanent Redact', 'Drag black box — text underneath is permanently destroyed on Save', '#000000', 16, false, false],
     };
     const cfg = labels[mode];
     if (cfg) {
@@ -781,6 +968,12 @@ function setToolMode(mode) {
       state.annotSize = cfg[3];
       els.annotSize.value = String(cfg[3]);
       els.annotSizeVal.textContent = String(cfg[3]);
+      $('annot-colors').hidden = !cfg[4];
+      const swWrap = $('subbar-size-wrap');
+      if (swWrap) swWrap.hidden = !cfg[5];
+      $('annot-colors').querySelectorAll('.swatch').forEach((sw) => {
+        sw.classList.toggle('active', sw.dataset.color.toLowerCase() === cfg[2].toLowerCase());
+      });
     }
   }
 }
@@ -817,16 +1010,13 @@ function bindPageAnnotationEvents(annotLayer, pageNum) {
         type: 'text',
         x: nx,
         y: ny,
-        text: 'Type here…',
+        text: '',
         color: state.annotColor === '#ffffff' ? '#111827' : state.annotColor,
         fontSize: Math.max(8, Number(state.annotSize) || 14),
       });
       setTimeout(() => {
         const el = annotLayer.querySelector(`[data-aid="${id}"] .annot-text-input`);
-        if (el) {
-          el.focus();
-          document.execCommand('selectAll', false, null);
-        }
+        if (el) el.focus();
       }, 30);
       return;
     }
@@ -986,11 +1176,19 @@ function renderPageAnnotationOverlay(pageNum) {
       txt.style.fontSize = `${Math.round((ann.fontSize || 14) * state.scale)}px`;
       txt.style.fontWeight = '700';
       txt.addEventListener('input', () => {
-        ann.text = txt.textContent || '';
+        ann.text = txt.innerText.replace(/\n$/, '') || '';
         markDirty(true);
+      });
+      txt.addEventListener('focus', () => {
+        state.selectedAnnotId = ann.id;
       });
       txt.addEventListener('pointerdown', (ev) => ev.stopPropagation());
       wrap.appendChild(txt);
+      const mover = document.createElement('div');
+      mover.className = 'annot-move';
+      mover.title = 'Drag to move text';
+      mover.textContent = '⠿';
+      wrap.appendChild(mover);
     } else if (ann.type === 'image') {
       wrap.style.left = `${ann.x * 100}%`;
       wrap.style.top = `${ann.y * 100}%`;
@@ -1138,86 +1336,254 @@ async function buildExportPdfBytes() {
   const pdf = await PDFDocument.load(state.pdfBytes, { ignoreEncryption: true });
   const fontBold = await pdf.embedFont(StandardFonts.HelveticaBold);
   const pages = pdf.getPages();
+  const imgCache = new Map();
+
+  const embedDataUrl = async (dataUrl) => {
+    if (imgCache.has(dataUrl)) return imgCache.get(dataUrl);
+    const rawB64 = dataUrl.split(',')[1] || '';
+    const bin = Uint8Array.from(atob(rawB64), (ch) => ch.charCodeAt(0));
+    let emb;
+    if (/^data:image\/jpe?g/i.test(dataUrl)) emb = await pdf.embedJpg(bin);
+    else if (/^data:image\/png/i.test(dataUrl)) emb = await pdf.embedPng(bin);
+    else {
+      // WebP / GIF / BMP etc. → normalize to PNG first (pdf-lib only embeds JPG/PNG)
+      const norm = await normalizeImageDataUrl(dataUrl, { forcePng: true });
+      const nb = Uint8Array.from(atob(norm.dataUrl.split(',')[1]), (ch) => ch.charCodeAt(0));
+      emb = await pdf.embedPng(nb);
+    }
+    imgCache.set(dataUrl, emb);
+    return emb;
+  };
 
   for (const [pKey, list] of Object.entries(state.annotations)) {
     const pIdx = Number(pKey) - 1;
     if (pIdx < 0 || pIdx >= pages.length || !list?.length) continue;
     const page = pages[pIdx];
-    const { width, height } = page.getSize();
+    // Rotation & CropBox-aware mapper: annotations are stored in *visual* (rotated) page space
+    const m = makePageMapper(page);
 
     for (const ann of list) {
       if (ann.type === 'highlight' || ann.type === 'whiteout' || ann.type === 'redact') {
         const c = hexToRgb01(ann.color);
-        const rx = ann.x * width;
-        const rw = ann.w * width;
-        const rh = ann.h * height;
-        const ry = height - ann.y * height - rh;
-        page.drawRectangle({
-          x: rx,
-          y: ry,
-          width: rw,
-          height: rh,
+        const a = m.toPdf(ann.x, ann.y);
+        const b = m.toPdf(ann.x + ann.w, ann.y + ann.h);
+        const opts = {
+          x: Math.min(a.x, b.x),
+          y: Math.min(a.y, b.y),
+          width: Math.abs(b.x - a.x),
+          height: Math.abs(b.y - a.y),
           color: rgb(c.r, c.g, c.b),
-          opacity: ann.type === 'highlight' ? 0.36 : 1.0,
-        });
+          opacity: ann.type === 'highlight' ? 0.45 : 1.0,
+        };
+        if (ann.type === 'highlight' && BlendMode) opts.blendMode = BlendMode.Multiply;
+        page.drawRectangle(opts);
       } else if (ann.type === 'text' && (ann.text || '').trim()) {
         const c = hexToRgb01(ann.color || '#111827');
         const ptSize = Math.max(6, Number(ann.fontSize) || 14);
-        const lines = String(ann.text).split('\n');
-        lines.forEach((line, idx) => {
-          // Encode clean WinAnsi-safe fallback so pdf-lib standard font never throws on emoji/Indic;
-          // if non-Latin characters exist, rasterize crisp high-DPI text image automatically!
-          if (/[^\x20-\x7E\xA0-\xFF]/.test(line)) {
-            return;
-          }
-          page.drawText(line, {
-            x: ann.x * width,
-            y: height - ann.y * height - ptSize * (idx + 1),
-            size: ptSize,
-            font: fontBold,
-            color: rgb(c.r, c.g, c.b),
+        const hasUnicode = /[^\x20-\x7E\xA0-\xFF]/.test(ann.text);
+        if (!hasUnicode) {
+          String(ann.text).split('\n').forEach((line, idx) => {
+            if (!line) return;
+            const o = m.toPdf(
+              ann.x + 4 / (m.viewW * state.scale),
+              ann.y + (2 / state.scale + ptSize * (1.2 * idx + 0.95)) / m.viewH
+            );
+            page.drawText(line, {
+              x: o.x,
+              y: o.y,
+              size: ptSize,
+              font: fontBold,
+              color: rgb(c.r, c.g, c.b),
+              rotate: degrees(m.rot),
+            });
           });
-        });
-        // Unicode / Hindi / Emoji crisp PNG stamp fallback
-        if (/[^\x20-\x7E\xA0-\xFF]/.test(ann.text)) {
-          const pngBytes = renderUnicodeTextToPngBytes(ann.text, ann.color || '#111827', ann.fontSize || 14);
-          const emb = await pdf.embedPng(pngBytes.bytes);
-          page.drawImage(emb, {
-            x: ann.x * width,
-            y: height - ann.y * height - pngBytes.ptH,
-            width: pngBytes.ptW,
-            height: pngBytes.ptH,
-          });
+        } else {
+          // Unicode / Hindi / Emoji → crisp high-DPI PNG stamp (standard fonts can't encode them)
+          const png = renderUnicodeTextToPngBytes(ann.text, ann.color || '#111827', ptSize);
+          const emb = await pdf.embedPng(png.bytes);
+          const o = m.toPdf(ann.x, ann.y + png.ptH / m.viewH);
+          page.drawImage(emb, { x: o.x, y: o.y, width: png.ptW, height: png.ptH, rotate: degrees(m.rot) });
         }
       } else if (ann.type === 'draw' && ann.points?.length >= 2) {
         const c = hexToRgb01(ann.color || '#1d4ed8');
         const thickness = Math.max(1, Number(ann.strokeWidth) || 2.5);
         for (let i = 1; i < ann.points.length; i++) {
-          const [x0, y0] = ann.points[i - 1];
-          const [x1, y1] = ann.points[i];
-          page.drawLine({
-            start: { x: x0 * width, y: height - y0 * height },
-            end: { x: x1 * width, y: height - y1 * height },
-            thickness,
-            color: rgb(c.r, c.g, c.b),
-          });
+          const s = m.toPdf(ann.points[i - 1][0], ann.points[i - 1][1]);
+          const e = m.toPdf(ann.points[i][0], ann.points[i][1]);
+          page.drawLine({ start: s, end: e, thickness, color: rgb(c.r, c.g, c.b), lineCap: LineCapStyle ? LineCapStyle.Round : undefined });
         }
       } else if (ann.type === 'image' && ann.dataUrl) {
-        const rawB64 = ann.dataUrl.split(',')[1] || '';
-        const bin = Uint8Array.from(atob(rawB64), (ch) => ch.charCodeAt(0));
-        const emb = ann.dataUrl.startsWith('data:image/jpeg')
-          ? await pdf.embedJpg(bin)
-          : await pdf.embedPng(bin);
-        const rw = ann.w * width;
-        const rh = ann.h * height;
-        const rx = ann.x * width;
-        const ry = height - ann.y * height - rh;
-        page.drawImage(emb, { x: rx, y: ry, width: rw, height: rh });
+        const emb = await embedDataUrl(ann.dataUrl);
+        const o = m.toPdf(ann.x, ann.y + ann.h); // visual bottom-left corner
+        page.drawImage(emb, {
+          x: o.x,
+          y: o.y,
+          width: ann.w * m.viewW,
+          height: ann.h * m.viewH,
+          rotate: degrees(m.rot),
+        });
       }
     }
   }
 
-  return await pdf.save();
+  const savedBytes = await pdf.save();
+  // True permanent redaction: if any page had a 'redact' box, flatten those pages so underlying text can never be copied!
+  const redactedPages = new Set();
+  for (const [pKey, list] of Object.entries(state.annotations)) {
+    if ((list || []).some((a) => a.type === 'redact')) redactedPages.add(Number(pKey));
+  }
+  if (redactedPages.size > 0) {
+    return await rasterizePagesInBytes(savedBytes, redactedPages, 2.4);
+  }
+  return savedBytes;
+}
+
+// Maps normalized *visual* coordinates (0..1, origin top-left, as seen on screen) to PDF user space,
+// handling /Rotate 0/90/180/270 and CropBox offsets so edits land exactly where the user placed them.
+function makePageMapper(page) {
+  const rot = (((page.getRotation().angle || 0) % 360) + 360) % 360;
+  let box;
+  try { box = page.getCropBox(); } catch { box = null; }
+  if (!box || !box.width) {
+    const s = page.getSize();
+    box = { x: 0, y: 0, width: s.width, height: s.height };
+  }
+  const W = box.width;
+  const H = box.height;
+  const viewW = rot % 180 === 0 ? W : H;
+  const viewH = rot % 180 === 0 ? H : W;
+  const toPdf = (nx, ny) => {
+    let x;
+    let y;
+    if (rot === 90) { x = ny * W; y = nx * H; }
+    else if (rot === 180) { x = W - nx * W; y = ny * H; }
+    else if (rot === 270) { x = W - ny * W; y = H - nx * H; }
+    else { x = nx * W; y = H - ny * H; }
+    return { x: x + box.x, y: y + box.y };
+  };
+  return { rot, viewW, viewH, toPdf };
+}
+
+// Decode any image dataURL, optionally downscale + trim transparent/white margins, and re-encode.
+async function normalizeImageDataUrl(srcDataUrl, { maxSide = 2000, trim = false, forcePng = false } = {}) {
+  const img = await new Promise((resolve, reject) => {
+    const el = new Image();
+    el.onload = () => resolve(el);
+    el.onerror = () => reject(new Error('Could not decode image'));
+    el.src = srcDataUrl;
+  });
+  let w = img.naturalWidth || img.width || 1;
+  let h = img.naturalHeight || img.height || 1;
+  const k = Math.min(1, maxSide / Math.max(w, h));
+  w = Math.max(1, Math.round(w * k));
+  h = Math.max(1, Math.round(h * k));
+  const c = document.createElement('canvas');
+  c.width = w;
+  c.height = h;
+  const g = c.getContext('2d', { willReadFrequently: trim });
+  g.drawImage(img, 0, 0, w, h);
+
+  let out = c;
+  if (trim) {
+    const d = g.getImageData(0, 0, w, h).data;
+    let minX = w, minY = h, maxX = -1, maxY = -1;
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const i = (y * w + x) * 4;
+        const visible = d[i + 3] > 12 && !(d[i] > 245 && d[i + 1] > 245 && d[i + 2] > 245);
+        if (visible) {
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
+        }
+      }
+    }
+    if (maxX >= minX && maxY >= minY) {
+      const pad = Math.round(Math.max(maxX - minX, maxY - minY) * 0.04) + 2;
+      const cx = Math.max(0, minX - pad);
+      const cy = Math.max(0, minY - pad);
+      const cw = Math.min(w - cx, maxX - minX + pad * 2);
+      const ch = Math.min(h - cy, maxY - minY + pad * 2);
+      const t = document.createElement('canvas');
+      t.width = cw;
+      t.height = ch;
+      t.getContext('2d').drawImage(c, cx, cy, cw, ch, 0, 0, cw, ch);
+      out = t;
+    }
+  }
+  const isJpeg = !forcePng && !trim && /^data:image\/jpe?g/i.test(srcDataUrl);
+  const dataUrl = isJpeg ? out.toDataURL('image/jpeg', 0.92) : out.toDataURL('image/png');
+  return { dataUrl, width: out.width, height: out.height };
+}
+
+// Places an image annotation with its TRUE aspect ratio (no stretching in viewer or exported PDF)
+function buildImageAnnotation(pageNum, norm, { x = 0.3, y = 0.3, w = 0.32, maxH = 0.5, idPrefix = 'img' } = {}) {
+  const entry = state.pageShells.get(pageNum);
+  const pageAspect = entry && entry.heightPt ? entry.widthPt / entry.heightPt : 595 / 842;
+  let ww = w;
+  let hh = ww * (norm.height / norm.width) * pageAspect;
+  if (hh > maxH) {
+    ww *= maxH / hh;
+    hh = maxH;
+  }
+  return {
+    id: `${idPrefix}_${pageNum}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+    type: 'image',
+    dataUrl: norm.dataUrl,
+    x: Math.max(0, Math.min(1 - ww, x)),
+    y: Math.max(0, Math.min(0.99 - hh, y)),
+    w: ww,
+    h: hh,
+  };
+}
+
+function hasLiveAnnotations() {
+  return Object.values(state.annotations).some((arr) => arr && arr.length > 0);
+}
+
+// Raster-based tools read pages from pdf.js → bake live edits first so signatures/text are never lost
+async function ensureAnnotationsBaked(label) {
+  if (!hasLiveAnnotations()) return;
+  const baked = await buildExportPdfBytes();
+  await applyAndReloadBytes(baked, '');
+  if (label) showLoading(label);
+}
+
+// Re-renders selected pages into flat images so redacted text is truly removed (not just covered)
+async function rasterizePagesInBytes(bytes, pageSet, scale = 2.6) {
+  const task = pdfjsLib.getDocument({ data: new Uint8Array(bytes), standardFontDataUrl: STANDARD_FONTS_URL });
+  try {
+    const doc = await task.promise;
+    const src = await PDFDocument.load(bytes, { ignoreEncryption: true });
+    const out = await PDFDocument.create();
+    for (let p = 1; p <= doc.numPages; p++) {
+      if (!pageSet.has(p)) {
+        const [cp] = await out.copyPages(src, [p - 1]);
+        out.addPage(cp);
+        continue;
+      }
+      const page = await doc.getPage(p);
+      const vp1 = page.getViewport({ scale: 1 });
+      const vp = page.getViewport({ scale });
+      const c = document.createElement('canvas');
+      c.width = Math.round(vp.width);
+      c.height = Math.round(vp.height);
+      const g = c.getContext('2d', { alpha: false });
+      g.fillStyle = '#fff';
+      g.fillRect(0, 0, c.width, c.height);
+      await page.render({ canvasContext: g, viewport: vp }).promise;
+      const blob = await new Promise((r) => c.toBlob(r, 'image/jpeg', 0.92));
+      c.width = 0;
+      c.height = 0;
+      const emb = await out.embedJpg(new Uint8Array(await blob.arrayBuffer()));
+      const np = out.addPage([vp1.width, vp1.height]);
+      np.drawImage(emb, { x: 0, y: 0, width: vp1.width, height: vp1.height });
+    }
+    return await out.save();
+  } finally {
+    try { await task.destroy(); } catch {}
+  }
 }
 
 function renderUnicodeTextToPngBytes(text, color, fontSizePt) {
@@ -1301,55 +1667,104 @@ async function handleNativePrint() {
     showToast('Open a PDF first to print.', 'error');
     return;
   }
+  if (state.printing) return;
+  state.printing = true;
   showLoading('Preparing high-resolution print pages…');
+  let printTask = null;
+  const objectUrls = [];
   try {
+    // Include all live annotations (highlights, text, signatures) in the printout
     const finalBytes = await buildExportPdfBytes();
-    const printPdf = await pdfjsLib.getDocument({
+    printTask = pdfjsLib.getDocument({
       data: new Uint8Array(finalBytes),
       standardFontDataUrl: STANDARD_FONTS_URL,
-    }).promise;
+    });
+    const printPdf = await printTask.promise;
 
-    const imgTags = [];
+    // ~200 DPI raster (72pt * 2.8) — crisp text, capped for very large pages to protect memory
+    const pagesHtml = [];
+    let firstSize = null;
     for (let p = 1; p <= printPdf.numPages; p++) {
       els.loadingText.textContent = `Preparing print page ${p} of ${printPdf.numPages}…`;
       const page = await printPdf.getPage(p);
-      const vp = page.getViewport({ scale: 2.2 }); // crisp ~160-200 DPI print raster
+      const base = page.getViewport({ scale: 1 });
+      if (!firstSize) firstSize = { w: base.width, h: base.height };
+      const maxSide = Math.max(base.width, base.height);
+      const scale = Math.min(2.8, 4200 / maxSide);
+      const vp = page.getViewport({ scale });
       const c = document.createElement('canvas');
       c.width = Math.round(vp.width);
       c.height = Math.round(vp.height);
       const ctx = c.getContext('2d', { alpha: false });
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, c.width, c.height);
       await page.render({ canvasContext: ctx, viewport: vp }).promise;
-      imgTags.push(`<div class="p"><img src="${c.toDataURL('image/jpeg', 0.94)}"></div>`);
+      const blob = await new Promise((r) => c.toBlob(r, 'image/png'));
+      const url = URL.createObjectURL(blob);
+      objectUrls.push(url);
+      const landscape = base.width > base.height;
+      pagesHtml.push(`<div class="p${landscape ? ' land' : ''}"><img src="${url}" alt="Page ${p}"></div>`);
       c.width = 0;
       c.height = 0;
+      page.cleanup();
     }
-    await printPdf.destroy();
+    try { await printTask.destroy(); } catch {}
+    printTask = null;
 
+    const sizeCss = firstSize ? `${firstSize.w.toFixed(1)}pt ${firstSize.h.toFixed(1)}pt` : 'auto';
+
+    document.querySelectorAll('iframe.pms-print-frame').forEach((f) => f.remove());
     const iframe = document.createElement('iframe');
-    iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden;';
+    iframe.className = 'pms-print-frame';
+    iframe.setAttribute('aria-hidden', 'true');
+    // NOTE: never use visibility:hidden / 0x0 — some Chrome builds then print blank pages
+    iframe.style.cssText = 'position:fixed;left:-10000px;top:0;width:800px;height:1100px;border:0;opacity:0;pointer-events:none;';
     document.body.appendChild(iframe);
     const doc = iframe.contentDocument;
     doc.open();
-    doc.write(`<!DOCTYPE html><html><head><title>${escapeHtml(state.fileName)}</title>
+    doc.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${escapeHtml(state.fileName)}</title>
       <style>
-        @page { margin: 0; }
+        @page { size: auto; margin: 0mm; }
         html, body { margin: 0; padding: 0; background: #fff; }
-        .p { page-break-after: always; display:flex; align-items:center; justify-content:center; width:100vw; height:100vh; }
-        .p:last-child { page-break-after: auto; }
-        img { max-width:100%; max-height:100%; object-fit:contain; display:block; }
-      </style></head><body>${imgTags.join('')}</body></html>`);
+        .p { width: 100%; height: 99.4vh; max-height: 99.4vh; display: flex; align-items: center; justify-content: center;
+             overflow: hidden; break-after: page; page-break-after: always; break-inside: avoid; page-break-inside: avoid; box-sizing: border-box; }
+        .p:last-child { break-after: auto; page-break-after: auto; }
+        img { max-width: 100%; max-height: 99.2vh; width: auto; height: auto; object-fit: contain; display: block; }
+        * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      </style></head><body>${pagesHtml.join('')}</body></html>`);
     doc.close();
 
     const imgs = Array.from(doc.querySelectorAll('img'));
-    await Promise.all(imgs.map((im) => (im.complete ? Promise.resolve() : new Promise((r) => { im.onload = r; im.onerror = r; }))));
+    await Promise.all(
+      imgs.map((im) =>
+        im.complete && im.naturalWidth
+          ? Promise.resolve()
+          : new Promise((r) => { im.onload = r; im.onerror = r; })
+      )
+    );
+    await Promise.all(imgs.map((im) => (im.decode ? im.decode().catch(() => {}) : Promise.resolve())));
     hideLoading();
+
+    const cleanup = () => {
+      setTimeout(() => {
+        iframe.remove();
+        objectUrls.forEach((u) => URL.revokeObjectURL(u));
+      }, 1500);
+    };
+    iframe.contentWindow.addEventListener('afterprint', cleanup, { once: true });
+    // Safety net in case afterprint never fires
+    setTimeout(() => { if (iframe.isConnected) cleanup(); }, 10 * 60 * 1000);
 
     iframe.contentWindow.focus();
     iframe.contentWindow.print();
-    setTimeout(() => iframe.remove(), 60000);
   } catch (err) {
     hideLoading();
-    showToast(`Print preparation failed: ${err.message}`, 'error');
+    if (printTask) { try { await printTask.destroy(); } catch {} }
+    objectUrls.forEach((u) => URL.revokeObjectURL(u));
+    console.error('[StudioViewer] Print failed:', err);
+    showToast(`Print preparation failed: ${err.message || err}`, 'error', 5000);
+  } finally {
+    state.printing = false;
   }
 }
 
@@ -1526,7 +1941,7 @@ function initSignatureModal() {
     state.uploadedSigDataUrl = c.toDataURL('image/png');
   });
 
-  $('btn-place-sign').addEventListener('click', () => {
+  $('btn-place-sign').addEventListener('click', async () => {
     if (!state.pdfBytes) {
       els.signModal.hidden = true;
       showToast('Open a PDF first!', 'error');
@@ -1576,23 +1991,29 @@ function initSignatureModal() {
       return;
     }
 
+    // Trim empty pad margins & keep TRUE aspect ratio so the signature is never stretched
+    const norm = await normalizeImageDataUrl(dataUrl, { maxSide: 1400, trim: state.sigTab !== 'stamp' });
+    if (state.sigTab === 'draw' && norm.width <= 8 && norm.height <= 8) {
+      showToast('Signature pad is empty — please draw your signature first.', 'error');
+      return;
+    }
+
     pushUndoSnapshot();
     const targetPages = els.chkSignAllPages.checked
       ? Array.from({ length: state.numPages }, (_, i) => i + 1)
       : [state.currentPage];
 
+    const width = state.sigTab === 'stamp' ? 0.3 : 0.24;
+    let lastId = null;
     for (const p of targetPages) {
       if (!state.annotations[p]) state.annotations[p] = [];
-      state.annotations[p].push({
-        id: 'sig_' + p + '_' + Date.now(),
-        type: 'image',
-        dataUrl,
-        x: 0.64,
-        y: 0.82,
-        w: 0.28,
-        h: 0.095,
-      });
+      const ann = buildImageAnnotation(p, norm, { x: 0.94 - width, y: 0.8, w: width, maxH: 0.14, idPrefix: 'sig' });
+      // keep it inside the bottom area of the page
+      ann.y = Math.min(ann.y, 0.95 - ann.h);
+      state.annotations[p].push(ann);
+      lastId = ann.id;
     }
+    state.selectedAnnotId = lastId;
     els.signModal.hidden = true;
     setToolMode('select');
     renderAllAnnotationOverlays();
@@ -1617,9 +2038,10 @@ function renderDockTools(filterText = '') {
   for (const [cat, items] of grouped.entries()) {
     html += `<div class="dock-cat-label">${escapeHtml(cat)}</div>`;
     for (const t of items) {
+      const svg = TOOL_SVGS[t.id] || TOOL_SVGS.markup;
       html += `
         <button class="dock-tool-card" data-stool="${t.id}">
-          <span class="dock-tool-icon">${t.icon}</span>
+          <span class="dock-tool-icon ${t.tone || ''}">${svg}</span>
           <span class="dock-tool-info">
             <span class="dock-tool-name">${escapeHtml(t.name)}</span>
             <span class="dock-tool-desc">${escapeHtml(t.desc)}</span>
@@ -1669,7 +2091,7 @@ function openStudioToolDrawer(toolId) {
   }
 
   const toolMeta = STUDIO_TOOLS.find((t) => t.id === toolId);
-  els.drawerTitle.textContent = toolMeta ? `${toolMeta.icon} ${toolMeta.name}` : 'Tool';
+  els.drawerTitle.textContent = toolMeta ? toolMeta.name : 'Tool';
   els.toolDrawer.hidden = false;
   const b = els.drawerBody;
 
@@ -1831,6 +2253,7 @@ function openStudioToolDrawer(toolId) {
     $('btn-remove-blanks').addEventListener('click', async () => {
       if (!requireOpenPdf()) return;
       showLoading('Scanning pages for blank content…');
+      await ensureAnnotationsBaked('Scanning pages for blank content…');
       const keepIdx = [];
       for (let p = 1; p <= state.numPages; p++) {
         const page = await state.pdfDoc.getPage(p);
@@ -1838,16 +2261,20 @@ function openStudioToolDrawer(toolId) {
         const c = document.createElement('canvas');
         c.width = Math.max(16, Math.round(vp.width));
         c.height = Math.max(16, Math.round(vp.height));
-        const g = c.getContext('2d');
+        const g = c.getContext('2d', { willReadFrequently: true });
+        g.fillStyle = '#fff';
+        g.fillRect(0, 0, c.width, c.height);
         await page.render({ canvasContext: g, viewport: vp }).promise;
         const d = g.getImageData(0, 0, c.width, c.height).data;
+        const sampled = d.length / 16;
         let nonWhite = 0;
         for (let i = 0; i < d.length; i += 16) {
-          if (d[i] < 242 || d[i + 1] < 242 || d[i + 2] < 242) nonWhite++;
+          if (d[i] < 235 || d[i + 1] < 235 || d[i + 2] < 235) nonWhite++;
         }
         c.width = 0;
         c.height = 0;
-        if (nonWhite > (c.width * c.height) / 4000 + 3) keepIdx.push(p - 1);
+        // Page counts as content if > 0.15% of sampled pixels are ink
+        if (nonWhite > Math.max(3, sampled * 0.0015)) keepIdx.push(p - 1);
       }
       if (keepIdx.length === state.numPages) {
         hideLoading();
@@ -1937,15 +2364,25 @@ function openStudioToolDrawer(toolId) {
       showLoading('Applying watermark…');
       const pdf = await PDFDocument.load(await buildExportPdfBytes(), { ignoreEncryption: true });
       const font = await pdf.embedFont(StandardFonts.HelveticaBold);
-      const sz = Number($('wm-size').value) || 54;
+      const baseSz = Number($('wm-size').value) || 54;
       const op = Math.max(0.05, Math.min(1, Number($('wm-op').value) || 0.22));
       const ang = Number($('wm-angle').value) || 0;
+      const a = (ang * Math.PI) / 180;
       for (const pg of pdf.getPages()) {
         const { width, height } = pg.getSize();
-        const tw = font.widthOfTextAtSize(txt, sz);
+        // Auto-shrink long text so it always fits inside the page
+        const maxW = (ang ? Math.hypot(width, height) : width) * 0.82;
+        let sz = baseSz;
+        let tw = font.widthOfTextAtSize(txt, sz);
+        if (tw > maxW) {
+          sz = Math.max(10, (sz * maxW) / tw);
+          tw = font.widthOfTextAtSize(txt, sz);
+        }
+        const th = sz * 0.72; // cap height
+        // Rotate around the visual center of the text so it sits exactly in the middle
         pg.drawText(txt, {
-          x: Math.max(20, (width - tw * Math.cos((ang * Math.PI) / 180)) / 2),
-          y: height / 2,
+          x: width / 2 - (tw / 2) * Math.cos(a) + (th / 2) * Math.sin(a),
+          y: height / 2 - (tw / 2) * Math.sin(a) - (th / 2) * Math.cos(a),
           size: sz,
           font,
           color: rgb(0.55, 0.12, 0.12),
@@ -2022,14 +2459,20 @@ function openStudioToolDrawer(toolId) {
     const runPiiPass = async (aadhaarOnly) => {
       if (!requireOpenPdf()) return;
       showLoading('Scanning PDF text coordinates…');
-      const aadhaarRe = /\b\d{4}\s?\d{4}\s?\d{4}\b/g;
-      const panRe = /\b[A-Z]{5}\d{4}[A-Z]\b/g;
-      const emailRe = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g;
-      const phoneRe = /\b(?:\+91[-\s]?)?[6-9]\d{9}\b/g;
+      await ensureAnnotationsBaked('Scanning PDF text coordinates…');
+      const patterns = aadhaarOnly
+        ? [{ re: /(?<!\d)\d{4}[\s-]?\d{4}[\s-]?\d{4}(?!\d)/g, kind: 'aadhaar' }]
+        : [
+            { re: /(?<!\d)\d{4}[\s-]?\d{4}[\s-]?\d{4}(?!\d)/g, kind: 'full' },
+            { re: /\b[A-Z]{5}\d{4}[A-Z]\b/g, kind: 'full' },
+            { re: /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, kind: 'full' },
+            { re: /(?:\+91[-\s]?)?(?<!\d)[6-9]\d{9}(?!\d)/g, kind: 'full' },
+          ];
 
-      const pdf = await PDFDocument.load(await buildExportPdfBytes(), { ignoreEncryption: true });
+      const pdf = await PDFDocument.load(state.pdfBytes, { ignoreEncryption: true });
       const pages = pdf.getPages();
       let count = 0;
+      const hitPages = new Set();
 
       for (let p = 1; p <= state.numPages; p++) {
         const pjsPage = await state.pdfDoc.getPage(p);
@@ -2038,37 +2481,29 @@ function openStudioToolDrawer(toolId) {
 
         for (const item of tc.items) {
           const str = String(item.str || '');
-          if (!str) continue;
-          const tx = item.transform?.[4] ?? 0;
-          const ty = item.transform?.[5] ?? 0;
-          const itemW = item.width || str.length * 5;
-          const itemH = Math.max(10, Math.abs(item.height || item.transform?.[0] || 11));
+          if (!str || str.length < 6) continue;
+          const t = item.transform || [1, 0, 0, 1, 0, 0];
+          const tx = t[4];
+          const ty = t[5];
+          const fontH = Math.max(6, Math.hypot(t[2], t[3]) || item.height || 10);
+          const itemW = item.width || str.length * fontH * 0.5;
+          const charW = itemW / str.length; // proportional estimate per character
 
-          if (aadhaarOnly) {
-            if (aadhaarRe.test(str)) {
-              aadhaarRe.lastIndex = 0;
-              // Mask first 66% width (first 8 digits) leaving last 4 digits visible!
+          for (const { re, kind } of patterns) {
+            re.lastIndex = 0;
+            for (const m of str.matchAll(re)) {
+              const start = m.index;
+              // UIDAI masking: hide first 8 digits, keep the last 4 visible (XXXX XXXX 1234)
+              const len = kind === 'aadhaar' ? m[0].length - 4 : m[0].length;
               pdfPage.drawRectangle({
-                x: tx - 1,
-                y: ty - 2,
-                width: itemW * 0.67,
-                height: itemH + 3,
-                color: rgb(0.05, 0.05, 0.05),
-              });
-              count++;
-            }
-          } else {
-            const hit = aadhaarRe.test(str) || panRe.test(str) || emailRe.test(str) || phoneRe.test(str);
-            aadhaarRe.lastIndex = panRe.lastIndex = emailRe.lastIndex = phoneRe.lastIndex = 0;
-            if (hit) {
-              pdfPage.drawRectangle({
-                x: tx - 1,
-                y: ty - 2,
-                width: itemW + 2,
-                height: itemH + 3,
+                x: tx + charW * start - 1,
+                y: ty - fontH * 0.28,
+                width: charW * len + 2,
+                height: fontH * 1.25,
                 color: rgb(0, 0, 0),
               });
               count++;
+              hitPages.add(p);
             }
           }
         }
@@ -2080,7 +2515,13 @@ function openStudioToolDrawer(toolId) {
         $('pii-stat').textContent = 'No text-layer Aadhaar/PII matches found (for scanned image PDFs, use the ⬛ Redact box tool in top bar!).';
         return;
       }
-      await applyAndReloadBytes(await pdf.save(), `✓ Redacted ${count} sensitive item(s)!`);
+      // True redaction: flatten affected pages to images so hidden digits can't be copied/selected
+      els.loadingText.textContent = `Permanently removing text under ${count} redaction(s)…`;
+      const flattened = await rasterizePagesInBytes(await pdf.save(), hitPages);
+      $('pii-stat').hidden = false;
+      $('pii-stat').textContent = `✓ ${count} item(s) masked on ${hitPages.size} page(s). Underlying text permanently removed.`;
+      await applyAndReloadBytes(flattened, `✓ Redacted ${count} sensitive item(s)!`);
+      return;
     };
     $('btn-scan-aadhaar').addEventListener('click', () => void runPiiPass(true));
     $('btn-scan-all-pii').addEventListener('click', () => void runPiiPass(false));
@@ -2126,6 +2567,7 @@ function openStudioToolDrawer(toolId) {
       const fmt = $('img-fmt').value;
       const sc = Number($('img-dpi').value);
       showLoading('Rendering HD page image…');
+      await ensureAnnotationsBaked('Rendering HD page image…');
       const blob = await renderPageBlob(state.currentPage, fmt, sc);
       hideLoading();
       triggerDownload(blob, sanitizePdfFilename(state.fileName, `_page_${state.currentPage}`, fmt === 'png' ? '.png' : '.jpg'));
@@ -2137,6 +2579,7 @@ function openStudioToolDrawer(toolId) {
       const sc = Number($('img-dpi').value);
       const ext = fmt === 'png' ? '.png' : '.jpg';
       showLoading('Exporting all pages at HD DPI…');
+      await ensureAnnotationsBaked('Exporting all pages at HD DPI…');
       const zip = new JSZip();
       for (let p = 1; p <= state.numPages; p++) {
         els.loadingText.textContent = `Rendering page ${p} of ${state.numPages}…`;
@@ -2203,6 +2646,7 @@ function openStudioToolDrawer(toolId) {
     const runFilter = async (eco) => {
       if (!requireOpenPdf()) return;
       showLoading(eco ? 'Applying Xerox Eco Ink-Saver…' : 'Converting to Grayscale…');
+      await ensureAnnotationsBaked(eco ? 'Applying Xerox Eco Ink-Saver…' : 'Converting to Grayscale…');
       const outPdf = await PDFDocument.create();
       for (let p = 1; p <= state.numPages; p++) {
         els.loadingText.textContent = `Processing page ${p} / ${state.numPages}…`;
@@ -2284,13 +2728,17 @@ function openStudioToolDrawer(toolId) {
 
         let convertedBlob = null;
         for (const base of CLOUD_API_POOL) {
+          const ctrl = new AbortController();
+          const timer = setTimeout(() => ctrl.abort(), 38000);
           try {
-            const res = await fetch(`${base}${map.endpoint}`, { method: 'POST', body: fd });
+            const res = await fetch(`${base}${map.endpoint}`, { method: 'POST', body: fd, signal: ctrl.signal });
             if (res.ok) {
               convertedBlob = await res.blob();
               break;
             }
-          } catch {}
+          } catch {} finally {
+            clearTimeout(timer);
+          }
         }
 
         if (convertedBlob && convertedBlob.size > 128) {
@@ -2298,14 +2746,12 @@ function openStudioToolDrawer(toolId) {
           triggerDownload(convertedBlob, outName, map.mime);
           statusBox.textContent = `✓ Downloaded ${outName} (${formatBytes(convertedBlob.size)})!`;
           showToast(`✓ ${map.label} downloaded!`, 'success');
-        } else if (toolId === 'word' || toolId === 'excel') {
-          // Offline local fallback so it STILL works with zero internet!
+        } else {
+          // Offline local fallback for Word, Excel, AND PowerPoint so conversion always succeeds!
           const fallback = await buildOfflineOfficeFallback(toolId);
           triggerDownload(fallback.blob, fallback.name, fallback.mime);
-          statusBox.textContent = `✓ Downloaded offline ${fallback.name}!`;
-          showToast(`✓ Downloaded ${fallback.name} (offline mode)!`, 'success');
-        } else {
-          throw new Error('Conversion server unreachable right now.');
+          statusBox.textContent = `✓ Downloaded ${fallback.name} (local conversion)!`;
+          showToast(`✓ Downloaded ${fallback.name}!`, 'success');
         }
       } catch (err) {
         statusBox.textContent = `Conversion error: ${err.message}`;
@@ -2322,19 +2768,55 @@ async function buildOfflineOfficeFallback(kind) {
   for (let p = 1; p <= state.numPages; p++) {
     const page = await state.pdfDoc.getPage(p);
     const tc = await page.getTextContent();
-    pagesTxt.push(tc.items.map((i) => i.str).join(' '));
+    const lines = [];
+    let lastY = null;
+    let buf = '';
+    for (const it of tc.items) {
+      const y = Math.round(it.transform?.[5] || 0);
+      if (lastY !== null && Math.abs(y - lastY) > 5) {
+        if (buf.trim()) lines.push(buf.trim());
+        buf = '';
+      }
+      buf += (buf && !buf.endsWith(' ') ? ' ' : '') + (it.str || '');
+      lastY = y;
+    }
+    if (buf.trim()) lines.push(buf.trim());
+    pagesTxt.push(lines);
   }
   if (kind === 'excel') {
-    const csv = pagesTxt.map((t, i) => `"Page ${i + 1}","${t.replace(/"/g, '""')}"`).join('\n');
+    const rows = ['Page,Line,Content'];
+    pagesTxt.forEach((lines, pIdx) => {
+      lines.forEach((ln, lIdx) => {
+        rows.push(`${pIdx + 1},${lIdx + 1},"${ln.replace(/"/g, '""')}"`);
+      });
+    });
     return {
-      blob: new Blob(['\uFEFFPage,Content\n' + csv], { type: 'text/csv;charset=utf-8' }),
+      blob: new Blob(['\uFEFF' + rows.join('\n')], { type: 'text/csv;charset=utf-8' }),
       name: sanitizePdfFilename(state.fileName, '', '.csv'),
       mime: 'text/csv',
     };
   }
-  const htmlDoc = `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>${pagesTxt
-    .map((t, i) => `<h3>Page ${i + 1}</h3><p>${escapeHtml(t)}</p>`)
-    .join('<hr>')}</body></html>`;
+  if (kind === 'ppt') {
+    const slides = pagesTxt
+      .map(
+        (lines, i) =>
+          `<section class="slide"><h2>Slide ${i + 1}</h2><ul>${lines
+            .slice(0, 12)
+            .map((l) => `<li>${escapeHtml(l)}</li>`)
+            .join('')}</ul></section>`
+      )
+      .join('');
+    const deckHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${escapeHtml(state.fileName)}</title>
+      <style>body{margin:0;background:#1e293b;font-family:sans-serif;padding:24px}.slide{width:960px;min-height:540px;margin:0 auto 24px;background:#fff;border-radius:12px;padding:48px;box-sizing:border-box;page-break-after:always}h2{color:#e11d48;margin-top:0}li{margin-bottom:8px;font-size:18px;color:#1e293b}</style></head><body>${slides}</body></html>`;
+    return {
+      blob: new Blob([deckHtml], { type: 'text/html;charset=utf-8' }),
+      name: sanitizePdfFilename(state.fileName, '_slides', '.html'),
+      mime: 'text/html',
+    };
+  }
+  const htmlDoc = `<!DOCTYPE html><html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word"><head><meta charset="utf-8"><style>body{font-family:Calibri,Arial,sans-serif;font-size:11pt;line-height:1.45}</style></head><body>${pagesTxt
+    .map((lines, i) => `${i > 0 ? '<br clear="all" style="page-break-before:always">' : ''}${lines.map((l) => `<p>${escapeHtml(l)}</p>`).join('')}`)
+    .join('')}</body></html>`;
   return {
     blob: new Blob([htmlDoc], { type: 'application/msword' }),
     name: sanitizePdfFilename(state.fileName, '', '.doc'),
@@ -2346,19 +2828,40 @@ async function buildOfflineOfficeFallback(kind) {
 async function runInViewerCompression(mode, targetBytes, resultBox) {
   showLoading('Optimizing PDF size…');
   try {
+    await ensureAnnotationsBaked('Optimizing PDF size…');
     const origSize = state.pdfBytes.byteLength;
 
-    const rasterCompressPass = async (scale, quality) => {
+    // Pass 0: lossless structural re-save (keeps selectable vector text, often shrinks bloated PDFs)
+    let losslessBytes = null;
+    try {
+      const doc = await PDFDocument.load(state.pdfBytes, { ignoreEncryption: true });
+      clearPdfMetadataFields(doc);
+      losslessBytes = await doc.save({ useObjectStreams: true });
+    } catch {}
+
+    const rasterCompressPass = async (scale, quality, gray = false) => {
       const out = await PDFDocument.create();
       for (let p = 1; p <= state.numPages; p++) {
+        els.loadingText.textContent = `Compressing page ${p} / ${state.numPages}…`;
         const page = await state.pdfDoc.getPage(p);
         const vp1 = page.getViewport({ scale: 1 });
         const vp = page.getViewport({ scale });
         const c = document.createElement('canvas');
         c.width = Math.max(32, Math.round(vp.width));
         c.height = Math.max(32, Math.round(vp.height));
-        const g = c.getContext('2d', { alpha: false });
+        const g = c.getContext('2d', { alpha: false, willReadFrequently: gray });
+        g.fillStyle = '#fff';
+        g.fillRect(0, 0, c.width, c.height);
         await page.render({ canvasContext: g, viewport: vp }).promise;
+        if (gray) {
+          const im = g.getImageData(0, 0, c.width, c.height);
+          const d = im.data;
+          for (let i = 0; i < d.length; i += 4) {
+            const l = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+            d[i] = d[i + 1] = d[i + 2] = l;
+          }
+          g.putImageData(im, 0, 0);
+        }
         const blob = await new Promise((r) => c.toBlob(r, 'image/jpeg', quality));
         c.width = 0;
         c.height = 0;
@@ -2370,24 +2873,39 @@ async function runInViewerCompression(mode, targetBytes, resultBox) {
       return await out.save({ useObjectStreams: true });
     };
 
+    const smaller = (a, b) => (!a ? b : !b ? a : a.byteLength <= b.byteLength ? a : b);
     let bestBytes;
+    let note = '';
     if (mode === 'balanced') {
-      bestBytes = await rasterCompressPass(1.45, 0.72);
+      const raster = await rasterCompressPass(1.5, 0.72);
+      bestBytes = smaller(losslessBytes, raster);
+      if (bestBytes === losslessBytes) note = 'Text kept selectable (vector) — this PDF was already lightweight.';
     } else if (mode === 'strong') {
-      bestBytes = await rasterCompressPass(1.08, 0.52);
+      const raster = await rasterCompressPass(1.1, 0.5);
+      bestBytes = smaller(losslessBytes, raster);
     } else {
-      // Binary-search scale + JPEG quality to hit exact target KB!
-      const trials = [
-        [1.5, 0.76],
-        [1.25, 0.64],
-        [1.05, 0.52],
-        [0.85, 0.42],
-        [0.68, 0.34],
-      ];
-      bestBytes = await rasterCompressPass(trials[0][0], trials[0][1]);
-      for (let i = 1; i < trials.length && bestBytes.byteLength > targetBytes; i++) {
-        els.loadingText.textContent = `Tuning to target size (pass ${i + 1})…`;
-        bestBytes = await rasterCompressPass(trials[i][0], trials[i][1]);
+      if (losslessBytes && losslessBytes.byteLength <= targetBytes) {
+        bestBytes = losslessBytes;
+        note = 'Already under target — kept original quality & selectable text.';
+      } else {
+        // Step down scale + JPEG quality until we fit the exact KB target (portal uploads)
+        const trials = [
+          [1.6, 0.8], [1.4, 0.7], [1.2, 0.6], [1.05, 0.52], [0.9, 0.45],
+          [0.78, 0.38], [0.66, 0.32], [0.56, 0.28], [0.56, 0.26, true], [0.46, 0.22, true],
+        ];
+        for (let i = 0; i < trials.length; i++) {
+          els.loadingText.textContent = `Tuning to target size (pass ${i + 1}/${trials.length})…`;
+          const [s, q, gray] = trials[i];
+          const attempt = await rasterCompressPass(s, q, !!gray);
+          bestBytes = smaller(bestBytes, attempt);
+          if (attempt.byteLength <= targetBytes) {
+            bestBytes = attempt;
+            break;
+          }
+        }
+        note = bestBytes.byteLength <= targetBytes
+          ? `🎯 Target ${formatBytes(targetBytes)} achieved.`
+          : `⚠️ Smallest possible is ${formatBytes(bestBytes.byteLength)} (target ${formatBytes(targetBytes)} too small for ${state.numPages} page(s)).`;
       }
     }
 
@@ -2396,6 +2914,7 @@ async function runInViewerCompression(mode, targetBytes, resultBox) {
     resultBox.hidden = false;
     resultBox.innerHTML = `
       <div><strong>${formatBytes(origSize)} → ${formatBytes(bestBytes.byteLength)}</strong> (${savedPct}% smaller)</div>
+      ${note ? `<div class="result-note">${escapeHtml(note)}</div>` : ''}
       <div class="drawer-btn-grid" style="margin-top:8px;">
         <button class="dock-action-btn" id="btn-dl-cmp">💾 Download</button>
         <button class="dock-action-btn secondary" id="btn-use-cmp">👁️ Use Here</button>
@@ -2487,25 +3006,33 @@ function bindAllUiEvents() {
     if (!requireOpenPdf()) return;
     els.insertImgInput.click();
   });
-  els.insertImgInput.addEventListener('change', (e) => {
-    const file = e.target.files?.[0];
+  els.insertImgInput.addEventListener('change', async (e) => {
+    const files = Array.from(e.target.files || []);
     e.target.value = '';
-    if (!file || !state.pdfBytes) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      addAnnotation(state.currentPage, {
-        id: 'img_' + Date.now(),
-        type: 'image',
-        dataUrl: String(reader.result),
-        x: 0.3,
-        y: 0.3,
-        w: 0.32,
-        h: 0.24,
-      });
+    if (!files.length || !state.pdfBytes) return;
+    try {
+      pushUndoSnapshot();
+      let offset = 0;
+      for (const file of files) {
+        const rawUrl = await new Promise((res, rej) => {
+          const reader = new FileReader();
+          reader.onload = () => res(String(reader.result));
+          reader.onerror = () => rej(new Error('Could not read image'));
+          reader.readAsDataURL(file);
+        });
+        const norm = await normalizeImageDataUrl(rawUrl, { maxSide: 1800 });
+        const ann = buildImageAnnotation(state.currentPage, norm, { x: 0.3 + offset, y: 0.28 + offset, w: 0.36 });
+        if (!state.annotations[state.currentPage]) state.annotations[state.currentPage] = [];
+        state.annotations[state.currentPage].push(ann);
+        state.selectedAnnotId = ann.id;
+        offset += 0.04;
+      }
+      renderPageAnnotationOverlay(state.currentPage);
       setToolMode('select');
       showToast('✓ Image placed — drag to move or corner-drag to resize!', 'success');
-    };
-    reader.readAsDataURL(file);
+    } catch (err) {
+      showToast(`Could not place image: ${err.message}`, 'error');
+    }
   });
 
   // Append images as full PDF pages
@@ -2573,26 +3100,56 @@ function bindAllUiEvents() {
   // Zoom controls
   const applyZoom = async (val) => {
     state.zoomMode = String(val);
-    if (val === 'fit-width' || val === 'fit-page') {
+    if (['auto', 'fit-width', 'fit-page'].includes(val)) {
       await computeFitScale(val);
     } else {
       state.scale = Math.max(0.35, Math.min(3.5, Number(val) || 1));
     }
-    if (state.pdfDoc) await buildStageAndThumbnails();
+    syncZoomSelect();
+    if (state.pdfDoc) {
+      const keepPage = state.currentPage;
+      await buildStageAndThumbnails();
+      jumpToPageInstant(keepPage);
+    }
   };
   els.zoomSelect.addEventListener('change', () => void applyZoom(els.zoomSelect.value));
   $('btn-zoom-in').addEventListener('click', () => {
-    const next = Math.min(3.0, Math.round((state.scale + 0.2) * 100) / 100);
-    els.zoomSelect.value = '1';
+    const next = Math.min(3.5, Math.round((state.scale + 0.15) * 100) / 100);
     void applyZoom(next);
   });
   $('btn-zoom-out').addEventListener('click', () => {
-    const next = Math.max(0.4, Math.round((state.scale - 0.2) * 100) / 100);
-    els.zoomSelect.value = '1';
+    const next = Math.max(0.35, Math.round((state.scale - 0.15) * 100) / 100);
     void applyZoom(next);
   });
+  // Ctrl/Cmd + mouse-wheel zoom like Acrobat
+  els.viewport.addEventListener('wheel', (e) => {
+    if (!(e.ctrlKey || e.metaKey) || !state.pdfDoc) return;
+    e.preventDefault();
+    clearTimeout(state._wheelZoomTimer);
+    const dir = e.deltaY < 0 ? 1 : -1;
+    state._pendingWheelScale = Math.max(0.35, Math.min(3.5, (state._pendingWheelScale || state.scale) + dir * 0.1));
+    state._wheelZoomTimer = setTimeout(() => {
+      const target = Math.round(state._pendingWheelScale * 100) / 100;
+      state._pendingWheelScale = 0;
+      void applyZoom(target);
+    }, 140);
+  }, { passive: false });
 
-  // Annotation mode buttons & subbar
+  // Annotation mode buttons & subbar (also updates selected annotation live!)
+  const updateSelectedAnnotationStyle = () => {
+    if (!state.selectedAnnotId) return;
+    for (const [pKey, list] of Object.entries(state.annotations)) {
+      const found = (list || []).find((a) => a.id === state.selectedAnnotId);
+      if (found) {
+        if (['highlight', 'text', 'draw'].includes(found.type)) found.color = state.annotColor;
+        if (found.type === 'text') found.fontSize = Math.max(8, Number(state.annotSize) || 14);
+        if (found.type === 'draw') found.strokeWidth = Math.max(1.5, Number(state.annotSize) || 3);
+        markDirty(true);
+        renderPageAnnotationOverlay(Number(pKey));
+        break;
+      }
+    }
+  };
   document.querySelectorAll('.mode-btn').forEach((btn) => {
     btn.addEventListener('click', () => setToolMode(btn.dataset.mode));
   });
@@ -2601,14 +3158,17 @@ function bindAllUiEvents() {
       $('annot-colors').querySelectorAll('.swatch').forEach((b) => b.classList.remove('active'));
       sw.classList.add('active');
       state.annotColor = sw.dataset.color;
+      updateSelectedAnnotationStyle();
     });
   });
   els.annotCustomColor.addEventListener('input', () => {
     state.annotColor = els.annotCustomColor.value;
+    updateSelectedAnnotationStyle();
   });
   els.annotSize.addEventListener('input', () => {
     state.annotSize = Number(els.annotSize.value);
     els.annotSizeVal.textContent = String(state.annotSize);
+    updateSelectedAnnotationStyle();
   });
   $('btn-done-mode').addEventListener('click', () => setToolMode('select'));
   $('btn-bake-annotations').addEventListener('click', async () => {
@@ -2617,6 +3177,13 @@ function bindAllUiEvents() {
     const baked = await buildExportPdfBytes();
     await applyAndReloadBytes(baked, '✓ Annotations permanently applied!');
     setToolMode('select');
+  });
+
+  // Two-page spread toggle
+  $('btn-two-page')?.addEventListener('click', (e) => {
+    state.twoPage = !state.twoPage;
+    els.pagesStage.classList.toggle('two-page', state.twoPage);
+    e.currentTarget.classList.toggle('active', state.twoPage);
   });
 
   // Top right actions
@@ -2638,13 +3205,22 @@ function bindAllUiEvents() {
     }
   });
 
-  // Theme cycle (Dark -> Light -> Sepia -> Night Invert PDF)
-  const themes = ['dark', 'light', 'sepia', 'night-invert'];
+  // Theme cycle (Light -> Dark -> Sepia -> Night Invert PDF), remembered across sessions
+  const themes = ['light', 'dark', 'sepia', 'night-invert'];
+  const themeLabels = { light: 'Light', dark: 'Dark', sepia: 'Sepia', 'night-invert': 'Night' };
+  const applyTheme = (t) => {
+    state.theme = themes.includes(t) ? t : 'light';
+    document.body.dataset.theme = state.theme;
+    try { localStorage.setItem('pms_viewer_theme', state.theme); } catch {}
+    const lbl = $('theme-btn-label');
+    if (lbl) lbl.textContent = themeLabels[state.theme];
+    $('btn-theme-cycle').title = `Theme: ${themeLabels[state.theme]} — click to switch`;
+  };
+  applyTheme(state.theme);
   $('btn-theme-cycle').addEventListener('click', () => {
     const next = themes[(themes.indexOf(state.theme) + 1) % themes.length];
-    state.theme = next;
-    document.body.dataset.theme = next;
-    showToast(`Theme: ${next.toUpperCase()}`);
+    applyTheme(next);
+    showToast(`Switched to ${themeLabels[next]} theme`);
   });
 
   // Search bar
@@ -2761,6 +3337,27 @@ function bindAllUiEvents() {
       e.preventDefault();
       void handleRedo();
       return;
+    }
+    if (!mod && !inInput && (e.key === 'Delete' || e.key === 'Backspace') && state.selectedAnnotId) {
+      e.preventDefault();
+      for (const [pKey, list] of Object.entries(state.annotations)) {
+        if ((list || []).some((a) => a.id === state.selectedAnnotId)) {
+          pushUndoSnapshot();
+          state.annotations[pKey] = list.filter((a) => a.id !== state.selectedAnnotId);
+          state.selectedAnnotId = null;
+          renderPageAnnotationOverlay(Number(pKey));
+          break;
+        }
+      }
+      return;
+    }
+    if (!mod && !inInput && !e.altKey && state.pdfBytes) {
+      const keyMap = { v: 'select', h: 'highlight', t: 'text', d: 'draw', w: 'whiteout', r: 'redact' };
+      const k = e.key.toLowerCase();
+      if (keyMap[k]) {
+        setToolMode(keyMap[k]);
+        return;
+      }
     }
     if (e.key === 'Escape') {
       setToolMode('select');

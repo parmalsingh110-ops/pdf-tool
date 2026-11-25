@@ -23,16 +23,16 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg-primary: #0f172a;
-    --bg-secondary: #1e293b;
-    --bg-hover: #334155;
-    --bg-active: #1c1010;
-    --text-primary: #f8fafc;
-    --text-secondary: #cbd5e1;
-    --text-muted: #64748b;
-    --border-color: #334155;
-    --shadow-sm: 0 1px 3px rgba(0,0,0,0.3);
-    --shadow-md: 0 4px 12px rgba(0,0,0,0.4);
+    --bg-primary: #1c1c20;
+    --bg-secondary: #25252b;
+    --bg-hover: #303038;
+    --bg-active: #2a181c;
+    --text-primary: #f4f4f6;
+    --text-secondary: #b4b4be;
+    --text-muted: #7e7e8a;
+    --border-color: #32323c;
+    --shadow-sm: 0 1px 3px rgba(0,0,0,0.32);
+    --shadow-md: 0 4px 14px rgba(0,0,0,0.44);
   }
 }
 
