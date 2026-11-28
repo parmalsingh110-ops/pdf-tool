@@ -7,7 +7,6 @@ import {
   Target,
   Route,
   Linkedin,
-  Github,
   Mail,
   MapPin,
   Building2,
@@ -60,7 +59,7 @@ export default function About() {
             jobTitle: m.title,
             email: m.email,
             image: `https://pdfmediasuite.in${m.photo || '/images/founder.jpg'}`,
-            sameAs: [m.linkedin, ...(m.github ? [m.github] : [])],
+            sameAs: [m.linkedin],
             description: m.bio,
           })),
         },
@@ -236,7 +235,7 @@ export default function About() {
                           </div>
                         )}
 
-                        {/* Social Verification & Contact Links */}
+                        {/* Social Verification & Official Business Contact Links */}
                         <div className="pt-2 flex flex-wrap items-center gap-2.5">
                           {member.linkedin && (
                             <a
@@ -248,30 +247,6 @@ export default function About() {
                               <Linkedin className="w-3.5 h-3.5 fill-current" />
                               LinkedIn Profile
                               <ExternalLink className="w-3 h-3 opacity-80" />
-                            </a>
-                          )}
-
-                          {member.github && (
-                            <a
-                              href={member.github}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 dark:bg-slate-800 dark:hover:bg-slate-700 text-white text-xs font-bold transition-all shadow-sm"
-                            >
-                              <Github className="w-3.5 h-3.5" />
-                              GitHub Profile
-                            </a>
-                          )}
-
-                          {member.githubSecondary && (
-                            <a
-                              href={member.githubSecondary}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 hover:border-slate-400 text-slate-700 dark:text-slate-200 text-xs font-bold transition-all"
-                            >
-                              <Github className="w-3.5 h-3.5" />
-                              GitHub (Ops)
                             </a>
                           )}
 
@@ -387,8 +362,24 @@ export default function About() {
               <div className="mt-4 space-y-1 text-xs text-slate-600 dark:text-slate-400">
                 <p><strong>Entity Name:</strong> PDF Media Suite</p>
                 <p><strong>Operating Base:</strong> Jaipur, Rajasthan, India</p>
-                <p><strong>Support &amp; Legal:</strong> support@pdfmediasuite.in</p>
-                <p><strong>Founding Inquiries:</strong> founder@pdfmediasuite.in</p>
+                <p>
+                  <strong>Support &amp; Legal:</strong>{' '}
+                  <a href="mailto:support@pdfmediasuite.in" className="text-rose-600 dark:text-rose-400 font-semibold hover:underline">
+                    support@pdfmediasuite.in
+                  </a>
+                </p>
+                <p>
+                  <strong>Founding Inquiries:</strong>{' '}
+                  <a href="mailto:founder@pdfmediasuite.in" className="text-rose-600 dark:text-rose-400 font-semibold hover:underline">
+                    founder@pdfmediasuite.in
+                  </a>
+                </p>
+                <p>
+                  <strong>Business &amp; Partnerships:</strong>{' '}
+                  <a href="mailto:contact@pdfmediasuite.in" className="text-rose-600 dark:text-rose-400 font-semibold hover:underline">
+                    contact@pdfmediasuite.in
+                  </a>
+                </p>
               </div>
             </div>
 

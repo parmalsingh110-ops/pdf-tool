@@ -8,6 +8,9 @@ Allow: /
 Disallow: /api/
 Disallow: /node_modules/
 Disallow: /src/
+Disallow: /backend/
+Disallow: /*.map$
+Disallow: /*.env$
 
 # Allow all static scripts, styles, and assets so search engine crawlers can fully render the React SPA
 Allow: /assets/

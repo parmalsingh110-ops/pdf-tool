@@ -11,8 +11,6 @@ export interface TeamMember {
   location: string;
   email: string;
   linkedin: string;
-  github?: string;
-  githubSecondary?: string;
   photo?: string;
   initials: string;
   colorGradient: string;
@@ -30,10 +28,8 @@ export const TEAM_MEMBERS: TeamMember[] = [
     role: 'Founder & Web Developer',
     title: 'Founder, CEO & Principal Software Architect',
     location: 'Jaipur, Rajasthan, India',
-    email: 'parmalsingh26@gmail.com',
+    email: 'founder@pdfmediasuite.in',
     linkedin: 'https://www.linkedin.com/in/parmal-singh-gurjar-b838a4131/',
-    github: 'https://github.com/parmalsingh26-gif',
-    githubSecondary: 'https://github.com/parmalsingh110-ops',
     photo: '/images/founder.jpg',
     initials: 'PG',
     colorGradient: 'from-rose-500 via-rose-600 to-indigo-700',
@@ -62,7 +58,7 @@ export const TEAM_MEMBERS: TeamMember[] = [
     role: 'Co-founder — Business & Growth',
     title: 'Co-founder & Head of Business, Strategy & Growth',
     location: 'Jaipur, Rajasthan, India',
-    email: 'meenapankaj98@gmail.com',
+    email: 'contact@pdfmediasuite.in',
     linkedin: 'https://www.linkedin.com/in/pankaj-meena-925218447/',
     photo: '/images/pankaj-meena.jpg',
     initials: 'PM',
@@ -89,7 +85,7 @@ export const TEAM_MEMBERS: TeamMember[] = [
     role: 'Co-founder — Technical Development',
     title: 'Co-founder & Core Systems Engineer',
     location: 'Jaipur, Rajasthan, India',
-    email: 'sachinsainbharkokalan@gmail.com',
+    email: 'support@pdfmediasuite.in',
     linkedin: 'https://www.linkedin.com/in/sachin-kumar-sain-012123447/',
     photo: '/images/sachin-kumar-sain.jpg',
     initials: 'SS',
@@ -118,6 +114,8 @@ export const FOUNDER_INFO = {
   company: 'PDF Media Suite',
   companyUrl: 'https://pdfmediasuite.in',
   supportEmail: 'support@pdfmediasuite.in',
+  founderEmail: 'founder@pdfmediasuite.in',
+  contactEmail: 'contact@pdfmediasuite.in',
   experience: '4+ Years Engineering & Product Architecture',
   education: 'University of Rajasthan',
   milestones: [

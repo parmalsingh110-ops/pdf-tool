@@ -507,12 +507,42 @@ function pmsShareTargetServerPlugin(): Plugin {
     });
   };
 
+  const blockSensitivePreviewPaths = (req: any, res: any, next: () => void) => {
+    const rawUrl = String(req.url || '').split('?')[0];
+    let decoded = rawUrl;
+    try {
+      decoded = decodeURIComponent(rawUrl);
+    } catch {}
+    const lower = decoded.toLowerCase();
+    if (
+      lower.startsWith('/.env') ||
+      lower.startsWith('/.git') ||
+      lower.startsWith('/.vscode') ||
+      lower.startsWith('/.agents') ||
+      lower.startsWith('/src/') ||
+      lower.startsWith('/backend/') ||
+      lower === '/package.json' ||
+      lower === '/package-lock.json' ||
+      lower.startsWith('/tsconfig') ||
+      lower.startsWith('/vite.config') ||
+      lower.endsWith('.map')
+    ) {
+      res.statusCode = 404;
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-store');
+      res.end('Not Found');
+      return;
+    }
+    next();
+  };
+
   return {
     name: 'pms-share-target-server',
     configureServer(server) {
       server.middlewares.use(handleShareTargetMiddleware);
     },
     configurePreviewServer(server) {
+      server.middlewares.use(blockSensitivePreviewPaths);
       server.middlewares.use(handleShareTargetMiddleware);
     },
   };
@@ -530,6 +560,7 @@ export default defineConfig(() => {
     ],
     build: {
       target: 'es2020',
+      sourcemap: false,
       rollupOptions: {
         output: {
           manualChunks(rawId) {
@@ -607,6 +638,9 @@ export default defineConfig(() => {
         'X-Frame-Options': 'DENY',
         'Referrer-Policy': 'strict-origin-when-cross-origin',
         'Permissions-Policy': 'camera=(self), microphone=(self), geolocation=()',
+        'Cross-Origin-Opener-Policy': 'same-origin-allow-popups',
+        'X-Permitted-Cross-Domain-Policies': 'none',
+        'X-DNS-Prefetch-Control': 'off',
       },
     },
   };

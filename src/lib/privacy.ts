@@ -247,7 +247,8 @@ export function sanitizeSensitiveText(input: string, maxLen = 2000): string {
     .replace(/Bearer\s+[A-Za-z0-9\-._~+/]+=*/gi, 'Bearer [REDACTED]')
     .replace(/#(?:k|t|key|token)=[^&\s"']+/gi, '#[REDACTED]')
     .replace(/([?&](?:token|key|secret|passcode|auth|read_token)=)[^&\s"']+/gi, '$1[REDACTED]')
-    .replace(/(?:\/Users\/|C:\\Users\\)[^/\\\s:)]+/gi, '[USER_HOME]')
+    .replace(/(?:\/Users\/|\/home\/|C:\\Users\\)[^/\\\s:)]+/gi, '[USER_HOME]')
+    .replace(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g, '[REDACTED_EMAIL]')
     .slice(0, maxLen);
 }
 

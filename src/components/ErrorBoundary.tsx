@@ -145,7 +145,7 @@ export default class ErrorBoundary extends React.Component<Props, State> {
               </p>
               <div className="mt-4 p-3 bg-slate-50 dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
                 <p className="text-xs font-mono text-slate-700 dark:text-slate-300 break-words">
-                  {message.slice(0, 240)}
+                  {sanitizeSensitiveText(message, 240)}
                 </p>
               </div>
 

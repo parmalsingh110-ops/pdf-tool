@@ -11,6 +11,12 @@ backend/__pycache__/
 backend/data/
 *.db
 *.zip
+*.map
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
 *service-account*.json
 *service_account*.json
 vertex-*.json

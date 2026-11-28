@@ -74,6 +74,15 @@ _BLOCKED_PATH_PREFIXES = (
     "/.git",
     "/.aws",
     "/.ssh",
+    "/.vscode",
+    "/.idea",
+    "/.ds_store",
+    "/docker-compose",
+    "/dockerfile",
+    "/requirements.txt",
+    "/package.json",
+    "/tsconfig",
+    "/vite.config",
     "/wp-admin",
     "/wp-login",
     "/wp-content",
@@ -95,7 +104,7 @@ def is_malicious_request_path(path: str, query: str = "") -> bool:
     decoded_once = urllib.parse.unquote(raw)
     decoded_twice = urllib.parse.unquote(decoded_once)
     lower_path = urllib.parse.unquote(path).lower()
-    if any(lower_path.startswith(prefix) for prefix in _BLOCKED_PATH_PREFIXES):
+    if lower_path.endswith(".map") or any(lower_path.startswith(prefix) for prefix in _BLOCKED_PATH_PREFIXES):
         return True
     for candidate in (raw, decoded_once, decoded_twice):
         if "\x00" in candidate or _SUSPICIOUS_PATH_REGEX.search(candidate):

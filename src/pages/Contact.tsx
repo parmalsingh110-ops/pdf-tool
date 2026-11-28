@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { ArrowLeft, Mail, MessageSquare, MapPin, Linkedin, Clock, ShieldCheck, Building2, ExternalLink, Github } from 'lucide-react';
+import { ArrowLeft, Mail, MessageSquare, MapPin, Linkedin, Clock, Building2 } from 'lucide-react';
 import { motion, useReducedMotion } from 'motion/react';
 import { useSEO } from '../hooks/useSEO';
 import { FOUNDER_INFO, TEAM_MEMBERS } from '../config/founderInfo';
@@ -134,17 +134,6 @@ export default function Contact() {
                     >
                       <Linkedin className="w-3.5 h-3.5 fill-current" />
                       LinkedIn
-                    </a>
-                  )}
-                  {member.github && (
-                    <a
-                      href={member.github}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 text-white text-xs font-bold hover:bg-slate-800 transition-colors"
-                    >
-                      <Github className="w-3.5 h-3.5" />
-                      GitHub
                     </a>
                   )}
                 </div>

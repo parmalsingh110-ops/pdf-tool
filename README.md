@@ -1,37 +1,34 @@
-# MediaSuite (PDF Tool)
+# PDF Media Suite
 
-Client-side **PDF** and **media** utilities: merge, split, compress, image resize, OCR text on images, and more. Processing runs in the browser unless a tool explicitly notes otherwise.
+Privacy-first **PDF**, **OCR**, and **media** productivity platform featuring 130+ specialized browser-based and hybrid cloud document tools.
+
+## Key Security & Privacy Principles
+
+- **Browser-First Processing**: Core PDF and image utilities execute directly in WebAssembly / Canvas inside the user's browser.
+- **Zero Permanent File Retention**: Server-assisted conversions and E2EE print relays run statelessly with immediate post-response cleanup.
+- **Hardened Production Builds**: Source maps disabled, strict Content-Security-Policy (CSP), HSTS, and zero third-party ad/tracker scripts.
 
 ## Prerequisites
 
-- [Node.js](https://nodejs.org/) (LTS recommended)
+- [Node.js](https://nodejs.org/) (v20+ LTS)
 
-## Run locally
+## Run Locally
 
 ```bash
 npm install
 npm run dev
 ```
 
-App defaults to port **3000** (see `package.json` scripts).
-
-## Production build
-
-```bash
-npm run build
-npm run preview
-```
-
-## Typecheck
+## Production Build & Typecheck
 
 ```bash
 npm run lint
+npm run build
 ```
 
-## Deploy
+## Official Website & Business Contact
 
-Build static assets with `npm run build` and host the `dist/` folder on any static host (e.g. GitHub Pages, Cloudflare Pages, Netlify, Vercel). Use **HTTPS** on your host for a secure connection.
-
-## Repository
-
-https://github.com/parmalsingh110-ops/pdf-tool
+- **Website**: https://pdfmediasuite.in
+- **Support & Legal**: support@pdfmediasuite.in
+- **Business & Partnerships**: contact@pdfmediasuite.in
+- **Founding Office**: founder@pdfmediasuite.in
